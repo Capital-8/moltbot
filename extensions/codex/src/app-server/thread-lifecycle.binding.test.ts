@@ -387,8 +387,8 @@ async function createManualResumeFixture(
     if (method === "thread/read") {
       if (options.receipt === "stale") {
         await harness.notify({
-          method: "thread/status/changed",
-          params: { threadId, status: { type: "notLoaded" } },
+          method: "thread/closed",
+          params: { threadId },
         });
       }
       return {
@@ -407,10 +407,9 @@ async function createManualResumeFixture(
       if (options.receipt !== "none" && options.receipt !== "stale") {
         unloaded = options.receipt !== "unrelated";
         await harness.notify({
-          method: "thread/status/changed",
+          method: "thread/closed",
           params: {
             threadId: options.receipt === "unrelated" ? "other-thread" : threadId,
-            status: { type: "notLoaded" },
           },
         });
       }
