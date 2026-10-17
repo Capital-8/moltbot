@@ -140,6 +140,7 @@ async function capturePostgresBackupInWorker(params: {
   profile: PostgresExportEnvelope["profile"];
   config: OpenClawConfig;
   assertCurrent: () => void;
+  gitIdentity?: GitBackupIdentity;
 }): Promise<PostgresExportEnvelope> {
   const { createVerifiedSqliteSnapshot } = await import("../infra/sqlite-snapshot.js");
   const anchor = readBackupEngine(params.sourcePath);
@@ -170,6 +171,13 @@ async function capturePostgresBackupInWorker(params: {
         descriptor,
         storeId: anchor.storeId,
         assertCurrent: params.assertCurrent,
+        transformRow: params.gitIdentity
+          ? (await import("./git-backup-sanitizer.js")).createGitBackupRowTransform(
+              params.gitIdentity,
+              descriptor.id,
+              new Set(descriptor.tables.map(({ name }) => name)),
+            )
+          : undefined,
       });
     }
     const sanitizedDifferences: string[] = [];
@@ -184,6 +192,9 @@ async function capturePostgresBackupInWorker(params: {
         targetPath: image,
         preserveRowIds: true,
         async transform(db) {
+          if (params.gitIdentity) {
+            sanitizedDifferences.push("git-exclude-secrets");
+          }
           const before = /* sqlite-allow-raw: count the sanitizer's native changes. */ db
             .prepare("SELECT total_changes() AS n")
             .get()?.n;
@@ -199,6 +210,12 @@ async function capturePostgresBackupInWorker(params: {
             .get()?.n;
           if (after !== before) {
             sanitizedDifferences.push("transient-state");
+          }
+          if (params.gitIdentity) {
+            // Publish hashes of redacted rows, never fingerprints of omitted credentials.
+            verification.tables = (
+              await inspectDatabasePort({ engine: "sqlite", db }, descriptor)
+            ).tables;
           }
         },
       });
@@ -343,21 +360,36 @@ export async function captureGitPostgresBackup(params: {
   outputPath: string;
   identity: GitBackupIdentity;
   physicalEngine?: BackupEngine["engine"];
+  excludeSecrets?: boolean;
 }): Promise<GitBackupManifest | undefined> {
   if ((params.physicalEngine ?? readBackupEngine(params.snapshotPath).engine) !== "postgres") {
     return undefined;
   }
   await fs.mkdir(params.outputPath, { mode: 0o700 });
-  const exported = await capturePostgresBackup({
-    sourcePath: params.snapshotPath,
-    directory: path.join(params.outputPath, "postgres"),
-  });
+  const exported = await runOfflineDatabaseBackup(
+    params.snapshotPath,
+    ({ config, assertCurrent }) =>
+      capturePostgresBackup({
+        sourcePath: params.snapshotPath,
+        directory: path.join(params.outputPath, "postgres"),
+        profile: "user-backup",
+        config,
+        assertCurrent,
+        ...(params.excludeSecrets ? { gitIdentity: params.identity } : {}),
+      }),
+  );
+  const { gitBackupRedaction } = await import("./git-backup-sanitizer.js");
+  const redaction = gitBackupRedaction(
+    params.identity,
+    new Set(Object.keys(exported.verification.tables)),
+    params.excludeSecrets === true,
+    exported.source.owner,
+  );
   const manifest: GitBackupManifest = {
     schemaVersion: 2,
     identity: params.identity,
     userVersion: exported.exportSchemaVersion,
-    excludedTables: [],
-    excludedConfigStateKeyPrefixes: [],
+    ...redaction,
     tables: {},
   };
   await fs.writeFile(
