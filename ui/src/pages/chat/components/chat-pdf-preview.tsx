@@ -1,4 +1,15 @@
-import { createMemo, createSignal, Errored, lazy, Loading, onSettled, Show } from "solid-js";
+import {
+  type Accessor,
+  createMemo,
+  createSignal,
+  Errored,
+  isPending,
+  lazy,
+  Loading,
+  onCleanup,
+  onSettled,
+  Show,
+} from "solid-js";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { AttachmentPreviewSkeleton, CompactAttachmentCard } from "./chat-attachment-card-solid.tsx";
 import { safeAttachmentHref } from "./chat-attachment-href.ts";
@@ -30,60 +41,53 @@ type PdfPreviewProps = {
   sizeBytes?: number;
 };
 
+type PdfRead = { ok: true; bytes: ArrayBuffer } | { ok: false; cause: unknown };
+
 /** Owns bounded PDF bytes and ticket revalidation; the lazy reader owns selection. */
 export function ChatPdfPreview(props: PdfPreviewProps) {
-  const [preview, setPreview] = createSignal<{
-    status: "loading" | "ready" | "error";
-    url?: string;
-  }>({ status: "loading" });
-  let previewUrl: string | undefined;
-  let previewBytes: Uint8Array | undefined;
-  let previous: { sourceIdentity: string; sizeBytes?: number } | undefined;
-  let active: AbortController | undefined;
-  const revokePreview = () => {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-    previewUrl = undefined;
-    previewBytes = undefined;
-  };
+  // A new ticket keeps its reader; a different attachment or missing source retires it.
   const source = createMemo(
-    () => ({ src: props.src, sourceIdentity: props.sourceIdentity, sizeBytes: props.sizeBytes }),
-    {
-      equals: (before, next) =>
-        before.src === next.src &&
-        before.sourceIdentity === next.sourceIdentity &&
-        before.sizeBytes === next.sizeBytes,
-    },
+    () =>
+      [
+        props.sourceIdentity,
+        props.sourceIdentity ? undefined : props.src,
+        props.sizeBytes,
+        Boolean(props.src),
+      ] as const,
+    { equals: (before, next) => before.every((value, index) => Object.is(value, next[index])) },
   );
-  const readPreview = (value: ReturnType<typeof source>) => {
-    onSettled(() => {
-      // A renewed ticket for the same attachment must not reset the reader.
-      if (
-        !value.src ||
-        !previewUrl ||
-        !value.sourceIdentity ||
-        previous?.sourceIdentity !== value.sourceIdentity ||
-        previous?.sizeBytes !== value.sizeBytes
-      ) {
-        revokePreview();
-        setPreview({ status: "loading" });
-      }
-      previous = value;
-      if (!value.src) {
-        return undefined;
-      }
-      if (value.sizeBytes !== undefined && value.sizeBytes > PDF_PREVIEW_MAX_BYTES) {
-        revokePreview();
-        setPreview({ status: "error" });
-        return undefined;
-      }
-      const controller = new AbortController();
-      active = controller;
-      const timeout = setTimeout(() => controller.abort(), PDF_PREVIEW_TIMEOUT_MS);
-      void (async () => {
+  const unavailable = () => (
+    <div class="sidebar-attachment-preview__unavailable" role="alert">
+      {t("chat.attachments.previewUnavailable")}
+      <CompactAttachmentCard
+        kind="document"
+        label={props.label}
+        mimeType={props.mimeType}
+        sizeBytes={props.sizeBytes}
+        downloadHref={safeAttachmentHref(props.src) ?? undefined}
+      />
+    </div>
+  );
+  const renderPreview = (input: ReturnType<typeof source>) => {
+    const sizeBytes = input[2];
+    if (!input[3]) {
+      return <AttachmentPreviewSkeleton />;
+    }
+    if (sizeBytes !== undefined && sizeBytes > PDF_PREVIEW_MAX_BYTES) {
+      return unavailable();
+    }
+    const result = createMemo<PdfRead>(
+      async () => {
+        const src = props.src;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), PDF_PREVIEW_TIMEOUT_MS);
+        // This cleanup belongs to the tracked read, so replacement aborts transport immediately.
+        onCleanup(() => {
+          controller.abort();
+          clearTimeout(timeout);
+        });
         try {
-          const response = await fetch(value.src, {
+          const response = await fetch(src, {
             credentials: "same-origin",
             redirect: "error",
             signal: controller.signal,
@@ -96,82 +100,86 @@ export function ChatPdfPreview(props: PdfPreviewProps) {
           if (!bytes) {
             throw new Error("PDF attachment exceeds preview limit");
           }
-          if (active !== controller) {
-            return;
-          }
-          const nextBytes = new Uint8Array(bytes);
-          if (
-            previewBytes?.length === nextBytes.length &&
-            previewBytes.every((byte, index) => byte === nextBytes[index])
-          ) {
-            return;
-          }
-          revokePreview();
-          previewBytes = nextBytes;
-          previewUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-          setPreview({ status: "ready", url: previewUrl });
-        } catch {
-          if (active === controller) {
-            revokePreview();
-            setPreview({ status: "error" });
-          }
+          return { ok: true, bytes };
+        } catch (cause) {
+          // Commit failure so a later ticket cannot revive the previously successful reader.
+          return { ok: false, cause };
         } finally {
           clearTimeout(timeout);
-          if (active === controller) {
-            active = undefined;
+        }
+      },
+      {
+        equals: (before, next) => {
+          if (!before.ok || !next.ok || before.bytes.byteLength !== next.bytes.byteLength) {
+            return false;
           }
-        }
-      })();
-      return () => {
-        if (active === controller) {
-          active = undefined;
-        }
-        controller.abort();
-        clearTimeout(timeout);
-      };
-    });
-    return null;
-  };
-  onSettled(() => revokePreview);
-  function Unavailable() {
-    return (
-      <div class="sidebar-attachment-preview__unavailable" role="alert">
-        {t("chat.attachments.previewUnavailable")}
-        <CompactAttachmentCard
-          kind="document"
-          label={props.label}
-          mimeType={props.mimeType}
-          sizeBytes={props.sizeBytes}
-          downloadHref={safeAttachmentHref(props.src) ?? undefined}
-        />
-      </div>
+          const right = new Uint8Array(next.bytes);
+          return new Uint8Array(before.bytes).every((byte, index) => byte === right[index]);
+        },
+      },
     );
-  }
+    const bytes = () => {
+      const value = result();
+      return value.ok ? value.bytes : undefined;
+    };
+    const error = () => {
+      const value = result();
+      if (!value.ok) {
+        throw value.cause;
+      }
+      return null;
+    };
+    // Each accepted byte revision owns one Blob URL and one PDF document.
+    const renderFrame = (value: Accessor<ArrayBuffer>) => {
+      const [url, setUrl] = createSignal<string>();
+      return (
+        <>
+          <Show when={value()} keyed>
+            {(content) => {
+              onSettled(() => {
+                const next = URL.createObjectURL(new Blob([content], { type: "application/pdf" }));
+                setUrl(next);
+                return () => URL.revokeObjectURL(next);
+              });
+              return null;
+            }}
+          </Show>
+          <Show when={url()} keyed>
+            {(documentUrl) => (
+              <Errored fallback={(_error) => unavailable()}>
+                <Loading fallback={<AttachmentPreviewSkeleton />}>
+                  <PdfDocumentView
+                    url={documentUrl}
+                    resourceBasePath={props.resourceBasePath}
+                    label={props.label}
+                    active={props.active}
+                    attachmentChat={props.attachmentChat}
+                  />
+                </Loading>
+              </Errored>
+            )}
+          </Show>
+        </>
+      );
+    };
+    return (
+      <Loading fallback={<AttachmentPreviewSkeleton />}>
+        <Show
+          when={result().ok || !isPending(() => result())}
+          fallback={<AttachmentPreviewSkeleton />}
+        >
+          <Show when={bytes()}>{renderFrame}</Show>
+          <Errored fallback={(_error) => unavailable()}>{error()}</Errored>
+        </Show>
+      </Loading>
+    );
+  };
   return (
     <openclaw-chat-pdf-preview style={{ display: "contents" }}>
       <div class="sidebar-pdf-preview" aria-label={props.label}>
-        <Show when={source()} keyed>
-          {readPreview}
-        </Show>
         <div class="sidebar-pdf-preview__surface">
-          <Show when={preview().status !== "loading"} fallback={<AttachmentPreviewSkeleton />}>
-            <Show when={preview().status === "ready" && preview().url} fallback={<Unavailable />}>
-              <Show when={preview().url} keyed>
-                {(url) => (
-                  <Errored fallback={<Unavailable />}>
-                    <Loading fallback={<AttachmentPreviewSkeleton />}>
-                      <PdfDocumentView
-                        url={url}
-                        resourceBasePath={props.resourceBasePath}
-                        label={props.label}
-                        active={props.active}
-                        attachmentChat={props.attachmentChat}
-                      />
-                    </Loading>
-                  </Errored>
-                )}
-              </Show>
-            </Show>
+          <Show when={source()} keyed>
+            {renderPreview}
           </Show>
         </div>
       </div>
