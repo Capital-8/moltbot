@@ -41,6 +41,43 @@ function configuredSettings(model: Model) {
 }
 
 describe("AgentSession small-context compaction", () => {
+  it("maps an admitted request boundary across later internal updates", async () => {
+    const model = { ...testModel, contextWindow: 32_768 };
+    const sessionManager = SessionManager.inMemory();
+    sessionManager.appendMessage(makeUserMessage("Completed earlier human task", 1));
+    sessionManager.appendMessage(
+      createAssistant(model, [{ type: "text", text: "Completed." }], "stop"),
+    );
+    const request = "Review the patch; do not deploy it.";
+    const requestFromEntryId = sessionManager.appendMessage(makeUserMessage(request, 3));
+    sessionManager.appendMessage(
+      Object.assign(makeUserMessage("Worker update", 4), {
+        provenance: { kind: "inter_session" },
+      }),
+    );
+    sessionManager.appendMessage(
+      createAssistant(model, [{ type: "text", text: "Work continues." }], "stop"),
+    );
+    const { session } = await createTestSession({
+      model,
+      sessionManager,
+      settingsManager: smallSettings(),
+    });
+
+    const outcome = await session[agentSessionAutomaticCompaction](
+      undefined,
+      "unresolved",
+      "deterministic",
+      { requestFromEntryId },
+    );
+
+    expect(outcome).toMatchObject({
+      status: "completed",
+      result: { details: { latestUnresolvedUserRequest: request } },
+    });
+    expect(streamMocks.streamSimple).not.toHaveBeenCalled();
+  });
+
   it("defers a one-archive retention no-op until the foreground request budget is prepared", async () => {
     const model = { ...testModel, contextWindow: 32_768, maxTokens: 8_192 };
     const settingsManager = configuredSettings(model);
