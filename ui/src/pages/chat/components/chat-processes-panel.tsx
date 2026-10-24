@@ -308,6 +308,7 @@ export const ChatProcessesPanel = defineSolidBridge<ChatProcessesPanelProps>(
               fallback={
                 <div class="chat-processes__output-empty">
                   <PanelEmptyState
+                    presentation="desktop"
                     icon={<Icon name="terminal" />}
                     heading={t("chat.processesPanel.noOutputTitle")}
                     description={t("chat.processesPanel.noOutput")}
@@ -469,11 +470,12 @@ export const ChatProcessesPanel = defineSolidBridge<ChatProcessesPanelProps>(
                       </div>
                     }
                   >
-                    <PanelLoadingSkeleton variant="file-list" label={t("common.loading")} compact />
+                    <PanelLoadingSkeleton variant="file-list" label={t("common.loading")} />
                   </Show>
                 }
               >
                 <PanelEmptyState
+                  presentation={props.mobile ? "mobile" : "desktop"}
                   icon={<Icon name="terminal" />}
                   heading={t("chat.processesPanel.emptyTitle")}
                   description={t("chat.processesPanel.empty")}
@@ -525,17 +527,13 @@ export const ChatProcessesPanel = defineSolidBridge<ChatProcessesPanelProps>(
       </div>
     );
     const retry = () => void panel().refresh();
-    const consumeRead = () => {
-      latest(presentation.read);
-      return null;
-    };
     // Read fallbacks must not replace the retained content's navigation refs.
     const ReadFallback = (fallbackProps: { loading: boolean; retry: () => void }) => (
       <div class="chat-processes__panel" data-mobile={props.mobile ? "true" : "false"}>
         <div class="chat-processes__list" aria-busy={fallbackProps.loading ? "true" : "false"}>
           {error(fallbackProps.loading, fallbackProps.retry)}
           <Show when={fallbackProps.loading}>
-            <PanelLoadingSkeleton variant="file-list" label={t("common.loading")} compact />
+            <PanelLoadingSkeleton variant="file-list" label={t("common.loading")} />
           </Show>
         </div>
       </div>
@@ -553,7 +551,7 @@ export const ChatProcessesPanel = defineSolidBridge<ChatProcessesPanelProps>(
         )}
       >
         <Loading on={presentation.scope()} fallback={<ReadFallback loading retry={retry} />}>
-          {consumeRead()}
+          {(latest(presentation.read), null)}
           <Content loading={isPending(presentation.read)} retry={retry} />
         </Loading>
       </Errored>

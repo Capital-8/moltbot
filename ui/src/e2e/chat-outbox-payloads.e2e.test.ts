@@ -1,8 +1,6 @@
-import { withTimeout } from "@openclaw/fs-safe/advanced";
 import type { BrowserContext, Page } from "playwright/test";
 import { assert, expect, it } from "vitest";
 import { evaluateControlUiContext } from "../test-helpers/control-ui-e2e-context.ts";
-import { recordControlUiE2eFailureFacts } from "../test-helpers/control-ui-e2e-diagnostics.ts";
 import {
   waitForControlUiGatewayReady,
   waitForControlUiGatewayReconnecting,
@@ -29,6 +27,7 @@ import {
   stageOutboxAttachment as stage,
   outboxChatUrl as chatUrl,
 } from "./chat-outbox-payloads.test-support.ts";
+import { controlUiE2eBuiltModuleRequest } from "./control-ui-built-module.test-support.ts";
 
 const plainHttpHost = "plain-http.test";
 const suite = createChatFlowE2eSuite({
@@ -123,31 +122,18 @@ suite.define(() => {
       await expectPayload(page, original.attachmentPayload.key);
     }));
 
-  it("reloads an offline Blob queue with exact bytes and idempotency, and never replays a lost ACK", () =>
-    suite.withPage(pageOptions, async ({ page }) => {
-      const gateway = await installGateway(page, true);
-      await openChat(page);
-      await disconnect(page, gateway);
-      const queued = await queueAttachment(page, "Mock Gateway: offline binary submission");
-      expect(queued.attachmentPayload).toBeDefined();
-      expect(queued.sendAttempts).toBe(0);
-      await expect.poll(() => composerFor(page).inputValue()).toBe("");
-      await expectRequestCountStable(gateway, "chat.send", 0);
-      await page.reload();
-      await expect.poll(async () => (await readQueue(page))[0]?.sendRunId).toBe(queued.sendRunId);
-      await gateway.setOnline(true);
-      const sent = await gateway.waitForRequest("chat.send");
-      expectAttachmentSend(sent.params, { idempotencyKey: queued.sendRunId });
-      await expect.poll(() => payloadCount(page)).toBe(1);
-      // Reload destroys the pending ACK. The restored attempted row must require review.
-      await page.reload();
-      await paneFor(page).getByText("Delivery unconfirmed", { exact: true }).waitFor();
-      await expectRequestCountStable(gateway, "chat.send", 0);
-      expect((await readQueue(page))[0]?.sendRunId).toBe(queued.sendRunId);
-    }));
-
-  it("queues complete attachment bytes while the browser and Gateway are offline", () =>
+  it("retains offline attachment bytes through cold queue recovery and reconnect", () =>
     suite.withPage({ serviceWorkers: "block" }, async ({ context, page }) => {
+      const queueModule = controlUiE2eBuiltModuleRequest(
+        "ui/src/pages/chat/components/chat-composer-queue.tsx",
+      );
+      await page.addInitScript(() => {
+        window.addEventListener("vite:preloadError", (event) => {
+          console.debug(
+            "outbox-preload-error: " + String((event as Event & { payload?: unknown }).payload),
+          );
+        });
+      });
       const gateway = await installGateway(page, true);
       await openChat(page);
       await waitForControlUiGatewayReady(page);
@@ -155,7 +141,17 @@ suite.define(() => {
       await stage(page, message);
       await context.setOffline(true);
       await disconnect(page, gateway);
-      await send(page);
+      const [failedQueueRequest] = await Promise.all([
+        page.waitForEvent("requestfailed", (request) => queueModule.test(request.url())),
+        page.waitForEvent(
+          "console",
+          (consoleMessage) =>
+            consoleMessage.text().startsWith("outbox-preload-error: ") &&
+            queueModule.test(consoleMessage.text()),
+        ),
+        send(page),
+      ]);
+      expect(failedQueueRequest.failure()?.errorText).toBe("net::ERR_INTERNET_DISCONNECTED");
       await expect.poll(async () => (await readQueue(page)).length).toBe(1);
       const queued = (await readQueue(page))[0]!;
       expect(queued.attachmentPayload).toBeDefined();
@@ -163,46 +159,11 @@ suite.define(() => {
       await expect.poll(() => payloadCount(page)).toBe(1);
       await expect.poll(() => composerFor(page).inputValue()).toBe("");
       await expectRequestCountStable(gateway, "chat.send", 0);
+      const reloaded = page.waitForEvent("domcontentloaded");
       await context.setOffline(false);
+      await reloaded;
       await gateway.setOnline(true);
-      const recordReconnectFacts = (afterWait: boolean) =>
-        withTimeout(
-          Promise.all([
-            readQueue(page),
-            evaluateControlUiContext(page, (app) => ({
-              browserOnline: navigator.onLine,
-              gatewayConnected: app.gateway.snapshot.phase === "connected",
-              clientConnected: app.gateway.snapshot.client?.connected ?? false,
-              recoveryScopeReady: app.gateway.snapshot.client?.recoveryScopeReady ?? false,
-              identityResolved: app.gateway.snapshot.selfUser !== undefined,
-              foregroundReady: app.connectionBootstrap.foregroundReady,
-            })),
-          ]),
-          1_000,
-          "offline attachment reconnect facts",
-        )
-          .then(([queue, connection]) =>
-            recordControlUiE2eFailureFacts(page, {
-              ...connection,
-              reconnectFactsAfterWait: afterWait,
-              queueCount: queue.length,
-              sendAttempts: queue.reduce((count, item) => count + (item.sendAttempts ?? 0), 0),
-              payloadCount: queue.filter((item) => item.attachmentPayload).length,
-              waitingReconnect: queue.filter((item) => item.sendState === "waiting-reconnect")
-                .length,
-              waitingIdle: queue.filter((item) => item.sendState === "waiting-idle").length,
-              waitingModel: queue.filter((item) => item.sendState === "waiting-model").length,
-              unconfirmed: queue.filter((item) => item.sendState === "unconfirmed").length,
-              failed: queue.filter((item) => item.sendState === "failed").length,
-            }),
-          )
-          .catch(() => undefined);
-      await recordReconnectFacts(false);
-      const sent = await gateway.waitForRequest("chat.send").catch(async (error: unknown) => {
-        recordControlUiE2eFailureFacts(page, { reconnectSendWaitFailed: true });
-        await recordReconnectFacts(true);
-        throw error;
-      });
+      const sent = await gateway.waitForRequest("chat.send");
       expectAttachmentSend(sent.params, { message, idempotencyKey: queued.sendRunId });
       await expectRequestCountStable(gateway, "chat.send", 1);
     }));

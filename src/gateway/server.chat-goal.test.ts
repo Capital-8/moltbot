@@ -19,7 +19,7 @@ import {
   loadTranscriptEventsSync,
   patchSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
-import type { SessionEntry } from "../config/sessions/types.js";
+import type { InternalSessionEntry, SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { waitForGatewayActiveWork } from "../infra/gateway-active-work.js";
 import { withPluginRuntimeGatewayContextResolver } from "../plugins/runtime/gateway-request-scope.js";
@@ -32,6 +32,7 @@ import {
 import { listSessionStateEventsSince } from "../sessions/session-state-events.js";
 import * as skillLibrarySelection from "../skills/library/selection.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
+import { captureGatewayAuthPolicy } from "./auth-policy.js";
 import { createDirectChatContext } from "./server-chat.agent-events.test-helpers.js";
 import { handleGatewayRequest } from "./server-methods.js";
 import { handleChatSend } from "./server-methods/chat-send-handler.js";
@@ -44,6 +45,7 @@ import type {
 } from "./server-methods/types.js";
 import { pendingChatSendDedupeKey } from "./server-shared.js";
 import { registerGoalAutomaticContinuationCases } from "./server.chat-goal-continuation.test-support.js";
+import { registerGoalReplacementCases } from "./server.chat-goal-replacement.test-support.js";
 import { registerWorkerGoalChatCases } from "./server.chat-goal-workers.test-support.js";
 import {
   createGoalChatStartRequest,
@@ -181,7 +183,13 @@ async function useFreshSessionStore() {
 }
 
 async function rpc(
-  method: "chat.send" | "chat.history" | "chat.abort" | "sessions.abort" | "sessions.goal.update",
+  method:
+    | "chat.send"
+    | "chat.history"
+    | "chat.abort"
+    | "sessions.abort"
+    | "sessions.goal.update"
+    | "users.setRole",
   params: Record<string, unknown>,
   onResponse?: RespondFn,
   requestClient: GatewayClient = client,
@@ -310,6 +318,7 @@ function holdGoalReceipt() {
 
 describe("Goal chat admission and continuation", () => {
   registerGoalAutomaticContinuationCases(scope, runEmbeddedAgent, rpc, goalStart, userMessages);
+  registerGoalReplacementCases(scope, runEmbeddedAgent, rpc, goalStart, () => context, client);
 
   registerGoalChatRestartSettlementCase({
     scope,
@@ -814,6 +823,15 @@ describe("Goal chat admission and continuation", () => {
     const objective = "Finish the release checklist";
     const profile = ensureProfileForEmail("goal-participant@example.test");
     const requestClient = profileClient(profile.id);
+    requestClient.internal = {
+      authenticatedOperator: true,
+      controlUiAdmin: true,
+      operatorAccessAuthority: null,
+    };
+    requestClient.authPolicy = captureGatewayAuthPolicy(context.getRuntimeConfig(), {
+      role: "operator",
+      authMethod: "token",
+    });
     const startRequest = goalStart(objective);
     const started = await rpc("chat.send", startRequest, undefined, requestClient);
     expect(started.mock.calls[0]?.[0]).toBe(true);
@@ -850,8 +868,18 @@ describe("Goal chat admission and continuation", () => {
         }
       });
     let resumed: Awaited<ReturnType<typeof rpc>>;
+    let resumeEntryAtAck: InternalSessionEntry | undefined;
     try {
-      resumed = await rpc("sessions.goal.update", request, undefined, requestClient);
+      resumed = await rpc(
+        "sessions.goal.update",
+        request,
+        (ok) => {
+          if (ok) {
+            resumeEntryAtAck = loadSessionEntry(scope());
+          }
+        },
+        requestClient,
+      );
     } finally {
       notification.mockRestore();
     }
@@ -861,6 +889,11 @@ describe("Goal chat admission and continuation", () => {
       undefined,
       expect.anything(),
     );
+    expect(resumeEntryAtAck?.restartRecoveryOperatorSource).toMatchObject({
+      sourceRunId: request.operationId,
+      sessionId,
+      snapshot: { profileId: profile.id },
+    });
     await waitForModelRun(2);
     await waitForDispatchEnd();
     expect(loadSessionEntry(scope())?.goal).toMatchObject({
