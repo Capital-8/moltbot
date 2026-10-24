@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { upsertAuthProfileAsync } from "../../dist/plugin-sdk/provider-auth.js";
+import { upsertAuthProfile } from "../../dist/plugin-sdk/provider-auth.js";
 import { applyDockerOpenAiProviderConfig, type OpenClawConfig } from "./docker-openai-seed.ts";
 
 const require = createRequire(import.meta.url);
@@ -118,7 +118,7 @@ async function main() {
   );
 
   // Scheduled inference retains a stored account, not the provider-config key.
-  await upsertAuthProfileAsync({
+  upsertAuthProfile({
     profileId,
     credential: {
       type: "api_key",
