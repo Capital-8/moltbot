@@ -4,6 +4,7 @@ import {
   assertCodexModelListResponse,
   assertCodexPassiveTurnItems,
   readCodexTurnCompletedNotification,
+  readCodexErrorNotification,
   assertCodexThreadStartResponse,
   assertCodexThreadResumeResponse,
 } from "./protocol-validators.js";
@@ -145,6 +146,52 @@ describe("assertCodexModelListResponse", () => {
 });
 
 describe("readCodexTurnCompletedNotification", () => {
+  it("accepts Codex 0.164 partial answers and root turn identities", () => {
+    const turn = readCodexTurnCompletedNotification({
+      threadId: "thread-1",
+      turn: {
+        id: "turn-1",
+        rootTurnId: "root-turn-1",
+        status: "completed",
+        items: [
+          {
+            id: "item-1",
+            type: "agentMessage",
+            phase: "partial_answer",
+            text: "Stable partial answer.",
+            questions: [{ title: "Continue?", options: ["Yes", "No"] }],
+          },
+        ],
+      },
+    })?.turn;
+
+    expect(turn).toMatchObject({ rootTurnId: "root-turn-1" });
+    expect(turn?.items[0]).toMatchObject({ phase: "partial_answer" });
+  });
+
+  it("validates structured Codex 0.164 error information", () => {
+    const notification = {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      willRetry: false,
+      error: {
+        message: "Synthetic error",
+        codexErrorInfo: { activeTurnNotSteerable: { turnKind: "review" } },
+      },
+    };
+
+    expect(readCodexErrorNotification(notification)).toMatchObject(notification);
+    expect(
+      readCodexErrorNotification({
+        ...notification,
+        error: {
+          ...notification.error,
+          codexErrorInfo: { activeTurnNotSteerable: { turnKind: 12 } },
+        },
+      }),
+    ).toBeUndefined();
+  });
+
   it("does not merge defaults from unrelated thread item union branches", () => {
     const turn = readCodexTurnCompletedNotification({
       threadId: "thread-1",

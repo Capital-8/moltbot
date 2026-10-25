@@ -27,7 +27,13 @@ describe("Codex native login discovery", () => {
     });
   });
 
-  it.each([["Logged in using an API key - sk-synthetic***11111", "api-key"]])(
+  it.each([
+    ["Logged in using an API key - sk-synthetic***11111", "api-key"],
+    [
+      "API key configured - sk-synthetic***11111\nAuthentication is checked when you send a request.",
+      "api-key",
+    ],
+  ])(
     "projects %s as a native-only fact",
     async (line, mode) => {
       run.mockResolvedValue({ termination: "exit", code: 0, stdout: "", stderr: line });
