@@ -232,8 +232,9 @@ Each Doctor interval verifies its input again. Changed data, intervening commits
 replaced files, and tampered backups still refuse automatic restoration. The
 installed extended-stable updater does not need to contain this repair.
 The private rehearsal also preserves the source's legacy cron partition identity
-before migrating the copied state. An unmatched historical partition still needs
-an explicit Doctor selection.
+before migrating the copied state. A sole unmatched historical partition is
+selected automatically; multiple unmatched partitions still need an explicit
+Doctor selection.
 
 Within one database-generation observation, update and Doctor workers reuse a
 verified digest while the file's device, inode, size, and nanosecond birth,

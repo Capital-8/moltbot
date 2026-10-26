@@ -148,7 +148,7 @@ it("preserves an upgraded partition and receipt bytes across a stopped state-dir
 });
 
 it.each([32, 33])(
-  "upgrades already-moved v%s state without guessing or refusing database startup",
+  "upgrades already-moved v%s state by selecting its sole partition",
   async (previousVersion) => {
     const fixture = legacyStore(true, previousVersion);
     const moved = path.join(fixture.root, "already-moved");
@@ -156,7 +156,7 @@ it.each([32, 33])(
     const options = { env: { OPENCLAW_STATE_DIR: moved } };
     await withStateMigrationBackupForTest(options, () => openState(options));
     const migrated = openState(options);
-    expect(readCronDefaultStoreKeyInDatabase(migrated.db)).toBeUndefined();
+    expect(readCronDefaultStoreKeyInDatabase(migrated.db)).toBe(fixture.storeKey);
     expect(readCronStorePartitionInventoryInDatabase(migrated.db)).toMatchObject([
       { storeKey: fixture.storeKey, jobs: 1 },
     ]);
@@ -166,6 +166,29 @@ it.each([32, 33])(
   },
 );
 
+it("leaves multiple already-moved partitions unresolved", async () => {
+  const fixture = legacyStore(true, 33);
+  const secondStoreKey = path.join(fixture.stateDir, "other-cron", "jobs.json");
+  {
+    using db = new DatabaseSync(fixture.databasePath);
+    db.prepare(`INSERT INTO cron_jobs
+      (store_key, job_id, name, enabled, payload_kind, job_json, state_json, updated_at)
+      VALUES (?, 'other-job', 'Other migration job', 0, 'agentTurn', '{}', '{}', 1)`).run(
+      secondStoreKey,
+    );
+  }
+  const moved = path.join(fixture.root, "already-moved");
+  renameSync(fixture.stateDir, moved);
+  const options = { env: { OPENCLAW_STATE_DIR: moved } };
+  await withStateMigrationBackupForTest(options, () => openState(options));
+  const migrated = openState(options);
+  expect(readCronDefaultStoreKeyInDatabase(migrated.db)).toBeUndefined();
+  expect(readCronStorePartitionInventoryInDatabase(migrated.db)).toMatchObject([
+    { storeKey: fixture.storeKey, jobs: 1 },
+    { storeKey: secondStoreKey, jobs: 1 },
+  ]);
+});
+
 it("uses retained history, scratch, quarantine and provisioning evidence after all jobs were removed", async () => {
   const fixture = legacyStore(false);
   replaceClosedFile(fixture.databasePath);
@@ -173,11 +196,13 @@ it("uses retained history, scratch, quarantine and provisioning evidence after a
   expect(readCronDefaultStoreKeyInDatabase(openState(fixture.options).db)).toBe(fixture.storeKey);
 });
 
-it.each([false, true])("preserves history-only legacy partitions (moved: %s)", async (moved) => {
-  const fixture = legacyStore(false, 32);
-  {
-    using db = new DatabaseSync(fixture.databasePath);
-    db.exec(`DELETE FROM cron_job_scratch;
+it.each([false, true])(
+  "selects a sole history-only legacy partition (moved: %s)",
+  async (moved) => {
+    const fixture = legacyStore(false, 32);
+    {
+      using db = new DatabaseSync(fixture.databasePath);
+      db.exec(`DELETE FROM cron_job_scratch;
       DELETE FROM cron_run_receipts;
       DELETE FROM task_runs;
       DELETE FROM diagnostic_events;
@@ -186,34 +211,31 @@ it.each([false, true])("preserves history-only legacy partitions (moved: %s)", a
         store_key TEXT NOT NULL, job_id TEXT NOT NULL, seq INTEGER NOT NULL,
         ts INTEGER NOT NULL, entry_json TEXT NOT NULL, created_at INTEGER NOT NULL,
         PRIMARY KEY (store_key, job_id, seq));`);
-    db.prepare("INSERT INTO cron_run_logs VALUES (?, 'deleted-job', 1, 1000, ?, 1000)").run(
-      fixture.storeKey,
-      JSON.stringify({ ts: 1000, jobId: "deleted-job", action: "finished", status: "ok" }),
-    );
-  }
-  const destination = moved ? path.join(fixture.root, "moved") : fixture.stateDir;
-  if (moved) {
-    renameSync(fixture.stateDir, destination);
-  } else {
-    replaceClosedFile(fixture.databasePath);
-  }
-  const options = { env: { OPENCLAW_STATE_DIR: destination } };
-  await withStateMigrationBackupForTest(options, () => openState(options));
-  const { db } = openState(options);
-  expect(readCronDefaultStoreKeyInDatabase(db)).toBe(moved ? undefined : fixture.storeKey);
-  expect(readCronStorePartitionInventoryInDatabase(db)).toMatchObject([
-    { storeKey: fixture.storeKey, jobs: 0, history: 1 },
-  ]);
-  expect(
-    db.prepare("SELECT name FROM sqlite_master WHERE name='cron_run_logs'").get(),
-  ).toBeUndefined();
-  const history = db.prepare("SELECT detail_json FROM task_runs WHERE runtime='cron'").get();
-  expect(JSON.parse(String(history?.detail_json))).toMatchObject({ storeKey: fixture.storeKey });
-  if (moved) {
-    selectCronDefaultStoreIdentityInDatabase(db, fixture.storeKey);
+      db.prepare("INSERT INTO cron_run_logs VALUES (?, 'deleted-job', 1, 1000, ?, 1000)").run(
+        fixture.storeKey,
+        JSON.stringify({ ts: 1000, jobId: "deleted-job", action: "finished", status: "ok" }),
+      );
+    }
+    const destination = moved ? path.join(fixture.root, "moved") : fixture.stateDir;
+    if (moved) {
+      renameSync(fixture.stateDir, destination);
+    } else {
+      replaceClosedFile(fixture.databasePath);
+    }
+    const options = { env: { OPENCLAW_STATE_DIR: destination } };
+    await withStateMigrationBackupForTest(options, () => openState(options));
+    const { db } = openState(options);
     expect(readCronDefaultStoreKeyInDatabase(db)).toBe(fixture.storeKey);
-  }
-});
+    expect(readCronStorePartitionInventoryInDatabase(db)).toMatchObject([
+      { storeKey: fixture.storeKey, jobs: 0, history: 1 },
+    ]);
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name='cron_run_logs'").get(),
+    ).toBeUndefined();
+    const history = db.prepare("SELECT detail_json FROM task_runs WHERE runtime='cron'").get();
+    expect(JSON.parse(String(history?.detail_json))).toMatchObject({ storeKey: fixture.storeKey });
+  },
+);
 
 it("rolls back the binding with failed schema publication", async () => {
   const fixture = legacyStore();
