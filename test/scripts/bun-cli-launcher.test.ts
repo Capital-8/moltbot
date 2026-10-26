@@ -286,7 +286,7 @@ describe("Bun launcher path contract", () => {
 describe.skipIf(process.platform === "win32")("packaged Bun launcher lifecycle", () => {
   beforeEach(() => {
     lifecycle.resolveBinDir.mockReset();
-    lifecycle.probeNode.mockReset().mockReturnValue({ bunVersion: "1.4.3" });
+    lifecycle.probeNode.mockReset().mockReturnValue({ bunVersion: "1.4.4" });
   });
 
   function lifecycleFixture() {
@@ -294,10 +294,10 @@ describe.skipIf(process.platform === "win32")("packaged Bun launcher lifecycle",
     symlinkSync(target.entryPath, target.path);
     lifecycle.resolveBinDir.mockReturnValue(target.binDir);
     const env = {
-      npm_config_user_agent: "bun/1.4.3",
+      npm_config_user_agent: "bun/1.4.4",
       OPENCLAW_PACKAGE_BUN_LAUNCHER: target.bunPath,
     };
-    return { target, params: { packageRoot: target.packageRoot, env, bunVersion: "1.4.3" } };
+    return { target, params: { packageRoot: target.packageRoot, env, bunVersion: "1.4.4" } };
   }
 
   it("finishes only its existing global link and refreshes it after a Bun update", () => {
@@ -332,9 +332,9 @@ describe.skipIf(process.platform === "win32")("packaged Bun launcher lifecycle",
         expect(() =>
           installPackageBunCliLauncher({
             packageRoot: target.packageRoot,
-            bunVersion: "1.4.3",
+            bunVersion: "1.4.4",
             env: {
-              npm_config_user_agent: "bun/1.4.3",
+              npm_config_user_agent: "bun/1.4.4",
               OPENCLAW_PACKAGE_BUN_LAUNCHER: target.bunPath,
             },
           }),
@@ -353,8 +353,8 @@ describe.skipIf(process.platform === "win32")("packaged Bun launcher lifecycle",
     lifecycle.resolveBinDir.mockReturnValue(target.binDir);
     installPackageBunCliLauncher({
       packageRoot: target.packageRoot,
-      bunVersion: "1.4.3",
-      env: { npm_config_user_agent: "bun/1.4.3", OPENCLAW_PACKAGE_BUN_LAUNCHER: target.bunPath },
+      bunVersion: "1.4.4",
+      env: { npm_config_user_agent: "bun/1.4.4", OPENCLAW_PACKAGE_BUN_LAUNCHER: target.bunPath },
     });
     expect(readdirSync(target.binDir)).toEqual(kind === "missing" ? [] : ["openclaw"]);
     if (kind === "foreign") {

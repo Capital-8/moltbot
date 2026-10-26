@@ -84,7 +84,7 @@ describe("install runtime enforcement", () => {
       {
         name: "no marker",
         launcher: undefined,
-        bun: "1.4.3",
+        bun: "1.4.4",
         persistent: undefined,
         accepted: false,
         error: "detected Node missing",
@@ -93,7 +93,7 @@ describe("install runtime enforcement", () => {
         [true, false].map((shimMatchesBun) => ({
           name: `${shimDirectory} resolving to ${shimMatchesBun ? "running" : "another"} Bun`,
           launcher: "/opt/bun/bin/bun",
-          bun: "1.4.3",
+          bun: "1.4.4",
           persistent: undefined,
           shimDirectory,
           shimMatchesBun,
@@ -107,12 +107,12 @@ describe("install runtime enforcement", () => {
         bun: "1.4.2",
         persistent: undefined,
         accepted: false,
-        error: "Bun launcher /opt/bun/bin/bun requires Bun 1.4.3+",
+        error: "Bun launcher /opt/bun/bin/bun requires Bun 1.4.4+",
       },
       {
         name: "relative launcher",
         launcher: "bin/bun",
-        bun: "1.4.3",
+        bun: "1.4.4",
         persistent: undefined,
         accepted: false,
         error: "detected Node missing",
@@ -120,7 +120,7 @@ describe("install runtime enforcement", () => {
       {
         name: "persistent old Node after the shim",
         launcher: "/opt/bun/bin/bun",
-        bun: "1.4.3",
+        bun: "1.4.4",
         persistent: "old-node",
         accepted: false,
         error: "detected Node 24.14.1",
@@ -166,7 +166,7 @@ describe("install runtime enforcement", () => {
       );
       const result = enforceSupportedNodeRuntime(
         {
-          bunVersion: "1.4.3",
+          bunVersion: "1.4.4",
           engine: EXPECTED_NODE_ENGINE_RANGE,
           probeNodeRuntime: () =>
             probePackageCliNodeRuntime({
@@ -254,7 +254,7 @@ describe("install runtime enforcement", () => {
               status: 0,
               stdout: JSON.stringify({
                 version: nodeVersion ?? "24.3.0",
-                bunVersion: nodeVersion ? null : "1.4.3",
+                bunVersion: nodeVersion ? null : "1.4.4",
                 execPath: executable,
               }),
             }
@@ -264,7 +264,7 @@ describe("install runtime enforcement", () => {
       expect(
         enforceSupportedNodeRuntime(
           {
-            bunVersion: "1.4.3",
+            bunVersion: "1.4.4",
             engine: EXPECTED_NODE_ENGINE_RANGE,
             probeNodeRuntime: () =>
               probePackageCliNodeRuntime({
