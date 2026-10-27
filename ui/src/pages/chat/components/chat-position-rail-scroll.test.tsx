@@ -145,9 +145,13 @@ it("follows native midpoint crossings and the final virtual range", async () => 
 
     const readRailHeight = vi.fn(() => 240);
     Object.defineProperty(marks, "clientHeight", { configurable: true, get: readRailHeight });
-    marks.scrollTop = 400;
+    const readRailOffset = vi.fn(() => 400);
+    Object.defineProperty(marks, "scrollTop", { configurable: true, get: readRailOffset });
     marks.dispatchEvent(new Event("scroll"));
+    marks.dispatchEvent(new Event("scroll"));
+    expect(readRailOffset).not.toHaveBeenCalled();
     await settle(true);
+    expect(readRailOffset).toHaveBeenCalledTimes(1);
     expect(readRailHeight).not.toHaveBeenCalled();
     expect(marks.querySelector('[data-position-marker-id="row-35"]')).not.toBeNull();
     expectCurrent("row-3");

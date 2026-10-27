@@ -50,6 +50,7 @@ export function createPositionRail(props: PositionRailParams) {
   let scrollElement: HTMLElement | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let observationPending = false;
+  let offsetPending = false;
   let refreshingWindow = false;
   let layoutFrame: number | undefined;
   let currentActiveId: string | undefined;
@@ -94,7 +95,10 @@ export function createPositionRail(props: PositionRailParams) {
     layoutFrame = requestAnimationFrame(() => {
       if (observationPending) {
         observeLayout();
+      } else if (offsetPending && scrollElement) {
+        viewportOffset = scrollElement.scrollTop;
       }
+      offsetPending = false;
       layoutFrame = undefined;
       syncLayout();
     });
@@ -483,6 +487,7 @@ export function createPositionRail(props: PositionRailParams) {
   const bindScroller = (element?: Element) => {
     resizeObserver?.disconnect();
     observationPending = false;
+    offsetPending = false;
     disconnectVisibility();
     markersChanged = true;
     layoutVisible = false;
@@ -637,12 +642,10 @@ export function createPositionRail(props: PositionRailParams) {
       bindScroller,
       bindPreview,
       onScroll: () => {
-        // Rail movement changes only its offset; observers own dimensions and reader position.
-        const offset = scrollElement?.scrollTop;
-        if (offset !== undefined && offset !== viewportOffset) {
-          viewportOffset = offset;
-          scheduleLayout();
-        }
+        // Read once in the owned frame, after transcript mutations have settled.
+        // Rail-only movement does not need dimensions or a reader observation.
+        offsetPending = true;
+        scheduleLayout();
       },
       stopScrollInput,
       onPointerLeave: () => {
