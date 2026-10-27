@@ -1853,6 +1853,7 @@
     "native.android.f6a04d629e72725f": "此裝置將失去受信任的 Gateway 存取權。",
     "native.android.f6d50d3e347d2d12": "隔離",
     "native.android.f6f0f4e6491e711a": "無法儲存小工具圖片",
+    "native.android.f6f257e56b6519f4": "採用憑證釘選的 Gateway 無法使用嵌入式頁面。請改用原生畫面。",
     "native.android.f72c3674b897b26b": "正在載入討論串",
     "native.android.f74ff12138dba28c": "回應更快速，但會消耗較多用量限額。",
     "native.android.f758bb56374bdb8a": "尚未配對",

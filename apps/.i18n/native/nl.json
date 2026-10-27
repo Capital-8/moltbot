@@ -1853,6 +1853,7 @@
     "native.android.f6a04d629e72725f": "Dit apparaat verliest zijn vertrouwde toegang tot de Gateway.",
     "native.android.f6d50d3e347d2d12": "Geïsoleerd",
     "native.android.f6f0f4e6491e711a": "Kan de widgetafbeelding niet opslaan",
+    "native.android.f6f257e56b6519f4": "Ingesloten pagina's zijn niet beschikbaar bij gateways met certificaatpinning. Gebruik in plaats daarvan de native schermen.",
     "native.android.f72c3674b897b26b": "Gesprek laden",
     "native.android.f74ff12138dba28c": "Snellere antwoorden, hoger verbruik van gebruikslimieten.",
     "native.android.f758bb56374bdb8a": "Geen gekoppeld",

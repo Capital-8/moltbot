@@ -1853,6 +1853,7 @@
     "native.android.f6a04d629e72725f": "Cet appareil perdra son accès de confiance au Gateway.",
     "native.android.f6d50d3e347d2d12": "Isolé",
     "native.android.f6f0f4e6491e711a": "Impossible d’enregistrer l’image du widget",
+    "native.android.f6f257e56b6519f4": "Les pages intégrées ne sont pas disponibles pour les passerelles avec épinglage de certificat. Utilisez plutôt les écrans natifs.",
     "native.android.f72c3674b897b26b": "Chargement du fil de discussion",
     "native.android.f74ff12138dba28c": "Réponses plus rapides, consommation accrue des quotas.",
     "native.android.f758bb56374bdb8a": "Aucun nœud appairé",

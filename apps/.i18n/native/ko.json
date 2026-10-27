@@ -1853,6 +1853,7 @@
     "native.android.f6a04d629e72725f": "이 기기는 신뢰할 수 있는 기기로서의 Gateway 접근 권한을 잃게 됩니다.",
     "native.android.f6d50d3e347d2d12": "격리됨",
     "native.android.f6f0f4e6491e711a": "위젯 이미지를 저장하지 못했습니다",
+    "native.android.f6f257e56b6519f4": "인증서 고정이 적용된 Gateway에서는 내장 페이지를 사용할 수 없습니다. 대신 네이티브 화면을 사용하세요.",
     "native.android.f72c3674b897b26b": "스레드 불러오는 중",
     "native.android.f74ff12138dba28c": "응답이 더 빠르지만 사용 한도를 더 많이 소모합니다.",
     "native.android.f758bb56374bdb8a": "페어링된 노드 없음",

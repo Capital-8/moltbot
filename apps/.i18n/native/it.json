@@ -1853,6 +1853,7 @@
     "native.android.f6a04d629e72725f": "Questo dispositivo perderà l'accesso attendibile al Gateway.",
     "native.android.f6d50d3e347d2d12": "Isolato",
     "native.android.f6f0f4e6491e711a": "Impossibile salvare l'immagine del widget",
+    "native.android.f6f257e56b6519f4": "Le pagine incorporate non sono disponibili sui Gateway con pinning del certificato. Usa invece le schermate native.",
     "native.android.f72c3674b897b26b": "Caricamento della conversazione",
     "native.android.f74ff12138dba28c": "Risposte più rapide, maggiore utilizzo dei limiti.",
     "native.android.f758bb56374bdb8a": "Nessun nodo associato",

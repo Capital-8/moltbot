@@ -1853,6 +1853,7 @@
     "native.android.f6a04d629e72725f": "Este dispositivo perderá o acesso confiável ao Gateway.",
     "native.android.f6d50d3e347d2d12": "Isolado",
     "native.android.f6f0f4e6491e711a": "Não foi possível salvar a imagem do widget",
+    "native.android.f6f257e56b6519f4": "As páginas incorporadas não estão disponíveis em gateways com fixação de certificado. Use as telas nativas em vez disso.",
     "native.android.f72c3674b897b26b": "Carregando conversa",
     "native.android.f74ff12138dba28c": "Respostas mais rápidas, maior uso dos limites.",
     "native.android.f758bb56374bdb8a": "Nenhum pareado",
