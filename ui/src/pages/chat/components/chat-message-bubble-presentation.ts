@@ -9,10 +9,8 @@ import {
   prewarmSanitizedMarkdown,
   type MarkdownPrewarmMode,
 } from "../../../components/markdown.ts";
-import {
-  extractThinkingCached,
-  readTranscriptMediaEntries,
-} from "../../../lib/chat/message-extract.ts";
+import { resolveMessageDisplayMarkdown } from "../../../lib/chat/message-display.ts";
+import { extractThinkingCached } from "../../../lib/chat/message-extract.ts";
 import {
   isStandaloneToolMessageForDisplay,
   normalizeRoleForGrouping,
@@ -30,6 +28,7 @@ import {
   type ChatMessageRenderPreparation,
   prepareChatMessageRender,
 } from "./chat-message-markdown-view.tsx";
+import { prepareMarkdownMediaSource } from "./chat-message-media-markdown.ts";
 import { type AttachmentItem, projectMessageMedia } from "./chat-message-media.ts";
 import { isSentPastedTextAttachment } from "./chat-pasted-text.ts";
 import { isSentCommentAttachment } from "./chat-sent-comments.ts";
@@ -160,37 +159,55 @@ function messageMarkdownRenderOptions(
   };
 }
 
-/** Warm settled text only; media and recovered messages keep their visible lifecycle. */
+/** Warm settled text only; media resources and recovered messages keep their visible lifecycle. */
 export function prewarmGroupedMessage(
   message: unknown,
   opts: Pick<GroupedMessageOptions, "onOpenImage" | "fetchLinkFavicon">,
   mode: MarkdownPrewarmMode = "cold-fragment",
 ): boolean {
   const role = asNullableRecord(message)?.role;
-  if (
-    (role !== "user" && role !== "assistant") ||
-    resolveCappedMessageId(message, role) ||
-    readTranscriptMediaEntries(message).length
-  ) {
+  if ((role !== "user" && role !== "assistant") || resolveCappedMessageId(message, role)) {
     return false;
   }
   const prepared = prepareChatMessageRender(message);
-  // Tool calls preserve the text source; media instead renders ordered slot markers.
+  // Media text uses the same slots as the visible renderer, without mounting resources.
   if (
     prepared.normalizedMessage.content.some(
       (part) =>
-        part.type !== "text" && part.type !== "thinking" && !isToolCallContentType(part.type),
+        part.type !== "text" &&
+        part.type !== "thinking" &&
+        part.type !== "image" &&
+        !isToolCallContentType(part.type),
     )
   ) {
     return false;
   }
-  const markdown = prepared.displayMarkdown;
+  const ordered =
+    role === "assistant" &&
+    Boolean(prepared.displayMarkdown) &&
+    prepared.normalizedMessage.content.some((part) => part.type === "image");
+  const markdown = ordered
+    ? resolveMessageDisplayMarkdown(message, {
+        ...prepared.normalizedMessage,
+        content: [
+          {
+            type: "text",
+            text: prepareMarkdownMediaSource(
+              projectMessageMedia(message, prepared.normalizedMessage.content).orderedContent,
+            ).markdown,
+          },
+        ],
+      })
+    : prepared.displayMarkdown;
   return (
     Boolean(markdown) &&
     !parseMarkdownJson(markdown) &&
     prewarmSanitizedMarkdown(
       markdown,
-      messageMarkdownRenderOptions(role, prepared, markdown, { ...opts, isStreaming: false }),
+      messageMarkdownRenderOptions(role, prepared, prepared.displayMarkdown, {
+        ...opts,
+        isStreaming: false,
+      }),
       mode,
     )
   );

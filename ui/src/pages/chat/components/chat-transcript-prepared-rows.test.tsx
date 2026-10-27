@@ -2,8 +2,10 @@
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mountSolid } from "../../../test-helpers/solid-render.tsx";
-import { flush } from "../../../test-helpers/solid-settle.ts";
+import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { prewarmGroupedMessage } from "./chat-message-bubble-presentation.ts";
+import { GroupedMessage } from "./chat-message-bubble-view.tsx";
+import { prepareChatMessageRender } from "./chat-message-markdown-view.tsx";
 import { ChatTimestamp } from "./chat-message-timestamp-view.tsx";
 import { createMessageGroup } from "./chat-message.test-support.ts";
 import { emitTranscriptResize } from "./chat-transcript-fixture.test-support.tsx";
@@ -350,10 +352,43 @@ it.each(["group", "frame"] as const)(
               },
         ),
     );
-    expect(renderer.prewarmRow(0, "fragment")).toBe(true);
+    for (let source = 0; source < 8; source++) {
+      expect(renderer.prewarmRow(0, "fragment")).toBe(true);
+    }
     expect(renderer.prewarmRow(0, "fragment")).toBe(false);
   },
 );
+
+it("mounts prewarmed assistant text around an image without parsing it again", async () => {
+  const message = {
+    role: "assistant",
+    content: [
+      { type: "text", text: "**Prepared image caption**" },
+      {
+        type: "image",
+        url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a34sAAAAASUVORK5CYII=",
+        alt: "Synthetic prepared image",
+      },
+      { type: "text", text: "Text after the image." },
+    ],
+  };
+  expect(prewarmGroupedMessage(message, {}, "fragment")).toBe(true);
+  const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+  const view = mountSolid(GroupedMessage, {
+    preparation: prepareChatMessageRender(message),
+    messageKey: "prepared-image",
+    options: {},
+  });
+  disposers.push(view.dispose);
+  await settle();
+  expect(view.container.textContent).toContain("Prepared image caption");
+  expect(view.container.textContent).toContain("Text after the image.");
+  await waitForSolid(() =>
+    expect(view.container.querySelector('img[alt="Synthetic prepared image"]')).not.toBeNull(),
+  );
+  expect(view.container.textContent).not.toContain("OPENCLAWMEDIASLOT");
+  expect(parse).not.toHaveBeenCalled();
+});
 
 it.each([600, 1400])(
   "warms ordinary rows only in idle time without mounting their DOM (%i px)",
