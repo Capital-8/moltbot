@@ -37,6 +37,16 @@ on:
         required: false
         default: false
         type: boolean
+      published_driver_version:
+        description: Optional stable driver version for a manual published-driver compatibility proof.
+        required: false
+        default: ""
+        type: string
+      published_driver_moved_cron:
+        description: Seed a moved sole cron partition in the manual published-driver compatibility proof.
+        required: false
+        default: false
+        type: boolean
       validation_tier:
         description: Full release coverage, or complete main coverage without release-only proofs.
         required: false
@@ -6823,6 +6833,8 @@ jobs:
     with:
       candidate_artifact_id: ${{ needs.build-artifacts.outputs.published_driver_artifact_id }}
       candidate_sha256: ${{ needs.build-artifacts.outputs.published_driver_sha256 }}
+      driver_version: ${{ inputs.published_driver_version }}
+      moved_cron: ${{ inputs.published_driver_moved_cron }}
 
   docker-seed-e2e:
     permissions:

@@ -56,6 +56,112 @@ export function publishedDriverSqliteTargets(state) {
   ];
 }
 
+function cronRows(database) {
+  const jobs = database
+    .prepare("SELECT store_key, job_id, name FROM cron_jobs ORDER BY store_key, job_id")
+    .all()
+    .map((row) => Object.assign({}, row));
+  const receipts = database
+    .prepare(
+      "SELECT store_key, job_id, request_run_id, status FROM cron_run_receipts ORDER BY store_key, job_id, started_at_ms, receipt_id",
+    )
+    .all()
+    .map((row) => Object.assign({}, row));
+  const history = database
+    .prepare(
+      "SELECT task_id, source_id AS job_id, run_id, status, detail_json FROM task_runs WHERE runtime = 'cron' ORDER BY created_at, task_id",
+    )
+    .all()
+    .map((row) => ({
+      task_id: row.task_id,
+      job_id: row.job_id,
+      run_id: row.run_id,
+      status: row.status,
+      store_key: JSON.parse(row.detail_json).storeKey,
+    }));
+  const binding = database
+    .prepare("SELECT value_json FROM config_machine_state WHERE state_key = 'cron.defaultStoreKey'")
+    .get();
+  return {
+    jobs,
+    receipts,
+    history,
+    binding: binding === undefined ? null : JSON.parse(binding.value_json),
+  };
+}
+
+export function inspectPublishedDriverMovedCron(state) {
+  const databasePath = path.join(state, "state/openclaw.sqlite");
+  return readDatabase(databasePath, (database) => {
+    assert.equal(database.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+    return cronRows(database);
+  });
+}
+
+/** Re-key the stable fixture as state retained from its previous pre-v34 directory. */
+export function relocatePublishedDriverCronPartition(state, jobId, movedStoreKey) {
+  const databasePath = path.join(state, "state/openclaw.sqlite");
+  const database = new DatabaseSync(databasePath);
+  try {
+    const before = cronRows(database);
+    assert.equal(before.binding, null, "Published driver already bound a durable cron partition");
+    const fixture = before.jobs.find((row) => row.job_id === jobId);
+    assert(fixture, "Published driver omitted the cron fixture job");
+    assert(
+      before.receipts.some((row) => row.job_id === jobId),
+      "Cron fixture has no run history",
+    );
+    const sourceStoreKeys = [...new Set(before.jobs.map((row) => row.store_key))];
+    assert.deepEqual(sourceStoreKeys, [fixture.store_key], "Cron fixture is not a sole partition");
+    assert.notEqual(fixture.store_key, movedStoreKey);
+
+    database.exec("PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE");
+    try {
+      const tables = database
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all();
+      for (const { name } of tables) {
+        const columns = database.prepare(`PRAGMA table_info(${JSON.stringify(name)})`).all();
+        if (!columns.some((column) => column.name === "store_key")) {
+          continue;
+        }
+        database
+          .prepare(`UPDATE ${JSON.stringify(name)} SET store_key = ? WHERE store_key = ?`)
+          .run(movedStoreKey, fixture.store_key);
+      }
+      let movedHistory = 0;
+      const updateHistory = database.prepare(
+        "UPDATE task_runs SET detail_json = ? WHERE task_id = ?",
+      );
+      for (const row of database
+        .prepare("SELECT task_id, detail_json FROM task_runs WHERE runtime = 'cron'")
+        .all()) {
+        const detail = JSON.parse(row.detail_json);
+        assert.equal(detail.storeKey, fixture.store_key, "Cron history is not a sole partition");
+        updateHistory.run(JSON.stringify({ ...detail, storeKey: movedStoreKey }), row.task_id);
+        movedHistory += 1;
+      }
+      assert(movedHistory > 0, "Cron fixture has no persisted task history");
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      database.exec("PRAGMA foreign_keys=ON");
+    }
+    assert.equal(database.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+    const after = cronRows(database);
+    assert.deepEqual([...new Set(after.jobs.map((row) => row.store_key))], [movedStoreKey]);
+    assert.deepEqual([...new Set(after.history.map((row) => row.store_key))], [movedStoreKey]);
+    assert(after.receipts.some((row) => row.job_id === jobId && row.store_key === movedStoreKey));
+    return { sourceStoreKey: fixture.store_key, movedStoreKey, before, after };
+  } finally {
+    database.close();
+  }
+}
+
 /** Let the published Doctor create its own schema by importing real legacy input. */
 export function seedPublishedDriverSessionSources(state) {
   assert.equal(state, "/home/appuser/.openclaw");

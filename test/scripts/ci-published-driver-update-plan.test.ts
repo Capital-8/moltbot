@@ -17,6 +17,7 @@ import {
 } from "./ci-workflow.test-support.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const ciWorkflow = readWorkflow(".github/workflows/ci.yml");
 const updateWorkflow = readWorkflow(".github/workflows/ci-published-driver-update.yml");
 const updateJob = updateWorkflow.jobs.update;
 const updateStep = (name: string) => requiredWorkflowStep(updateJob.steps, name);
@@ -105,6 +106,29 @@ it.each<
     }
   },
 );
+
+it("passes the manually pinned compatibility specimen into the published-driver cell", () => {
+  const dispatchInputs = ciWorkflow.on.workflow_dispatch.inputs;
+  expect(dispatchInputs.published_driver_version).toMatchObject({ default: "", type: "string" });
+  expect(dispatchInputs.published_driver_moved_cron).toMatchObject({
+    default: false,
+    type: "boolean",
+  });
+  expect(ciWorkflow.jobs["published-driver-update"].with).toMatchObject({
+    driver_version: "${{ inputs.published_driver_version }}",
+    moved_cron: "${{ inputs.published_driver_moved_cron }}",
+  });
+  expect(updateWorkflow.on.workflow_call.inputs).toMatchObject({
+    driver_version: { default: "", type: "string" },
+    moved_cron: { default: false, type: "boolean" },
+  });
+  expect(updateStep("Resolve published driver").env.REQUESTED_DRIVER_VERSION).toBe(
+    "${{ inputs.driver_version }}",
+  );
+  expect(updateStep("Update published driver to candidate").env).toMatchObject({
+    OPENCLAW_PUBLISHED_DRIVER_MOVED_CRON: "${{ inputs.moved_cron && '1' || '' }}",
+  });
+});
 
 it("keeps candidate execution read-only and bound to this run", () => {
   const checkout = actionStep("actions/checkout@");

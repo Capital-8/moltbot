@@ -9,6 +9,14 @@ on:
       candidate_sha256:
         required: true
         type: string
+      driver_version:
+        required: false
+        default: ""
+        type: string
+      moved_cron:
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -39,12 +47,15 @@ jobs:
         timeout-minutes: 1
         env:
           DRIVER_CACHE_MODE: ${{ github.repository == 'openclaw/openclaw' && github.ref == 'refs/heads/main' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && 'read-write' || 'restore' }}
+          REQUESTED_DRIVER_VERSION: ${{ inputs.driver_version }}
         run: |
           node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
           import { appendFileSync } from "node:fs";
           import { classifyReleaseTrain, parseReleaseVersion } from "./scripts/lib/release-version.mjs";
-          const version = JSON.parse(execFileSync("npm", ["view", "openclaw@latest", "version", "--json"], { encoding: "utf8" }));
+          const version = process.env.REQUESTED_DRIVER_VERSION || JSON.parse(
+            execFileSync("npm", ["view", "openclaw@latest", "version", "--json"], { encoding: "utf8" }),
+          );
           const parsed = parseReleaseVersion(version);
           if (!parsed || classifyReleaseTrain(parsed) !== "stable") throw new Error("npm latest must resolve to stable");
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncache-mode=${process.env.DRIVER_CACHE_MODE}\n`);
@@ -96,6 +107,7 @@ jobs:
         env:
           CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
           DRIVER_VERSION: ${{ steps.driver.outputs.version }}
+          OPENCLAW_PUBLISHED_DRIVER_MOVED_CRON: ${{ inputs.moved_cron && '1' || '' }}
         run: |
           set -euo pipefail
           package=.artifacts/published-driver-package/openclaw-candidate.tgz
