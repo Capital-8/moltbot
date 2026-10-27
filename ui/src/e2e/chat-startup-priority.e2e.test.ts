@@ -48,8 +48,8 @@ async function installStartupGateway(page: Page) {
     sessionKey,
     sessions: [ownedSession(sessionKey, "Selected conversation")],
     historyMessages: [{ role: "assistant", content: historyText }],
-    deferredMethods: ["chat.startup"],
-    heldMethods: bulkMethods,
+    // Visibility changes can retire and reissue the still-pending startup read.
+    heldMethods: ["chat.startup", ...bulkMethods],
     featureMethods: [
       ...defaultControlUiFeatureMethods,
       "sessions.catalog.list",

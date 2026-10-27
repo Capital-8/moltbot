@@ -206,13 +206,13 @@ suite.define(() => {
           .getByText("Waiting for the backend review.", { exact: true })
           .waitFor();
         const pendingStatus = activePane.locator(".chat-working-indicator");
-        await pendingStatus
-          .getByRole("button", { name: "1 subagent running", exact: true })
-          .waitFor();
+        const waitingOn = pendingStatus.getByRole("link", { name: child.label, exact: true });
+        await waitingOn.waitFor();
+        expect(await waitingOn.getAttribute("href")).toMatch(/\/chat\/main\/backend-review$/u);
         expect(await pendingStatus.count()).toBe(1);
         await expect.poll(() => pendingStatus.locator(".chat-reading-indicator").count()).toBe(0);
         expect(await pendingStatus.locator("openclaw-working-phrase").count()).toBe(0);
-        expect(await pendingStatus.textContent()).not.toContain("Backend review");
+        expect(await panel.isVisible()).toBe(true);
         expect(
           await activePane.locator(".chat-thread openclaw-chat-subagent-activity").count(),
         ).toBe(0);
