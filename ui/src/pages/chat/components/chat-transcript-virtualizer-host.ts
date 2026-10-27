@@ -325,9 +325,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     const target = this.callbacks.geometryEventTarget;
     this.stopGeometry =
       target && listen(target, SIDEBAR_GEOMETRY_COMMIT_EVENT, this.handleGeometryCommit);
-    // Virtual-core exposes its lifecycle hooks as bound arrow functions.
-    const { _didMount: mountVirtualizer } = this.virtualizer;
-    this.cleanupVirtualizer = mountVirtualizer();
+    this.cleanupVirtualizer = this.virtualizer._didMount();
     if (this.offsetState.pendingScrollOffset) {
       this.invalidate();
     }
@@ -610,19 +608,19 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       { source, behavior },
       (preserveEnd) => this.cancelScroll(preserveEnd),
       () => this.presentation.queueRowMeasure(),
+      this.endAnchor,
     );
-    // A smooth no-op emits no native idle event to capture the end. Preserve
-    // that actual resting edge before a later row measurement grows the range.
-    if (behavior !== "smooth" || this.endAnchor.recordViewport(this.scrollElement)) {
-      this.endAnchor.capture(this.scrollElement);
-    }
     return true;
   }
 
   cancelScroll(preserveEnd = false): void {
     // Completing a smooth journey can reveal skipped row sizes. Retain its
     // resting edge before that measurement moves the end; reader input clears it.
-    preserveEnd ? this.endAnchor.capture(this.scrollElement) : this.endAnchor.clear();
+    if (preserveEnd) {
+      this.endAnchor.capture(this.scrollElement);
+    } else {
+      this.endAnchor.clear();
+    }
     this.prependAnchor.clear();
     if (this.offsetState.scrollCommand === null && !this.offsetState.pendingScrollOffset) {
       return;

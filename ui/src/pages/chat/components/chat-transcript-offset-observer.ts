@@ -72,6 +72,7 @@ export function scrollTranscriptToEnd(
   { source, behavior }: Required<ChatScrollToEndOptions>,
   cancelScroll: (preserveEnd?: boolean) => void,
   measureSkippedRows: () => void,
+  endAnchor: TranscriptEndAnchor,
 ): void {
   // Retargeting automatic follow must not insert an instant stop.
   if (source !== "auto" || state.scrollCommand?.target !== "end") {
@@ -92,6 +93,11 @@ export function scrollTranscriptToEnd(
   const max = maxTranscriptScrollOffset(element);
   if (element && max !== null && Math.abs(max - element.scrollTop) <= 1) {
     cancelScroll(true);
+  }
+  // A smooth no-op emits no native idle event to capture the end. Preserve
+  // that actual resting edge before a later row measurement grows the range.
+  if (behavior !== "smooth" || endAnchor.recordViewport(element)) {
+    endAnchor.capture(element);
   }
 }
 
