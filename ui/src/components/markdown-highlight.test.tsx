@@ -66,7 +66,6 @@ it("preserves readable code and node state across lazy highlighting", async () =
         props.history ? "lazy-history" : "lazy-stream",
         { role: "assistant", isStreaming: props.streaming },
         { codeBlockInteraction: "interactive" },
-        undefined,
         props.streaming ? toStreamingMarkdownDomParts : undefined,
       ),
     }));
