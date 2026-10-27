@@ -542,6 +542,18 @@ it("cancels queued scroll warming when the transcript is hidden", async () => {
   expect(view.renderRow.mock.calls).toHaveLength(rendered);
 });
 
+it("warms every message in the arriving viewport's completed rows before mounting", async () => {
+  const view = await transcriptFixture(0, true, false, true, 1_000, true);
+  await view.scrollTo(60);
+  await view.frame(1, false);
+  await view.task();
+  const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+  await view.scrollTo(120);
+  expect(view.container.textContent).toContain("idle-frame-120-first");
+  expect(view.container.textContent).toContain("idle-frame-120-second");
+  expect(parse.mock.calls.filter(([input]) => input.includes("idle-frame-"))).toHaveLength(0);
+});
+
 it("keeps warming in the reader's direction through opposite size compensation", async () => {
   const view = await transcriptFixture(24_000, true, false, true);
   await view.scrollTo(180);

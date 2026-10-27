@@ -461,10 +461,20 @@ export class TranscriptInitialRange {
         canMaterialize ||= Boolean(canPrepareRow);
         // Distant HTML must not evict the nearby fragments needed by the next scroll.
         const mode = arrivingViewport || step <= 8 ? "fragment" : "html";
-        if (prewarm && moving && !rendered.has(row.key) && this.prewarmRow?.(index, mode)) {
+        for (
+          let warming =
+            prewarm && moving && !rendered.has(row.key) && this.prewarmRow?.(index, mode);
+          warming;
+          warming = this.prewarmRow?.(index, mode)
+        ) {
           // The shared cache owns readiness; no DOM or range invalidation is needed.
           if (warmOnly) {
             warmed = true;
+            // One admission prepares one message, not the whole atomic row.
+            if (performance.now() >= deadline) {
+              this.queuePreparation();
+              return;
+            }
             continue;
           }
           this.queuePreparation();
