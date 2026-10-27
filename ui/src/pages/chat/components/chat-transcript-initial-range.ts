@@ -334,15 +334,16 @@ export class TranscriptInitialRange {
       const viewport = virtualizer.scrollRect?.height ?? 600;
       const moving = !inward && this.isReaderMoving();
       const velocity = moving ? this.scrollSample.velocity : 0;
-      // A viewport-sized step skips speculative DOM before it can be reused.
-      // Spend that frame's preparation budget on the arriving Markdown instead.
-      const skipSpeculativeDom = moving && this.scrollSample.distance >= viewport;
-      const prewarm = prewarmRequested || skipSpeculativeDom;
-      const warmOnly = warmOnlyRequested || skipSpeculativeDom;
+      // Large steps need the arriving viewport, including its interior rows.
+      // Warm its Markdown first, then admit one DOM row on a later budget.
+      const viewportStep = moving && this.scrollSample.distance >= viewport;
+      const prewarm = prewarmRequested || viewportStep;
+      const warmOnly = warmOnlyRequested;
+      const arrivingViewport = warmOnly || viewportStep;
       // HTML warming is synchronous: predict one observed scroll step and walk
       // into that viewport, rather than beyond its leading edge.
       const distance = moving
-        ? warmOnly
+        ? arrivingViewport
           ? this.scrollSample.distance
           : velocity * (16 + this.prepareLatency)
         : 0;
@@ -356,12 +357,12 @@ export class TranscriptInitialRange {
         ),
       );
       const predictedOffset =
-        predictedTop + ((warmOnly ? direction < 0 : direction > 0) ? viewport : 0);
+        predictedTop + ((arrivingViewport ? direction < 0 : direction > 0) ? viewport : 0);
       const predicted = virtualizer.getVirtualItemForOffset(Math.max(0, predictedOffset));
       // Prediction can reach an edge before the viewport. Prepare back into the
       // transcript instead of searching past an ordinary, nonfragment edge row.
       let searchDirection = direction;
-      if (!warmOnly && distance && predicted) {
+      if (!arrivingViewport && distance && predicted) {
         if (predicted.index === 0) {
           searchDirection = 1;
         } else if (predicted.index === rows.length - 1) {
@@ -370,7 +371,7 @@ export class TranscriptInitialRange {
       }
       // Ordinary rows mount with overscan. Warm those neighbours as well as
       // the viewport so its first frame does not parse the cold edge rows.
-      const overscan = warmOnly && distance ? virtualizer.options.overscan : 0;
+      const overscan = arrivingViewport && distance ? virtualizer.options.overscan : 0;
       const origin =
         distance && predicted
           ? predicted.index - searchDirection * (1 + overscan)
@@ -411,7 +412,7 @@ export class TranscriptInitialRange {
       // Warming covers the predicted viewport, whose row count varies with
       // measured heights. A fixed candidate cap left its last rows cold.
       const opposite =
-        warmOnly && distance
+        arrivingViewport && distance
           ? virtualizer.getVirtualItemForOffset(predictedTop + (direction > 0 ? viewport : 0))
           : undefined;
       const domLookahead =
@@ -439,7 +440,7 @@ export class TranscriptInitialRange {
           break;
         }
         if (performance.now() >= deadline) {
-          this.queuePreparation(warmOnly ? canMaterialize && !skipSpeculativeDom : true);
+          this.queuePreparation(warmOnly ? canMaterialize : true);
           return;
         }
         const index = origin + step * searchDirection;
@@ -459,7 +460,7 @@ export class TranscriptInitialRange {
         }
         canMaterialize ||= Boolean(canPrepareRow);
         // Distant HTML must not evict the nearby fragments needed by the next scroll.
-        const mode = warmOnly || step <= 8 ? "fragment" : "html";
+        const mode = arrivingViewport || step <= 8 ? "fragment" : "html";
         if (prewarm && moving && !rendered.has(row.key) && this.prewarmRow?.(index, mode)) {
           // The shared cache owns readiness; no DOM or range invalidation is needed.
           if (warmOnly) {
@@ -484,8 +485,8 @@ export class TranscriptInitialRange {
         }
       }
       if (!admitted) {
-        if (warmOnly && (warmed || (canMaterialize && !skipSpeculativeDom))) {
-          this.queuePreparation(canMaterialize && !skipSpeculativeDom);
+        if (warmOnly && (warmed || canMaterialize)) {
+          this.queuePreparation(canMaterialize);
         } else if (
           prewarm &&
           !moving &&

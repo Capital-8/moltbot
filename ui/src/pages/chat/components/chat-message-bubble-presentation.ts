@@ -177,6 +177,7 @@ export function prewarmGroupedMessage(
         part.type !== "text" &&
         part.type !== "thinking" &&
         part.type !== "image" &&
+        part.type !== "canvas" &&
         !isToolCallContentType(part.type),
     )
   ) {

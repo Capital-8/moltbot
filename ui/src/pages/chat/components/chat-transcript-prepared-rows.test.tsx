@@ -3,9 +3,13 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mountSolid } from "../../../test-helpers/solid-render.tsx";
 import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
-import { prewarmGroupedMessage } from "./chat-message-bubble-presentation.ts";
+import {
+  prepareGroupedMessage,
+  prewarmGroupedMessage,
+} from "./chat-message-bubble-presentation.ts";
 import { GroupedMessage } from "./chat-message-bubble-view.tsx";
 import { prepareChatMessageRender } from "./chat-message-markdown-view.tsx";
+import { prepareMessageMarkdown } from "./chat-message-text-preparation.ts";
 import { ChatTimestamp } from "./chat-message-timestamp-view.tsx";
 import { createMessageGroup } from "./chat-message.test-support.ts";
 import { emitTranscriptResize } from "./chat-transcript-fixture.test-support.tsx";
@@ -387,6 +391,31 @@ it("mounts prewarmed assistant text around an image without parsing it again", a
     expect(view.container.querySelector('img[alt="Synthetic prepared image"]')).not.toBeNull(),
   );
   expect(view.container.textContent).not.toContain("OPENCLAWMEDIASLOT");
+  expect(parse).not.toHaveBeenCalled();
+});
+
+it("warms an embedded widget's caption without mounting the widget", () => {
+  const message = {
+    role: "assistant",
+    content:
+      '**Prepared widget caption**\n\n[embed ref="prepared-caption-chart" title="Synthetic chart" height="220" /]',
+  };
+  const state = prepareGroupedMessage(prepareChatMessageRender(message), "prepared-widget", {});
+  expect(state.assistantViewBlocks).toHaveLength(1);
+  expect(state.bodyMarkdown).not.toContain("[embed");
+  expect(prewarmGroupedMessage(message, {}, "fragment")).toBe(true);
+  const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+  const prepared = prepareMessageMarkdown(
+    state.bodyMarkdown!,
+    "prepared-widget",
+    { role: "assistant", isStreaming: false },
+    state.markdownRenderOptions,
+  );
+  expect(prepared.parts()[0]).toEqual(
+    expect.objectContaining({
+      html: expect.stringContaining("<strong>Prepared widget caption</strong>"),
+    }),
+  );
   expect(parse).not.toHaveBeenCalled();
 });
 
@@ -789,7 +818,7 @@ it("stops preparing when the predicted DOM window has no retainable rows", async
   expect(view.renderRow.mock.calls).toHaveLength(rendered);
 });
 
-it("warms arriving Markdown without speculative mounts during viewport-sized scroll steps", async () => {
+it("prepares one arriving row between viewport-sized scroll steps", async () => {
   const view = await transcriptFixture(0, true, false, "retained");
   await view.scrollTo(60);
   const mounted = transcriptRows(view.container);
@@ -799,7 +828,25 @@ it("warms arriving Markdown without speculative mounts during viewport-sized scr
   await view.frame(1, false);
   await view.task();
   expect(view.renderRow.mock.calls.length).toBeGreaterThan(rendered);
-  expect(transcriptRows(view.container)).toEqual(mounted);
+  const preparing = view.container.querySelector<HTMLElement>("[data-preparing-row]");
+  expect(preparing).not.toBeNull();
+  expect(preparing!.hasAttribute("inert")).toBe(true);
+  expect(Number(preparing!.dataset.index)).toBeGreaterThan(66);
+  expect(transcriptRows(view.container)).toHaveLength(mounted.length + 1);
+  const prepared = transcriptRows(view.container);
+  await view.frame(1, false);
+  await view.task();
+  expect(transcriptRows(view.container)).toEqual(prepared);
+  emitTranscriptResize(preparing!, 800, 100);
+  await settle();
+  await view.scrollTo(180);
+  await view.frame(1, false);
+  await view.task();
+  await view.frame(1, false);
+  await view.task();
+  expect(
+    Number(view.container.querySelector<HTMLElement>("[data-preparing-row]")!.dataset.index),
+  ).toBeGreaterThan(180);
 });
 
 it("warms rows when earlier animation callbacks delay preparation delivery", async () => {
