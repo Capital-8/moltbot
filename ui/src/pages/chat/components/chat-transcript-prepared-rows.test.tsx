@@ -776,17 +776,17 @@ it("warms rows when earlier animation callbacks delay preparation delivery", asy
   expect(view.renderRow.mock.calls.length).toBeGreaterThan(rendered);
 });
 
-it("defers late preparation timers instead of spending another frame's budget", async () => {
+it("warms arriving rows after a delayed timer without running twice in one frame", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const view = await transcriptFixture(0, true, false, "retained");
   await view.scrollTo(60);
   const rendered = view.renderRow.mock.calls.length;
   await view.frame(1, false);
   await view.task(8);
-  expect(view.renderRow.mock.calls).toHaveLength(rendered);
-  await view.frame(1, false);
-  await view.task();
   expect(view.renderRow.mock.calls.length).toBeGreaterThan(rendered);
+  const warmed = view.renderRow.mock.calls.length;
+  await view.task();
+  expect(view.renderRow.mock.calls).toHaveLength(warmed);
 });
 
 it("prepares ahead of the active upward overscan", async () => {
@@ -800,7 +800,6 @@ it("prepares ahead of the active upward overscan", async () => {
   await view.task();
   await view.frame(1, false);
   await view.task();
-  // The undelivered timer from the earlier two frames first yields its expired budget.
   await view.frame(1, false);
   await view.task();
 
