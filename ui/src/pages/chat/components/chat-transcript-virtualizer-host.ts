@@ -247,7 +247,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
             endAnchor: this.endAnchor,
             canFollowEnd: () => this.canAutoFollow(),
             isProgrammaticScroll: () => this.isProgrammaticScroll,
-            cancelScroll: () => this.cancelScroll(),
+            cancelScroll: (preserveEnd) => this.cancelScroll(preserveEnd),
             onLayoutCorrection: this.recordEndLayoutCorrection,
             invalidate,
             // Nested or canceled input must not admit offscreen measurements.
@@ -608,7 +608,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       this.offsetState,
       this.virtualizer,
       { source, behavior },
-      () => this.cancelScroll(),
+      (preserveEnd) => this.cancelScroll(preserveEnd),
       () => this.presentation.queueRowMeasure(),
     );
     // A smooth no-op emits no native idle event to capture the end. Preserve
@@ -619,8 +619,10 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     return true;
   }
 
-  cancelScroll(): void {
-    this.endAnchor.clear();
+  cancelScroll(preserveEnd = false): void {
+    // Completing a smooth journey can reveal skipped row sizes. Retain its
+    // resting edge before that measurement moves the end; reader input clears it.
+    preserveEnd ? this.endAnchor.capture(this.scrollElement) : this.endAnchor.clear();
     this.prependAnchor.clear();
     if (this.offsetState.scrollCommand === null && !this.offsetState.pendingScrollOffset) {
       return;

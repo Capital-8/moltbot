@@ -70,7 +70,7 @@ export function scrollTranscriptToEnd(
   state: TranscriptOffsetState,
   instance: Virtualizer<HTMLDivElement, HTMLElement>,
   { source, behavior }: Required<ChatScrollToEndOptions>,
-  cancelScroll: () => void,
+  cancelScroll: (preserveEnd?: boolean) => void,
   measureSkippedRows: () => void,
 ): void {
   // Retargeting automatic follow must not insert an instant stop.
@@ -91,7 +91,7 @@ export function scrollTranscriptToEnd(
   const element = instance.scrollElement;
   const max = maxTranscriptScrollOffset(element);
   if (element && max !== null && Math.abs(max - element.scrollTop) <= 1) {
-    cancelScroll();
+    cancelScroll(true);
   }
 }
 
@@ -139,7 +139,7 @@ type OffsetOwner = {
   readonly endAnchor: TranscriptEndAnchor;
   canFollowEnd(): boolean;
   isProgrammaticScroll(): boolean;
-  cancelScroll(): void;
+  cancelScroll(preserveEnd?: boolean): void;
   onLayoutCorrection(before: number, after: number): void;
   invalidate(): void;
   onOffset(readerDelta: number): void;
@@ -449,15 +449,15 @@ export function observeTranscriptOffset(
       Math.abs((maxTranscriptScrollOffset(element) ?? 0) - element.scrollTop) <= (scrolling ? 0 : 1)
     ) {
       if (owner.state.scrollCommand.behavior === "smooth") {
-        owner.cancelScroll();
+        owner.cancelScroll(true);
       } else {
         owner.state.scrollCommand = null;
         // Arrival can precede the queued reconciliation frame. Retire its
         // index target too, without cancelling the reader’s end-follow intent.
         // The notification can lag a newer native write; hold the current viewport.
         instance.scrollToOffset(element.scrollTop, { behavior: "instant" });
+        owner.endAnchor.capture(element);
       }
-      owner.endAnchor.capture(element);
     }
   });
   return () => {
