@@ -6,7 +6,6 @@ import { sha256Hex as sha256 } from "@openclaw/normalization-core/node-crypto";
 import { expect } from "vitest";
 import type { SqlConnection } from "../infra/sql-connection.js";
 import { CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
-import { readCronDefaultStoreKeyInDatabase } from "./openclaw-state-db-cron-identity-migration.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 import {
   addPreCutoverClientCredentialTablesForTest,
@@ -54,7 +53,13 @@ export function expectV2026_7_1_2CronHistoryPreserved(database: SqlConnection): 
     storeKey: "/fixture/state/cron/jobs.json",
     runId: "fixture-cron-run",
   });
-  expect(readCronDefaultStoreKeyInDatabase(database)).toBe("/fixture/state/cron/jobs.json");
+  expect(
+    database
+      .prepare(
+        "SELECT value_json FROM config_machine_state WHERE state_key = 'cron.defaultStoreKey'",
+      )
+      .get(),
+  ).toEqual({ value_json: JSON.stringify("/fixture/state/cron/jobs.json") });
 }
 
 export function materializeV2026_7_1_2StateDatabase(stateDir: string) {
