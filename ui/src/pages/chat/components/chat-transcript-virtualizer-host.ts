@@ -325,7 +325,9 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     const target = this.callbacks.geometryEventTarget;
     this.stopGeometry =
       target && listen(target, SIDEBAR_GEOMETRY_COMMIT_EVENT, this.handleGeometryCommit);
-    this.cleanupVirtualizer = this.virtualizer._didMount();
+    // Virtual-core exposes its lifecycle hooks as bound arrow functions.
+    const { _didMount: mountVirtualizer } = this.virtualizer;
+    this.cleanupVirtualizer = mountVirtualizer();
     if (this.offsetState.pendingScrollOffset) {
       this.invalidate();
     }
@@ -343,8 +345,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       this.canAutoFollow(),
       this.offsetState.pendingScrollOffset !== null ||
         this.offsetState.pendingInteractionAnchor !== null ||
-        (this.offsetState.scrollCommand !== null &&
-          this.offsetState.scrollCommand.target !== "end") ||
+        (this.offsetState.scrollCommand?.target ?? "end") !== "end" ||
         this.offsetState.touchActive,
     );
     if (correction?.resumeFollow) {
