@@ -3,8 +3,14 @@ import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, vi } from "vitest";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+} from "../../../test/helpers/promise.js";
 import type { SandboxBackendHandle } from "../../agents/sandbox/backend-handle.types.js";
 import { stagedInputDirectory, STAGED_INPUT_GITIGNORE } from "../../media/staged-inputs.js";
+import { executeExistingOpenClawStateRead } from "../../state/openclaw-state-db-readonly.js";
 import {
   closeOpenClawStateDatabase,
   closeOpenClawStateDatabaseAsync,
@@ -84,7 +90,46 @@ export async function proveWorkerOwnedIncrementalWorkspace(owner: LocalWorkspace
   sql.calibrate();
   const projection = await prepare(owner);
   await writeText(projection, "source.txt", "worker-persisted edit\n");
-  await synchronize(owner);
+  const readFastState = () =>
+    Promise.all([
+      executeExistingOpenClawStateRead(
+        {},
+        { type: "config.health.read", input: undefined },
+        { current: true, live: true },
+      ),
+      executeExistingOpenClawStateRead(
+        {},
+        { type: "subagents.runs", scope: { kind: "ids", runIds: ["synthetic-missing-run"] } },
+        { current: true, live: true },
+      ),
+      executeExistingOpenClawStateRead(
+        {},
+        { type: "deliveryQueue.outbound", mode: "pending" },
+        { current: true, live: true },
+      ),
+    ]);
+  const expectedReads = await readFastState();
+  expect(expectedReads.map((reply) => reply?.type)).toEqual([
+    "config.health.read",
+    "subagents.runs",
+    "deliveryQueue.outbound",
+  ]);
+  let synchronized = false;
+  const synchronizing = synchronize(owner).finally(() => {
+    synchronized = true;
+  });
+  const reading = (async () => {
+    for (;;) {
+      expect(await readFastState()).toEqual(expectedReads);
+      if (synchronized) {
+        return;
+      }
+    }
+  })();
+  // Drain both owners on failure before the fixture can delete its workspace.
+  await Promise.allSettled([synchronizing, reading]);
+  await synchronizing;
+  await reading;
   await expectText(owner.worktree.path, "source.txt", "worker-persisted edit\n");
   await withLocalWorkspaceStore({ worktreeId: owner.worktree.id }, async (store) => {
     expect(store.get()!.baseline_json).toBeNull();
@@ -148,6 +193,111 @@ export async function proveStagedInputCheckpointOwnership(owner: LocalWorkspaceO
   await expectText(owner.worktree.path, input, "edited input\n");
   await prepare(owner);
   await expectText(projection, input, "edited input\n");
+}
+
+export async function proveSharedSandboxCheckpoints(
+  owner: LocalWorkspaceOwner,
+  signal: AbortSignal,
+) {
+  const [projectionOwner, { prepareLocalSandboxWorkspace }, { resolveSandboxConfigForAgent }] =
+    await Promise.all([
+      import("./local-workspace-projection.js"),
+      import("../../agents/sandbox/local-workspace.js"),
+      import("../../agents/sandbox/config.js"),
+    ]);
+  let joinedAuthorityRevoked = false;
+  vi.spyOn(projectionOwner, "resolveLocalWorkspaceOwner")
+    .mockResolvedValueOnce({ ...owner, [Symbol.dispose]() {} })
+    .mockResolvedValueOnce({
+      ...owner,
+      workerAuthority: {
+        ...owner.workerAuthority,
+        assertCurrent: () => {
+          owner.workerAuthority?.assertCurrent?.();
+          if (joinedAuthorityRevoked) {
+            throw new Error("Joined checkpoint authority revoked");
+          }
+        },
+      },
+      [Symbol.dispose]() {},
+    });
+  const preparation = {
+    cfg: { worktreeAcceleration: false },
+    agentId: owner.agentId,
+    sessionKey: owner.sessionKey,
+    workspaceDir: owner.worktree.path,
+    sandbox: resolveSandboxConfigForAgent({}, owner.agentId),
+  };
+  using first = await prepareLocalSandboxWorkspace(preparation);
+  using second = await prepareLocalSandboxWorkspace(preparation);
+  if (!first || !second) {
+    throw new Error("Expected managed projections");
+  }
+  const withStore = workspaceStore.withLocalWorkspaceStore;
+  let scans = 0;
+  let beforeRun: (() => Promise<void>) | undefined;
+  let afterScan: (() => Promise<void>) | undefined;
+  vi.spyOn(workspaceStore, "withLocalWorkspaceStore").mockImplementation((params, run) =>
+    withStore(params, async (store) => {
+      await beforeRun?.();
+      return await run({
+        ...store,
+        manifest: async (row, action) => {
+          const result = await store.manifest(row, action);
+          if (action.kind === "scan" && action.target === "canonical") {
+            scans++;
+            await afterScan?.();
+          }
+          return result;
+        },
+      });
+    }),
+  );
+  for (const phase of ["waiting", "captured", "revoked"] as const) {
+    const entered = createDeferred();
+    const released = createDeferred();
+    const pause = async () => {
+      beforeRun = undefined;
+      afterScan = undefined;
+      entered.resolve();
+      await released.promise;
+    };
+    beforeRun = phase !== "captured" ? pause : undefined;
+    afterScan = phase === "captured" ? pause : undefined;
+    scans = 0;
+    if (phase === "waiting") {
+      await writeText(first.workspaceDir, "source.txt", "shared checkpoint\n");
+    }
+    const initial = first.checkpoint();
+    let later: Promise<void> | undefined;
+    let results: PromiseSettledResult<void | undefined>[];
+    try {
+      await withinTest(
+        awaitGateBeforeSettlement(entered.promise, initial, "Checkpoint did not reach its gate"),
+        signal,
+      );
+      if (phase === "captured") {
+        await writeText(second.workspaceDir, "late.txt", "write after capture\n");
+      }
+      later = second.checkpoint();
+      joinedAuthorityRevoked = phase === "revoked";
+    } finally {
+      released.resolve();
+      results = await Promise.allSettled([initial, later]);
+      joinedAuthorityRevoked = false;
+    }
+    expect(results[0]).toEqual({ status: "fulfilled", value: undefined });
+    expect(results[1]).toEqual(
+      phase === "revoked"
+        ? { status: "rejected", reason: new Error("Joined checkpoint authority revoked") }
+        : { status: "fulfilled", value: undefined },
+    );
+    expect.soft(scans).toBe(phase === "captured" ? 2 : 1);
+    await expectText(owner.worktree.path, "source.txt", "shared checkpoint\n");
+    if (phase === "captured") {
+      await expectText(owner.worktree.path, "late.txt", "write after capture\n");
+    }
+  }
 }
 
 export async function proveSandboxMutationCheckpoints(owner: LocalWorkspaceOwner) {
