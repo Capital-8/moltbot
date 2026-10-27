@@ -317,7 +317,7 @@ function prepareSanitizedMarkdown(
       renderOptions,
       undefined,
       undefined,
-      returnFragment || prewarm,
+      returnFragment || (prewarm && mode !== "html" && mode !== "idle-html"),
     );
     cached = { html: markdownContentHtml(content) };
     if (

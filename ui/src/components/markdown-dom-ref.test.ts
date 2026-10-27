@@ -65,7 +65,6 @@ it("reuses pristine idle-prepared DOM across visible mounts without parsing it a
 it("retains HTML-only preparation after its first visible mount", () => {
   const marker = "html-only-visible-fragment";
   const source = `### ${marker}\n\n| State |\n| --- |\n| Ready |\n\n<img src="x" onerror="alert(1)"><script>alert(2)</script>`;
-  expect(prewarmSanitizedMarkdown(source, {}, "html")).toBe(true);
   const html = vi.spyOn(Element.prototype, "innerHTML", "set");
   onTestFinished(() => html.mockRestore());
   const parses = () =>
@@ -73,6 +72,8 @@ it("retains HTML-only preparation after its first visible mount", () => {
       ([value], index) =>
         html.mock.contexts[index] instanceof HTMLTemplateElement && value.includes(marker),
     ).length;
+  expect(prewarmSanitizedMarkdown(source, {}, "html")).toBe(true);
+  expect(parses()).toBe(0);
   const mount = () => {
     const content = toSanitizedMarkdownContent(source);
     return renderSolidRef(() => createMarkdownRef(() => ({ content })), {
