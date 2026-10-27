@@ -16,7 +16,7 @@ import { sessionsListResponse } from "./session-management.test-support.ts";
 const suite = createControlUiE2eSuite({ name: "Chat header and delegated work" });
 
 suite.define(() => {
-  it("keeps new batches in Details and opens Subagents manually without duplicate wait status", async () => {
+  it("keeps new batches in Details and shows one named handoff status after opening Subagents", async () => {
     await suite.withPage(
       {
         locale: "en-US",
@@ -212,6 +212,7 @@ suite.define(() => {
         expect(await pendingStatus.count()).toBe(1);
         await expect.poll(() => pendingStatus.locator(".chat-reading-indicator").count()).toBe(0);
         expect(await pendingStatus.locator("openclaw-working-phrase").count()).toBe(0);
+        expect(await pendingStatus.textContent()).toContain("Waiting on Backend review");
         expect(await panel.isVisible()).toBe(true);
         expect(
           await activePane.locator(".chat-thread openclaw-chat-subagent-activity").count(),

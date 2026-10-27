@@ -48,7 +48,7 @@ async function installStartupGateway(page: Page) {
     sessionKey,
     sessions: [ownedSession(sessionKey, "Selected conversation")],
     historyMessages: [{ role: "assistant", content: historyText }],
-    // Visibility changes can retire and reissue the still-pending startup read.
+    // Keep replacement startup reads held across visibility changes.
     heldMethods: ["chat.startup", ...bulkMethods],
     featureMethods: [
       ...defaultControlUiFeatureMethods,
