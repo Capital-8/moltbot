@@ -6,6 +6,7 @@ import { sha256Hex as sha256 } from "@openclaw/normalization-core/node-crypto";
 import { expect } from "vitest";
 import type { SqlConnection } from "../infra/sql-connection.js";
 import { CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
+import { readCronDefaultStoreKeyInDatabase } from "./openclaw-state-db-cron-identity-migration.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 import {
   addPreCutoverClientCredentialTablesForTest,
@@ -30,6 +31,7 @@ export const V2026_7_1_2_STATE_MIGRATION_CHANGES = [
   "Removed redundant conversation binding target projections (v15)",
   "Replaced retained task indexes with ordered cron history indexes (v24)",
   "Removed redundant replay and skill indexes and narrowed the lease-owner index (v27)",
+  "Introduced durable default cron partition selection (v34)",
   "Migrated shared state tables to SQLite STRICT typing (46)",
 ];
 
@@ -52,13 +54,7 @@ export function expectV2026_7_1_2CronHistoryPreserved(database: SqlConnection): 
     storeKey: "/fixture/state/cron/jobs.json",
     runId: "fixture-cron-run",
   });
-  expect(
-    database
-      .prepare(
-        "SELECT value_json FROM config_machine_state WHERE state_key = 'cron.defaultStoreKey'",
-      )
-      .get(),
-  ).toBeUndefined();
+  expect(readCronDefaultStoreKeyInDatabase(database)).toBe("/fixture/state/cron/jobs.json");
 }
 
 export function materializeV2026_7_1_2StateDatabase(stateDir: string) {
