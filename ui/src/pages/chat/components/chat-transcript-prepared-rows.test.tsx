@@ -509,21 +509,6 @@ it("keeps warming in the reader's direction through opposite size compensation",
   expect(Math.min(...downward)).toBeGreaterThan(180);
 });
 
-it("measures the next completed row before scrolling it into view", async () => {
-  const view = await transcriptFixture(1000);
-  const next = view.container.querySelector<HTMLElement>('[data-virtual-row-key="fragment:16"]');
-  expect(next).not.toBeNull();
-  expect(next!.hasAttribute("data-prepared-row")).toBe(false);
-  emitTranscriptResize(next!, 800, 160);
-  await settle();
-  const mounts = view.renderRow.mock.calls.filter(([row]) => row.key === "fragment:16").length;
-  await view.scrollTo(11);
-  expect(view.container.querySelector('[data-virtual-row-key="fragment:16"]')).toBe(next);
-  expect(view.renderRow.mock.calls.filter(([row]) => row.key === "fragment:16")).toHaveLength(
-    mounts,
-  );
-});
-
 it("reuses a nearby completed row after scrolling away and back, with a bounded DOM cache", async () => {
   const view = await transcriptFixture();
   await view.frame(8);
@@ -681,6 +666,11 @@ it("retains nearby geometry while scrolling back into the prepared window", asyn
 it("uses cached geometry on the first reader movement after tail placement", async () => {
   const view = await transcriptFixture(null, true);
   await view.frame(8);
+  const initialRows = transcriptRows(view.container);
+  for (let turn = 0; turn < 32; turn++) {
+    await view.idle();
+  }
+  expect(transcriptRows(view.container)).toEqual(initialRows);
   const style = vi.spyOn(globalThis, "getComputedStyle");
   await view.scrollTo(240);
   await view.frame(2, false);

@@ -489,12 +489,12 @@ suite.define(() => {
             await expect.poll(() => chatThreadDistanceFromBottom(reader)).toBeLessThanOrEqual(8);
             await expect.poll(provider.requests).toBe(local.index);
             await local.append(paragraphs("local-resume", 3));
+            await waitForDelta(a, "local-resume paragraph 3.", sessionKey);
             await waitForChatScrollIdle(reader);
-            expect
-              .soft(
-                await chatThreadDistanceFromBottom(reader),
-                "local submit follows its assistant stream",
-              )
+            await expect
+              .poll(() => chatThreadDistanceFromBottom(reader), {
+                message: "local submit follows its assistant stream",
+              })
               .toBeLessThanOrEqual(8);
             await local.finish();
             for (const page of pages) {

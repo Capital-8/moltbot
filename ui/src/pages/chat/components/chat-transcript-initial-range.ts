@@ -85,7 +85,9 @@ export class TranscriptInitialRange {
       }
     }
     if (!this.tailRows) {
-      const indexes = new Set(this.normalRange(range, this.rowIndexes));
+      const indexes = new Set(
+        this.normalRange(this.viewportOnly ? { ...range, overscan: 0 } : range, this.rowIndexes),
+      );
       for (const key of this.preparedRowKeys) {
         const index = this.rowIndexes.get(key);
         if (index !== undefined) {
@@ -293,7 +295,7 @@ export class TranscriptInitialRange {
     const idleRange = this.virtualizer().range;
     if (
       idleRange &&
-      this.idleMeasureStep > PREPARED_ROW_LIMIT &&
+      (this.viewportOnly || this.idleMeasureStep > PREPARED_ROW_LIMIT) &&
       performance.now() - this.scrollSample.time >= 100
     ) {
       const sampledDirection = this.scrollSample.direction;
@@ -376,7 +378,8 @@ export class TranscriptInitialRange {
             ? range.endIndex
             : range.startIndex;
       const rendered = new Set(virtualizer.getVirtualItems().map((row) => row.key));
-      const nearGeometryPending = this.idleMeasureStep <= PREPARED_ROW_LIMIT;
+      // Before reader navigation, keep warming out of the native scroll geometry.
+      const nearGeometryPending = !this.viewportOnly && this.idleMeasureStep <= PREPARED_ROW_LIMIT;
       if (prewarm && !moving) {
         // Measure nearby prepared rows before spending idle slices on distant HTML.
         const warmLimit = nearGeometryPending ? PREPARED_ROW_LIMIT : IDLE_PREWARM_ROW_LIMIT;
