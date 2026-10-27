@@ -346,10 +346,14 @@ function prepareSanitizedMarkdown(
     preparedFragments.set(cached, template.content);
     pruneMapToMaxSize(preparedFragments, PREPARED_FRAGMENT_LIMIT);
   } else if (returnFragment) {
-    const fragment = preparedFragments.get(cached);
-    if (fragment) {
-      content = { html: cached.html, fragment };
+    let fragment = preparedFragments.get(cached);
+    if (!fragment) {
+      // A visible HTML-only hit joins the same bounded cache as prewarmed DOM.
+      const template = document.createElement("template");
+      template.innerHTML = cached.html;
+      fragment = template.content;
     }
+    content = { html: cached.html, fragment };
   }
   if (returnFragment && content && typeof content !== "string") {
     preparedFragments.delete(cached);

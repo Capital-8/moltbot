@@ -62,26 +62,60 @@ it("reuses pristine idle-prepared DOM across visible mounts without parsing it a
   expect(prewarmSanitizedMarkdown("oversized ".repeat(6000), {})).toBe(false);
 });
 
+it("retains HTML-only preparation after its first visible mount", () => {
+  const marker = "html-only-visible-fragment";
+  const source = `### ${marker}\n\n| State |\n| --- |\n| Ready |\n\n<img src="x" onerror="alert(1)"><script>alert(2)</script>`;
+  expect(prewarmSanitizedMarkdown(source, {}, "html")).toBe(true);
+  const html = vi.spyOn(Element.prototype, "innerHTML", "set");
+  onTestFinished(() => html.mockRestore());
+  const parses = () =>
+    html.mock.calls.filter(
+      ([value], index) =>
+        html.mock.contexts[index] instanceof HTMLTemplateElement && value.includes(marker),
+    ).length;
+  const mount = () => {
+    const content = toSanitizedMarkdownContent(source);
+    return renderSolidRef(() => createMarkdownRef(() => ({ content })), {
+      targetElement: document.createElement("div"),
+    });
+  };
+
+  const first = mount();
+  expect(first.container.querySelector("h3")?.textContent).toBe(marker);
+  expect(first.container.querySelector("td")?.textContent).toBe("Ready");
+  expect(first.container.querySelector("script, [onerror]")).toBeNull();
+  expect(parses()).toBe(1);
+  first.container.querySelector("h3")!.textContent = "Mounted decoration";
+  first.unmount();
+
+  const second = mount();
+  expect(second.container.querySelector("h3")?.textContent).toBe(marker);
+  expect(second.container.querySelector("td")?.textContent).toBe("Ready");
+  expect(second.container.querySelector("script, [onerror]")).toBeNull();
+  expect(parses()).toBe(1);
+});
+
 it("bounds prepared DOM while keeping evicted HTML reusable", () => {
   const source = (index: number) => `bounded-idle-fragment-${index}`;
   for (let index = 0; index < 33; index++) {
     expect(prewarmSanitizedMarkdown(source(index), {})).toBe(true);
   }
-  expect(typeof toSanitizedMarkdownContent(source(0))).toBe("string");
-  expect(typeof toSanitizedMarkdownContent(source(32))).not.toBe("string");
-  expect(typeof toSanitizedMarkdownContent(source(32))).not.toBe("string");
-  for (let index = 0; index < 33; index++) {
-    toSanitizedMarkdownContent(source(index));
+  expect(prewarmSanitizedMarkdown(source(0), {}, "fragment")).toBe(true);
+  expect(prewarmSanitizedMarkdown(source(32), {}, "fragment")).toBe(false);
+  expect(prewarmSanitizedMarkdown(source(32), {}, "fragment")).toBe(false);
+  for (let index = 1; index < 33; index++) {
     expect(prewarmSanitizedMarkdown(source(index), {}, "fragment")).toBe(true);
   }
-  expect(typeof toSanitizedMarkdownContent(source(0))).toBe("string");
-  expect(typeof toSanitizedMarkdownContent(source(32))).not.toBe("string");
+  expect(prewarmSanitizedMarkdown(source(0), {}, "fragment")).toBe(true);
+  expect(prewarmSanitizedMarkdown(source(32), {}, "fragment")).toBe(false);
+  expect(toSanitizedMarkdownHtml(source(0))).toBe(`<p>${source(0)}</p>\n`);
   for (let index = 0; index < 64; index++) {
     prewarmSanitizedMarkdown(`near-first-${index}`, {}, index < 8 ? "cold-fragment" : "html");
   }
-  expect(typeof toSanitizedMarkdownContent("near-first-0")).not.toBe("string");
-  expect(typeof toSanitizedMarkdownContent("near-first-0")).not.toBe("string");
-  expect(typeof toSanitizedMarkdownContent("near-first-63")).toBe("string");
+  expect(prewarmSanitizedMarkdown("near-first-0", {}, "fragment")).toBe(false);
+  expect(prewarmSanitizedMarkdown("near-first-0", {}, "fragment")).toBe(false);
+  expect(prewarmSanitizedMarkdown("near-first-63", {}, "fragment")).toBe(true);
+  expect(prewarmSanitizedMarkdown("near-first-63", {}, "fragment")).toBe(false);
 });
 
 it("stops distant idle admission at the character budget without evicting nearby HTML", () => {

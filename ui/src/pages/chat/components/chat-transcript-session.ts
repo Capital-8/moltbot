@@ -39,9 +39,9 @@ export type TranscriptCallbacks = {
 };
 
 export const CHAT_TRANSCRIPT_ESTIMATED_ROW_PX = 120;
-// Dynamic rows retain neighboring measurements; completed fragments are filtered
-// to the viewport and prepared separately by TranscriptInitialRange.
-export const CHAT_TRANSCRIPT_OVERSCAN = 2;
+// Keep one measured neighbor on either side; farther rows are prepared
+// separately by TranscriptInitialRange.
+export const CHAT_TRANSCRIPT_OVERSCAN = 1;
 // Initial virtual rows can correct their estimates for several frames. Observe
 // the range for ~200ms before accepting a saved offset that remains unreachable.
 export const CHAT_TRANSCRIPT_SCROLL_RESTORE_STABLE_FRAMES = 12;
