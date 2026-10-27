@@ -383,7 +383,10 @@ it.each([600, 1400])(
     expect(last.kind === "item" ? last.item : -1).toBeGreaterThan(index);
     expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
     // A fast first movement can cross several viewports before scroll warming runs.
-    expect(prewarmGroupedMessage(view.groups[200]!.messages[0]!.message, {})).toBe(false);
+    expect(prewarmGroupedMessage(view.groups[96]!.messages[0]!.message, {})).toBe(false);
+    expect(view.renderRow.mock.calls.some(([row]) => row.kind === "item" && row.item === 200)).toBe(
+      false,
+    );
     // A completed sweep does not walk the cached prefix again on every idle delivery.
     expect(view.renderRow.mock.calls.length - rendered).toBeLessThan(530);
     const completed = view.renderRow.mock.calls.length;

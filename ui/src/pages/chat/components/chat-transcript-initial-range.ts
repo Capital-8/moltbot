@@ -7,7 +7,7 @@ import type { TranscriptRow } from "./chat-transcript-layout.ts";
 const PREPARED_ROW_LIMIT = 24;
 // Cover the first fast scroll before direction sampling can warm its next viewport.
 // These are HTML cache entries; the smaller DOM and pristine-fragment limits stay unchanged.
-const IDLE_PREWARM_ROW_LIMIT = 2048;
+const IDLE_PREWARM_ROW_LIMIT = 128;
 
 /** Own initial tail placement and bounded preparation ahead of the visible range. */
 export class TranscriptInitialRange {
