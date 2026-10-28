@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { serialize } from "node:v8";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanupEmbeddedAttemptSessionPhase } from "../agents/embedded-agent-runner/run/attempt-session-settle.js";
 import { createEmbeddedAttemptDeferredLifecycleOwner } from "../agents/embedded-agent-runner/run/deferred-lifecycle-owner.js";
@@ -35,6 +36,7 @@ const delivery = vi.hoisted(() => ({
   settlement: undefined as Promise<SqliteWorkerOperationSettlement> | undefined,
   hideCommit: false,
   appendCalls: 0,
+  appendBytes: 0,
 }));
 vi.mock("../state/openclaw-agent-execution.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../state/openclaw-agent-execution.js")>();
@@ -72,6 +74,7 @@ vi.mock("../state/openclaw-agent-execution.js", async (importOriginal) => {
                 execute: async (command, commandOptions) => {
                   if (command.type === "trajectory.events.append") {
                     delivery.appendCalls += 1;
+                    delivery.appendBytes += serialize(command).byteLength;
                     const before = delivery.beforeAppend;
                     delivery.beforeAppend = undefined;
                     await before?.();
@@ -149,6 +152,7 @@ afterEach(() => {
   delivery.settlement = undefined;
   delivery.hideCommit = false;
   delivery.appendCalls = 0;
+  delivery.appendBytes = 0;
   vi.restoreAllMocks();
 });
 
@@ -213,10 +217,12 @@ async function createSink(
   state: OpenClawTestState,
   target: Target,
   maxRuntimeFileBytes = 1024 * 1024,
+  runId = "run-1",
 ) {
   const sink = await createSqliteTrajectoryRuntimeSink({
     env: state.env,
     sessionId: target.sessionId,
+    runId,
     sessionTarget: target,
     maxRuntimeFileBytes,
   });
@@ -257,13 +263,15 @@ it("persists repeated events and retains the worker owner without a main-thread 
 
 it("keeps a large eight-event turn in one append across writer yields", async () => {
   await withTrajectoryState("trajectory-large-turn", async ({ target, state }) => {
-    const sink = await createSink(state, target);
+    const runId = "synthetic-trajectory-run-".repeat(4);
+    const sink = await createSink(state, target, 1024 * 1024, runId);
     const events = Array.from({ length: 8 }, (_, index) =>
       createTrajectoryEvent({
         type: index === 7 ? "session.ended" : "context.compiled",
         sessionId: target.sessionId,
         seq: index,
         payloadSize: 54_000,
+        runId,
       }),
     );
     const lines = events.map((event) => JSON.stringify(event));
@@ -279,6 +287,9 @@ it("keeps a large eight-event turn in one append across writer yields", async ()
     }
     await sink.flush();
     expect(delivery.appendCalls).toBe(1);
+    expect(delivery.appendBytes).toBeLessThan(
+      lines.reduce((bytes, line) => bytes + Buffer.byteLength(line), 0) + 650,
+    );
     expect(
       (await loadSqliteTrajectoryRuntimeEvents(target)).map((event) => JSON.stringify(event)),
     ).toEqual(lines);
@@ -435,51 +446,70 @@ it("settles retention during concurrent appends and worker session patches", asy
   });
 });
 
-it.each(["committed", "unknown"] as const)(
-  "settles the captured trajectory prefix before another flush after a lost result (%s)",
-  async (outcome) => {
+it.each(
+  ["explicit", "background"].flatMap((start) =>
+    ["committed", "unknown"].map((outcome) => ({ start, outcome })),
+  ),
+)(
+  "settles a $start append before flushing again after a lost result ($outcome)",
+  async ({ start, outcome }) => {
     await withTrajectoryState("trajectory-settlement", async ({ target }) => {
       const recorder = await createRecorder(target);
-      recorder.recordEvent("seed");
-      await recorder.flush();
-      await retention.accepted;
-      recorder.recordEvent("warm");
-      await recorder.flush();
-      await retention.accepted;
+      const prefix = start === "explicit" ? ["seed", "warm"] : [];
+      for (const type of prefix) {
+        recorder.recordEvent(type);
+        await recorder.flush();
+        await retention.accepted;
+      }
       const failure = new Error("trajectory result was lost after native completion");
       const { committed, settlement } = pauseAppend(failure, outcome === "unknown");
-      recorder.recordEvent("first");
-      const first = observe(recorder.flush());
+      const count = start === "background" ? 32 : 1;
+      for (let index = 0; index < count; index++) {
+        recorder.recordEvent("first", { index });
+      }
+      const first = start === "explicit" ? observe(recorder.flush()) : undefined;
       let next: ReturnType<typeof observe> | undefined;
       try {
-        await Promise.race([
-          committed.promise,
-          first.then(() => {
-            throw new Error("Flush ended before the real native append completed");
-          }),
-        ]);
-        expect(recorder.describeFlushState()).toContain("pendingRows=1");
+        await (first
+          ? Promise.race([
+              committed.promise,
+              first.then(() => {
+                throw new Error("Flush ended before the real native append completed");
+              }),
+            ])
+          : committed.promise);
+        expect(recorder.describeFlushState()).toContain(`pendingRows=${count}`);
         recorder.recordEvent("later");
-        next = observe(recorder.flush());
+        next = first ? observe(recorder.flush()) : undefined;
+      } finally {
         settlement.resolve(
           outcome === "committed" ? { kind: "completed" } : { kind: "unknown", error: failure },
         );
-        expect(await first).toEqual({ ok: false, error: failure });
-        if (outcome === "committed") {
-          expect(await next).toEqual({ ok: true });
-          expect(recorder.describeFlushState()).toBeUndefined();
-          expect(await eventTypes(target)).toEqual(["seed", "warm", "first", "later"]);
-        } else {
-          expect(await next).toMatchObject({ ok: false, error: { code: "outcome-unknown" } });
-          await expect(recorder.flush()).rejects.toMatchObject({ code: "outcome-unknown" });
-          expect(recorder.describeFlushState()).toContain("pendingRows=2");
-          expect(await eventTypes(target)).toEqual(["seed", "warm", "first"]);
-        }
-      } finally {
-        settlement.resolve({ kind: "completed" });
         await first;
         await next;
       }
+      if (first) {
+        expect(await first).toEqual({ ok: false, error: failure });
+        expect(await next).toMatchObject(
+          outcome === "committed"
+            ? { ok: true }
+            : { ok: false, error: { code: "outcome-unknown" } },
+        );
+      }
+      if (outcome === "committed") {
+        await recorder.flush();
+        expect(recorder.describeFlushState()).toBeUndefined();
+      } else {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await expect(recorder.flush()).rejects.toMatchObject({ code: "outcome-unknown" });
+        }
+        expect(recorder.describeFlushState()).toContain(`pendingRows=${count + 1}`);
+      }
+      expect(await eventTypes(target)).toEqual([
+        ...prefix,
+        ...Array.from({ length: count }, () => "first"),
+        ...(outcome === "committed" ? ["later"] : []),
+      ]);
     });
   },
 );
@@ -527,45 +557,10 @@ it("bounds 2,000 queued events while a background append awaits settlement", asy
   });
 });
 
-it.each(["committed", "unknown"] as const)(
-  "joins a background append with a lost result before final flushing (%s)",
-  async (outcome) => {
-    await withTrajectoryState("trajectory-background-settlement", async ({ target }) => {
-      const recorder = await createRecorder(target);
-      const failure = new Error("background trajectory result lost after native completion");
-      const { committed, settlement } = pauseAppend(failure, outcome === "unknown");
-      for (let index = 0; index < 32; index++) {
-        recorder.recordEvent("before-settlement", { index });
-      }
-      try {
-        await committed.promise;
-        recorder.recordEvent("after-settlement");
-      } finally {
-        settlement.resolve(
-          outcome === "committed" ? { kind: "completed" } : { kind: "unknown", error: failure },
-        );
-      }
-      if (outcome === "committed") {
-        await recorder.flush();
-        expect(recorder.describeFlushState()).toBeUndefined();
-      } else {
-        await expect(recorder.flush()).rejects.toMatchObject({ code: "outcome-unknown" });
-        await expect(recorder.flush()).rejects.toMatchObject({ code: "outcome-unknown" });
-      }
-      const events = await loadSqliteTrajectoryRuntimeEvents(target);
-      expect(events.filter((event) => event.type === "before-settlement")).toHaveLength(32);
-      expect(events.filter((event) => event.type === "after-settlement")).toHaveLength(
-        outcome === "committed" ? 1 : 0,
-      );
-    });
-  },
-);
-
 it.each([3_000, 6_000])(
   "expires durable rows when a %i-character queued prefix is evicted before append",
   async (chars) => {
     await withTrajectoryState("trajectory-evicted-prefix", async ({ target }) => {
-      await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
       let allowCommit = true;
       const recorder = await createRecorder(target, {
         maxRuntimeFileBytes: 4_096,

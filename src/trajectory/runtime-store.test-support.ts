@@ -31,7 +31,6 @@ export function appendSqliteTrajectoryRuntimeEvents(
   events: readonly TrajectoryEvent[],
 ): void {
   const serialized = events.map((event) => ({
-    runId: event.runId,
     ts: event.ts,
     line: JSON.stringify(event),
   }));
@@ -50,8 +49,27 @@ export function appendSqliteTrajectoryRuntimeEvents(
       options,
       { operationLabel: label },
     );
-  const input = { ...scope, events: serialized };
-  const { database } = appendWithWriter(input, openOpenClawAgentDatabase(options), write);
+  const database = openOpenClawAgentDatabase(options);
+  write("trajectory.runtime.append", (current) => {
+    for (let start = 0; start < events.length;) {
+      const runId = events[start]!.runId;
+      let end = start + 1;
+      while (end < events.length && events[end]!.runId === runId) {
+        end++;
+      }
+      appendWithWriter(
+        {
+          ...scope,
+          runId,
+          events: serialized.slice(start, end),
+          discardPrevious: start === 0 && scope.discardPrevious,
+        },
+        current,
+        (_label, operation) => operation(current),
+      );
+      start = end;
+    }
+  });
   const state = retentionState(database);
   const now = Date.now();
   // A nested append cannot commit maintenance independently of its caller.
@@ -62,7 +80,7 @@ export function appendSqliteTrajectoryRuntimeEvents(
       for (let attempt = 0; attempt < 2; attempt++) {
         const selection: Parameters<typeof selectBatch>[1] = {
           sweepId: beginRetention(database.db, lease),
-          snapshot: prepareRetention(database.db, input, now),
+          snapshot: prepareRetention(database.db, scope, now),
         };
         for (;;) {
           const batch = selectBatch(database.db, selection);

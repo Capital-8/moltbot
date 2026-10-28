@@ -122,6 +122,7 @@ async function trajectorySink(scope: Scope, sessionActor?: Binding) {
   const sink = await createSqliteTrajectoryRuntimeSink({
     env: scope.env,
     sessionId: scope.sessionId,
+    runId: "run-1",
     sessionKey: scope.sessionKey,
     sessionTarget: scope,
     sessionActor,
@@ -160,7 +161,7 @@ function trajectory(sessionId: string, text: string, seq: number): TrajectoryEve
     ts: "2026-10-11T00:00:00.000Z",
     seq,
     sessionId,
-    runId: `run-${seq}`,
+    runId: "run-1",
     data: { text },
   };
 }
@@ -357,7 +358,8 @@ describe("memory session side-data consumers", () => {
     const retained = trajectory(second.scope.sessionId, "new", 2);
     await second.mutate("session.trajectory.append", {
       sessionId: second.scope.sessionId,
-      events: [{ runId: retained.runId, ts: retained.ts, line: JSON.stringify(retained) }],
+      runId: retained.runId,
+      events: [{ ts: retained.ts, line: JSON.stringify(retained) }],
       maxRuntimeBytes: 1000,
       maxGlobalRuntimeBytes: 1,
     });

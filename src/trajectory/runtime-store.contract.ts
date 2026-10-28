@@ -10,7 +10,7 @@ export type SqliteTrajectoryRuntimeScope = {
   assertCommitAllowed?: () => void;
 };
 
-export type SerializedTrajectoryEvent = Pick<TrajectoryEvent, "runId" | "ts"> & {
+export type SerializedTrajectoryEvent = Pick<TrajectoryEvent, "ts"> & {
   line: string;
 };
 
@@ -23,6 +23,8 @@ export type SqliteTrajectoryRuntimeAppend = Pick<
   SqliteTrajectoryRuntimeScope,
   "sessionId" | "maxRuntimeBytes" | "maxGlobalRuntimeBytes"
 > & {
+  /** A recorder owns one run; indexed attribution travels once per batch. */
+  runId?: string;
   events: readonly SerializedTrajectoryEvent[];
   /** Facts supplied by the host inside the existing physical-store writer FIFO. */
   windowFacts?: TrajectoryRuntimeWindowFacts;

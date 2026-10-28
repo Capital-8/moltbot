@@ -82,7 +82,7 @@ export function appendSqliteTrajectoryRuntimeEventsWithWriter(
   const encoding = readTrajectoryStorageEncoding(sourceDatabase.db);
   const rows = input.events.map((event) => ({
     session_id: sessionId,
-    run_id: event.runId ?? null,
+    run_id: input.runId ?? null,
     ...prepareTrajectoryPayload(sourceDatabase.db, event.line, encoding),
     created_at: parseDateStringTimestampMs(event.ts) ?? Date.now(),
     seq: 0,

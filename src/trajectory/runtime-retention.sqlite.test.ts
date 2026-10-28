@@ -102,8 +102,9 @@ function appendManaged(event: TrajectoryEvent, discardPrevious = false) {
   appendSqliteTrajectoryRuntimeEventsWithWriter(
     {
       sessionId: event.sessionId,
+      runId: event.runId,
       discardPrevious,
-      events: [{ runId: event.runId, ts: event.ts, line: JSON.stringify(event) }],
+      events: [{ ts: event.ts, line: JSON.stringify(event) }],
     },
     openOpenClawAgentDatabase(options),
     (operationLabel, write) => runOpenClawAgentWriteTransaction(write, options, { operationLabel }),

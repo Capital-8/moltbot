@@ -15,6 +15,7 @@ export function createMemoryTrajectoryRuntimeSink(
   source: NonNullable<ReturnType<typeof captureSessionActorStorageOwner>>,
   params: {
     sessionId: string;
+    runId?: string;
     sessionKey?: string;
     maxRuntimeFileBytes: number;
     assertCommitAllowed?: () => void;
@@ -92,6 +93,7 @@ export function createMemoryTrajectoryRuntimeSink(
     let committed = false;
     flushing = append({
       sessionId: params.sessionId,
+      runId: params.runId,
       events: [...batch.keys()],
       discardPrevious: batchDiscard,
       maxRuntimeBytes: params.maxRuntimeFileBytes,
@@ -125,7 +127,7 @@ export function createMemoryTrajectoryRuntimeSink(
     },
     write(event: TrajectoryEvent, line: string) {
       const bytes = Buffer.byteLength(line) + 1;
-      pending.set({ runId: event.runId, ts: event.ts, line }, bytes);
+      pending.set({ ts: event.ts, line }, bytes);
       queuedBytes += bytes;
       trim();
       if (!flushing && !backgroundFailed && (pending.size >= 32 || queuedBytes >= 256 * 1024)) {

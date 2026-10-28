@@ -228,7 +228,6 @@ if (values.seed) {
           transcript.push({ type: "message", id: eventId, parentId, timestamp: ts, message });
           parentId = eventId;
           trajectory.push({
-            runId: `delete-run-${index}`,
             ts,
             line: JSON.stringify({
               traceSchema: "openclaw-trajectory",
@@ -256,7 +255,7 @@ if (values.seed) {
         databaseOptions,
       );
       appendSqliteTrajectoryRuntimeEventsWithWriter(
-        { sessionId: scope.sessionId, events: trajectory },
+        { sessionId: scope.sessionId, runId: `delete-run-${index}`, events: trajectory },
         openOpenClawAgentDatabase(databaseOptions),
         (label, write) =>
           runOpenClawAgentWriteTransaction(write, databaseOptions, { operationLabel: label }),

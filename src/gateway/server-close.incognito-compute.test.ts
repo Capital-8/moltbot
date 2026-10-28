@@ -76,6 +76,7 @@ it("settles accepted memory usage and trajectory work across the real close prel
     const trajectory = await createSqliteTrajectoryRuntimeSink({
       env: fixture.state.env,
       sessionId: target.sessionId,
+      runId: "run-1",
       sessionTarget: target,
       maxRuntimeFileBytes: 1024 * 1024,
     });

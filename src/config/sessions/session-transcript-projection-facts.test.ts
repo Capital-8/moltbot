@@ -175,7 +175,8 @@ it("keeps transcript receipts through unrelated trajectory append and trim", asy
         appendSqliteTrajectoryRuntimeEventsWithWriter(
           {
             sessionId: f.scope.sessionId,
-            events: [{ runId: id, ts: "2026-10-12T00:00:00Z", line: JSON.stringify({ id }) }],
+            runId: id,
+            events: [{ ts: "2026-10-12T00:00:00Z", line: JSON.stringify({ id }) }],
             discardPrevious: true,
           },
           f.database,

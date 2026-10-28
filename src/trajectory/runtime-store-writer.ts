@@ -53,6 +53,7 @@ type TrajectoryRuntimeSinkParams = {
   maxRuntimeFileBytes: number;
   sessionFile?: string;
   sessionId: string;
+  runId?: string;
   sessionKey?: string;
   sessionTarget?: SessionTranscriptRuntimeTarget;
   assertCommitAllowed?: () => void;
@@ -246,6 +247,7 @@ function buildSqliteTrajectoryRuntimeSink(
               discardPrevious: batch.discardPrevious,
               maxRuntimeBytes: params.maxRuntimeFileBytes,
               sessionId: marker.sessionId,
+              runId: params.runId,
             },
             params.assertCommitAllowed,
             (outcome) => {
@@ -311,7 +313,7 @@ function buildSqliteTrajectoryRuntimeSink(
     },
     write: (event: TrajectoryEvent, line: string) => {
       const bytes = Buffer.byteLength(line, "utf8") + 1;
-      pendingEvents.set({ runId: event.runId, ts: event.ts, line }, bytes);
+      pendingEvents.set({ ts: event.ts, line }, bytes);
       queuedBytes += bytes;
       trimPending();
       scheduleFlush();

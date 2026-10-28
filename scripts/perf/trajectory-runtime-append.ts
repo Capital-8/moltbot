@@ -175,7 +175,8 @@ try {
         sessionId,
         maxRuntimeBytes,
         windowFacts,
-        events: [{ line, ts: event.ts, runId: event.runId }],
+        runId: event.runId,
+        events: [{ line, ts: event.ts }],
       },
       database,
       (operationLabel, write) =>

@@ -82,7 +82,7 @@ function appendEvents(
 }
 
 function serialized(event: TrajectoryEvent) {
-  return { runId: event.runId, ts: event.ts, line: JSON.stringify(event) };
+  return { ts: event.ts, line: JSON.stringify(event) };
 }
 
 function eventsOf(...types: string[]) {
@@ -147,6 +147,7 @@ describe("SQLite trajectory runtime store", () => {
     const event = createTrajectoryEvent({ type: "terminal-insert" });
     const input: SqliteTrajectoryRuntimeAppend = {
       sessionId: "session-1",
+      runId: event.runId,
       windowFacts: { nextSeq: 0, retainedBytes: 0 },
       events: [serialized(event)],
     };
@@ -261,9 +262,9 @@ describe("SQLite trajectory runtime store", () => {
         operations["trajectory.events.append"](
           {
             sessionId: "session-1",
+            runId: batch[0]?.runId,
             maxRuntimeBytes,
             events: batch.map((event) => ({
-              runId: event.runId,
               ts: event.ts,
               get line() {
                 expect(database.db.isTransaction).toBe(false);
@@ -325,6 +326,7 @@ describe("SQLite trajectory runtime store", () => {
       appendSqliteTrajectoryRuntimeEventsWithWriter(
         {
           sessionId: "session-1",
+          runId: event.runId,
           maxRuntimeBytes,
           windowFacts,
           discardPrevious,
@@ -399,6 +401,7 @@ describe("SQLite trajectory runtime store", () => {
         appendSqliteTrajectoryRuntimeEventsWithWriter(
           {
             sessionId: "session-1",
+            runId: event.runId,
             maxRuntimeBytes: bytes * 128,
             events: events.map(serialized),
             windowFacts,
@@ -475,20 +478,26 @@ describe("SQLite trajectory runtime store", () => {
 
   it.each(
     ["UTF-8", "UTF-16le", "UTF-16be"].flatMap((encoding) =>
-      [0, -1].map((delta) => ({ encoding, delta })),
+      ["ascii", "cjk"].flatMap((label) => [0, -1].map((delta) => ({ encoding, label, delta }))),
     ),
   )(
-    "keeps the UTF-8 byte window in $encoding with a $delta-byte adjustment",
-    async ({ encoding, delta }) => {
+    "keeps UTF-8 write and read budgets in $encoding for $label with a $delta-byte adjustment",
+    async ({ encoding, label, delta }) => {
       await seedEncoding(encoding);
       const events = ["old", "middle", "newest"].map((type) => {
         const event = createTrajectoryEvent({ type });
-        event.data = { payload: "日本語🦞".repeat(100) };
+        event.data = { payload: label === "ascii" ? "a".repeat(2000) : "日本語🦞".repeat(400) };
         return event;
       });
       const maxRuntimeBytes = eventBytes(events.slice(-2), delta);
       appendEvents(events, { maxRuntimeBytes });
-      await expect(readEvents()).resolves.toEqual(events.slice(delta === 0 ? -2 : -1));
+      const retained = events.slice(delta === 0 ? -2 : -1);
+      await expect(readEvents()).resolves.toEqual(retained);
+      const jsonlSize = eventBytes(retained, -1);
+      expect(readRows({ maxEventBytes: jsonlSize }).map((row) => row.event)).toEqual(retained);
+      expect(() => readRows({ maxEventBytes: jsonlSize - 1 })).toThrow(
+        /runtime store is too large to export/u,
+      );
     },
   );
 
@@ -510,34 +519,6 @@ describe("SQLite trajectory runtime store", () => {
     database.db.prepare("DELETE FROM session_windows WHERE session_id = ?").run("session-1");
     await expect(readEvents()).resolves.toEqual([]);
   });
-});
-
-describe("SQLite trajectory runtime reader byte and count budgets", () => {
-  // OCTET_LENGTH measures the database encoding, so a UTF-16 store would otherwise
-  // reject an ASCII transcript near half the documented UTF-8 cap and undercount
-  // CJK-heavy text. Admission must measure the UTF-8 byte budget across encodings.
-  it.each(
-    ["UTF-8", "UTF-16le", "UTF-16be"].flatMap((encoding) => [
-      { encoding, payload: "a".repeat(2000), label: "ascii" },
-      { encoding, payload: "日本語🦞".repeat(400), label: "cjk" },
-    ]),
-  )(
-    "measures the UTF-8 byte budget in $encoding for $label payloads",
-    async ({ encoding, payload }) => {
-      await seedEncoding(encoding);
-      const events = ["alpha", "beta"].map((type) => {
-        const event = createTrajectoryEvent({ type });
-        event.data = { payload };
-        return event;
-      });
-      appendEvents(events);
-      const jsonlSize = eventBytes(events, -1);
-      expect(readRows({ maxEventBytes: jsonlSize }).length).toBe(events.length);
-      expect(() => readRows({ maxEventBytes: jsonlSize - 1 })).toThrow(
-        /runtime store is too large to export/u,
-      );
-    },
-  );
 });
 
 describe("SQLite trajectory runtime reader snapshot consistency", () => {

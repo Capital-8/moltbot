@@ -24,10 +24,11 @@ it("reuses trajectory facts through chat admission, metadata notices, and anothe
   const completed = createDeferred();
   const take = vi.spyOn(windows, "takeTrajectoryRuntimeWindowFacts");
   const sweep = vi.spyOn(retention, "scheduleSqliteTrajectoryRuntimeRetention");
-  const createSink = () =>
+  const createSink = (runId = fixture.params.idempotencyKey) =>
     createSqliteTrajectoryRuntimeSink({
       env: process.env,
       sessionId: fixture.scope.sessionId,
+      runId,
       sessionTarget: fixture.scope,
       maxRuntimeFileBytes: 1024 * 1024,
     });
@@ -64,7 +65,7 @@ it("reuses trajectory facts through chat admission, metadata notices, and anothe
         { agentId: fixture.scope.agentId, sessionKey: fixture.scope.sessionKey, reason: "send" },
         { accessChanged: false },
       );
-      const other = await createSink();
+      const other = await createSink("other-run");
       assert(other);
       await append(other, 3);
       expect(take.mock.results.at(-1)?.value).toMatchObject({ nextSeq: 3 });

@@ -141,7 +141,7 @@ export function appendSessionActorMemoryTrajectory(
       eventJson,
       bytes: Buffer.byteLength(eventJson) + 1,
       createdAt: parseDateStringTimestampMs(event.ts) ?? now,
-      runId: event.runId ?? null,
+      runId: input.runId ?? null,
     };
   });
   const rows = [...(input.discardPrevious ? [] : previous), ...added];

@@ -370,6 +370,7 @@ export async function createTrajectoryRuntimeRecorder(input: TrajectoryRuntimeIn
     maxRuntimeFileBytes,
     sessionFile: params.sessionFile,
     sessionId: params.sessionId,
+    runId: params.runId,
     sessionKey: params.sessionKey,
     sessionTarget: params.sessionTarget,
     assertCommitAllowed: params.assertCommitAllowed,
