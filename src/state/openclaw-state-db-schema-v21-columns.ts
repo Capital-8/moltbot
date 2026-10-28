@@ -25,7 +25,9 @@ export const statePredicateColumnMigration = {
 
 /** Complete the derived projection before any writer or column-only reader runs. */
 export function migratePredicateColumnsV21(db: DatabaseSync, previousVersion: number): boolean {
-  if (previousVersion >= 21) {
+  // Historical TeamClaw v21 stores predate main's predicate-column promotion.
+  // Re-derive these projections during the v22 cutover; source payloads stay intact.
+  if (previousVersion >= 22) {
     return false;
   }
   let changed = false;

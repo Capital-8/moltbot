@@ -11,7 +11,7 @@ import {
 import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 
 // Advance for code-only migrations, validation rules, or serialized fact changes.
-const integrityPolicyRevision = 3;
+const integrityPolicyRevision = 4;
 
 export function sqliteDatabaseSealSchemaFor(kind: "agent" | "state" | "other") {
   requireNodeSqlite();

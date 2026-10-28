@@ -35,6 +35,8 @@ import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import { openTrackedStateDatabase } from "./openclaw-state-db-handle.js";
 import { withLegacyPublicationDraft } from "./openclaw-state-db-schema-v28-publication.js";
 import { withLegacyLocalWorkspaceManifests } from "./openclaw-state-db-schema-v31-workspace-manifests.js";
+import { withLegacyWorkerRetention } from "./openclaw-state-db-schema-v32-session-retention.js";
+import { withLegacyDiskAuthority } from "./openclaw-state-db-schema-v33-disk-authority.js";
 import {
   admitStateSchemaFacts,
   PostgresSchemaAdmissionUnavailableError,

@@ -165,6 +165,7 @@ export const STATE_SCHEMA_MIGRATION_DESCRIPTIONS = {
     "Heartbeat monitors → ordinary automation timing and delivery policy fence",
   "local-workspace-manifests-v31":
     "local workspace baselines → per-path manifests and recoverable checkpoint deltas",
+  "historical-image-reserve-snapshots": "historical image reserves → runtime preparation snapshots",
   "operator-approvals-system-agent": "operator approvals → OpenClaw system changes",
   "session-watch-cursor-provenance-v4": "session watch cursors → provenance column",
   "strict-tables-v3": "tables → SQLite STRICT typing",

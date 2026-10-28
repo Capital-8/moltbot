@@ -19,7 +19,8 @@ export type SessionPendingInputPage = {
   total: number;
   nextBefore?: number;
 };
-export type SessionPendingInputRow = Selectable<SessionPendingInputs>;
+// The historical envelope is archival data, not part of current input admission.
+export type SessionPendingInputRow = Omit<Selectable<SessionPendingInputs>, "recovery_intent_json">;
 /** Transported facts do not grant custody; the host retains and checks the exact live owner. */
 export type SessionPendingInputWorkerFacts = {
   agentId?: string;

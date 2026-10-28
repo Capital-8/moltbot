@@ -11,6 +11,7 @@ import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../state/openclaw-state-db-cont
 import { isStatePostgres } from "../state/openclaw-state-db-engine.js";
 import {
   openOpenClawStateDatabase,
+  prepareOpenClawStateDatabaseSchema,
   repairOpenClawStateDatabaseSchema,
 } from "../state/openclaw-state-db.js";
 import { getOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-maintenance-context.js";
@@ -69,6 +70,19 @@ export async function prepareDoctorDatabaseMigrations(
   }
   const agentMigrations = migrations.filter((entry) => entry.kind === "agent");
   if (agentMigrations.length > 0) {
+    if (!isStatePostgres()) {
+      // Agent companions already preserve a full shared-state image. Finish
+      // recognized same-version repairs before their leases open shared state;
+      // a bounded version step can leave earlier additive work pending.
+      const prepared = await prepareOpenClawStateDatabaseSchema(
+        { env: params.env, integrityCheck: params.check ?? "quick" },
+        "doctor-preparation",
+      );
+      if (prepared.warnings.length > 0) {
+        throw new Error(prepared.warnings.join("\n"));
+      }
+      result.changes.push(...prepared.changes);
+    }
     await withAgentDatabaseMaintenanceLease(
       {
         env: params.env,

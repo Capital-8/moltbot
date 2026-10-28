@@ -9,10 +9,12 @@ import {
   readSqliteSchemaCookie,
   type SqliteTableContractReader,
 } from "../infra/sqlite-schema-contract.js";
+import { throwSqliteSchemaMismatches } from "../infra/sqlite-schema-issues.js";
 import { prepareSqliteReadOnlyLocationSync } from "../infra/sqlite-snapshot-source.js";
 import { runSqliteDeferredTransactionSync } from "../infra/sqlite-transaction.js";
 import { hasLegacyCronRunLogs } from "../infra/state-migrations.cron-run-logs.js";
 import { hasUpdateDoctorMigrationCapture } from "../infra/update-doctor-migration-attribution.js";
+import { CLAW_STARTUP_ADDITIVE_STATE_COLUMN_DEFINITIONS } from "./openclaw-state-db-additive-columns.js";
 import {
   getStateRuntimeSchemaAdmission,
   publishStateRuntimeSchemaAdmission,
@@ -28,6 +30,7 @@ import {
   assertSupportedStateSchemaVersion,
   readStateSchemaContentVersion,
 } from "./openclaw-state-db-schema-version.js";
+import { hasHistoricalImageReserveSnapshots } from "./openclaw-state-db-teamclaw-migration.js";
 import { STATE_RUNTIME_SCHEMA_COMPATIBILITY } from "./openclaw-state-schema-compatibility.js";
 import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 
@@ -51,7 +54,8 @@ export function needsOpenClawStateDatabaseSchemaRepair(
     assertSupportedStateSchemaVersion(database, pathname);
     const needsRepair =
       readStateSchemaContentVersion(database) !== OPENCLAW_STATE_SCHEMA_VERSION ||
-      hasLegacyCronRunLogs(database);
+      hasLegacyCronRunLogs(database) ||
+      hasHistoricalImageReserveSnapshots(database);
     if (!needsRepair) {
       assertCurrentStateRuntimeSchema(database, pathname);
       if (scope === "doctor") {
@@ -74,6 +78,17 @@ export function assertCurrentStateRuntimeSchema(
   pathname: string,
   readTable: SqliteTableContractReader = createSqliteTableContractReader(database),
 ): void {
+  // Lazy tables may be absent, but existing ones still need their startup columns.
+  // Reuse the cold admission reader; warm handles consume the published admission.
+  for (const { tableName, columnName } of CLAW_STARTUP_ADDITIVE_STATE_COLUMN_DEFINITIONS) {
+    if (!STATE_RUNTIME_SCHEMA_COMPATIBILITY.excludedTables?.includes(tableName)) {
+      continue;
+    }
+    const table = readTable(tableName);
+    if (table && !table.columns.some((column) => column.name === columnName)) {
+      throwSqliteSchemaMismatches(pathname, [`missing column ${tableName}.${columnName}`]);
+    }
+  }
   assertCanonicalStateSchemaShape(database, pathname);
   assertOpenClawStateDatabaseForMaintenance(database, { pathname }, readTable);
   assertSqliteSchemaContains(
@@ -87,6 +102,12 @@ export function assertCurrentStateRuntimeSchema(
 
 /** Catalog presence is enough to refuse retired history without reading or rewriting its rows. */
 export function assertNoLegacyStateRuntimeRepair(database: DatabaseSync, pathname: string): void {
+  if (hasHistoricalImageReserveSnapshots(database)) {
+    throw new OpenClawStateDatabaseSchemaMigrationRequiredError(
+      "historical-image-reserve-snapshots",
+      pathname,
+    );
+  }
   if (hasLegacyCronRunLogs(database)) {
     throw new OpenClawStateDatabaseSchemaMigrationRequiredError("legacy-cron-run-logs", pathname);
   }

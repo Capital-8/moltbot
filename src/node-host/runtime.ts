@@ -326,6 +326,8 @@ export async function prepareNodeHostRuntime(params?: {
               env,
               capacity: config.nodeHost?.workerRuns?.capacity,
               nativeInferenceSnapshot,
+              managedIdentityTransport,
+              platformTrust,
               onCapacityChanged: onRunnerCapacityChanged,
               onProcessesChanged: publishProcessChanges,
               workspace: workerWorkspace,

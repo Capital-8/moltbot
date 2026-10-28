@@ -298,6 +298,21 @@ const tableNames: readonly (readonly [string, readonly string[]])[] = [
   ["worktree_provisioned_file_chunks", []],
   ["worktree_templates", []],
   ["worktrees", ["idx_worktrees_removed_at", "idx_worktrees_repo_fingerprint"]],
+  ["session_repository_workspaces", []],
+  ["worker_workspace_pending_results", []],
+  ["session_repository_workspaces", []],
+  [
+    "worker_environments",
+    ["idx_worker_environments_provider_lease", "idx_worker_environments_terminal_changed"],
+  ],
+  [
+    "worker_session_placements",
+    [
+      "idx_worker_session_placements_environment",
+      "idx_worker_session_placements_reconcile",
+      "idx_worker_session_placements_session_key",
+    ],
+  ],
   ["local_workspace_projections", []],
   ["acp_replay_events", ["idx_acp_replay_events_session_seq"]],
   ["skill_usage", ["idx_skill_usage_key"]],

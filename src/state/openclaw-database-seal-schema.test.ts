@@ -138,12 +138,16 @@ it("invalidates proof for a different or unknown SQLite storage stack", async ()
   expect(sqliteDatabaseSealSchemaFor("agent")).toBeUndefined();
 });
 
-it("compares feature options without compiler metadata and preserves the legacy digest", async () => {
+it("compares feature options without compiler metadata and invalidates prior policy seals", async () => {
   const { sqliteDatabaseSealSchemaFor } = await import("./openclaw-database-seal-schema.js");
   const before = sqliteDatabaseSealSchemaFor("agent")!;
-  // Persisted by the combined-hash implementation with this synthetic native tuple.
-  expect(before.schemaIdentity).toBe(
+  // Policy4 admits the explicit historical archival-column variant; policy3 proofs
+  // must revalidate. Both digests use the independently fixed synthetic native tuple.
+  expect(before.schemaIdentity).not.toBe(
     "9f93c4304456e20100a54354c11099c82974e1ff9711eeb07f6335302d41b4df",
+  );
+  expect(before.schemaIdentity).toBe(
+    "ca43103f9ef5ffe3f178f46e153f768261ed5c778d7457d4d590b1bf9ae9673d",
   );
   inputs.storageIdentity = { sourceId: "source", compileOptions: "COMPILER=gcc-14,ENABLE_FTS5" };
   const rebuilt = sqliteDatabaseSealSchemaFor("agent")!;

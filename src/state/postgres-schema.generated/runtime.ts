@@ -14492,6 +14492,30 @@ export const statePostgresRuntime = {
       table: "session_repository_workspaces",
       kind: "column",
       value: {
+        name: "recovery_json",
+        type: "text",
+        nullable: true,
+        identity: false,
+        default: null,
+        position: 12,
+      },
+    },
+    {
+      table: "session_repository_workspaces",
+      kind: "column",
+      value: {
+        name: "disk_authority_json",
+        type: "text",
+        nullable: true,
+        identity: false,
+        default: null,
+        position: 13,
+      },
+    },
+    {
+      table: "session_repository_workspaces",
+      kind: "column",
+      value: {
         name: "revision",
         type: "bigint",
         nullable: false,
@@ -18494,6 +18518,18 @@ export const statePostgresRuntime = {
     },
     {
       table: "worker_environments",
+      kind: "column",
+      value: {
+        name: "session_retention_json",
+        type: "text",
+        nullable: true,
+        identity: false,
+        default: null,
+        position: 36,
+      },
+    },
+    {
+      table: "worker_environments",
       kind: "primaryKey",
       value: ["environment_id"],
     },
@@ -18976,7 +19012,7 @@ export const statePostgresRuntime = {
       table: "worker_session_placements",
       kind: "column",
       value: {
-        name: "remote_workspace_dir",
+        name: "repository_preparation",
         type: "text",
         nullable: true,
         identity: false,
@@ -18988,7 +19024,7 @@ export const statePostgresRuntime = {
       table: "worker_session_placements",
       kind: "column",
       value: {
-        name: "worker_bundle_hash",
+        name: "confirmed_loss_recovery_json",
         type: "text",
         nullable: true,
         identity: false,
@@ -19000,12 +19036,36 @@ export const statePostgresRuntime = {
       table: "worker_session_placements",
       kind: "column",
       value: {
+        name: "remote_workspace_dir",
+        type: "text",
+        nullable: true,
+        identity: false,
+        default: null,
+        position: 12,
+      },
+    },
+    {
+      table: "worker_session_placements",
+      kind: "column",
+      value: {
+        name: "worker_bundle_hash",
+        type: "text",
+        nullable: true,
+        identity: false,
+        default: null,
+        position: 13,
+      },
+    },
+    {
+      table: "worker_session_placements",
+      kind: "column",
+      value: {
         name: "last_transcript_ack_cursor",
         type: "bigint",
         nullable: true,
         identity: false,
         default: null,
-        position: 12,
+        position: 14,
       },
     },
     {
@@ -19017,7 +19077,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 13,
+        position: 15,
       },
     },
     {
@@ -19029,7 +19089,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 14,
+        position: 16,
       },
     },
     {
@@ -19041,7 +19101,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 15,
+        position: 17,
       },
     },
     {
@@ -19053,7 +19113,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 16,
+        position: 18,
       },
     },
     {
@@ -19065,7 +19125,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 17,
+        position: 19,
       },
     },
     {
@@ -19077,7 +19137,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 18,
+        position: 20,
       },
     },
     {
@@ -19089,7 +19149,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 19,
+        position: 21,
       },
     },
     {
@@ -19101,7 +19161,7 @@ export const statePostgresRuntime = {
         nullable: false,
         identity: false,
         default: null,
-        position: 20,
+        position: 22,
       },
     },
     {
@@ -19113,7 +19173,7 @@ export const statePostgresRuntime = {
         nullable: false,
         identity: false,
         default: null,
-        position: 21,
+        position: 23,
       },
     },
     {
@@ -19125,7 +19185,7 @@ export const statePostgresRuntime = {
         nullable: false,
         identity: false,
         default: null,
-        position: 22,
+        position: 24,
       },
     },
     {
@@ -19137,7 +19197,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 23,
+        position: 25,
       },
     },
     {
@@ -19149,7 +19209,7 @@ export const statePostgresRuntime = {
         nullable: true,
         identity: false,
         default: null,
-        position: 24,
+        position: 26,
       },
     },
     {

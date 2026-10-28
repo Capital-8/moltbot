@@ -2167,6 +2167,9 @@ CREATE TABLE IF NOT EXISTS worker_session_placements (
   transition_generation INTEGER NOT NULL DEFAULT 0 CHECK (transition_generation >= 0),
   active_owner_epoch INTEGER CHECK (active_owner_epoch IS NULL OR active_owner_epoch >= 1),
   workspace_base_manifest_ref TEXT,
+  -- Historical import evidence only; current placement owners never consume this as authority.
+  repository_preparation TEXT,
+  confirmed_loss_recovery_json TEXT,
   remote_workspace_dir TEXT,
   worker_bundle_hash TEXT,
   last_transcript_ack_cursor INTEGER CHECK (

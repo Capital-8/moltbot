@@ -24,6 +24,7 @@ import {
 import { OpenClawStateDatabaseSchemaMigrationRequiredError } from "./openclaw-state-db-schema-migration-required.js";
 import { FOLDED_SINGLETON_STATE_TABLES_V12 } from "./openclaw-state-db-schema-v12-foldin.js";
 import { STATE_CURSOR_TABLES_V22 } from "./openclaw-state-db-schema-v22-columns.js";
+import { needsPublicationDraftMigration } from "./openclaw-state-db-schema-v28-publication.js";
 import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
 import * as sessionWatchMigration from "./openclaw-state-db-session-watch-migration.js";
 import {
@@ -32,6 +33,7 @@ import {
   RETIRED_DEAD_STATE_TABLES_V10,
   RETIRED_SKILL_CURATOR_TABLES_V11,
 } from "./openclaw-state-db-table-retirements.js";
+import { hasHistoricalImageReserveSnapshots } from "./openclaw-state-db-teamclaw-migration.js";
 import {
   resolveOpenClawAgentDatabaseStoredPath,
   resolveOpenClawStateDirForDatabasePath,
@@ -86,6 +88,7 @@ export const STATE_SCHEMA_MIGRATION_READ_TABLES: Record<StateMigrationKind, read
     "gateway_origin_device_tokens",
     "exec_approvals_config",
   ],
+  "historical-image-reserve-snapshots": ["worker_environments"],
   "predicate-columns-v21": [
     "meeting_transcript_sessions",
     "meeting_transcript_summaries",
@@ -374,6 +377,9 @@ export function detectOpenClawStateDatabaseSchemaMigrationsFromDatabase(
   assertCanonicalAgentDatabasesPrimaryKey(db, pathname);
   const migrations: OpenClawStateDatabaseSchemaMigration[] = [];
   const userVersion = readStateSchemaContentVersion(db);
+  if (hasHistoricalImageReserveSnapshots(db)) {
+    migrations.push({ kind: "historical-image-reserve-snapshots", path: pathname });
+  }
   if (
     userVersion < RETIRED_COMMITMENTS_SCHEMA_VERSION &&
     tableExists(db, "commitments") &&
@@ -472,7 +478,7 @@ export function detectOpenClawStateDatabaseSchemaMigrationsFromDatabase(
   if (userVersion < 27) {
     migrations.push({ kind: "state-write-indexes-v27", path: pathname });
   }
-  if (userVersion < 28) {
+  if (userVersion < 28 || needsPublicationDraftMigration(db)) {
     migrations.push({ kind: "github-publication-draft-v28", path: pathname });
   }
   if (userVersion < CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION) {

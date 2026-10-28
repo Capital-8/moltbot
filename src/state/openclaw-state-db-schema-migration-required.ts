@@ -6,7 +6,8 @@ export const LEGACY_SKILL_WORKSHOP_COLLECTION_REVIEWS_INDEX =
 type OpenClawStateDatabaseSchemaMigrationRequiredKind =
   | "audit-events-v2"
   | "legacy-cron-run-logs"
-  | "legacy-workshop-review-index";
+  | "legacy-workshop-review-index"
+  | "historical-image-reserve-snapshots";
 
 export class OpenClawStateDatabaseSchemaMigrationRequiredError extends StartupMaintenanceRequiredError {
   constructor(

@@ -22,6 +22,36 @@ process holding state. An "Internal state ownership error" instead means the
 current command lost its maintenance scope; retry the command and report the
 error if it persists.
 
+## Historical TeamClaw imports
+
+Stop the Gateway and retain a complete state backup before running
+`openclaw doctor --fix` on a historical TeamClaw store. Its shared schema 21
+and agent schema 24 differ from the corresponding main schemas. Doctor
+backfills the shared predicate columns and migrates both stores through the
+current owners; changing version markers alone is unsafe.
+
+Historical image-only reserves stored under `project` are migrated to the current
+`runtimePreparation` shape, including stores already at shared schema 22.
+The original serialized profile remains in `historicalProfileSnapshotJson` as
+archival evidence; current preparation does not consume it. Preparation keys,
+artifacts, finite expiry and consumption timestamps, environment state, lease,
+ownership, and attachments remain unchanged. Startup requests Doctor maintenance
+while these known legacy snapshots remain, rather than weakening project validation.
+
+Repository preparation marked pending or failed becomes a failed placement
+with recovery diagnostics. The migration retains environment identity,
+ownership, generation, workspace facts, and cleanup custody without inventing
+an accepted manifest. An incomplete preparation with an unsettled worker turn
+claim refuses migration and rolls back; reconcile that claim through its owner
+before retrying.
+
+Historical preparation, identity-verification, and input-recovery payloads stay
+as diagnostic data. Current placement, authentication, and input admission do
+not use these fields as authority. Queued historical inputs become interrupted;
+their messages and identities remain stored, and migration does not replay them.
+Existing interrupted and cancelled inputs retain their dispositions. Restore a
+verified pre-migration backup with its matching binary for rollback.
+
 ## Integrity checks
 
 Admission validates SQLite format, schema, required indexes, and required

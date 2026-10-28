@@ -31,7 +31,8 @@ import {
 import { publishPlacementTurnClaimState } from "./placement-turn-authority.js";
 import { publishWorkerEnvironmentNativeMutation } from "./store-native-publication.js";
 
-type PlacementRow = Selectable<WorkerSessionPlacements>;
+// Historical preparation diagnostics never participate in current placement decisions or writes.
+type PlacementRow = Omit<Selectable<WorkerSessionPlacements>, "repository_preparation">;
 type PlacementDatabase = Pick<
   StateDatabase,
   | "worker_environments"

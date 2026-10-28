@@ -54,24 +54,24 @@ import {
   STATE_CURSOR_TABLES_V22,
 } from "./openclaw-state-db-schema-v22-columns.js";
 import { migrateTaskRunIndexesV24 } from "./openclaw-state-db-schema-v24-indexes.js";
+import { migrateSessionStateHeadLayoutV26 } from "./openclaw-state-db-schema-v26-layout.js";
+import { migrateStateWriteIndexesV27 } from "./openclaw-state-db-schema-v27-indexes.js";
 import {
-  migrateSessionStateHeadLayoutV26,
-  withLegacyStateHeadLayout,
-} from "./openclaw-state-db-schema-v26-layout.js";
-import {
-  migrateStateWriteIndexesV27,
-  withLegacyStateWriteIndexes,
-} from "./openclaw-state-db-schema-v27-indexes.js";
-import { statePublicationDraftMigration } from "./openclaw-state-db-schema-v28-publication.js";
-import {
-  stateLocalWorkspaceManifestMigration,
-  withLegacyLocalWorkspaceManifests,
-} from "./openclaw-state-db-schema-v31-workspace-manifests.js";
+  migrateGitHubPublicationRequesterAuthority,
+  statePublicationDraftMigration,
+} from "./openclaw-state-db-schema-v28-publication.js";
+import { stateLocalWorkspaceManifestMigration } from "./openclaw-state-db-schema-v31-workspace-manifests.js";
+import { stateRetentionMigration } from "./openclaw-state-db-schema-v32-session-retention.js";
+import { stateDiskAuthorityMigration } from "./openclaw-state-db-schema-v33-disk-authority.js";
 import {
   assertSupportedStateSchemaVersion,
   readStateSchemaContentVersion,
   type StateSchemaVersionFacts,
 } from "./openclaw-state-db-schema-version.js";
+import {
+  migrateHistoricalRepositoryPreparation,
+  migrateHistoricalImageReserveSnapshots,
+} from "./openclaw-state-db-teamclaw-migration.js";
 import type { DB } from "./openclaw-state-db.generated.js";
 import { assertOpenClawStateWriteAllowed } from "./openclaw-state-ownership.js";
 import {
@@ -429,26 +429,6 @@ function migratePreparedWorkerOwnership(db: DatabaseSync, previousVersion: numbe
   return changed;
 }
 
-/** Historical publication rows retain unknown requesters; first use still owns absent tables. */
-function migrateGitHubPublicationRequesterAuthority(
-  db: DatabaseSync,
-  previousVersion: number,
-): boolean {
-  if (previousVersion >= 18) {
-    return false;
-  }
-  let changed = false;
-  for (const table of [
-    "github_publication_session_lifecycles",
-    "github_repository_publication_requests",
-  ]) {
-    if (tableExists(db, table)) {
-      changed = ensureColumn(db, table, "requester_authority_json TEXT") || changed;
-    }
-  }
-  return changed;
-}
-
 const statePortableIdentityMigration = {
   version: 22,
   tables: ["acp_sessions", ...STATE_CURSOR_TABLES_V22],
@@ -523,6 +503,15 @@ export const versionedStateMigrations: ReadonlyArray<{
 }> = [
   statePortableIdentityMigration,
   stateMeetingChronologyMigration,
+  {
+    migrate: migrateHistoricalImageReserveSnapshots,
+    applied:
+      "Migrated historical image reserves to runtime preparation with original snapshot evidence retained",
+  },
+  {
+    migrate: migrateHistoricalRepositoryPreparation,
+    applied: "Preserved historical repository preparation and fenced incomplete worker placements",
+  },
   { migrate: migrateJsonCanonicalWideRowsV13, applied: "Consolidated shared state tables (v13)" },
   {
     migrate: migrateCronCreatorNamespaces,

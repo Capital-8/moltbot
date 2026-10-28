@@ -9,6 +9,7 @@ import {
   closeOpenClawStateDatabaseAsync,
   detectOpenClawStateDatabaseSchemaMigrations,
   openOpenClawStateDatabase,
+  repairOpenClawStateDatabaseSchema,
 } from "./openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
@@ -29,16 +30,16 @@ const directories = useAutoCleanupTempDirTracker((cleanup) => {
     cleanup();
   });
 });
-function legacyDatabase(absent: boolean, refuse = false) {
+function legacyDatabase(absent: boolean, refuse = false, version = 27) {
   const env = { OPENCLAW_STATE_DIR: directories.make("publication-draft-migration-") };
   const pathname = resolveOpenClawStateSqlitePath(env);
   mkdirSync(path.dirname(pathname), { recursive: true });
   using db = new DatabaseSync(pathname);
   db.exec(OPENCLAW_STATE_SCHEMA_SQL.replaceAll("\n  draft INTEGER,", ""));
   addPreCutoverClientCredentialTablesForTest(db);
-  db.exec(`PRAGMA user_version = 27;
+  db.exec(`PRAGMA user_version = ${version};
     INSERT INTO schema_meta (meta_key, role, schema_version, created_at, updated_at)
-      VALUES ('primary', 'global', 27, 1, 1);`);
+      VALUES ('primary', 'global', ${version}, 1, 1);`);
   const digest = digestGitHubPublicationRequest({
     sessionId: "session",
     idempotencyKey: "accepted",
@@ -128,3 +129,49 @@ it("rolls back the draft columns with a refused schema publication", async () =>
     ).toBe(false);
   }
 });
+
+it.each([false, true])(
+  "continues draft column repair after a v28 version phase with lazy tables absent=%s",
+  async (absent) => {
+    const { options, pathname, before } = legacyDatabase(absent, false, 28);
+    await withStateMigrationBackupForTest(options, () => {
+      const migrated = repairOpenClawStateDatabaseSchema({
+        ...options,
+        versionMigrationOnly: true,
+      });
+      expect(migrated.warnings).toEqual([]);
+    });
+    // A completed version phase must remain recoverable under a fresh Doctor owner.
+    using witness = new DatabaseSync(pathname);
+    expect(witness.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: OPENCLAW_STATE_SCHEMA_VERSION,
+    });
+    expect(witness.prepare("SELECT * FROM github_publication_requests").get()).toEqual(before);
+    const pending = detectOpenClawStateDatabaseSchemaMigrations(options);
+    await withStateMigrationBackupForTest(options, async () => {
+      const repaired = await assertSqliteMigrationScopePreserved(
+        witness,
+        ["schema_meta", "config_machine_state", ...tables],
+        () => repairOpenClawStateDatabaseSchema(options),
+      );
+      expect(repaired.warnings).toEqual([]);
+      expect(pending).toContainEqual({ kind: "github-publication-draft-v28", path: pathname });
+      expect(witness.prepare("SELECT * FROM github_publication_requests").get()).toEqual({
+        ...before,
+        draft: null,
+      });
+      expect(witness.prepare("PRAGMA user_version").get()).toEqual({
+        user_version: OPENCLAW_STATE_SCHEMA_VERSION,
+      });
+      for (const table of tables.slice(1)) {
+        expect(witness.prepare(`PRAGMA table_info(${table})`).all().length > 0).toBe(!absent);
+      }
+      expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toEqual([]);
+      const reopened = openOpenClawStateDatabase(options);
+      expect(reopened.db.prepare("SELECT * FROM github_publication_requests").get()).toEqual({
+        ...before,
+        draft: null,
+      });
+    });
+  },
+);

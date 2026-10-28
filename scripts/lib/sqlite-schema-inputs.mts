@@ -31,6 +31,8 @@ import { DEPLOYED_FTS_ROWS_SCHEMA } from "../../src/state/openclaw-agent-transcr
 import { withLegacyStateHeadLayout } from "../../src/state/openclaw-state-db-schema-v26-layout.js";
 import { withLegacyStateWriteIndexes } from "../../src/state/openclaw-state-db-schema-v27-indexes.js";
 import { withLegacyLocalWorkspaceManifests } from "../../src/state/openclaw-state-db-schema-v31-workspace-manifests.js";
+import { withLegacyWorkerRetention } from "../../src/state/openclaw-state-db-schema-v32-session-retention.js";
+import { withLegacyDiskAuthority } from "../../src/state/openclaw-state-db-schema-v33-disk-authority.js";
 import {
   getOpenClawStateFeatureSchemaSql,
   listOpenClawStateFeatureSchemas,

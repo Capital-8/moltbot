@@ -43,6 +43,8 @@ export const SCHEMA_MIGRATION_BACKUP_TABLES: Record<
       "github_personal_publication_requests",
       "github_repository_publication_requests",
     ],
+    32: ["worker_environments", "worker_session_placements", "session_repository_workspaces"],
+    33: ["session_repository_workspaces", "worker_workspace_pending_results"],
     // Only shared-state version and content metadata change.
     30: [],
     31: [

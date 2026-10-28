@@ -11,6 +11,7 @@ const maintenanceReasons = {
   "legacy-cron-run-logs": "cron run history migration",
   "legacy-workspace": "workspace setup state migration",
   "legacy-session-store": "session store migration",
+  "historical-image-reserve-snapshots": "historical worker image snapshot migration",
 } as const;
 
 export class StartupMaintenanceRequiredError extends Error {

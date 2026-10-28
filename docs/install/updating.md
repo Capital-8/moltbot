@@ -86,6 +86,12 @@ Dropped writes do not consume the legacy progress budget, so reporting resumes
 when the pipe becomes writable. The worker must contain this repair; it does not
 change an older worker that is already running.
 
+Candidate Doctor completes recognized same-version shared-state repairs after
+backed-up version migration and before acquiring agent migration leases. A
+published schema version can still have additive work pending. Original backups,
+unknown-drift refusals, and state-only scoped migrations keep their existing
+behavior. The candidate must contain this ordering repair.
+
 Package verification checks file hashes, sizes, and required executability. When
 a non-executable dist file gains execute bits, verification continues with one
 warning listing the affected file count, provided it has no group/world write or

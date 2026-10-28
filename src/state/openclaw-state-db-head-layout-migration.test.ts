@@ -21,6 +21,7 @@ import {
   runOpenClawStateWriteTransaction,
 } from "./openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
+import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 import { assertSqliteMigrationScopePreserved } from "./sqlite-migration-scope.test-support.js";
 import { migrateSqliteTableWithoutRowid } from "./sqlite-table-layout-migration.js";
 
@@ -157,6 +158,9 @@ it.each(["runtime", "doctor"] as const)(
           "exec_approvals_config",
           "local_workspace_projections",
           "local_workspace_manifest_nodes",
+          "worker_environments",
+          "worker_session_placements",
+          "session_repository_workspaces",
           "sqlite_stat1",
           "sqlite_stat4",
         ],
@@ -335,4 +339,50 @@ it("batches creation heads without rewinding replayed or shared-key agent heads"
     dispatch.mockRestore();
     grant.finish();
   }
+});
+
+it("migrates main schema 31 worker rows without acquiring retained-disk ownership", async () => {
+  const env = { OPENCLAW_STATE_DIR: directories.make("worker-retention-v31-") };
+  const pathname = resolveOpenClawStateSqlitePath(env);
+  mkdirSync(path.dirname(pathname), { recursive: true });
+  {
+    using source = new DatabaseSync(pathname);
+    source.exec(OPENCLAW_STATE_SCHEMA_SQL);
+    source.exec(`ALTER TABLE worker_environments DROP COLUMN session_retention_json;
+      ALTER TABLE worker_session_placements DROP COLUMN repository_preparation;
+      PRAGMA user_version = 31;
+      INSERT INTO schema_meta (meta_key, role, schema_version, created_at, updated_at)
+        VALUES ('primary', 'global', 31, 1, 1);
+      INSERT INTO worker_environments
+        (environment_id, provider_id, profile_id, profile_snapshot_json, provision_operation_id,
+         state, created_at_ms, updated_at_ms, state_changed_at_ms)
+        VALUES ('existing-worker', 'fixture', 'fixture', '{}', 'provision-existing', 'idle', 1, 2, 2);
+      INSERT INTO worker_session_placements (session_id, agent_id, session_key, state, created_at_ms, updated_at_ms, state_changed_at_ms)
+        VALUES ('existing-session', 'main', 'agent:main:fixture', 'local', 1, 2, 2);`);
+  }
+  await withMigrationCustody(pathname, () => {
+    const result = repairOpenClawStateDatabaseSchema({ env, path: pathname });
+    expect(result.warnings).toEqual([]);
+    const { db } = openOpenClawStateDatabase({ env, path: pathname });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 32 });
+    expect(
+      db
+        .prepare(`SELECT environment_id, state, session_retention_json, created_at_ms, updated_at_ms
+      FROM worker_environments`)
+        .all(),
+    ).toEqual([
+      {
+        environment_id: "existing-worker",
+        state: "idle",
+        session_retention_json: null,
+        created_at_ms: 1,
+        updated_at_ms: 2,
+      },
+    ]);
+    expect(
+      db
+        .prepare(`SELECT session_id, state, repository_preparation FROM worker_session_placements`)
+        .all(),
+    ).toEqual([{ session_id: "existing-session", state: "local", repository_preparation: null }]);
+  });
 });

@@ -14,6 +14,8 @@ import { withLegacyStateHeadLayout } from "../../state/openclaw-state-db-schema-
 import { withLegacyStateWriteIndexes } from "../../state/openclaw-state-db-schema-v27-indexes.js";
 import { withLegacyPublicationDraft } from "../../state/openclaw-state-db-schema-v28-publication.js";
 import { withLegacyLocalWorkspaceManifests } from "../../state/openclaw-state-db-schema-v31-workspace-manifests.js";
+import { withLegacyWorkerRetention } from "../../state/openclaw-state-db-schema-v32-session-retention.js";
+import { withLegacyDiskAuthority } from "../../state/openclaw-state-db-schema-v33-disk-authority.js";
 import { listOpenClawStateFeatureSchemas } from "../../state/openclaw-state-feature-schema.js";
 import { RETAINED_STATE_TABLES } from "../../state/openclaw-state-schema-compatibility.js";
 import { OPENCLAW_STATE_SCHEMA_SQL } from "../../state/openclaw-state-schema.js";
@@ -61,12 +63,22 @@ export async function loadStatePortDescriptor(
     fact: (typeof statePostgresRuntime.expectedCatalog)[number],
   ): fact is typeof fact & { value: PortTable["columns"][number] } => fact.kind === "column";
   const historical = sourceVersion < 28;
+  const legacyRetention = sourceVersion < 32;
   const legacyWorkspace = sourceVersion < 31;
   const catalog = [
     ...statePostgresRuntime.expectedCatalog,
     ...(source?.expectedCatalog ?? []),
   ].filter(
     (fact) =>
+      (sourceVersion >= 33 || !isColumn(fact) || fact.value.name !== "disk_authority_json") &&
+      (!legacyRetention ||
+        !isColumn(fact) ||
+        ![
+          "session_retention_json",
+          "repository_preparation",
+          "confirmed_loss_recovery_json",
+          "recovery_json",
+        ].includes(fact.value.name)) &&
       (!legacyWorkspace ||
         (fact.table !== "local_workspace_manifest_nodes" &&
           (fact.table !== "local_workspace_projections" ||

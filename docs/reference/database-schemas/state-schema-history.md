@@ -58,6 +58,29 @@ Earlier beta releases first included schema 1 in `v2026.5.30-beta.1`, schema 2
 in `v2026.7.2-beta.1`, schema 3 in `v2026.7.2-beta.2`, schema 5 in
 `v2026.7.2-beta.4`, and schema 6 in `v2026.7.2-beta.5`.
 
+### State schema 33
+
+Schema 33 adds nullable disk-authority metadata to session repository workspaces
+and their pending results. Existing rows remain mirror-authoritative; migration
+does not reinterpret unresolved work. The existing owners bind eligible Azure
+Sandbox repository workspaces to their exact session disk and record the selected
+settlement mode before execution. SQLite and PostgreSQL preserve the same facts.
+Older mirror-only writers refuse this state. Rollback requires exclusive verified
+pre-upgrade backup recovery; Gateway backups do not contain later disk-only edits.
+The agent schema is unchanged.
+
+### State schema 32
+
+Schema 32 adds nullable retained-session disk state on worker environments and
+preserves historical repository-preparation evidence on imported placements.
+It also records confirmed worker-loss lineage and repository recovery state.
+Native binding replacement admits available quoted history before committing its
+exact predecessor binding. Existing unassociated lost bindings keep their explicit
+recovery refusal. Existing environments remain ephemeral. Main's schema 27 index migration and
+schemas 28–31 remain unchanged. Older binaries refuse retained-disk state rather
+than reclaiming session-private resources. SQLite and PostgreSQL use the same
+version fence; rollback requires the verified pre-upgrade backup and matching build.
+
 ### State schema 31
 
 Schema 31 moves local sandbox checkpoint baselines from complete manifest documents
@@ -139,6 +162,10 @@ repository-checkpoint GitHub publication request tables. New requests record
 open or draft creation explicitly. Previously accepted requests retain null,
 their original request digest, and their original draft behavior after recovery.
 Updating an existing PR does not change its state.
+
+SQLite Doctor also finishes this additive change when the database already publishes
+schema 28 or later but an existing publication table lacks `draft`. It retains
+accepted request digests and leaves absent publication tables uncreated.
 
 SQLite and PostgreSQL add the field transactionally without rewriting retained
 requests. Absent first-use tables remain absent. The declared backup scope is
