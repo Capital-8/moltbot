@@ -1,6 +1,6 @@
 name: Android build-only Gradle profile
 
-run-name: Android build-only profile (60b52d9d21d1)
+run-name: Android four/eight CPU comparison (60b52d9d21d1)
 
 on:
   workflow_dispatch:
@@ -14,7 +14,21 @@ env:
 
 jobs:
   profile:
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.variant }} sample ${{ matrix.sample }}
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        sample: [1, 2, 3]
+        variant: [github-four-cpu, blacksmith-eight-cpu]
+        include:
+          - variant: github-four-cpu
+            runner: ubuntu-24.04
+            cpus: 4
+          - variant: blacksmith-eight-cpu
+            runner: blacksmith-32vcpu-ubuntu-2404
+            cpus: 8
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - name: Checkout diagnostic tooling
@@ -56,13 +70,17 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/android-profile-gradle-home
           PROFILE_OUTPUT: ${{ runner.temp }}/android-gradle-profile
+          PROFILE_EXPECTED_CPUS: ${{ matrix.cpus }}
+          PROFILE_VARIANT: ${{ matrix.variant }}
+          PROFILE_SAMPLE: ${{ matrix.sample }}
+          PROFILE_RUNNER_LABEL: ${{ matrix.runner }}
         run: python3 "$RUNNER_TEMP/android-gradle-build-profile.py"
 
       - name: Retain local Gradle profiles and resource evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: android-gradle-profile-${{ github.run_id }}
+          name: android-gradle-profile-${{ github.run_id }}-${{ matrix.variant }}-${{ matrix.sample }}
           path: ${{ runner.temp }}/android-gradle-profile
           if-no-files-found: error
           retention-days: 14

@@ -95,6 +95,12 @@ def main():
         "signing": "Disposable synthetic key; no store credentials or publishing commands",
         "cpuCount": os.cpu_count(),
         "cpuAffinity": sorted(os.sched_getaffinity(0)),
+        "cpuModel": next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")), "unknown"),
+        "expectedCpus": int(os.environ["PROFILE_EXPECTED_CPUS"]),
+        "variant": os.environ["PROFILE_VARIANT"],
+        "sample": int(os.environ["PROFILE_SAMPLE"]),
+        "runnerLabel": os.environ["PROFILE_RUNNER_LABEL"],
+        "toolVersions": {name: subprocess.check_output(command, text=True, stderr=subprocess.STDOUT).strip() for name, command in {"node": ["node", "--version"], "java": ["java", "-version"]}.items()},
         "runner": {key: os.environ.get(key) for key in ["RUNNER_NAME", "RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion"]},
         "cgroup": {name: (Path("/sys/fs/cgroup") / name).read_text().strip() for name in ["cpu.max", "memory.max", "cpuset.cpus.effective"] if (Path("/sys/fs/cgroup") / name).is_file()},
         "hostBefore": sample(),
@@ -117,6 +123,8 @@ def main():
         "ORG_GRADLE_PROJECT_OPENCLAW_ANDROID_WEAR_VERSION_CODE": WEAR_CODE,
     })
     try:
+        if min(facts["cpuCount"], len(facts["cpuAffinity"])) != facts["expectedCpus"]:
+            raise ValueError("Runner CPU allocation does not match the selected comparison arm")
         subprocess.run(["keytool", "-genkeypair", "-storetype", "PKCS12", "-keystore", str(keystore), "-storepass", "android", "-keypass", "android", "-alias", "profile", "-keyalg", "RSA", "-keysize", "2048", "-validity", "2", "-dname", "CN=Disposable Android Build Profile"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         keystore.chmod(0o600)
         facts["signingPreflight"] = measure("signing-preflight", [
