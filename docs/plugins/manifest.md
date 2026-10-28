@@ -411,6 +411,20 @@ surfaces. Repository builds include declared entries and rewrite emitted manifes
 paths to the corresponding JavaScript artifacts. Plugin reload owns invalidation;
 catalog requests do not poll files for changes.
 
+### Repository integration policy
+
+`contracts.repositoryIntegrations: ["repository"]` declares the plugin as the
+repository policy owner. Its runtime registers one version-1 implementation with
+`api.registerRepositoryIntegration`. Only one enabled manifest may declare this
+contract. A missing or failed runtime registration is an error, rather than an
+ordinary-policy fallback. Disabling an integration requires the existing config
+owner; callback lifetime ends with its plugin instance.
+
+This contract does not grant identity or repository access. The host supplies
+authenticated connection and current session/profile capabilities; the plugin
+provides its external admission policy. See the
+[repository integration SDK entrypoint](/plugins/sdk-entrypoints).
+
 ### Cloud worker profile suggestions
 
 `contracts.workerProfileSuggestions` lists worker provider IDs whose plugin exposes

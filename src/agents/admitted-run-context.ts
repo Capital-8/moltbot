@@ -51,6 +51,8 @@ export type AdmittedRunContext = Readonly<{
 
 export type AdmittedRunOperatorAuthority = Readonly<{
   profileId: string;
+  /** Original broker-attested credential lease; never selected again by profile. */
+  repositoryCredentialSource?: import("../gateway/github-user-identity.types.js").RepositoryCredentialSource;
   /** Host-captured original input; claim/occurrence owners revalidate it for continuations. */
   recoverySnapshot?: import("../gateway/operator-run-recovery-source.codec.js").OperatorRunRecoverySnapshot;
   /** Existing immutable policy and link; accepted-input owners may retain them for recovery. */
@@ -113,6 +115,7 @@ export function createAdmittedRunOperatorAuthority(
   const readRoleFacts = source.readCurrentRoleFacts;
   const authority = Object.freeze({
     profileId: source.profileId,
+    repositoryCredentialSource: source.repositoryCredentialSource,
     recoverySnapshot: source.recoverySnapshot
       ? freezeJsonSnapshot(structuredClone(source.recoverySnapshot))
       : undefined,

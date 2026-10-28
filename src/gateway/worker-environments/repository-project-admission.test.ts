@@ -1,6 +1,10 @@
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
-import type { PreparedGitHubSourceReadIdentity } from "../../agents/github-read-identity.js";
+import {
+  annotateGitHubIdentityError,
+  getGitHubIdentityErrorOrigin,
+  type PreparedGitHubSourceReadIdentity,
+} from "../../agents/github-read-identity.js";
 import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
@@ -704,11 +708,17 @@ describe("repository project admission", () => {
 
   it("does not expose native credential subprocess diagnostics as preparation errors", async () => {
     mocks.prepareGitHubReadIdentity.mockRejectedValueOnce(
-      new Error("synthetic-private-diagnostic"),
+      annotateGitHubIdentityError(
+        new Error("synthetic-private-diagnostic"),
+        "native-reader-failed",
+      ),
     );
-    await expect(prepareRepositoryWorkerProjectSource(initial)).rejects.toThrow(
-      "could not be verified",
-    );
+    await expect(
+      prepareRepositoryWorkerProjectSource(initial).catch((error: unknown) => {
+        expect(getGitHubIdentityErrorOrigin(error)).toBe("native-reader-failed");
+        throw error;
+      }),
+    ).rejects.toThrow("could not be verified");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

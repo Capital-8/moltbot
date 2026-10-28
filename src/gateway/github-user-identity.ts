@@ -9,9 +9,8 @@ import { resolveConfiguredGitHubHost } from "../agents/github-host.js";
 import type { GatewayAuthConfig, GatewayTrustedProxyConfig } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { pruneMapToMaxSize } from "../infra/map-size.js";
-import { parseEnterpriseGitHubPrincipal } from "../shared/enterprise-github-principal.js";
+import { getRepositoryIntegration } from "../plugins/repository-integration-runtime.js";
 import { createLazyPromise, getOrCreatePromise } from "../shared/lazy-promise.js";
-import { normalizeVerifiedEmail } from "../shared/verified-email.js";
 import { resolveCanonicalCachedGitHubIdentity } from "../state/user-profile-reads.js";
 import {
   ensureCanonicalEnterpriseGitHubProfile,
@@ -333,25 +332,42 @@ function resolveGitHubUserIdentityById(
   return promise.then((identity) => ({ identity, refreshed: true }));
 }
 
-/** An Enterprise GitHub principal is authoritative only after trusted-proxy admission. */
-export function resolveTrustedEnterpriseGitHubAccountId(params: {
+/** Interpret repository metadata only through the selected lifetime-bound integration. */
+export function resolveRepositoryConnectionIdentity(params: {
   authResult: Pick<GatewayAuthResult, "ok" | "method" | "user">;
   authConfig?: GatewayAuthConfig;
   config?: OpenClawConfig;
-}): number | undefined {
-  if (
-    !params.authResult.ok ||
-    params.authResult.method !== "trusted-proxy" ||
-    params.authConfig?.mode !== "trusted-proxy" ||
-    normalizeLowercaseStringOrEmpty(params.authConfig.trustedProxy?.userHeader) !==
-      "x-factory-principal"
-  ) {
+  requestHeaders?: IncomingHttpHeaders;
+  assertCurrent?: () => void;
+}) {
+  if (!params.authResult.ok) {
     return undefined;
   }
-  const principal = parseEnterpriseGitHubPrincipal(params.authResult.user ?? "");
-  return principal?.host === resolveConfiguredGitHubHost(params.config)
-    ? principal.accountId
-    : undefined;
+  const integration = getRepositoryIntegration(params.config);
+  if (!integration) {
+    return undefined;
+  }
+  const assertCurrent = () => {
+    params.assertCurrent?.();
+    if (getRepositoryIntegration(params.config) !== integration) {
+      throw new Error("Repository identity owner changed");
+    }
+  };
+  assertCurrent();
+  const identity = integration.resolveConnectionIdentity({
+    authentication: {
+      ok: params.authResult.ok,
+      method: params.authResult.method,
+      user: params.authResult.user,
+      mode: params.authConfig?.mode,
+      userHeader: params.authConfig?.trustedProxy?.userHeader,
+    },
+    headers: params.requestHeaders ?? {},
+    host: resolveConfiguredGitHubHost(params.config),
+    assertCurrent,
+  });
+  assertCurrent();
+  return identity;
 }
 
 export function createAuthenticatedGitHubIdentitySync(params: {
@@ -360,6 +376,7 @@ export function createAuthenticatedGitHubIdentitySync(params: {
   config?: OpenClawConfig;
   requestHeaders?: IncomingHttpHeaders;
   assertCurrent?: () => void;
+  repositoryIdentity?: import("../plugins/repository-integration.types.js").RepositoryConnectionIdentity;
 }): AuthenticatedGitHubIdentitySync | undefined {
   const options = { assertCurrent: params.assertCurrent };
   // A retryable GitHub outage may reuse only an exact binding verified earlier.
@@ -372,56 +389,30 @@ export function createAuthenticatedGitHubIdentitySync(params: {
     params.assertCurrent?.();
     return cached;
   };
-  // Metadata is accepted only from the same trusted hop that asserted the immutable account.
-  const accountId = resolveTrustedEnterpriseGitHubAccountId(params);
-  if (accountId) {
-    const rawLogin = firstHeaderValue(params.requestHeaders?.["x-factory-github-login"]);
-    const login = rawLogin && rawLogin.length <= 39 ? normalizeGitHubLogin(rawLogin) : undefined;
-    const rawName = firstHeaderValue(params.requestHeaders?.["x-factory-github-name"]);
-    const name =
-      rawName && rawName.length <= 128 && !/[\p{Cc}\p{Cf}]/u.test(rawName)
-        ? rawName.trim()
-        : undefined;
-    const rawAvatar = firstHeaderValue(params.requestHeaders?.["x-factory-github-avatar-url"]);
-    const email = normalizeVerifiedEmail(params.requestHeaders?.["x-factory-github-email"]);
-    let avatarUrl: string | undefined;
-    if (rawAvatar && rawAvatar.length <= 512) {
-      try {
-        const url = new URL(rawAvatar);
-        if (
-          url.origin === `https://${resolveConfiguredGitHubHost(params.config)}` &&
-          url.pathname === `/avatars/u/${accountId}` &&
-          !url.username &&
-          !url.password &&
-          !url.hash
-        ) {
-          avatarUrl = url.href;
-        }
-      } catch {
-        /* Invalid metadata never grants authority. */
-      }
-    }
-    if (login) {
-      return createLazyPromise(async () => {
-        params.assertCurrent?.();
-        const profile = await ensureCanonicalEnterpriseGitHubProfile(
-          params.authResult.user!,
-          name || login,
-          options,
-          { login, email },
-        );
-        params.assertCurrent?.();
-        return {
-          profileId: profile.id,
-          updatedAt: profile.updatedAt,
-          enterprise: {
-            accountId,
-            login,
-            ...(avatarUrl ? { avatarUrl } : {}),
-          },
-        };
-      });
-    }
+  const repositoryIdentity = params.authResult.ok
+    ? (params.repositoryIdentity ?? resolveRepositoryConnectionIdentity(params))
+    : undefined;
+  const enterprise = repositoryIdentity?.profile;
+  if (enterprise) {
+    return createLazyPromise(async () => {
+      params.assertCurrent?.();
+      const profile = await ensureCanonicalEnterpriseGitHubProfile(
+        enterprise.principal,
+        enterprise.name ?? enterprise.login,
+        options,
+        { login: enterprise.login, email: enterprise.email },
+      );
+      params.assertCurrent?.();
+      return {
+        profileId: profile.id,
+        updatedAt: profile.updatedAt,
+        enterprise: {
+          accountId: repositoryIdentity!.accountId,
+          login: enterprise.login,
+          ...(enterprise.avatarUrl ? { avatarUrl: enterprise.avatarUrl } : {}),
+        },
+      };
+    });
   }
   const tailscaleLogin = params.authResult.tailscaleIdentity
     ? classifyTailscaleLogin(params.authResult.tailscaleIdentity.login)

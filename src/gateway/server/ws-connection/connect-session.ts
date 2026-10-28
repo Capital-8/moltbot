@@ -27,7 +27,7 @@ import { prepareGatewayRecipientProfile } from "../../expected-profile.js";
 import { shouldUseGatewayOwnerProfile } from "../../gateway-owner-profile.js";
 import {
   createAuthenticatedGitHubIdentitySync,
-  resolveTrustedEnterpriseGitHubAccountId,
+  resolveRepositoryConnectionIdentity,
 } from "../../github-user-identity.js";
 import { getRemoteControlUiIngressContext } from "../../ingress-attribution.js";
 import {
@@ -184,17 +184,22 @@ export async function attachAuthenticatedGatewayConnect(
       : connId
     : undefined;
   const authenticatedUserId = normalizeOptionalString(authResult.user);
-  const authenticatedFactoryGitHubAccountId = resolveTrustedEnterpriseGitHubAccountId({
+  const profileLifecycle = createGatewayConnectProfileLifecycle(context, state);
+  const repositoryIdentity = resolveRepositoryConnectionIdentity({
     authResult,
     authConfig: context.configSnapshot.gateway?.auth,
     config: context.configSnapshot,
+    requestHeaders: context.handler.upgradeReq.headers,
+    assertCurrent: profileLifecycle.assertCurrent,
   });
+  const authenticatedGitHubAccountId = repositoryIdentity?.accountId;
+  const authenticatedRepositoryCredentialSource = repositoryIdentity?.credentialSource;
   const tailscaleLogin = authResult.tailscaleIdentity
     ? classifyTailscaleLogin(authResult.tailscaleIdentity.login)
     : undefined;
   const authenticatedUserIsTailscaleProvider = tailscaleLogin?.kind === "provider";
-  const profileLifecycle = createGatewayConnectProfileLifecycle(context, state);
   const resolveAuthenticatedGitHubIdentity = createAuthenticatedGitHubIdentitySync({
+    repositoryIdentity,
     authResult,
     authConfig: context.configSnapshot.gateway?.auth,
     config: context.configSnapshot,
@@ -234,15 +239,6 @@ export async function attachAuthenticatedGatewayConnect(
   // Identity-derived scopes must be capped only after their durable profile is known.
   // Configured roles fail closed if profile storage or provider verification is unavailable.
   const scopesStartedAt = performance.now();
-  const effectiveScopes = remoteIngressPrincipal
-    ? deviceScopes
-    : resolveEffectiveConnectionScopes({
-        role,
-        deviceScopes,
-        verifiedIdentity: state.authPolicy.verifiedIdentity,
-        identityScopes: context.configSnapshot.gateway?.auth?.identityScopes,
-        upgradeReq: context.handler.upgradeReq,
-      });
   const rolePolicy = remoteIngressPrincipal
     ? remoteIngressPrincipal.operatorRolePolicy
     : role === "operator" && !operatorOwner
@@ -253,6 +249,18 @@ export async function attachAuthenticatedGatewayConnect(
           preparedProfile?.authority.githubLogin ?? null,
         )
       : undefined;
+  const effectiveScopes = remoteIngressPrincipal
+    ? deviceScopes
+    : resolveEffectiveConnectionScopes({
+        role,
+        deviceScopes,
+        verifiedIdentity: state.authPolicy.verifiedIdentity,
+        identityScopes: context.configSnapshot.gateway?.auth?.identityScopes,
+        verifiedIdentityWrite:
+          Boolean(preparedProfile && rolePolicy?.verifiedIdentityWrite) &&
+          (authResult.method === "trusted-proxy" || authResult.method === "tailscale"),
+        upgradeReq: context.handler.upgradeReq,
+      });
   const scopes = rolePolicy
     ? intersectOperatorScopes(effectiveScopes, rolePolicy.scopes)
     : effectiveScopes;
@@ -415,7 +423,8 @@ export async function attachAuthenticatedGatewayConnect(
     authPolicy: state.authPolicy,
     presenceKey,
     ...(authenticatedUserId ? { authenticatedUserId } : {}),
-    ...(authenticatedFactoryGitHubAccountId ? { authenticatedFactoryGitHubAccountId } : {}),
+    ...(authenticatedGitHubAccountId ? { authenticatedGitHubAccountId } : {}),
+    ...(authenticatedRepositoryCredentialSource ? { authenticatedRepositoryCredentialSource } : {}),
     ...(authenticatedUserIsTailscaleProvider ? { authenticatedUserIsTailscaleProvider: true } : {}),
     ...(authenticatedUserProfile ? { authenticatedUserProfile } : {}),
     clientIp: reportedClientIp,

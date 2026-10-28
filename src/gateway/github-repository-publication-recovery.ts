@@ -6,7 +6,11 @@ import { decodeGitHubPublicationRequester } from "../state/github-publication-re
 import { readGitHubPublicationInWorker } from "../state/github-publication-worker.js";
 import { executeExistingOpenClawStateRead } from "../state/openclaw-state-db-readonly.js";
 import { OpenClawStateLeaseAcquisitionError } from "../state/openclaw-state-lease-error.js";
-import { createGitHubPublicationExecutionIdentity } from "./github-publication-execution-identity.js";
+import { matchesCurrentGitHubPublicationIdentity } from "./github-publication-availability.js";
+import {
+  createGitHubPublicationExecutionIdentity,
+  prepareGitHubPublicationExecutionIdentity,
+} from "./github-publication-execution-identity.js";
 import { GitHubPublicationRequesterUnavailableError } from "./github-publication-failure.js";
 import { GitHubPublicationRecoveryPendingError } from "./github-publication-git-index.js";
 import { reconcileGitHubPublicationPullRequest } from "./github-publication-pull-requests.js";
@@ -78,8 +82,29 @@ export async function settleDeniedRepositoryGitHubPublication(params: {
     using _ = { [Symbol.dispose]: () => preparedOwner.release() };
 
     assertCustody();
-    const { assertCurrent, refreshIdentity } = createGitHubPublicationExecutionIdentity({
+    await using executionIdentity = createGitHubPublicationExecutionIdentity({
       row,
+      identity: {
+        prepare: async () => {
+          const actor = requester?.actor;
+          const ownerId = execution.row.execution_id;
+          if (!ownerId) {
+            throw new GitHubPublicationRecoveryPendingError(
+              "GitHub publication execution custody is unavailable.",
+            );
+          }
+          return await prepareGitHubPublicationExecutionIdentity({
+            row,
+            actor,
+            lifecycleRevision: row.session_lifecycle_revision,
+            executionKind: "repository",
+            ownerId,
+            assertCurrent: assertCustody,
+          });
+        },
+        isCurrent: (identity) =>
+          matchesCurrentGitHubPublicationIdentity({ agentId: row.agent_id, identity }),
+      },
       validateAuthority: () => {
         assertCustody();
         return execution.ownsExecution();
@@ -88,6 +113,7 @@ export async function settleDeniedRepositoryGitHubPublication(params: {
         assertReceiptOwner(row, preparedOwner);
       },
     });
+    const { assertCurrent, refreshIdentity } = executionIdentity;
     let url: string | undefined;
     try {
       assertCurrent();
@@ -257,21 +283,33 @@ export function createRepositoryGitHubPublicationRecovery(params: {
           ) {
             continue;
           }
-          await placements.withRepositoryWorkspaceReservation(
-            { sessionId: row.session_id, sessionKey: row.session_key, agentId: row.agent_id },
-            async (assertCurrent) => {
-              const preparedOwner = await prepareReceiptOwner(row);
-              using _ = { [Symbol.dispose]: () => preparedOwner.release() };
-              assertCurrent();
-              const owner = resolveReceiptOwner(row, preparedOwner);
-              if (!owner) {
-                // Keep the reservation through settlement; retirement needs only owner custody.
-                await failStaleRepositoryGitHubPublicationAsync(row, params.assertCurrent);
-                return;
-              }
-              await params.execute(row, assertCurrent);
-            },
-          );
+          const publish = async (assertCurrent: () => void) => {
+            const preparedOwner = await prepareReceiptOwner(row);
+            using _ = { [Symbol.dispose]: () => preparedOwner.release() };
+            assertCurrent();
+            const owner = resolveReceiptOwner(row, preparedOwner);
+            if (!owner) {
+              // Keep the reservation through settlement; retirement needs only owner custody.
+              await failStaleRepositoryGitHubPublicationAsync(row, params.assertCurrent);
+              return;
+            }
+            await params.execute(row, assertCurrent);
+          };
+          if (row.checkpoint_ref) {
+            // Keep pending-result and placement-identity admission guards, then release
+            // the mutable workspace. The bound snapshot needs only publication/move
+            // exclusion and its existing effect authority while later turns run.
+            await placements.withRepositoryWorkspaceReservation(
+              { sessionId: row.session_id, sessionKey: row.session_key, agentId: row.agent_id },
+              async (assertCurrent) => assertCurrent(),
+            );
+            await placements.withWorkspaceExclusion(row.session_id, publish);
+          } else {
+            await placements.withRepositoryWorkspaceReservation(
+              { sessionId: row.session_id, sessionKey: row.session_key, agentId: row.agent_id },
+              publish,
+            );
+          }
         } catch (error) {
           if (
             error instanceof SessionWorkspaceReservationBusyError ||

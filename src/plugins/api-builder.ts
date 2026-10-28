@@ -21,6 +21,7 @@ const noops = {
   registerChannel: () => {},
   registerGatewayMethod: () => {},
   registerGatewayAccessPolicy: () => {},
+  registerRepositoryIntegration: () => {},
   registerSessionCatalog: () => {},
   registerReload: () => {},
   registerNodeHostCommand: () => {},

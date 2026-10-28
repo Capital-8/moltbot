@@ -130,13 +130,15 @@ afterEach(() => {
 });
 
 describe("authenticated GitHub identity sync", () => {
-  it("adopts trusted Enterprise GitHub account metadata through the canonical profile worker and preserves a chosen name", async () => {
+  it("adopts admitted repository identity through the canonical profile worker and preserves a chosen name", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const params: Parameters<typeof createAuthenticatedGitHubIdentitySync>[0] = {
         authResult: { ok: true, method: "trusted-proxy", user: "github:ghe.example.test:101" },
         config: { gateway: { github: { host: "ghe.example.test" } } },
-        authConfig: { mode: "trusted-proxy", trustedProxy: { userHeader: "x-factory-principal" } },
-        requestHeaders: { "x-factory-github-login": "ada", "x-factory-github-name": "Ada" },
+        repositoryIdentity: {
+          accountId: 101,
+          profile: { principal: "github:ghe.example.test:101", login: "ada", name: "Ada" },
+        },
       };
       const sync = createAuthenticatedGitHubIdentitySync(params);
       assert(sync);
@@ -146,9 +148,13 @@ describe("authenticated GitHub identity sync", () => {
       setDisplayName(result.profileId, "Chosen name");
       const nextSync = createAuthenticatedGitHubIdentitySync({
         ...params,
-        requestHeaders: {
-          "x-factory-github-login": "ada",
-          "x-factory-github-name": "Changed upstream",
+        repositoryIdentity: {
+          accountId: 101,
+          profile: {
+            principal: "github:ghe.example.test:101",
+            login: "ada",
+            name: "Changed upstream",
+          },
         },
       });
       assert(nextSync);
@@ -156,20 +162,8 @@ describe("authenticated GitHub identity sync", () => {
       expect(getUserProfileListItem(result.profileId)).toMatchObject({
         displayName: "Chosen name",
       });
-      for (const config of [{}, { gateway: { github: { host: "other.example.test" } } }]) {
-        expect(createAuthenticatedGitHubIdentitySync({ ...params, config })).toBeUndefined();
-      }
       expect(
-        createAuthenticatedGitHubIdentitySync({
-          ...params,
-          authResult: { ...params.authResult, method: "token" },
-        }),
-      ).toBeUndefined();
-      expect(
-        createAuthenticatedGitHubIdentitySync({
-          ...params,
-          authResult: { ...params.authResult, user: "github:ghe.example.test:9007199254740992" },
-        }),
+        createAuthenticatedGitHubIdentitySync({ ...params, authResult: { ok: false } }),
       ).toBeUndefined();
     });
   });

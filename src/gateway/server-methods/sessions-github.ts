@@ -20,6 +20,8 @@ import { performSessionGitHubPreparation } from "../github-pr-workspace-preparat
 import { performSessionGitHubAction } from "../github-publication-actions.js";
 import {
   prepareCurrentGitHubPublicationIdentity,
+  repositoryPublicationPreflightActor,
+  repositoryPublicationPreflightCredential,
   matchesCurrentGitHubPublicationIdentity,
   prepareCurrentGitHubPublicationOptionsIdentity,
   hasSupportedGitHubPublicationTarget,
@@ -212,7 +214,28 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
       const session = { agentId: loaded.agentId, sessionKey: loaded.canonicalKey };
       const admitted = await prepareGitHubPublicationRequesterV2(options, session);
       using _ = { [Symbol.dispose]: admitted.release };
-      const identity = await prepareCurrentGitHubPublicationIdentity(session.agentId);
+      const assertRequester = () => {
+        selected.readCurrent();
+        admitted.requester.assertCurrent();
+      };
+      const identity = await prepareCurrentGitHubPublicationIdentity(
+        session.agentId,
+        repositoryPublicationPreflightActor(
+          admitted.requester,
+          session.sessionKey,
+          assertRequester,
+        ),
+        repositoryPublicationPreflightCredential({
+          ...session,
+          sessionId: loaded.entry.sessionId,
+          lifecycleRevision: loaded.entry.lifecycleRevision ?? null,
+          assertCurrent: assertRequester,
+        }),
+      );
+      await using identityLifetime = {
+        identity,
+        [Symbol.asyncDispose]: async () => identity.revoke?.(),
+      };
       const assertCurrent = () => {
         selected.readCurrent();
         admitted.requester.assertCurrent();
@@ -238,7 +261,7 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
         async (assertOwned) =>
           refreshManagedWorkspaceBase({
             owner,
-            identity,
+            identity: identityLifetime.identity,
             sandbox,
             signal: options.signal,
             assertCurrent: () => {
@@ -366,6 +389,7 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
             prepareCurrentGitHubPublicationOptionsIdentity(
               read.session.agentId,
               assertResponseCurrent,
+              read.repositoryActor,
             ).catch((error: unknown) => {
               sharedUnavailableReason =
                 error instanceof GitHubIdentityError ? error.reason : "unverified";

@@ -2,7 +2,6 @@ import { isDeepStrictEqual } from "node:util";
 import type { GitHubPublicationPublisher } from "../../packages/gateway-protocol/src/schema/session-github-publication.js";
 import {
   matchesPreparedGitHubPublicationIdentity,
-  prepareGitHubPublicationIdentity,
   prepareGitHubPublicationOptionsIdentity,
   type PreparedGitHubPublicationIdentity,
 } from "../agents/github-tool-identity.js";
@@ -41,10 +40,19 @@ import {
 } from "./github-publication-failure.js";
 import { GitHubPublicationRecoveryPendingError } from "./github-publication-git-index.js";
 import { parseGitHubRemoteUrl } from "./github-remote.js";
+import {
+  preparePublicationGitHubIdentity,
+  type RepositoryPublicationActor,
+  type RepositoryPublicationCredential,
+} from "./repository-integration-identity.js";
 import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import { findCanonicalStoreMatch } from "./session-utils-store-selection.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "./session-utils-store-worker.js";
 
+export {
+  repositoryPublicationPreflightCredential,
+  repositoryPublicationPreflightActor,
+} from "./repository-integration-identity.js";
 // Discovery is best effort for 15 seconds; publication resolves the current Git repository again.
 const repositoryTargets = createStaleWhileRevalidateCache<boolean>({
   maxEntries: 256,
@@ -87,27 +95,35 @@ export function currentGitHubPublicationConfig() {
 
 export async function prepareCurrentGitHubPublicationIdentity(
   agentId: string,
-  assertCurrent?: () => void,
+  actor?: RepositoryPublicationActor | (() => void),
+  credential?: RepositoryPublicationCredential,
+  allowAppInstallation = true,
 ): Promise<PreparedGitHubPublicationIdentity> {
+  const assertCurrent = typeof actor === "function" ? actor : actor?.assertCurrent;
   assertCurrent?.();
+  credential?.assertCurrent();
   await requestCurrentGitHubOAuthRefresh(agentId);
   assertCurrent?.();
-  const snapshot = publicationConfigSnapshot();
-  return await prepareGitHubPublicationIdentity({
-    config: snapshot.config,
-    sourceConfig: snapshot.sourceConfig,
+  credential?.assertCurrent();
+  return preparePublicationGitHubIdentity(
+    publicationConfigSnapshot(),
     agentId,
-    assertCurrent,
-  });
+    actor,
+    credential,
+    allowAppInstallation,
+  );
 }
 
 export async function prepareCurrentGitHubPublicationOptionsIdentity(
   agentId: string,
   assertCurrent?: () => void,
+  actor?: RepositoryPublicationActor,
 ) {
   assertCurrent?.();
+  actor?.assertCurrent();
   await requestCurrentGitHubOAuthRefresh(agentId);
   assertCurrent?.();
+  actor?.assertCurrent();
   const snapshot = publicationConfigSnapshot();
   return await prepareGitHubPublicationOptionsIdentity({
     config: snapshot.config,

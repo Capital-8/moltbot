@@ -5,3 +5,6 @@ type AuthenticatedGitHubIdentitySyncResult = CachedGitHubIdentity & {
   enterprise?: { accountId: number; login: string; avatarUrl?: string };
 };
 export type AuthenticatedGitHubIdentitySync = () => Promise<AuthenticatedGitHubIdentitySyncResult>;
+
+/** Integration-attested original credential lease; never a token or caller-selected wire claim. */
+export type RepositoryCredentialSource = Readonly<{ id: string; expiresAtMs: number }>;

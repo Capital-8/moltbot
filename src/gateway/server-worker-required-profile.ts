@@ -7,6 +7,7 @@ import {
 import { composeSessionSourceAssertion } from "../config/sessions/session-source-authority.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { bindGatewayDeviceRevocation } from "./device-revocation.js";
+import { repositoryChatDispatchCredentialReader } from "./repository-dispatch.js";
 import { withGatewayWorkerSessionAdmission } from "./server-worker-placement-dispatch-admission.js";
 import { ensureSessionWorkspaceForPlacement } from "./session-lifecycle-preparation.js";
 import type { coordinateWorkerPlacementDispatch } from "./worker-environments/placement-dispatch-coordinator.js";

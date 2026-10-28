@@ -11,6 +11,8 @@ import { readGitHubPublicationSessionLifecycleInWorker } from "../state/github-p
 import {
   assertExpectedSharedGitHubPublisher,
   prepareCurrentGitHubPublicationIdentity,
+  repositoryPublicationPreflightCredential,
+  repositoryPublicationPreflightActor,
   readGitHubPublicationWorktreeOwner,
   type PublicationSessionIdentity,
   prepareGitHubPublicationSession,
@@ -109,6 +111,7 @@ export function createGitHubPublicationCoordinatorMethods(params: {
     validateExecution: () => boolean,
     assertInvocationCurrent?: () => void,
     invocationSignal?: AbortSignal,
+    invocationRequester?: GitHubPublicationRequesterV2,
   ) => Promise<SessionGitHubPublicationResult>;
   recordRequestingRun: (requestId: string, runId: string) => void;
 }) {
@@ -137,6 +140,7 @@ export function createGitHubPublicationCoordinatorMethods(params: {
           validateExecution,
           input.requester.assertInvocationCurrent,
           input.requester.signal,
+          input.requester,
         );
       } catch (error) {
         if (
@@ -293,11 +297,27 @@ export function createGitHubPublicationCoordinatorMethods(params: {
       }
     }
     assertRequester();
-    const identity = await prepareCurrentGitHubPublicationIdentity(input.agentId);
+    const identity = await prepareCurrentGitHubPublicationIdentity(
+      input.agentId,
+      repositoryPublicationPreflightActor(input.requester, input.sessionKey, assertRequester),
+      repositoryPublicationPreflightCredential({
+        agentId: input.agentId,
+        sessionKey: input.sessionKey,
+        sessionId,
+        lifecycleRevision,
+        assertCurrent: assertRequester,
+      }),
+    );
+    await using identityLifetime = {
+      identity,
+      [Symbol.asyncDispose]: async () => {
+        await identity.revoke?.();
+      },
+    };
     assertRequester();
     assertExpectedSharedGitHubPublisher(
       expected,
-      { source: identity.source, ...identity.account },
+      { source: identityLifetime.identity.source, ...identityLifetime.identity.account },
       existing
         ? undefined
         : {

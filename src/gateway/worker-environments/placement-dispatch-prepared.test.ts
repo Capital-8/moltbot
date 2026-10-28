@@ -1,17 +1,8 @@
-import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import vm from "node:vm";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
-import {
-  GATEWAY_CLIENT_IDS,
-  GATEWAY_CLIENT_MODES,
-} from "../../../packages/gateway-protocol/src/client-info.js";
-import {
-  WORKER_EXECUTION_AUTHORITY_PROTOCOL_FEATURE,
-  WORKER_EXECUTION_CONTEXT_PROTOCOL_FEATURE,
-} from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { WORKER_EXECUTION_CONTEXT_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { createGitHubReadIdentity } from "../../agents/github-read-identity.js";
 import { getRuntimeConfig } from "../../config/config.js";
@@ -565,4 +556,16 @@ describe("prepared worker dispatch", () => {
       expect(tunnel.reconcileWorkspace).not.toHaveBeenCalled();
     },
   );
+});
+
+const integrationState = vi.hoisted(() => ({
+  enabled: false,
+  provider: { preparedCapacity: "image" as const },
+}));
+vi.mock("../../plugins/repository-integration-runtime.js", () => ({
+  getRepositoryIntegration: () =>
+    integrationState.enabled ? integrationState.provider : undefined,
+}));
+afterEach(() => {
+  integrationState.enabled = false;
 });

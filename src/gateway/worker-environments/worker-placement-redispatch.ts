@@ -1,4 +1,5 @@
 import { getRuntimeConfig } from "../../config/config.js";
+import { repositoryChatDispatchCredentialReader } from "../repository-dispatch.js";
 import { DEVICE_WORKER_PROVIDER_ID } from "./device-provider-identity.js";
 import type { WorkerDevicePlacementRequirementResolver } from "./placement-dispatch-startup.js";
 import type { WorkerSessionPlacementStore } from "./placement-store.js";

@@ -5,6 +5,10 @@ import {
   resolveSessionTranscriptReadFence,
   runWithSessionTranscriptReadFence,
 } from "../../config/sessions/session-transcript-read-fence.js";
+import {
+  captureRepositoryGoalDispatch,
+  withRepositoryChatDispatch,
+} from "../../gateway/repository-dispatch.js";
 import { createChatSendLateFollowupDisposition } from "../../gateway/server-methods/chat-send-late-followup.js";
 import {
   getPluginRuntimeGatewayRequestScope,

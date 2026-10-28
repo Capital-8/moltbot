@@ -109,7 +109,7 @@ export async function reconcileGitHubPublication<
   }
   let worktreeOwner: Awaited<ReturnType<typeof readLocalGitHubPublicationWorktreeOwner>>;
   let releaseWorktree: (() => void) | undefined;
-  const { assertCurrent, refreshIdentity } = createGitHubPublicationExecutionIdentity({
+  await using executionIdentity = createGitHubPublicationExecutionIdentity({
     row,
     identity: params.identity,
     validateAuthority: params.validateCustody,
@@ -117,6 +117,7 @@ export async function reconcileGitHubPublication<
       worktreeOwner.assertCurrent();
     },
   });
+  const { assertCurrent, refreshIdentity } = executionIdentity;
   let url: string | undefined;
   try {
     worktreeOwner = await readLocalGitHubPublicationWorktreeOwner(row);

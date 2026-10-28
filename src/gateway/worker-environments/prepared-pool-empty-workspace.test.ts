@@ -175,3 +175,12 @@ describe("empty workspace prepared worker reserves", () => {
     },
   );
 });
+
+const integrationState = vi.hoisted(() => ({ enabled: false }));
+vi.mock("../../plugins/repository-integration-runtime.js", () => ({
+  getRepositoryIntegration: () =>
+    integrationState.enabled ? { preparedCapacity: "image" } : undefined,
+}));
+afterEach(() => {
+  integrationState.enabled = false;
+});

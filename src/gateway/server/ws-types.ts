@@ -5,7 +5,10 @@ import type { SystemPresence } from "../../infra/system-presence.js";
 import type { UserProfileIdentity } from "../../state/user-profiles.types.js";
 import type { AgentRuntimeIdentity } from "../agent-runtime-identity-token.js";
 import type { GatewayAuthPolicy } from "../auth-policy.types.js";
-import type { AuthenticatedGitHubIdentitySync } from "../github-user-identity.types.js";
+import type {
+  RepositoryCredentialSource,
+  AuthenticatedGitHubIdentitySync,
+} from "../github-user-identity.types.js";
 import type { GatewayOperatorAccessAuthority } from "../operator-access-policy.types.js";
 import type { GatewayOperatorRoleActor } from "../operator-role-actor.js";
 import type { PluginNodeCapabilityClient } from "../plugin-node-capability.js";
@@ -66,7 +69,9 @@ export type GatewayWsClient = PluginNodeCapabilityClient & {
   connectionLastActivityAt?: number;
   authenticatedUserId?: string;
   /** Configured Enterprise account verified by trusted-proxy handshake admission. */
-  authenticatedFactoryGitHubAccountId?: number;
+  authenticatedGitHubAccountId?: number;
+  /** Original credential lease projected by authenticated repository integration. */
+  authenticatedRepositoryCredentialSource?: RepositoryCredentialSource;
   /** Verified Tailscale provider identity; generic proxy identities must not infer this. */
   authenticatedUserIsTailscaleProvider?: boolean;
   authenticatedGitHubIdentitySync?: AuthenticatedGitHubIdentitySync;

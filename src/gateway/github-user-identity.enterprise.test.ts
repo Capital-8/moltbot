@@ -38,11 +38,14 @@ function enterpriseSync(email?: string, host = "ghe.example.test") {
     createAuthenticatedGitHubIdentitySync({
       authResult: { ok: true, method: "trusted-proxy", user: `github:${host}:101` },
       config: { gateway: { github: { host } } },
-      authConfig: { mode: "trusted-proxy", trustedProxy: { userHeader: "x-factory-principal" } },
-      requestHeaders: {
-        "x-factory-github-login": "enterprise-ada",
-        "x-factory-github-name": "Ada",
-        ...(email ? { "x-factory-github-email": email } : {}),
+      repositoryIdentity: {
+        accountId: 101,
+        profile: {
+          principal: `github:${host}:101`,
+          login: "enterprise-ada",
+          name: "Ada",
+          ...(email ? { email } : {}),
+        },
       },
     }),
     "Enterprise GitHub identity sync",

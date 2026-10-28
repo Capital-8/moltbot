@@ -126,14 +126,28 @@ export async function prepareRepositoryWorkerProjectSource(params: AdmissionRequ
       sourceConfig: getActiveSecretsRuntimeConfigSnapshot()?.sourceConfig ?? config,
       agentId: agent.agentId,
       getCurrentConfig: getConfig,
-      assertActive: assertAgent,
+      // A refreshed identity outlives the current Git/project operation. Its
+      // retained assertion belongs to the original admission, not that operation's signal.
+      assertActive:
+        params.readNativeCredential || params.retainCredentialCleanup
+          ? assertAdmission
+          : assertAgent,
+      readNativeCredential: params.readNativeCredential,
+      allowAppInstallation: params.retainCredentialCleanup !== undefined,
+      requestedRepository: repositoryPath.slice(1),
       refresh: () => requestCurrentGitHubOAuthRefresh(agent.agentId),
       allowAnonymous: true,
     }).catch(async (error: unknown) => {
       await assertAgentPrepared();
       // Native credential subprocess diagnostics must never enter provider errors.
-      throw error instanceof GitHubIdentityError ? error : new GitHubIdentityError("unverified");
+      throw error instanceof GitHubIdentityError
+        ? error
+        : new GitHubIdentityError("unverified", getGitHubIdentityErrorOrigin(error));
     });
+    if (identity.revoke) {
+      params.retainCredentialCleanup?.(identity.revoke);
+    }
+    assertPreparationCurrent();
     assertAgent();
     return identity;
   };

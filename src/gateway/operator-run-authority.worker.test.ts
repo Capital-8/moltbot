@@ -194,6 +194,11 @@ it("prepares a warm skill library without DDL after the tool caller's initiating
 
 it("preserves the live operator source through principal capture without trusting copied labels", () =>
   withOperator(async ({ profile, client, context }) => {
+    const credentialSource = Object.freeze({
+      id: `browser:${"b".repeat(64)}`,
+      expiresAtMs: Date.now() + 60_000,
+    });
+    client.authenticatedRepositoryCredentialSource = credentialSource;
     const principal = expectDefined(captureAgentTurnPrincipal(client), "captured principal");
     const source = new AbortController();
     const sourceAuthority = abortAuthority(source);
@@ -228,6 +233,7 @@ it("preserves the live operator source through principal capture without trustin
         expect(read()).toMatchObject({ assignedRole: null, githubLogin: null });
       }
       for (const retained of captures) {
+        expect(retained.authority.repositoryCredentialSource).toBe(credentialSource);
         expect(retained.authority.assertCurrent).not.toThrow();
       }
       source.abort(new Error("source revoked"));
@@ -544,3 +550,45 @@ it("rechecks current role and latched revocation after a source callback mutates
     expect(captured.authority.signal?.aborted).toBe(true);
     expect(captured.authority.assertCurrent).toThrow("no longer active");
   }));
+
+it("retains the original credential source and fences same-profile source replacement", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const profile = ensureProfileForEmail("credential-source@example.test");
+    const client = createOperatorClient({ profileId: profile.id, scopes: ["operator.write"] });
+    const originalSource = Object.freeze({
+      id: `browser:${"a".repeat(64)}`,
+      expiresAtMs: Date.now() + 60_000,
+    });
+    client.authenticatedRepositoryCredentialSource = originalSource;
+    const context = createContext();
+    const first = expectDefined(
+      await captureGatewayOperatorRunAuthority({ client, context }),
+      "original authority",
+    );
+    const release = expectDefined(first.authority.retain, "retained authority")();
+    first.release();
+    let second: typeof first | undefined;
+    try {
+      expect(first.authority.repositoryCredentialSource).toBe(originalSource);
+      expect(first.authority.assertCurrent).not.toThrow();
+      const replacement = Object.freeze({
+        id: `ahp:${"b".repeat(64)}`,
+        expiresAtMs: Date.now() + 60_000,
+      });
+      client.authenticatedRepositoryCredentialSource = replacement;
+      second = expectDefined(
+        await captureGatewayOperatorRunAuthority({ client, context }),
+        "replacement authority",
+      );
+      expect(second.authority.repositoryCredentialSource).toBe(replacement);
+      expect(second.authority.source).not.toBe(first.authority.source);
+      expect(first.authority.repositoryCredentialSource).toBe(originalSource);
+      expect(first.authority.assertCurrent).toThrow("operator GitHub credential source changed");
+      expect(second.authority.assertCurrent).not.toThrow();
+    } finally {
+      second?.release();
+      release();
+      first.release();
+    }
+  });
+});

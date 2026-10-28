@@ -52,6 +52,7 @@ type OperatorSource = {
     access: object | null | undefined,
     ingress: object | undefined,
     invocation: object | undefined,
+    githubCredential: object | undefined,
   ];
   membership: string | undefined;
   token: object;
@@ -343,6 +344,7 @@ export async function captureGatewayOperatorRunAuthority(input: {
   const profileId = actor?.kind === "operator" ? actor.profileId : GATEWAY_OWNER_PROFILE_ID;
   const connectionId = client.connId;
   const connectionSignal = client.connectionSignal;
+  const repositoryCredentialSource = client.authenticatedRepositoryCredentialSource;
   if (params.hasCurrentClientAuthority?.() === false) {
     throw new Error("Gateway caller authority is no longer active.");
   }
@@ -369,6 +371,7 @@ export async function captureGatewayOperatorRunAuthority(input: {
     sourceAuthority,
     ingressPrincipal,
     params.invocationAuthority,
+    repositoryCredentialSource,
   ];
   let releaseSource: (() => void) | undefined;
   let references = 1;
@@ -434,6 +437,9 @@ export async function captureGatewayOperatorRunAuthority(input: {
       }
       if (isSourceCurrent?.() === false || !isGatewayCurrent()) {
         throw new Error("operator source authority is no longer active");
+      }
+      if (client.authenticatedRepositoryCredentialSource !== repositoryCredentialSource) {
+        throw new Error("operator GitHub credential source changed; start a new request");
       }
       assertSources();
       if (revoked || references === 0) {
@@ -565,6 +571,7 @@ export async function captureGatewayOperatorRunAuthority(input: {
     // Pin the grant before source callbacks can mutate their original reference.
     const admission = {
       profileId,
+      repositoryCredentialSource,
       scopes,
       gatewayAccessGrant: grant ? Object.freeze({ ...grant }) : grant,
       assertCurrent,

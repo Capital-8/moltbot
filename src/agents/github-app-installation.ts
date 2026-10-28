@@ -3,9 +3,10 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { normalizeResolvedSecretInputString } from "../config/types.secrets.js";
 import { readResponseWithLimit } from "../infra/http-response-body.js";
+import { isTransientNetworkError } from "../infra/retryable-network-errors.js";
 import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import type { GitHubAppSelection } from "./github-credential-reader.js";
-import { GitHubIdentityError } from "./github-read-identity.js";
+import { annotateGitHubIdentityError, GitHubIdentityError } from "./github-read-identity.js";
 import type { GitHubToolAccount } from "./github-tool-account.js";
 
 const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -72,6 +73,13 @@ export function readGitHubAppInstallationMetadata(
     isDeepStrictEqual(selection, record.snapshot)
     ? record.value
     : undefined;
+}
+
+/** Only temporary issuer failures may retry under an unexpired execution grant. */
+export class GitHubAppInstallationRetryableError extends Error {
+  constructor() {
+    super("GitHub App issuer is temporarily unavailable");
+  }
 }
 
 function failure(): GitHubIdentityError {
@@ -173,12 +181,17 @@ async function issueGitHubAppInstallation(params: {
       throw new GitHubIdentityError("changed");
     }
   };
-  const key = normalizeResolvedSecretInputString({
-    value: selection.app.privateKey,
-    path: "tools.github.app.privateKey",
-  });
+  let key: string | undefined;
+  try {
+    key = normalizeResolvedSecretInputString({
+      value: selection.app.privateKey,
+      path: "tools.github.app.privateKey",
+    });
+  } catch (error) {
+    throw annotateGitHubIdentityError(error, "issuer-key-unresolved");
+  }
   if (!key) {
-    throw new GitHubIdentityError("unavailable");
+    throw new GitHubIdentityError("unavailable", "issuer-key-unresolved");
   }
   registerSecretValueForRedaction(key);
   let issuedToken: string | undefined;
@@ -204,7 +217,9 @@ async function issueGitHubAppInstallation(params: {
     });
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
-      throw failure();
+      throw response.status === 429 || response.status >= 500
+        ? new GitHubAppInstallationRetryableError()
+        : failure();
     }
     const bytes = await readResponseWithLimit(response, 256 * 1024, { signal });
     const raw: unknown = JSON.parse(bytes.toString("utf8"));
@@ -329,6 +344,13 @@ async function issueGitHubAppInstallation(params: {
       );
     }
     assertCurrent();
+    if (
+      error instanceof GitHubAppInstallationRetryableError ||
+      isTransientNetworkError(error) ||
+      signal.aborted
+    ) {
+      throw new GitHubAppInstallationRetryableError();
+    }
     throw error instanceof GitHubIdentityError ? error : failure();
   }
 }

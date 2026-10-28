@@ -1,12 +1,31 @@
 import { isDeepStrictEqual } from "node:util";
 import type { GitHubIdentityFacts } from "../../packages/gateway-protocol/src/index.js";
+import { getRepositoryIntegration } from "../plugins/repository-integration-runtime.js";
 import {
   prepareGitHubAppInstallation,
   readGitHubAppInstallationMetadata,
 } from "./github-app-installation.js";
 import type { GitHubAppSelection, GitHubCredentialReader } from "./github-credential-reader.js";
-import { resolveGitHubHost, resolveGitHubApiBaseUrl } from "./github-host-runtime.js";
-import { GitHubIdentityError, type GitHubIdentityPreparation } from "./github-read-identity.js";
+import {
+  resolveGitHubHost,
+  resolveGitHubApiBaseUrl,
+  withGitHubToken,
+} from "./github-host-runtime.js";
+import {
+  annotateGitHubIdentityError,
+  GitHubIdentityError,
+  type GitHubIdentityPreparation,
+} from "./github-read-identity.js";
+import type { PreparedGitHubPublicationIdentity } from "./github-tool-identity.types.js";
+
+const selections = new WeakMap<object, GitHubAppSelection>();
+export function matchesAppGitHubIdentity(
+  identity: PreparedGitHubPublicationIdentity,
+  selection: import("../config/types.tools.js").GitHubToolIdentityConfig,
+): boolean {
+  const snapshot = selections.get(identity);
+  return !snapshot || isDeepStrictEqual(snapshot, selection);
+}
 
 export async function prepareAppGitHubIdentity(
   params: GitHubIdentityPreparation & {
@@ -23,12 +42,14 @@ export async function prepareAppGitHubIdentity(
 ) {
   // Existing publication and background readers do not own App token cleanup.
   if (!params.allowAppInstallation) {
-    throw new GitHubIdentityError("unavailable");
+    throw new GitHubIdentityError("unavailable", "app-not-admitted");
   }
   const snapshot = structuredClone(selection);
+  const integration = getRepositoryIntegration(params.config);
   const assertCurrent = () => {
     params.assertCurrent?.();
     if (
+      getRepositoryIntegration(params.config) !== integration ||
       resolveGitHubHost() !== host ||
       resolveGitHubApiBaseUrl() !== apiBaseUrl ||
       !isDeepStrictEqual(selection, snapshot)
@@ -44,21 +65,25 @@ export async function prepareAppGitHubIdentity(
       (repo) => repo.fullName.toLowerCase() === requestedRepository,
     );
     if (!repository) {
-      throw new GitHubIdentityError("unavailable");
+      throw new GitHubIdentityError("unavailable", "repository-not-selected");
     }
     // Retain the complete selection above for currency checks. Only the grant
     // and broker receipt are narrowed to the repository this request reads.
     requestedSelection = { ...selection, app: { ...selection.app, repositories: [repository] } };
   }
-  if (process.env.FACTORY_AUTH_MODE === "github") {
+  if (integration) {
     if (!params.readNativeCredential) {
-      throw new GitHubIdentityError("unavailable");
+      throw new GitHubIdentityError("unavailable", "native-reader-missing");
     }
-    await params.readNativeCredential(env, {
-      kind: "repository-admission",
-      host,
-      selection: requestedSelection,
-    });
+    try {
+      await params.readNativeCredential(env, {
+        kind: "repository-admission",
+        host,
+        selection: requestedSelection,
+      });
+    } catch (error) {
+      throw annotateGitHubIdentityError(error, "native-reader-failed");
+    }
     assertCurrent();
   }
   const issued = await prepareGitHubAppInstallation({
@@ -67,6 +92,8 @@ export async function prepareAppGitHubIdentity(
     host,
     apiBaseUrl,
     assertCurrent,
+  }).catch((error: unknown) => {
+    throw annotateGitHubIdentityError(error, "issuer-failed");
   });
   try {
     assertCurrent();
@@ -75,9 +102,14 @@ export async function prepareAppGitHubIdentity(
       profileId: selection.profileId,
       host,
       account: issued.account,
+      env: Object.freeze({
+        ...withGitHubToken(env, issued.token),
+        OPENCLAW_GITHUB_EXECUTION_KIND: "app-installation",
+      }),
       accessExpiresAtMs: issued.expiresAtMs,
       revoke: issued.revoke,
     });
+    selections.set(prepared, snapshot);
     return { prepared, token: issued.token, readToken: issued.readToken, stale: undefined };
   } catch (error) {
     await issued.revoke().catch(() => {});
@@ -97,7 +129,8 @@ export function configuredAppGitHubIdentityFacts(
   return {
     source,
     credentialKind: "app-installation",
-    credentialState: metadata ? "available" : "configured_unavailable",
+    // Status does not issue a credential; an absent observation is not a failed grant.
+    credentialState: metadata ? "available" : "unverified",
     account: metadata ? { login: metadata.account.login } : null,
     gitAuthor: {
       name: selection.gitAuthor?.name ?? null,

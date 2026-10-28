@@ -38,7 +38,7 @@ import {
   hasCurrentRemoteControlUiIngress,
 } from "../../ingress-attribution.js";
 import { resolveIdentityOperatorScopes } from "../../operator-identity-scopes.js";
-import type { OperatorScope } from "../../operator-scopes.js";
+import { READ_SCOPE, WRITE_SCOPE, type OperatorScope } from "../../operator-scopes.js";
 import { checkGatewayWsBrowserOrigin, normalizeChromeExtensionOrigin } from "../../origin-check.js";
 import { parseGatewayRole } from "../../role-policy.js";
 import { authenticatedProfileUnavailableError } from "../../server-methods/gateway-client-identity.js";
@@ -131,12 +131,18 @@ export function resolveEffectiveConnectionScopes(params: {
   deviceScopes: string[];
   verifiedIdentity?: string;
   identityScopes?: Record<string, OperatorScope[]>;
+  verifiedIdentityWrite?: boolean;
   upgradeReq: IncomingMessage;
 }): string[] {
   const verifiedIdentity = params.verifiedIdentity;
   let identityScopes: OperatorScope[] = [];
   if (params.role === "operator" && verifiedIdentity) {
     identityScopes = resolveIdentityOperatorScopes(verifiedIdentity, params.identityScopes);
+    if (params.verifiedIdentityWrite) {
+      // An owner-approved write grant includes read. Materialize both before
+      // an exact transport cap attenuates the grant to read-only.
+      identityScopes = [...new Set([...identityScopes, READ_SCOPE, WRITE_SCOPE])];
+    }
   }
   return applyConnectionScopeCap({
     role: params.role,

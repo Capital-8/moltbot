@@ -293,7 +293,10 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: awaited web_search policy preparation for harnesses; the sync resolver stays.
       // +3: shared Decisions support/evaluation functions and the canonical capability schema.
       // +2: openRecord and ToolArgumentValidationError on the existing tool-plugin facade.
-      3815,
+      // +7: six explicit repository-integration data contracts on plugin-entry plus
+      // capturePrivateGatewayRequestAuthority on the existing gateway-method runtime.
+      // The extraction preserves existing retention exports and adds no entrypoint.
+      3822,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
