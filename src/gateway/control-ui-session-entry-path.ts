@@ -16,6 +16,7 @@ export function parseControlUiSessionReturnPath(value: string, basePath: string)
     return null;
   }
   const url = URL.parse(value, "http://localhost");
+  const navigationKeys = url?.searchParams.getAll("__openclawSessionKey") ?? [];
   if (
     !url ||
     `${url.pathname}${url.search}` !== value ||
@@ -24,8 +25,12 @@ export function parseControlUiSessionReturnPath(value: string, basePath: string)
         key !== "dashboard" &&
         key !== "draft" &&
         key !== "openclaw_mount_recovery" &&
-        key !== "__openclawSessionFacePreference",
+        key !== "__openclawSessionFacePreference" &&
+        key !== "__openclawSessionKey",
     ) ||
+    // An in-app full-key hint survives reload, but only the pathname selects access/target.
+    navigationKeys.length > 1 ||
+    navigationKeys.some((key) => !key.trim() || containsAsciiControlCharacter(key)) ||
     // The UI emits this hint until the session loader resolves its preferred face.
     // Reloading that address must keep the same pathname-based auth and target.
     url.searchParams.getAll("__openclawSessionFacePreference").length > 1 ||

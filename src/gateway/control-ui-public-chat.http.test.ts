@@ -148,6 +148,45 @@ describe("canonical anonymous HTTP entry", () => {
     expect(reader).not.toHaveBeenCalled();
   });
 
+  it("keeps publication and login access bound to the path despite a cross-agent navigation hint", async () => {
+    const requestPath = `${route}?${new URLSearchParams({
+      __openclawSessionKey: "agent:other:dashboard:87654321-bbbb-4000-8000-000000000002",
+    })}`;
+    const instance = server();
+    const published = await request(instance, requestPath);
+    expect(published.res.statusCode).toBe(200);
+    expect(published.getBody()).toContain("Published answer");
+    expect(published.getBody()).not.toContain("<openclaw-app>");
+    expect(resolveSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({
+          agentId: "main",
+          shortId: "12345678aaaa40008000000000000001",
+        }),
+        client: null,
+        publicOnly: true,
+      }),
+    );
+    expect(reader).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentId: "main", sessionKey: key }),
+      expect.anything(),
+    );
+    resolveSession.mockResolvedValue(null);
+    reader.mockClear();
+    const privateChat = await request(instance, requestPath);
+    expect(privateChat.res.statusCode).toBe(404);
+    expect(privateChat.getBody()).toContain('data-gateway-path="/control"');
+    expect(privateChat.getBody()).not.toContain("Published answer");
+    expect(reader).not.toHaveBeenCalled();
+    const entry = `/control/__openclaw__/session-entry?${new URLSearchParams({ path: requestPath })}`;
+    expect((await request(instance, `${entry}&probe=1`)).res.statusCode).toBe(401);
+    const app = await request(instance, entry);
+    expect(app.res.statusCode).toBe(200);
+    expect(app.getBody()).toContain("<openclaw-app>");
+    expect(app.getBody()).toContain(JSON.stringify(requestPath));
+  });
+
   it("reloads a new bot while its preferred chat face is still resolving", async () => {
     const agentId = "bot-11111111-2222-4333-8444-555555555555";
     const target = sessionNavigationTarget({

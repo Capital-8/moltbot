@@ -103,6 +103,25 @@ describe("operator browser chat document navigation", () => {
     );
   });
 
+  it.each(["", "/control"])(
+    "reloads a hinted chat through the protected entry under %s",
+    async (basePath) => {
+      const worker = navigationWorker(basePath);
+      const path = `${basePath}/chat/main/12345678?__openclawSessionKey=agent%3Amain%3Adashboard%3A12345678-aaaa-4000-8000-000000000001`;
+      const app = new Response("app", { headers: { "X-OpenClaw-Session-Entry": "1" } });
+      worker.fetch.mockResolvedValueOnce(app);
+      expect(await worker.navigate(path)).toBe(app);
+      expect(worker.fetch).toHaveBeenCalledExactlyOnceWith(
+        `https://gateway.test${basePath}/__openclaw__/session-entry?${new URLSearchParams({ path })}`,
+        expect.objectContaining({
+          credentials: "same-origin",
+          redirect: "manual",
+          cache: "no-store",
+        }),
+      );
+    },
+  );
+
   it("leaves the browser a native navigation when the public route also challenges", async () => {
     const worker = navigationWorker();
     worker.fetch.mockResolvedValue(
@@ -128,6 +147,17 @@ describe("operator browser chat document navigation", () => {
     ["/chat/main/topic?offset=100", true],
     ["/chat/main/topic?openclaw_mount_recovery=1&token=secret", true],
     ["/chat/main/topic?openclaw_mount_recovery=1&unknown=value", true],
+    ["/chat/main/topic?__openclawSessionKey=", true],
+    ["/chat/main/topic?__openclawSessionKey=+++", true],
+    [
+      "/chat/main/topic?__openclawSessionKey=agent%3Amain%3Atopic&__openclawSessionKey=agent%3Aother%3Atopic",
+      true,
+    ],
+    ["/chat/main/topic?__openclawSessionKey=agent%3Amain%3A%00topic", true],
+    ["/chat/main/topic?__openclawSessionKey=agent%3Amain%3A%1Ftopic", true],
+    ["/chat/main/topic?__openclawSessionKey=agent%3Amain%3A%7Ftopic", true],
+    ["/chat/main/topic?__openclawSessionKey=agent%3Amain%3Atopic&token=secret", true],
+    ["/chat/main/topic?__openclawSessionKey=agent%3Amain%3Atopic&unknown=value", true],
     ["/chat/main?catalog=x&host=y&thread=z", true],
   ] as const)(
     "fetches %s without rewriting it to a protected session entry",

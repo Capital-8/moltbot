@@ -71,6 +71,22 @@ describe("protected canonical session handoff", () => {
     expect(parseReturn(path, "/control")).toEqual(parseReturn(canonical, "/control"));
   });
 
+  it.each([
+    "agent:main:dashboard:12345678-aaaa-4000-8000-000000000001",
+    "agent:other:dashboard:87654321-bbbb-4000-8000-000000000002",
+  ])("keeps pathname authority when reloading with session hint %s", async (hint) => {
+    const path = `${canonical}?${new URLSearchParams({ __openclawSessionKey: hint })}`;
+    const opened = await request(entryUrl(path, "/control"));
+    expect(opened.serveApp).toHaveBeenCalledWith(path, expect.any(Function));
+    expect(resolveSession).toHaveBeenCalledWith(
+      expect.objectContaining({ target: parseReturn(canonical, "/control") }),
+    );
+    resolveSession.mockResolvedValue(null);
+    const denied = await request(entryUrl(path, "/control"));
+    expect(denied.res.statusCode).toBe(403);
+    expect(denied.serveApp).not.toHaveBeenCalled();
+  });
+
   it("uses the authenticated profile and grants only exact accessible sessions", async () => {
     const probe = await request(`${entry}&probe=1`);
     expect(probe.res.statusCode).toBe(204);
@@ -122,6 +138,14 @@ describe("protected canonical session handoff", () => {
     "/control/chat/main?__openclawSessionFacePreference=0",
     "/control/chat/main?__openclawSessionFacePreference=",
     "/control/chat/main?__openclawSessionFacePreference=1&token=secret",
+    "/control/chat/main/topic?__openclawSessionKey=",
+    "/control/chat/main/topic?__openclawSessionKey=+++",
+    "/control/chat/main/topic?__openclawSessionKey=agent%3Amain%3Atopic&__openclawSessionKey=agent%3Aother%3Atopic",
+    "/control/chat/main/topic?__openclawSessionKey=agent%3Amain%3A%00topic",
+    "/control/chat/main/topic?__openclawSessionKey=agent%3Amain%3A%1Ftopic",
+    "/control/chat/main/topic?__openclawSessionKey=agent%3Amain%3A%7Ftopic",
+    "/control/chat/main/topic?__openclawSessionKey=agent%3Amain%3Atopic&token=secret",
+    "/control/chat/main/topic?__openclawSessionKey=agent%3Amain%3Atopic&unknown=value",
     `${canonical}?dashboard=other`,
     "/control/chat/main/../settings",
     "/control/chat/main\\topic",
