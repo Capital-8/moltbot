@@ -191,6 +191,14 @@ export function useNodeBootstrapArtifactFixtures() {
       "src/private.ts": "source-only",
       "extensions/remote-runtime/package.json": pluginPackage,
     });
+    await writeFiles(packageRoot, {
+      "node_modules/native-runtime/package.json": {
+        name: "native-runtime",
+        version: "1.2.3",
+        main: "index.js",
+      },
+      "node_modules/native-runtime/index.js": "module.exports = 'prepared-native-fixture';",
+    });
     const aiRoot =
       mode === "source"
         ? path.join(root, "ai-source")

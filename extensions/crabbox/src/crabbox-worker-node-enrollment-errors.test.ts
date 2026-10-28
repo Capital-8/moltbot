@@ -1,31 +1,39 @@
 import { createRequire } from "node:module";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { inspect } from "node:util";
 import { runInNewContext } from "node:vm";
 import { expect, it } from "vitest";
 import { createCrabboxNodeEnrollmentSetup } from "./crabbox-worker-node-enrollment.js";
-import { nodeEnrollmentFixture } from "./crabbox-worker-provider.test-support.js";
+import { createRuntimeVerificationFixture } from "./crabbox-worker-node-enrollment.test-support.js";
 
+const leaseId = "cbx_bootstrap_test";
 const setupCode = "synthetic-enrollment-credential";
 
 it.each([
   { status: 7, signal: null, error: undefined },
   { status: null, signal: "SIGKILL", error: new Error("probe timed out") },
 ])("reports sanitized runtime probe failure ($status, $signal)", async (probe) => {
-  const enrollment = {
-    ...nodeEnrollmentFixture(setupCode, "fixture", async () => "unused"),
-    setupId: "synthetic-setup",
-  };
-  const { nodeBootstrap } = enrollment;
+  const verification = createRuntimeVerificationFixture("linux");
+  const { nodeBootstrap } = verification;
   const setup = createCrabboxNodeEnrollmentSetup({
-    leaseId: "cbx_bootstrap_test",
-    enrollment,
+    leaseId,
+    enrollment: {
+      mode: "connect",
+      setupId: "synthetic-setup",
+      setupCode,
+      displayName: "fixture",
+      openclawVersion: nodeBootstrap.openclawVersion,
+      nodeBootstrap,
+      waitForDeviceId: async () => "unused",
+    },
   });
   const runtime = path.join("/fixture", ".openclaw-worker", "node-runtimes", nodeBootstrap.sha256);
   const output: string[] = [];
   const envValue = "synthetic-private-environment-value";
   const processFixture = {
     platform: "linux",
+    arch: "x64",
     execPath: "/node",
     umask: () => {},
     exitCode: 0,
@@ -44,40 +52,56 @@ it.each([
   const script = setup.command
     .split("CRABBOX_NODE_ENROLLMENT_SCRIPT'\n")[1]!
     .split("\nCRABBOX_NODE_ENROLLMENT_SCRIPT")[0]!;
-  const modules: Record<string, unknown> = {
-    "node:os": { homedir: () => "/fixture" },
-    "node:fs": {
-      promises: {},
-      mkdirSync: () => {},
-      chmodSync: () => {},
-      existsSync: (file: string) => file === runtime,
-      realpathSync: (file: string) => file,
-      lstatSync: (file: string) => {
-        if (file === runtime) {
-          return { isDirectory: () => true };
-        }
-        throw Object.assign(new Error("missing fixture path"), { code: "ENOENT" });
-      },
-      readFileSync: () =>
-        JSON.stringify({ name: "openclaw", version: nodeBootstrap.openclawVersion }),
-    },
-    "node:child_process": {
-      spawnSync: () => ({
-        ...probe,
-        stdout: "",
-        stderr:
-          "old output 😀 ".repeat(100) +
-          `runtime dependency missing ${envValue} ${nodeBootstrap.token} ${setupCode} token=synthetic-unknown-token`,
-      }),
-    },
-  };
   await runInNewContext(script, {
     Buffer,
     AbortController,
     Error: ScriptError,
     process: processFixture,
     console: { error: (line: string) => output.push(line) },
-    require: (name: string) => (Object.hasOwn(modules, name) ? modules[name] : require(name)),
+    require: (name: string) =>
+      name === "node:os"
+        ? { homedir: () => "/fixture" }
+        : name === "node:fs"
+          ? {
+              promises: {},
+              mkdirSync: () => {},
+              chmodSync: () => {},
+              existsSync: (file: string) => file === runtime,
+              realpathSync: (file: string) => file,
+              lstatSync: (file: string) => {
+                const content = verification.files.get(
+                  path.relative(path.join(runtime, "node_modules/openclaw"), file),
+                );
+                if (content) {
+                  return { isFile: () => true, isSymbolicLink: () => false, size: content.length };
+                }
+                if (file === runtime) {
+                  return { isDirectory: () => true };
+                }
+                throw Object.assign(new Error("missing fixture path"), { code: "ENOENT" });
+              },
+              readFileSync: (file: string) =>
+                verification.files.get(
+                  path.relative(path.join(runtime, "node_modules/openclaw"), file),
+                )!,
+              createReadStream: (file: string) =>
+                Readable.from([
+                  verification.files.get(
+                    path.relative(path.join(runtime, "node_modules/openclaw"), file),
+                  )!,
+                ]),
+            }
+          : name === "node:child_process"
+            ? {
+                spawnSync: () => ({
+                  ...probe,
+                  stdout: "",
+                  stderr:
+                    "old output 😀 ".repeat(100) +
+                    `runtime dependency missing ${envValue} ${nodeBootstrap.token} ${setupCode} token=synthetic-unknown-token`,
+                }),
+              }
+            : require(name),
   });
   const detail = output.at(-1)!;
   expect(processFixture.exitCode).toBe(1);

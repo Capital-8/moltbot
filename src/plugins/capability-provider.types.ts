@@ -143,6 +143,11 @@ type WorkerNodeBootstrapAccess = {
     sha256: string;
     bytes: number;
     openclawVersion: string;
+    /** Existing profile selection; npm resolves exact pins for the destination OS and CPU. */
+    install?: "bundle" | "npm";
+    /** Exact built-runtime identity and inventory, authenticated with the archive descriptor. */
+    buildId?: string;
+    manifestSha256?: string;
     enabledPluginIds: readonly string[];
     tlsFingerprint?: string;
     /** Core-owned POSIX prerequisite script, applied only to Linux before invoking Node. */

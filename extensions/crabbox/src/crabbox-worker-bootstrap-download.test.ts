@@ -67,9 +67,27 @@ async function download(
     packageRelativePath: `worker-artifacts/${sha256}.tgz`,
     ...(Array.isArray(outcomes) && outcomes[0] === "pin" ? { tlsFingerprint: "a".repeat(64) } : {}),
   };
+  const metadata = Buffer.from(
+    JSON.stringify({
+      buildId: "fixture-runtime-build",
+      openclawVersion: "2026.8.1",
+      platforms: [{ platform: "linux", arch: "x64", prefix: "" }],
+    }),
+  );
+  const inventory = Buffer.from(
+    JSON.stringify([
+      {
+        path: "package/node-runtime.json",
+        size: metadata.length,
+        mode: 0o644,
+        sha256: createHash("sha256").update(metadata).digest("hex"),
+      },
+    ]),
+  );
   const nodeBootstrap = createNodeBootstrapFixture({
     sha256: createHash("sha256").update(runtimeArchive).digest("hex"),
     bytes: runtimeArchive.length,
+    manifestSha256: createHash("sha256").update(inventory).digest("hex"),
   });
   const setup = createCrabboxNodeRuntimeSetup({
     leaseId: "cbx_download_fixture",
@@ -268,8 +286,13 @@ async function download(
     constants: fs.constants,
     realpathSync: (file: string) => file,
     existsSync: () => !freshRuntime,
-    lstatSync: () => ({ isDirectory: () => true }),
-    readFileSync: () => JSON.stringify({ name: "openclaw", version: "2026.8.1" }),
+    lstatSync: () => ({ isDirectory: () => true, isFile: () => true, isSymbolicLink: () => false }),
+    readFileSync: (file: string) =>
+      file.endsWith("node-runtime.manifest.json")
+        ? inventory
+        : file.endsWith("node-runtime.json")
+          ? metadata
+          : JSON.stringify({ name: "openclaw", version: "2026.8.1" }),
     writeFileSync: () => {},
     openSync: () => 1,
     closeSync: () => {},
@@ -326,6 +349,7 @@ async function download(
   };
   const processFixture = Object.assign(new EventEmitter(), {
     platform: "linux",
+    arch: "x64",
     env: { ...setup.forwardedEnv },
     execPath: "/fixture/node",
     umask: () => {},
@@ -347,12 +371,76 @@ async function download(
     AbortController,
     AbortSignal: {
       any: (signals: AbortSignal[]) => AbortSignal.any(signals),
-      timeout: (ms: number) =>
-        abortAfter(ms, transferError("ABORT_ERR", "request deadline exceeded")),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(
+          () =>
+            controller.abort(
+              Object.assign(new Error("request deadline exceeded"), { code: "ABORT_ERR" }),
+            ),
+          ms,
+        );
+        return controller.signal;
+      },
     },
     process: processFixture,
-    console: { error: (line: string) => output.push(line) },
-    require: (name: string) => dependencies[name] ?? require(name),
+    console: { error: (line: string) => output.push(line), log: () => {} },
+    require: (name: string) => {
+      if (name === "node:fs") {
+        return fileSystem;
+      }
+      if (name === "node:path") {
+        return path.posix;
+      }
+      if (name === "node:os") {
+        return { homedir: () => "/fixture" };
+      }
+      if (name === "node:http" || name === "node:https") {
+        return transport;
+      }
+      if (name === "node:timers/promises") {
+        return {
+          setTimeout: async (ms: number, _value: unknown, options?: { signal: AbortSignal }) => {
+            delays.push(ms);
+            await waitForDownload(ms, options?.signal);
+          },
+        };
+      }
+      if (name === "node:child_process") {
+        return {
+          spawnSync: () => ({ status: 0, stdout: "OpenClaw 2026.8.1" }),
+          spawn: (_command: string, args: string[]) => {
+            const extracting = args[0] === "-xzf";
+            if (extracting) {
+              installations.push(Date.now());
+            }
+            const listing =
+              args[0] === "-tzf"
+                ? "package/package.json\n"
+                : args[0] === "-tvzf"
+                  ? "-rw------- package/package.json\n"
+                  : "";
+            const child = Object.assign(new EventEmitter(), {
+              pid: 1234,
+              stdout: Readable.from([Buffer.from(listing)]),
+              stderr: Readable.from([]),
+            });
+            // Keep close delayed even after kill so the join must await actual settlement.
+            setTimeout(
+              () =>
+                child.emit(
+                  "close",
+                  terminations.length ? null : extracting ? install.exitCode : 0,
+                  terminations.length ? "SIGKILL" : null,
+                ),
+              extracting ? install.durationMs : 0,
+            );
+            return child;
+          },
+        };
+      }
+      return require(name);
+    },
   });
   const completion = Promise.resolve(execution).finally(() => {
     elapsedMs = Date.now();

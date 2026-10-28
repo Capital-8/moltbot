@@ -11,6 +11,30 @@ minimumReleaseAgeStrict: true
 
 # Trusted Codex runtimes are outside the dependency cooldown.
 minimumReleaseAgeExclude:
+  # Exact mirror-time corrections: original npmjs publications below predate the seven-day gate.
+  # Feed and npmjs SHA-512 values match the unchanged lockfile; only mirror import times differ.
+  # npmjs: 2024-03-01T09:10:39.024Z; remove after mirror ages past 2026-10-26T00:47:41Z.
+  - "@ampproject/remapping@2.3.0"
+  # npmjs: 2022-06-27T19:50:09.669Z; remove after mirror ages past 2026-10-26T10:08:11Z.
+  - "@babel/helper-module-imports@7.18.6"
+  # npmjs: 2022-03-27T00:14:35.230Z; remove after mirror ages past 2026-10-26T10:07:36Z.
+  - "html-entities@2.3.3"
+  # npmjs: 2023-04-05T03:57:40.255Z; remove after mirror ages past 2026-10-26T10:07:58Z.
+  - "html-tags@3.3.1"
+  # npmjs: 2023-10-26T04:56:54.839Z; remove after mirror ages past 2026-10-26T00:47:31Z.
+  - "is-what@4.1.16"
+  # npmjs: 2026-04-01T02:55:28.273Z; remove after mirror ages past 2026-10-26T00:47:34Z.
+  - "vitefu@1.1.3"
+  # npmjs: 2026-10-01T06:00:12.449Z; remove after mirror ages past 2026-10-31T16:58:29Z.
+  - "@openclaw/fs-safe@0.22.0"
+  # npmjs: 2026-10-01T05:43:35.076Z; remove after mirror ages past 2026-10-31T16:58:32Z.
+  - "@openclaw/fs-safe-linux-x64-gnu@0.22.0"
+  # Galin approved this exact-version exception for local AHP qualification (2026-10-18).
+  # Azure Artifacts reports its mirror import time (2026-10-18T15:07:55Z), but
+  # npm records original publication at 2024-03-26T13:43:08.499Z. Both registries
+  # match the unchanged lockfile SHA-512; no package or integrity change.
+  # Remove after the mirror timestamp ages past 2026-10-25T15:07:55Z.
+  - "@resvg/resvg-js-darwin-arm64@2.6.2"
   - "@openai/codex"
   - "@openai/codex-*"
   # Solid itself is exempt from the release-age gate (Peter, 2026-10-11).

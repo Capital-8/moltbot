@@ -53,13 +53,68 @@ Before enrollment, the Gateway prepares a reusable archive from its current buil
 
 The worker bundle includes the pinned Windows permission-inspection helper alongside its JavaScript runtime. Its bytes are covered by the same archive manifest and content verification.
 
-Archives and successful installs are verified by content digest, rather than version alone, and reused when they match. A snapshot fork tops up an older runtime before enrollment. Native dependencies install for the destination OS and CPU, so registry access is still required; this is not an offline dependency bundle. Enrollment and archive-download credentials are not passed to npm or the node process.
+Archives and fresh installations are verified by content digest, rather than version alone. A snapshot fork tops up an older runtime before enrollment. For `install: "bundle"`, the node bootstrap archive includes the preassembled production dependency closure for each prepared OS and CPU. Workers verify the archive size and SHA-256, reject unsafe archive paths and links, extract into private staging, check the manifest pin and target/build identity, then atomically publish the runtime. Cold bundle-mode node-bootstrap caches and cache misses never invoke npm, resolve dependencies, or run package lifecycle scripts. Missing target dependencies fail with a Gateway preparation hint. Enrollment and archive-download credentials are not passed to extraction tools or the node process.
+
+Node-backed profiles using `install: "npm"` retain target-native node bootstrap,
+including exact registry pins, bundled JavaScript, package lifecycle hooks, and
+installation verification. Their worker loop still uses the pinned Gateway
+bundle. SSH-backed npm worker installation retains its exact released-package
+proof. Npm bootstrap can provision a different OS or CPU without preassembled
+dependencies for that target. Its archive and producer cache remain distinct from bundle mode.
+Offline runtime exports and offline image-install APIs always use preassembled
+bundles and never switch to npm automatically.
+
+Startup of an already installed runtime checks the SHA-256 of `node-runtime.manifest.json` against the Gateway's expected manifest pin, along with package/build/platform compatibility and the CLI version probe. It does not enumerate, stat, or hash the installed payload inventory. Missing or mismatched manifest pins refuse startup. This check proves manifest identity, not the integrity of every installed file: payload changes that leave the manifest unchanged are not detected by it. Fresh installations still verify archive size and SHA-256 and reject unsafe tar paths and entry types before extracting into private staging and publishing the runtime. Worker archive integrity and current worker, credential, and session ownership checks remain unchanged.
 
 Concurrent workspace installs on the same node share an in-progress integrity scan of the same already prewarmed bundle. Later requests scan the installed files again, so edits or damage still trigger repair. Retention and replacement separate scans; each request keeps its own cancellation and download credentials.
+
+Dedicated Linux node recovery keeps the enrolled runtime, device identity, and
+workspace. Before relaunching a confirmed-dead node, the current Gateway applies
+the same verified Node.js prerequisite used by bootstrap and retains that
+executable for the launch and later shells. This lets an older enrolled runtime
+host the current worker bundle. A verified live node is reused without rerunning
+prerequisite setup. Failed setup preserves the dead launch receipt for a later
+recovery attempt.
 
 For source builds, run `pnpm build` and restart the Gateway before dispatching. Bootstrap does not compile an unbuilt checkout or copy raw edits over the running build. Missing or mismatched build metadata gives a rebuild-and-restart error. Private QA-only build chunks are excluded only when build metadata verifies their ownership; incomplete metadata or imports fail preparation.
 
 OpenClaw worker turns install the matching worker bundle, reusing a verified archive retained in a prepared image when available. Codex remote execution starts its managed exec-server directly. Node-command allowlists and invocation approval still apply. See [runtime support](/gateway/cloud-workers/dispatching-a-session#runtime-support) and [the security model](/gateway/cloud-workers/security-model).
+
+Cross-platform Gateway installations prepare additional dependency inputs under `node-runtime-dependencies/<platform>-<arch>/` inside the immutable package (for example, `linux-x64`). Each input contains the exact root `package.json`, its complete installed production `node_modules`, linked workspace packages, and selected plugins' installed dependency directories under `extensions/`, and a `runtime-input.json` receipt with `platform`, `arch`, `packageJsonSha256`, and `lockfileSha256`. The hashes must match the Gateway's `package.json` and `pnpm-lock.yaml`. Build/install dependencies and native addons on the target platform using the frozen lockfile; copy compiled workspace distributions from the same source build. Keep all links within that input. The canonical producer materializes regular archive files from these installed dependencies; it never resolves or downloads packages. Qualify the resulting runtime with a real cold launch on each target. A macOS dependency tree alone does not qualify Linux.
+
+Offline image preparation uses the public `openclaw/runtime-artifacts` entrypoint:
+`qualifyWorkerRuntimePlugins` inspects the selected installation's trusted bundled
+plugin generation without activating a Gateway, and `resolveNodeBootstrapPlugins`
+selects the remote-execution command owners. `prepareWorkerRuntimeArtifacts`
+exports the canonical node and worker archives into a new directory outside the
+installation, retaining their build, version, platform, plugin, size, and hash
+receipts. `workerBundleArchiveRelativePath` supplies the worker archive cache path.
+
+The Crabbox provider's `cli-runtime-api.js` exports
+`createCrabboxOfflineRuntimeSetup` for installation from those verified local
+archives. It populates the same runtime cache as enrollment under the actual node
+user's home with creation policy `0077`, using the same direct extraction and
+inventory verification as enrollment. Include the node artifact's `buildId` and
+`manifestSha256` in its local descriptor. It forwards no credentials and creates no lease, enrollment state, or
+node process. Later enrollment still owns plugin activation and live authority.
+A complete matching cache can be reused without the original archives; incomplete
+or mismatched caches remain subject to the canonical installer checks.
+
+For inspection without repair, `createCrabboxRuntimeCacheVerification` accepts the
+current `CrabboxRuntimeInstallationIdentity` and optional `target`, with no local
+archive paths or download credentials. Execute its command under the node user's
+HOME and consume stdout with `readCrabboxRuntimeInstallation`. Only a matching
+current runtime manifest, package/build/platform and bundle mode, CLI version,
+and verified worker archive return `existing-verified`. An older baked runtime
+may coexist in the cache. Missing or invalid current caches fail without
+installation, replacement, archive pruning, Node binding or enrollment. Installed
+payload verification remains manifest-only, as described above.
+
+Before clean Azure snapshot verification, the capture owner runs this check on
+its exact builder and binds the fresh `existing-verified` result to the admitted
+runtime identity. The existing private `currentRuntime.installationVerification`
+field carries that capture-only fact to the image verifier; the original install
+evidence is unchanged. Missing, mismatched or canceled checks prevent capture.
 
 ### Reuse a node runtime archive after Gateway restart
 

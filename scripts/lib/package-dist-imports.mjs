@@ -77,11 +77,20 @@ function resolvesCommonJs(importedPath, fileSet, packageJsons) {
   return loadIndex(importedPath);
 }
 
-function appendImportEdges(source, importerPath, imports, sourceType) {
+function appendImportEdges(source, importerPath, imports, sourceType, onLiteralCall) {
   function visit(node) {
     // These leaves cannot contain import edges; avoid allocating property lists for them.
     if (node.type === "Identifier" || node.type === "Literal" || node.type === "TemplateElement") {
       return;
+    }
+    // Pruning callers need a conservative superset of aliased Node loader edges,
+    // not scope authority. Keep these observations separate from required imports:
+    // ordinary calls with path arguments must not become closure errors.
+    if (onLiteralCall && node.type === "CallExpression") {
+      const argument = literal(node.arguments[0]);
+      if (argument?.startsWith(".")) {
+        onLiteralCall(argument);
+      }
     }
     let kind;
     let specifier;
@@ -221,7 +230,13 @@ export function collectPackageDistImports(params) {
       continue;
     }
     const source = params.readText(importerPath);
-    appendImportEdges(source, importerPath, imports, sourceTypeFor(importerPath, packageJsons));
+    appendImportEdges(
+      source,
+      importerPath,
+      imports,
+      sourceTypeFor(importerPath, packageJsons),
+      params.onLiteralCall,
+    );
   }
 
   return imports;

@@ -19,7 +19,7 @@ type PendingRequest = EventEmitter & { destroy: (error: Error) => void };
 
 describe.each(["linux", "win32"])("%s bootstrap install settlement", (platform) => {
   it.each(["download", "timeout", "cancel"])(
-    "terminates npm's tree on %s and joins close before cleanup",
+    "terminates the archive extractor's tree on %s and joins close before cleanup",
     async (failure) => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       const home = fs.realpathSync(tempDirs.make("crabbox-install-settlement-"));
@@ -42,7 +42,11 @@ describe.each(["linux", "win32"])("%s bootstrap install settlement", (platform) 
       const encoded = setup.command.match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/u)![1]!;
       const spawned = Promise.withResolvers<void>();
       const workerRequested = Promise.withResolvers<PendingRequest>();
-      const child = Object.assign(new EventEmitter(), { pid: 12345 });
+      const child = Object.assign(new EventEmitter(), {
+        pid: 12345,
+        stdout: Readable.from([]),
+        stderr: Readable.from([]),
+      });
       const spawn = vi.fn(() => {
         spawned.resolve();
         return child;
@@ -90,10 +94,7 @@ describe.each(["linux", "win32"])("%s bootstrap install settlement", (platform) 
         console: { error: (line: string) => output.push(line) },
         require: (name: string) => {
           if (name === "node:fs") {
-            return {
-              ...fs,
-              existsSync: (file: string) => file.endsWith("npm-cli.js") || fs.existsSync(file),
-            };
+            return fs;
           }
           if (name === "node:os") {
             return { homedir: () => home };
@@ -138,8 +139,8 @@ describe.each(["linux", "win32"])("%s bootstrap install settlement", (platform) 
         failure === "download"
           ? "synthetic worker download failure"
           : failure === "timeout"
-            ? "installation timed out"
-            : "installation cancelled",
+            ? "extraction timed out"
+            : "extraction cancelled",
       );
       expect(fs.readdirSync(runtimeRoot)).toEqual([]);
       expect(processFixture.listenerCount("SIGTERM")).toBe(0);

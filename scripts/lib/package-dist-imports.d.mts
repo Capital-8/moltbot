@@ -17,4 +17,5 @@ export function collectPackageDistImports(params: {
   files: readonly string[];
   packageJsons?: ReadonlyMap<string, string>;
   readText: (relativePath: string) => string;
+  onLiteralCall?: (specifier: string) => void;
 }): PackageDistImport[];

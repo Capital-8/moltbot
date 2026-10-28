@@ -20,11 +20,11 @@ import {
   LEGACY_PACKAGE_INSTALL_GUARD_RELATIVE_PATH,
   PACKAGE_LIFECYCLE_PENDING_RELATIVE_PATH,
 } from "../../../scripts/lib/package-lifecycle-marker.mjs";
-import { validateBundledPackageDependencyAlignment } from "../../../scripts/package-source-dependencies.mjs";
 import { sha256File } from "../../infra/directory-durability.js";
 import { walkDirectory } from "../../infra/fs-safe.js";
 import {
   collectPackageDistInventory,
+  PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH,
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
 } from "../../infra/package-dist-inventory.js";
 import {
@@ -44,6 +44,11 @@ import type {
   NodeBootstrapArtifactOptions,
   NodeBootstrapArtifact,
 } from "./node-bootstrap-artifact-contract.js";
+import {
+  collectNodeBootstrapDependencies,
+  collectNodeBootstrapDependencyTargets,
+  collectNodeBootstrapNpmDependencies,
+} from "./node-bootstrap-dependencies.js";
 import {
   copyNodeBootstrapPrebuiltArchive,
   NODE_BOOTSTRAP_PREBUILT_ARCHIVE,
@@ -92,6 +97,7 @@ function bootstrapPath(value: string): string {
     !value ||
     value.includes("\\") ||
     value.includes("\0") ||
+    /[\r\n]/u.test(value) ||
     value.startsWith("/") ||
     value.split("/").some((part) => !part || part === "." || part === "..")
   ) {
@@ -146,6 +152,7 @@ async function observeBootstrapModes(root: string): Promise<readonly number[]> {
 }
 
 type BootstrapImportScope = {
+  inspectImports: boolean;
   label: string;
   prefix: string;
   files: string[];
@@ -259,8 +266,10 @@ export async function prepareNodeBootstrapArtifact(
   const buildId = requireRunningBuild(options, buildInfo, sourcePackage.version);
   const plugins = await resolvePlugins(options, packageRoot);
   const packageJson = composePackagePlugins(sourcePackage, plugins);
+  const install = options.install ?? "bundle";
   const modes = await observeBootstrapModes(temporaryRoot);
   const mainScope: BootstrapImportScope = {
+    inspectImports: true,
     label: packageJson.name,
     prefix: "",
     files: [],
@@ -339,6 +348,9 @@ export async function prepareNodeBootstrapArtifact(
     // The Gateway serves Control UI assets; nodes install their worker bundle separately.
     // Neither belongs in the node runtime's packaging, validation, or download work.
     (relative) =>
+      // The node owns its filtered inventory and runtime manifest. Gateway-only
+      // content metadata is finalized later and must not invalidate this archive.
+      relative !== PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH &&
       !relative.startsWith("dist/worker/") &&
       !relative.startsWith("dist/worker-artifacts/") &&
       !relative.startsWith("dist/control-ui/") &&
@@ -361,12 +373,16 @@ export async function prepareNodeBootstrapArtifact(
     );
   }
   addFiles(packageRoot, files);
-  // Keep real install guards/pruning, but source-only prepare/prepack commands must not run on a node.
-  packageJson.scripts = Object.fromEntries(
-    Object.entries(packageJson.scripts ?? {}).filter(([name]) =>
-      ["preinstall", "install", "postinstall"].includes(name),
-    ),
-  );
+  if (install === "npm") {
+    // Preserve released install/native hooks only for the explicitly selected npm adapter.
+    packageJson.scripts = Object.fromEntries(
+      Object.entries(packageJson.scripts ?? {}).filter(([name]) =>
+        ["preinstall", "install", "postinstall"].includes(name),
+      ),
+    );
+  } else {
+    delete packageJson.scripts;
+  }
   delete packageJson.devDependencies;
   for (const plugin of plugins) {
     if (plugin.bundled) {
@@ -376,78 +392,116 @@ export async function prepareNodeBootstrapArtifact(
     addFiles(plugin.root, pluginFiles, `dist/extensions/${plugin.id}/`);
   }
 
-  // Only declared bundled/workspace packages cross as JavaScript artifacts. Native dependencies
-  // remain exact npm pins, so the destination chooses its own OS/CPU optional packages.
-  const bundledNames = new Set([
-    ...(packageJson.bundleDependencies ?? packageJson.bundledDependencies ?? []),
-    ...Object.entries(packageJson.dependencies ?? {})
+  const inspectedDependencies = new Set([
+    ...(sourcePackage.bundleDependencies ?? sourcePackage.bundledDependencies ?? []),
+    ...Object.entries(sourcePackage.dependencies ?? {})
       .filter(([, spec]) => spec.startsWith("workspace:"))
       .map(([name]) => name),
   ]);
-  for (const name of [...bundledNames].toSorted()) {
-    bootstrapPath(name);
-    const root = await fs.realpath(path.join(packageRoot, "node_modules", name));
-    const bundled = await readPackageManifest(root);
-    if (bundled.name !== name) {
-      throw new Error(`Bundled node distribution dependency identity does not match ${name}`);
-    }
-    const dependencies = validateBundledPackageDependencyAlignment({
-      bundledDependencies: bundled.dependencies,
-      bundledPackageLabel: `bundled ${name}`,
-      rootDependencies: packageJson.dependencies,
-    });
-    for (const [dependency, version] of dependencies) {
-      packageJson.dependencies![dependency] = version;
-    }
-    // Linked workspaces can carry source and private files; installed npm bundles already
-    // own their published layout, including compiled directories and non-JavaScript assets.
-    const workspace =
-      sourcePackage.dependencies?.[name]?.startsWith("workspace:") ||
-      !root.endsWith(`${path.sep}node_modules${path.sep}${name.split("/").join(path.sep)}`);
-    const bundledFiles = workspace
-      ? await collectPackageDistInventory(root)
-      : await collectBootstrapFiles(root);
-    if (bundledFiles.length === 0) {
-      throw new Error(
-        `Bundled node dependency ${name} needs its compiled distribution; rebuild the Gateway`,
+  const npmPlan =
+    install === "npm"
+      ? await collectNodeBootstrapNpmDependencies(packageRoot, packageJson)
+      : undefined;
+  const targets = npmPlan
+    ? [{ platform: process.platform, arch: process.arch, root: packageRoot, prefix: "" }]
+    : await collectNodeBootstrapDependencyTargets(packageRoot, sourcePackage);
+  if (npmPlan) {
+    packageJson.dependencies = npmPlan.rootDependencies;
+  }
+  for (const target of targets) {
+    for (const dependency of npmPlan?.dependencies ??
+      (await collectNodeBootstrapDependencies(
+        target.root,
+        packageJson,
+        target,
+        plugins.map((plugin) =>
+          target.prefix ? path.join(target.root, "extensions", plugin.id) : plugin.root,
+        ),
+      ))) {
+      const { root, requestedName, manifest: installed } = dependency;
+      if (
+        !target.prefix &&
+        dependency.prefix === `node_modules/${installed.name}/` &&
+        packageJson.dependencies?.[installed.name]
+      ) {
+        packageJson.dependencies[installed.name] = installed.version;
+      }
+      const name = installed.name;
+      const relative = path.relative(target.root, root);
+      if (
+        target.prefix &&
+        (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      ) {
+        throw new Error(`Node runtime target dependency escapes its prepared input: ${name}`);
+      }
+      const workspace =
+        sourcePackage.dependencies?.[requestedName]?.startsWith("workspace:") ||
+        // Aliases retain their requested name when flattened, but pnpm realpaths
+        // can end in the manifest name. Both are installed registry layouts.
+        ![requestedName, name].some((installedName) =>
+          root.endsWith(
+            `${path.sep}node_modules${path.sep}${installedName.split("/").join(path.sep)}`,
+          ),
+        );
+      const dependencyFiles = workspace
+        ? await collectPackageDistInventory(root)
+        : await collectBootstrapFiles(root);
+      if (!dependencyFiles.length) {
+        throw new Error(`Node runtime dependency ${name} has no executable distribution`);
+      }
+      const scope: BootstrapImportScope = {
+        // The built-package relative-import checker owns our workspaces/bundled patches.
+        // Registry layouts retain their installed resolver graph, including optional CLI
+        // files that are not ESM entrypoints; validate them through real target execution.
+        inspectImports: install === "npm" || inspectedDependencies.has(name),
+        label: name,
+        prefix: `${target.prefix}${dependency.prefix}`,
+        files: [],
+        imports: [],
+        packageJsons: new Map(),
+        ...(name === PATCHED_MCP_NAME
+          ? { patchedMcp: { manifest: installed, hashes: new Map<string, string>() } }
+          : {}),
+      };
+      scopes.push(scope);
+      addFiles(root, dependencyFiles, scope.prefix, scope);
+      const packaged = { ...installed } as NodePackageManifest;
+      if (install === "npm") {
+        delete packaged.dependencies;
+      }
+      delete packaged.scripts;
+      delete packaged.devDependencies;
+      addGeneratedFile(
+        `${scope.prefix}package.json`,
+        `${JSON.stringify(packaged, null, 2)}\n`,
+        scope,
       );
     }
-    const scope: BootstrapImportScope = {
-      label: name,
-      prefix: `node_modules/${name}/`,
-      files: [],
-      imports: [],
-      packageJsons: new Map(),
-      ...(name === PATCHED_MCP_NAME
-        ? { patchedMcp: { manifest: bundled, hashes: new Map<string, string>() } }
-        : {}),
-    };
-    scopes.push(scope);
-    addFiles(root, bundledFiles, scope.prefix, scope);
-    delete bundled.dependencies;
-    delete bundled.devDependencies;
-    delete bundled.scripts;
-    addGeneratedFile(
-      `node_modules/${name}/package.json`,
-      `${JSON.stringify(bundled, null, 2)}\n`,
-      scope,
-    );
-    packageJson.dependencies![name] = bundled.version;
   }
-  packageJson.bundleDependencies = [...bundledNames].toSorted();
+  addGeneratedFile(
+    "node-runtime.json",
+    `${JSON.stringify({
+      buildId,
+      install,
+      openclawVersion: packageJson.version,
+      platforms:
+        install === "bundle"
+          ? targets.map(({ platform, arch, prefix }) => ({ platform, arch, prefix }))
+          : [],
+    })}\n`,
+  );
+  if (npmPlan) {
+    packageJson.bundleDependencies = npmPlan.bundledNames;
+  } else {
+    delete packageJson.bundleDependencies;
+  }
   delete packageJson.bundledDependencies;
-  for (const [name, spec] of Object.entries({
-    ...packageJson.optionalDependencies,
-    ...packageJson.dependencies,
-  })) {
-    if (valid(spec) !== spec) {
-      throw new Error(`Node distribution requires an exact dependency pin: ${name}@${spec}`);
-    }
-  }
   addGeneratedFile("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
   const inventory = [...entries.keys()].filter((entry) => entry.startsWith("dist/")).toSorted();
   addGeneratedFile(PACKAGE_DIST_INVENTORY_RELATIVE_PATH, `${JSON.stringify(inventory)}\n`);
-  addGeneratedFile(PACKAGE_LIFECYCLE_PENDING_RELATIVE_PATH, "pending\n");
+  if (install === "npm") {
+    addGeneratedFile(PACKAGE_LIFECYCLE_PENDING_RELATIVE_PATH, "pending\n");
+  }
   // Inspect package metadata before JavaScript, independent of each package's file layout.
   const ordered = [...entries].toSorted(
     ([left], [right]) =>
@@ -458,10 +512,10 @@ export async function prepareNodeBootstrapArtifact(
   // Root imports may legitimately reach bundled node_modules files; their own
   // dist imports still receive a separate package-relative closure check.
   mainScope.files = ordered.map(([relative]) => relative);
-  for (const [relative, entry] of ordered) {
-    if (entry.scope !== mainScope) {
-      entry.scope.files.push(relative.slice(entry.scope.prefix.length));
-    }
+  for (const scope of scopes) {
+    scope.files = ordered.flatMap(([relative]) =>
+      relative.startsWith(scope.prefix) ? [relative.slice(scope.prefix.length)] : [],
+    );
   }
   const tarballPath = path.join(temporaryRoot, NODE_BOOTSTRAP_PREBUILT_ARCHIVE);
   const prebuiltManifest = usePrebuilt
@@ -521,7 +575,7 @@ export async function prepareNodeBootstrapArtifact(
         const inspected = sourceFacts.get(relative);
         if (entry.scope.patchedMcp) {
           entry.scope.patchedMcp.hashes.set(importerPath, identity.sha256);
-        } else {
+        } else if (entry.scope.inspectImports) {
           entry.scope.imports.push(
             ...(inspected?.imports ??
               collectPackageDistImports({
@@ -549,7 +603,17 @@ export async function prepareNodeBootstrapArtifact(
         await Promise.race([entryConsumed, archiveDone]);
       }
     }
+    for (const scope of scopes) {
+      for (const [relative, text] of mainScope.packageJsons) {
+        if (relative.startsWith(scope.prefix)) {
+          scope.packageJsons.set(relative.slice(scope.prefix.length), text);
+        }
+      }
+    }
     for (const scope of [...scopes, mainScope]) {
+      if (!scope.inspectImports) {
+        continue;
+      }
       const errors = scope.patchedMcp
         ? collectPatchedMcpArtifactErrors({
             manifest: scope.patchedMcp.manifest,
@@ -562,6 +626,27 @@ export async function prepareNodeBootstrapArtifact(
           `Node distribution ${scope.label} ${scope.patchedMcp ? "has an invalid patched dependency" : "has an incomplete built import closure"}; rebuild and restart the Gateway: ${errors.slice(0, 5).join("; ")}`,
         );
       }
+    }
+    const runtimeManifest = Buffer.from(`${JSON.stringify(manifest)}\n`);
+    const runtimeManifestEntry = {
+      path: "package/node-runtime.manifest.json",
+      size: runtimeManifest.byteLength,
+      mode: process.platform === "win32" ? WORKER_BUNDLE_ARTIFACT_MODE : modes[0]!,
+      sha256: createHash("sha256").update(runtimeManifest).digest("hex"),
+    };
+    manifest.push(runtimeManifestEntry);
+    if (pack) {
+      const input = new tar.ReadEntry(
+        new tar.Header({
+          path: runtimeManifestEntry.path,
+          size: runtimeManifestEntry.size,
+          mode: modes[0]!,
+          type: "File",
+        }),
+      );
+      pack.add(input);
+      input.end(runtimeManifest);
+      await Promise.race([entryConsumed, archiveDone]);
     }
     pack?.end();
     await archiveDone;
@@ -595,6 +680,9 @@ export async function prepareNodeBootstrapArtifact(
     tarballBytes,
     openclawVersion: packageJson.version,
     buildId,
+    install,
+    manifestSha256: manifest.find((entry) => entry.path === "package/node-runtime.manifest.json")!
+      .sha256,
     enabledPluginIds: plugins.map(({ id }) => id).toSorted(),
   };
 }

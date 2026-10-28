@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { gunzipSync, gzipSync } from "node:zlib";
 import * as tar from "tar";
 import { describe, expect, it, vi } from "vitest";
 import { collectPackageDistInventory } from "../../infra/package-dist-inventory.js";
@@ -115,6 +116,107 @@ describe("node bootstrap distribution", () => {
     await expect(provider.prepare()).rejects.toThrow("incomplete built import closure");
   });
 
+  it("keeps explicit npm installs portable with exact pins and install hooks", async () => {
+    const { root, packageRoot, options, sourcePackage } = await fixture();
+    await write(packageRoot, "package.json", {
+      ...sourcePackage,
+      dependencies: { ...sourcePackage.dependencies, "uninstalled-native": "3.4.5" },
+      optionalDependencies: { "other-platform-native": "2.3.4" },
+    });
+    await fs.rm(path.join(packageRoot, "node_modules/native-runtime"), { recursive: true });
+    await write(packageRoot, "node-runtime-dependencies/invalid-target/runtime-input.json", {});
+    const artifact = await createProvider({ ...options, install: "npm" }).prepare();
+    expect(artifact.install).toBe("npm");
+    const target = await extract(root, artifact);
+    const manifest = JSON.parse(await readText(target, "package.json"));
+    expect(manifest.dependencies).toEqual({
+      "@fixture/ai": version,
+      "native-runtime": "1.2.3",
+      "uninstalled-native": "3.4.5",
+    });
+    expect(manifest.optionalDependencies).toEqual({ "other-platform-native": "2.3.4" });
+    expect(manifest.bundleDependencies).toEqual(["@fixture/ai"]);
+    expect(manifest.scripts).toEqual({
+      preinstall: "node scripts/preinstall.mjs",
+      postinstall: "node scripts/postinstall.mjs",
+    });
+    expect(manifest.devDependencies).toBeUndefined();
+    expect(JSON.parse(await readText(target, "node-runtime.json"))).toMatchObject({
+      install: "npm",
+      platforms: [],
+    });
+    await expectFiles(target, {
+      "node_modules/@fixture/ai/dist/index.js": 'export const name = "local-ai";',
+      ".openclaw-lifecycle-pending": "pending\n",
+    });
+    await expectMissing(target, [
+      "node_modules/native-runtime",
+      "node_modules/uninstalled-native",
+      "runtime-dependencies",
+      "node-runtime-dependencies",
+    ]);
+    expect(await runNode(target)).toBe("local-ai:cloud-ready");
+    await promisify(execFile)(process.execPath, [path.join(target, "scripts/postinstall.mjs")]);
+    await expectMissing(target, [".openclaw-lifecycle-pending"]);
+  });
+
+  it("reuses the node archive after Gateway inventory finalization, but rejects changed runtime bytes", async () => {
+    const { root, packageRoot, options } = await fixture();
+    const first = await createProvider(options).prepare();
+    const retained = gzipSync(gunzipSync(await fs.readFile(first.tarballPath)), { level: 1 });
+    const retainedHash = createHash("sha256").update(retained).digest("hex");
+    await fs.writeFile(path.join(packageRoot, "node-runtime.tgz"), retained);
+    await write(packageRoot, "dist/postinstall-content-inventory.json", []);
+    await write(
+      packageRoot,
+      "dist/postinstall-inventory.json",
+      await collectPackageDistInventory(packageRoot),
+    );
+    const reused = await createProvider(options).prepare();
+    expect(reused.tarballSha256).toBe(retainedHash);
+    const target = await extract(root, reused);
+    await expectMissing(target, ["dist/postinstall-content-inventory.json"]);
+    expect(JSON.parse(await readText(target, "dist/postinstall-inventory.json"))).toEqual(
+      await collectPackageDistInventory(target),
+    );
+    await write(packageRoot, "dist/entry.js", "export const changedRuntime = true;\n");
+    const rebuilt = await createProvider(options).prepare();
+    expect(rebuilt.tarballSha256).not.toBe(retainedHash);
+    expect(await fs.readFile(path.join(packageRoot, "node-runtime.tgz"))).toEqual(retained);
+  });
+
+  it("treats a bundle prebuilt as an npm cache miss and reuses matching npm bytes", async () => {
+    const { packageRoot, options, provider } = await fixture();
+    const bundle = await provider.prepare();
+    const bundleBytes = await fs.readFile(bundle.tarballPath);
+    const prebuilt = path.join(packageRoot, "node-runtime.tgz");
+    await fs.writeFile(prebuilt, bundleBytes);
+    const npm = await createProvider({ ...options, install: "npm" }).prepare();
+    expect(npm.install).toBe("npm");
+    expect(npm.tarballSha256).not.toBe(bundle.tarballSha256);
+    expect(await fs.readFile(prebuilt)).toEqual(bundleBytes);
+    const retained = gzipSync(gunzipSync(await fs.readFile(npm.tarballPath)), { level: 1 });
+    const retainedHash = createHash("sha256").update(retained).digest("hex");
+    expect(retainedHash).not.toBe(npm.tarballSha256);
+    await fs.writeFile(prebuilt, retained);
+    const matching = await createProvider({ ...options, install: "npm" }).prepare();
+    expect(matching.install).toBe("npm");
+    expect(matching.tarballSha256).toBe(retainedHash);
+    expect(await fs.readFile(matching.tarballPath)).toEqual(retained);
+    expect(await fs.readFile(prebuilt)).toEqual(retained);
+  });
+
+  it("rejects a floating registry dependency in an explicit npm artifact", async () => {
+    const { packageRoot, options, sourcePackage } = await fixture();
+    await write(packageRoot, "package.json", {
+      ...sourcePackage,
+      dependencies: { ...sourcePackage.dependencies, "floating-native": "^3.4.5" },
+    });
+    await expect(createProvider({ ...options, install: "npm" }).prepare()).rejects.toThrow(
+      "requires an exact dependency pin: floating-native@^3.4.5",
+    );
+  });
+
   it("packs and runs an installed CommonJS bundle with extensionless relative requires", async () => {
     const { root, packageRoot, provider, sourcePackage } = await fixture();
     const bundledName = "@fixture/undici";
@@ -149,6 +251,162 @@ describe("node bootstrap distribution", () => {
     const artifact = await provider.prepare();
     const target = await extract(root, artifact);
     expect(await runNode(target)).toBe("commonjs:proxy:ready");
+  });
+
+  it.each([
+    ["node-domexception", "@nolyfill/domexception"],
+    ["@fixture/platform-linux-x64", "@fixture/platform"],
+  ])("runs flattened registry alias %s with a different manifest name", async (requested, name) => {
+    const { root, packageRoot, sourcePackage, provider } = await fixture("package");
+    await write(packageRoot, "package.json", {
+      ...sourcePackage,
+      dependencies: { ...sourcePackage.dependencies, [requested]: `npm:${name}@1.0.28` },
+    });
+    await write(packageRoot, `node_modules/${requested}/package.json`, {
+      name,
+      version: "1.0.28",
+      main: "./index.js",
+      dependencies: { "nested-runtime": "1.0.0" },
+    });
+    await write(
+      packageRoot,
+      `node_modules/${requested}/index.js`,
+      'module.exports = require("nested-runtime");',
+    );
+    await write(packageRoot, `node_modules/${requested}/node_modules/nested-runtime/package.json`, {
+      name: "nested-runtime",
+      version: "1.0.0",
+      main: "./index.js",
+    });
+    await write(
+      packageRoot,
+      `node_modules/${requested}/node_modules/nested-runtime/index.js`,
+      'module.exports = "alias-ready";',
+    );
+    await write(
+      packageRoot,
+      "dist/entry.js",
+      `import value from "${requested}"; console.log(value);`,
+    );
+    const artifact = await provider.prepare();
+    const installed = path.join(root, "node");
+    await fs.mkdir(installed);
+    await tar.extract({ file: artifact.tarballPath, cwd: installed });
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      path.join(installed, "package/openclaw.mjs"),
+    ]);
+    expect(stdout.trim()).toBe("alias-ready");
+  });
+
+  it.each(["source", "linked-package"] as const)(
+    "rejects an unbuilt %s workspace even when it has executable source",
+    async (mode) => {
+      const { root, provider } = await fixture(mode);
+      const aiRoot =
+        mode === "source"
+          ? path.join(root, "ai-source")
+          : path.join(root, "node_modules/linked-project/ai-source");
+      await fs.rm(path.join(aiRoot, "dist"), { recursive: true });
+      await write(aiRoot, "index.js", 'export const name = "unbuilt";');
+      await expect(provider.prepare()).rejects.toThrow(
+        "Node runtime dependency @fixture/ai has no executable distribution",
+      );
+    },
+  );
+
+  it("ships registry dependencies and nested versions as directly executable bytes", async () => {
+    const { root, packageRoot, sourcePackage, options } = await fixture();
+    await write(packageRoot, "package.json", {
+      ...sourcePackage,
+      dependencies: {
+        ...sourcePackage.dependencies,
+        "registry-runtime": "1.0.0",
+        "shared-runtime": "2.0.0",
+      },
+    });
+    await write(packageRoot, "node_modules/registry-runtime/package.json", {
+      name: "registry-runtime",
+      version: "1.0.0",
+      main: "index.js",
+      dependencies: { "shared-runtime": "1.0.0" },
+    });
+    await write(
+      packageRoot,
+      "node_modules/registry-runtime/index.js",
+      'module.exports = require("shared-runtime");',
+    );
+    for (const [prefix, dependencyVersion] of [
+      ["", "2.0.0"],
+      ["registry-runtime/node_modules/", "1.0.0"],
+    ]) {
+      await write(packageRoot, `node_modules/${prefix}shared-runtime/package.json`, {
+        name: "shared-runtime",
+        version: dependencyVersion,
+        main: "index.js",
+      });
+      await write(
+        packageRoot,
+        `node_modules/${prefix}shared-runtime/index.js`,
+        `module.exports = "${dependencyVersion}";`,
+      );
+    }
+    await write(
+      packageRoot,
+      "dist/entry.js",
+      'import nested from "registry-runtime"; import root from "shared-runtime"; console.log(nested + ":" + root);',
+    );
+    const artifact = await createProvider(options).prepare();
+    const installed = path.join(root, "directly-extracted");
+    await fs.mkdir(installed);
+    await tar.extract({ file: artifact.tarballPath, cwd: installed });
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [path.join(installed, "package/openclaw.mjs")],
+      { env: { PATH: "", npm_config_registry: "http://127.0.0.1:9" } },
+    );
+    expect(stdout.trim()).toBe("1.0.0:2.0.0");
+  });
+
+  it("materializes dependencies from the selected plugin's installed owner", async () => {
+    const { root, packageRoot, provider } = await fixture();
+    await fs.rm(path.join(packageRoot, "node_modules/native-runtime"), { recursive: true });
+    const dependency = "dist/extensions/remote-runtime/node_modules/native-runtime";
+    await fs.rm(path.join(packageRoot, dependency), { recursive: true });
+    await write(packageRoot, `${dependency}/package.json`, {
+      name: "native-runtime",
+      version: "1.2.3",
+      type: "module",
+      main: "index.js",
+    });
+    await write(packageRoot, `${dependency}/index.js`, 'export const answer = "plugin-owned";');
+    await write(
+      packageRoot,
+      "dist/extensions/remote-runtime/index.js",
+      'export { answer } from "native-runtime";',
+    );
+    const artifact = await provider.prepare();
+    const installed = path.join(root, "plugin-closure");
+    await fs.mkdir(installed);
+    await tar.extract({ file: artifact.tarballPath, cwd: installed });
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      path.join(installed, "package/openclaw.mjs"),
+    ]);
+    expect(stdout.trim()).toBe("local-ai:plugin-owned");
+  });
+
+  it("rejects a target dependency input whose frozen input fingerprints differ", async () => {
+    const { packageRoot, sourcePackage, provider } = await fixture();
+    const target = process.platform === "linux" ? "darwin-arm64" : "linux-x64";
+    await write(packageRoot, `node-runtime-dependencies/${target}/package.json`, sourcePackage);
+    await write(packageRoot, `node-runtime-dependencies/${target}/runtime-input.json`, {
+      platform: target.split("-")[0],
+      arch: target.split("-")[1],
+      packageJsonSha256: "0".repeat(64),
+      lockfileSha256: "0".repeat(64),
+    });
+    await expect(provider.prepare()).rejects.toThrow(
+      "does not match the running source/dependencies",
+    );
   });
 
   it("preserves an installed bundled dependency's runtime layout and assets", async () => {
@@ -247,6 +505,7 @@ describe("node bootstrap distribution", () => {
         buildId,
         openclawVersion: version,
         enabledPluginIds: ["remote-runtime"],
+        install: "bundle",
       });
       const bytes = await fs.readFile(artifact.tarballPath);
       expect(bytes.byteLength).toBe(artifact.tarballBytes);
@@ -306,18 +565,19 @@ describe("node bootstrap distribution", () => {
         payload: longEntryPayload,
       });
       const manifest = JSON.parse(await readText(target, "package.json"));
-      expect([manifest.dependencies, manifest.bundleDependencies, manifest.scripts]).toEqual([
-        { "@fixture/ai": version, "native-runtime": "1.2.3" },
-        ["@fixture/ai"],
-        { preinstall: "node scripts/preinstall.mjs", postinstall: "node scripts/postinstall.mjs" },
-      ]);
+      expect(manifest.dependencies).toEqual({ "@fixture/ai": version, "native-runtime": "1.2.3" });
+      expect(manifest.bundleDependencies).toBeUndefined();
+      expect(manifest.scripts).toBeUndefined();
       expect(manifest.devDependencies).toBeUndefined();
-      const lifecycleMarker = path.join(target, ".openclaw-lifecycle-pending");
-      await expect(fs.readFile(lifecycleMarker, "utf8")).resolves.toBe("pending\n");
-      await promisify(execFile)(process.execPath, [path.join(target, "scripts/preinstall.mjs")]);
-      await expect(fs.readFile(lifecycleMarker, "utf8")).resolves.toBe("pending\n");
-      await promisify(execFile)(process.execPath, [path.join(target, "scripts/postinstall.mjs")]);
-      await expect(fs.access(lifecycleMarker)).rejects.toHaveProperty("code", "ENOENT");
+      await expect(
+        fs.access(path.join(target, ".openclaw-lifecycle-pending")),
+      ).rejects.toHaveProperty("code", "ENOENT");
+      expect(
+        JSON.parse(await readText(target, "node_modules/native-runtime/package.json")),
+      ).toMatchObject({
+        name: "native-runtime",
+        version: "1.2.3",
+      });
       expect(await runNode(target)).toBe("local-ai:cloud-ready");
       expect(JSON.parse(await readText(packageRoot, "package.json"))).toEqual(sourcePackage);
       await expectFiles(packageRoot, {
@@ -339,6 +599,7 @@ describe("node bootstrap distribution", () => {
     { name: "public plugin ownership", extensions: ["remote-runtime"], entry: "ownership" },
     { name: "a current root import", extensions: ["qa-lab"], entry: "root" },
     { name: "a current root createRequire", extensions: ["qa-lab"], entry: "require" },
+    { name: "an optional aliased loader", extensions: ["qa-lab"], entry: "optional-require" },
     { name: "a transitive current root import", extensions: ["qa-lab"], entry: "transitive" },
     { name: "the CLI launcher", extensions: ["qa-lab"], entry: "launcher" },
     { name: "a declared install script", extensions: ["qa-lab"], entry: "install" },
@@ -364,13 +625,15 @@ describe("node bootstrap distribution", () => {
         ? ""
         : entry === "require"
           ? 'import { createRequire } from "node:module"; const load = createRequire(import.meta.url); load("./opaque-A1b2C3.mjs");\n'
-          : entry === "transitive"
-            ? 'import "./bridge.js";\n'
-            : entry === "launcher"
-              ? 'await import(new URL("./dist/opaque-A1b2C3.mjs", import.meta.url));\n'
-              : entry === "install"
-                ? 'await import(new URL("../dist/opaque-A1b2C3.mjs", import.meta.url));\n'
-                : 'import "./opaque-A1b2C3.mjs";\n';
+          : entry === "optional-require"
+            ? 'import { createRequire } from "node:module"; const load = createRequire(import.meta.url); load?.(`./opaque-A1b2C3.mjs`);\n'
+            : entry === "transitive"
+              ? 'import "./bridge.js";\n'
+              : entry === "launcher"
+                ? 'await import(new URL("./dist/opaque-A1b2C3.mjs", import.meta.url));\n'
+                : entry === "install"
+                  ? 'await import(new URL("../dist/opaque-A1b2C3.mjs", import.meta.url));\n'
+                  : 'import "./opaque-A1b2C3.mjs";\n';
     await write(packageRoot, importer, importSource + original);
     if (entry === "transitive") {
       await write(packageRoot, "dist/bridge.js", 'import "./opaque-A1b2C3.mjs";\n');
@@ -384,6 +647,16 @@ describe("node bootstrap distribution", () => {
     for (const [file, chunk] of Object.entries(chunks)) {
       await expectFiles(target, { [`dist/${file}`]: chunk.source });
     }
+  });
+
+  it("does not treat ordinary literal path arguments as required imports", async () => {
+    const { packageRoot, provider } = await fixture();
+    await writeOwnedChunks(packageRoot, {
+      "opaque-A1b2C3.mjs": { source: "export {};\n", extensions: ["qa-lab"] },
+    });
+    const entry = await fs.readFile(path.join(packageRoot, "dist/entry.js"), "utf8");
+    await write(packageRoot, "dist/entry.js", `String("./absent-user-directory");\n${entry}`);
+    await expect(provider.prepare()).resolves.toMatchObject({ buildId });
   });
 
   it.each([

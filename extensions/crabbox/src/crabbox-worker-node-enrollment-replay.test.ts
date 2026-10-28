@@ -1,10 +1,14 @@
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { createCrabboxNodeEnrollmentSetup } from "./crabbox-worker-node-enrollment.js";
-import { createNodeBootstrapFixture } from "./crabbox-worker-node-enrollment.test-support.js";
+import {
+  createRuntimeVerificationFixture,
+  expectSetupPhases,
+} from "./crabbox-worker-node-enrollment.test-support.js";
 
 const require = createRequire(import.meta.url);
 const leaseId = "cbx_replay_fixture";
@@ -29,6 +33,7 @@ async function replay(
     : undefined;
   const nodeStart = desktop ? "1788998400:123456" : "Wed Sep 9 12:00:00 2026";
   const hostStart = "1788998399:654321";
+  const verification = createRuntimeVerificationFixture(platform);
   const setup = createCrabboxNodeEnrollmentSetup({
     leaseId,
     ...(desktop ? { desktop: true, target: "macos" as const } : {}),
@@ -37,7 +42,7 @@ async function replay(
       setupCode: "synthetic-code",
       setupId: "synthetic-setup",
       openclawVersion: "2026.8.1",
-      nodeBootstrap: createNodeBootstrapFixture(),
+      nodeBootstrap: verification.nodeBootstrap,
       displayName,
       waitForDeviceId: async () => "synthetic-device",
     },
@@ -69,6 +74,7 @@ async function replay(
   });
   const processFixture = {
     platform,
+    arch: "x64",
     execPath: "/usr/bin/node",
     getuid: () => 501,
     env: { ...setup.forwardedEnv, LC_ALL: "fr_FR.UTF-8" },
@@ -85,6 +91,10 @@ async function replay(
     openSync: vi.fn(() => 11),
     closeSync: vi.fn(),
     lstatSync: (file: string) => {
+      const content = verification.files.get(path.relative(path.dirname(cli), file));
+      if (content) {
+        return { isFile: () => true, isSymbolicLink: () => false, size: content.length };
+      }
       if (file === runtimeDir) {
         return { isDirectory: () => true };
       }
@@ -99,7 +109,13 @@ async function replay(
       (file === path.join(stateDir, "node.pid") &&
         !interrupted &&
         (!launch || (launched && launch === "ready"))),
+    createReadStream: (file: string) =>
+      Readable.from([verification.files.get(path.relative(path.dirname(cli), file))!]),
     readFileSync: (file: string) => {
+      const content = verification.files.get(path.relative(path.dirname(cli), file));
+      if (content) {
+        return content;
+      }
       if (file === path.join(runtimeDir, "node_modules", "openclaw", "package.json")) {
         return JSON.stringify({ name: "openclaw", version: "2026.8.1" });
       }
@@ -311,11 +327,10 @@ describe.each(["linux", "darwin"] as const)("%s node enrollment replay", (platfo
     ).toMatchObject({ code: 1, output: expect.stringContaining("launch is incomplete") });
   });
   it.each([undefined, "original-argv"])("reuses verified live invocation (%s)", async (variant) => {
-    expect(await replay(platform, variant)).toEqual({
-      code: 0,
-      output:
-        "CRABBOX_PHASE:openclaw-bootstrap-preparation\nCRABBOX_PHASE:openclaw-bootstrap-complete",
-    });
+    expect(await expectSetupPhases(replay(platform, variant))).toEqual([
+      "openclaw-bootstrap-preparation",
+      "openclaw-bootstrap-complete",
+    ]);
   });
   it.each(["argv", "cwd", "state", "unavailable"])(
     "refuses %s mismatch or missing identity",

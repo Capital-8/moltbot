@@ -3,7 +3,10 @@ import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { createCrabboxNodeEnrollmentSetup } from "./crabbox-worker-node-enrollment.js";
-import { createNodeBootstrapFixture } from "./crabbox-worker-node-enrollment.test-support.js";
+import {
+  createNodeBootstrapFixture,
+  expectSetupPhases,
+} from "./crabbox-worker-node-enrollment.test-support.js";
 
 const require = createRequire(import.meta.url);
 const home = String.raw`C:\Users\Administrator`;
@@ -246,11 +249,10 @@ describe("native Windows node enrollment replay", () => {
       canonicalizePaths: true,
       processEntry: { executablePath: node.toLowerCase() },
     });
-    expect(result).toMatchObject({
-      code: 0,
-      output:
-        "CRABBOX_PHASE:openclaw-bootstrap-preparation\nCRABBOX_PHASE:openclaw-bootstrap-complete",
-    });
+    expect(await expectSetupPhases(Promise.resolve(result))).toEqual([
+      "openclaw-bootstrap-preparation",
+      "openclaw-bootstrap-complete",
+    ]);
     expect(result.spawnSync).toHaveBeenCalledOnce();
     expect(result.fs.mkdirSync).toHaveBeenCalledWith(defaultStateDir, { recursive: true });
   });

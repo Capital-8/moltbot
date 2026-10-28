@@ -7,7 +7,6 @@ import {
 } from "../../../scripts/lib/package-dist-imports.mjs";
 import { collectRootPackageExcludedExtensionDirs } from "../../../scripts/lib/root-package-bundled-plugin-excludes.mjs";
 import { root as openFsRoot } from "../../infra/fs-safe.js";
-import { collectPackageRootImports } from "../../infra/package-root-imports.js";
 import { readRuntimeDependencyOwnership } from "../../infra/runtime-dependency-ownership.js";
 import { NON_PACKAGED_BUNDLED_PLUGIN_DIRS } from "../../shared/non-packaged-plugin-dirs.js";
 import { DEFAULT_WORKER_BUNDLE_ARCHIVE_LIMITS } from "../../shared/worker-bundle-archive.js";
@@ -63,17 +62,20 @@ export async function resolveNodeBootstrapRuntimeChunks(
       throw new Error(`Runtime dependency ownership does not match ${file}; rebuild the Gateway`);
     }
     const source = buffer.toString("utf8");
+    const literalCalls = new Set<string>();
     const fileImports = collectPackageDistImports({
       files: [file],
       readText: () => source,
+      onLiteralCall: (specifier) => literalCalls.add(specifier),
     });
     sourceFacts.set(file, { sha256, imports: fileImports });
     const dependencies = new Set(fileImports.map(({ importedPath }) => importedPath));
     const resolveImport = createRequire(path.join(packageRoot, file)).resolve;
-    for (const specifier of collectPackageRootImports(source)) {
-      if (!specifier.startsWith(".")) {
-        continue;
-      }
+    // Conservatively retain resolvable literal call targets, including aliased
+    // createRequire loaders. Full-program scope analysis can exceed the worker
+    // heap on standalone bundles; the statement scanner releases completed ASTs.
+    // False positives only retain extra chunks; archive closure validation stays exact.
+    for (const specifier of literalCalls) {
       const specifierPath = specifier.replace(/[?#].*$/u, "");
       const direct = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifierPath));
       if (fileSet.has(direct) && dependencies.has(direct)) {
