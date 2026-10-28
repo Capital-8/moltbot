@@ -8,7 +8,8 @@
   height: auto;
   min-height: 30px;
   white-space: nowrap;
-  border-color: color-mix(in srgb, var(--text) 8%, var(--border));
+  border-color: var(--chat-content-border, color-mix(in srgb, var(--text) 8%, var(--border)));
+  background: var(--chat-content-surface, var(--chat-composer-surface, var(--popover)));
 }
 
 .chat-selection-annotations__chip .chat-attachment-file {

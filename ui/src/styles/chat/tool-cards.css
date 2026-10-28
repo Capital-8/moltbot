@@ -850,6 +850,15 @@
   width: 100%;
 }
 
+.chat-plugin-inline-view__notice.card {
+  border-color: var(--chat-content-border, var(--border));
+  background: var(--chat-content-surface, var(--card));
+}
+
+.chat-plugin-inline-view__notice.card:hover {
+  border-color: var(--chat-content-border, var(--border-strong));
+}
+
 .chat-tool-card__preview {
   position: relative;
   width: 100%;

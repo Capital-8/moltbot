@@ -1117,9 +1117,9 @@
   width: auto;
   height: auto;
   margin-top: 0.75em;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chat-content-border, var(--border));
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--secondary) 70%, transparent);
+  background: var(--chat-content-surface, color-mix(in srgb, var(--secondary) 70%, transparent));
   object-fit: contain;
 }
 
@@ -1139,7 +1139,7 @@
   padding: 0.7em 0.8em;
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--bg-muted);
+  background: var(--chat-content-surface, var(--bg-muted));
   color: var(--muted);
 }
 
@@ -1150,7 +1150,7 @@
   padding: 3px 9px;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--link);
+  color: var(--chat-content-link, var(--link));
   font-size: var(--control-ui-text-sm);
   font-weight: 550;
   text-decoration: none;
@@ -1158,7 +1158,7 @@
 
 :is(.chat-text, .sidebar-markdown) .markdown-external-image > a:hover {
   background: color-mix(in srgb, var(--text) 13%, transparent);
-  color: var(--link-hover);
+  color: var(--chat-content-link-hover, var(--link-hover));
 }
 
 /* Inline-code overrides let palettes separate chips from their host without

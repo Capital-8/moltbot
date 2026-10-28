@@ -47,7 +47,7 @@ export function PluginInlineView(props: {
       : "unavailable";
   });
   const notice = () => (
-    <div class="card" role="status">
+    <div class="card chat-plugin-inline-view__notice" role="status">
       <strong>{runtime?.read().inlineViewLabel(key()) ?? props.block.viewId}</strong>
       <p class="muted">
         {t(status() === "loading" ? "pluginUi.inlineLoading" : "pluginUi.inlineUnavailable")}
