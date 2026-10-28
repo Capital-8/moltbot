@@ -88,13 +88,37 @@ export async function syncSessionRepositoryWorkspace(params: {
   gitAuthor?: { name?: string; email?: string };
   runSetupScript?: boolean;
   recovery?: true;
+  readNativeCredential?: GitHubCredentialReader;
+  retainCredentialCleanup?: (revoke: () => Promise<void>) => void;
   preparedRepository?: PreparedRepositoryWorkspace;
+  retainedDisk?: (workspaceDir: string) => RetainedWorkspaceAuthority | undefined;
+  /** The dispatch owner excludes unresolved work before reconstructing source-only artifacts. */
+  prepareCheckpointRecovery?: () => Promise<() => void>;
   assertCurrent: () => void;
   markPhase?: (phase: string) => void;
 }) {
   const store = getSessionRepositoryWorkspaceStore();
   let repository = params.repository;
   const prepared = params.preparedRepository;
+  if (repository.diskAuthority) {
+    params.assertCurrent();
+    const current = params.retainedDisk?.(repository.diskAuthority.workspaceDir);
+    if (
+      !current ||
+      !isDeepStrictEqual(current, repository.diskAuthority) ||
+      !repository.baseCommit ||
+      !repository.baseManifestHash
+    ) {
+      throw new Error("Retained workspace disk authority changed; mirror restore is refused");
+    }
+    return {
+      mode: "repository" as const,
+      remoteWorkspaceDir: current.workspaceDir,
+      baseCommit: repository.baseCommit,
+      baseManifestRef: repository.baseManifestHash,
+      manifestRef: repository.baseManifestHash,
+    };
+  }
   if (prepared && repository.baseCommit && prepared.baseCommit !== repository.baseCommit) {
     throw new Error("Prepared repository does not match the pinned session commit");
   }
@@ -234,16 +258,34 @@ export async function syncSessionRepositoryWorkspace(params: {
       expectedRevision: repository.revision,
       baseCommit: synced.baseCommit,
       baseManifestHash: synced.baseManifestRef,
-      assertCurrent: params.assertCurrent,
+      assertCurrent: assertSourceCurrent,
     });
-    params.assertCurrent();
+    assertSourceCurrent();
   } else if (
     repository.baseCommit !== synced.baseCommit ||
     repository.baseManifestHash !== synced.baseManifestRef
   ) {
     throw new Error("Repository preparation changed the pinned source baseline");
   }
-  if (repository.checkpointRef) {
+  if (missingCheckpoint && synced.manifestRef !== missingCheckpoint.manifestRef) {
+    throw new Error(
+      "Repository source does not match the missing checkpoint; restore its artifact from backup.",
+    );
+  }
+  const diskAuthority = params.retainedDisk?.(synced.remoteWorkspaceDir);
+  if (diskAuthority) {
+    await store.bindBase({
+      workspaceId: repository.workspaceId,
+      expectedRevision: repository.revision,
+      baseCommit: synced.baseCommit,
+      baseManifestHash: synced.baseManifestRef,
+      diskAuthority,
+      assertCurrent: assertSourceCurrent,
+    });
+    assertSourceCurrent();
+    return synced;
+  }
+  if (repository.checkpointRef && !missingCheckpoint) {
     if (synced.manifestRef !== repository.manifestHash) {
       throw new Error("Repository preparation did not restore the accepted checkpoint");
     }

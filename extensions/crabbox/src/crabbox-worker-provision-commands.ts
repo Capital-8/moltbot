@@ -54,6 +54,7 @@ export function createCrabboxProvisionAuthority(
   return { signal, assertCurrent };
 }
 type ProvisionInspectContext = Omit<LeaseCommandContext, "id"> & {
+  timingIdentity?: { operationId: string; environmentId?: string };
   deadline: number;
   inspect: ParsedInspect;
   profile: ReturnType<typeof parseCrabboxProfile>;
@@ -341,8 +342,14 @@ export async function runProvisionSetup(
         : await withCrabboxWorkerEnvProfile(params.forwardedEnv, (names, profilePath, childEnv) =>
             run({
               action: params.phase,
+              observeResult: (observed) => {
+                if (params.timingIdentity) {
+                  reportCrabboxProvisionTiming(observed, params.timingIdentity);
+                }
+              },
               args: leaseRunArgs({ ...params, id: params.inspect.id }, names, profilePath),
               binary: params.binary,
+              providerEnv: params.providerEnv,
               env: childEnv,
               input: params.setup,
               signal: params.signal,

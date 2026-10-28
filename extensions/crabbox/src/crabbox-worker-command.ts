@@ -42,9 +42,11 @@ export type CrabboxCommandRunner = typeof runCrabboxProcess;
 
 export async function runCrabboxCommand(params: {
   action: string;
+  observeResult?: (result: SpawnResult) => void;
   args: string[];
   binary: string;
   env?: NodeJS.ProcessEnv;
+  providerEnv?: CrabboxProviderEnvironment;
   input?: string | Uint8Array;
   signal?: AbortSignal;
   timeoutMs: number;
@@ -64,6 +66,7 @@ export async function runCrabboxCommand(params: {
     params.signal?.throwIfAborted();
     throw crabboxExecutionError(params.action, error);
   }
+  params.observeResult?.(result);
   // The runner owns child/tree settlement; cancellation must not release that custody early.
   params.signal?.throwIfAborted();
   return result;

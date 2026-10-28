@@ -93,6 +93,14 @@ export function createPlacementRecoveryActions(
   ): Promise<void> => {
     let placement = initialPlacement;
     let environment = environments.get(placement.environmentId);
+    const assertMirrorRecoveryAllowed = async () => {
+      const workspace = await deps.resolveWorkspace(placement);
+      if (workspace.kind === "repository" && workspace.repository.diskAuthority) {
+        throw new Error(
+          "Retained workspace disk is unavailable or has a different owner; recovery is held without replacement",
+        );
+      }
+    };
     // Retire the old turn, not its machine. The node stop acknowledgement fences the
     // physical worker; the replacement turn receives a fresh claim on the same workspace.
     const claim = projectWorkerSessionTurnClaim(placement);
@@ -170,6 +178,7 @@ export function createPlacementRecoveryActions(
     }
     const disappearance = workerDisappearanceError(environment);
     if (disappearance || (environment && isUnavailableEnvironment(environment))) {
+      await assertMirrorRecoveryAllowed();
       await failure.reclaimActive(
         placement,
         environment,
@@ -178,6 +187,7 @@ export function createPlacementRecoveryActions(
       return;
     }
     if (!environment || !isCurrentActiveWorkerEnvironment(placement, environment)) {
+      await assertMirrorRecoveryAllowed();
       await failure.reclaimActive(
         placement,
         environment,

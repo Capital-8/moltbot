@@ -10,6 +10,7 @@ import {
   DevicePlacementUnavailableError,
   resolveDevicePlacementEligibility,
   type WorkerNodePlacementAuthority,
+  type WorkerDevicePlacementRequirementResolver,
 } from "./device-placement-eligibility.js";
 import { DEVICE_WORKER_PROVIDER_ID } from "./device-provider-identity.js";
 import { composePlacementAuthorization } from "./placement-authorization.js";
@@ -34,6 +35,7 @@ import { readWorkerProjectPreparation } from "./preparation-identity.schema.js";
 import { readWorkerProjectSnapshot } from "./project-preparation.js";
 import { runWorkerProjectLifecycle } from "./project-setup-script.js";
 import { syncSessionRepositoryWorkspace } from "./repository-workspace-startup.js";
+import { retainedRepositoryDisk } from "./retained-workspace.js";
 import {
   WorkerPlacementAdmissionTargetError,
   type WorkerPlacementAuthorization,
@@ -392,7 +394,11 @@ export function createWorkerPlacementDispatchStartup(options: {
             ? await syncSessionRepositoryWorkspace({
                 markPhase: params.markPhase,
                 repository: params.workspace.repository,
+                retainedDisk: (workspaceDir) =>
+                  retainedRepositoryDisk(requireAttachedEnvironment(), request, workspaceDir),
                 preparedRepository,
+                readNativeCredential: request.readNativeCredential,
+                retainCredentialCleanup: params.retainCredentialCleanup,
                 tunnel,
                 sessionId: request.sessionId,
                 sessionKey: request.sessionKey,

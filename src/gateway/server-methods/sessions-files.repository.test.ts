@@ -46,11 +46,13 @@ import {
 import { createWorkerSessionPlacementStore } from "../worker-environments/placement-store.js";
 import { advancePlacementFixtureToActive } from "../worker-environments/placement-test-fixtures.js";
 import { createRepositoryWorkspaceMutationService } from "../worker-environments/repository-workspace-mutation.js";
+import { retainedRepositoryDisk } from "../worker-environments/retained-workspace.js";
 import type { WorkerEnvironmentService } from "../worker-environments/service.js";
 import {
   stageSessionRepositoryCheckpoint,
   withSessionRepositoryCheckpoint,
 } from "../worker-environments/session-repository-checkpoints.js";
+import type { WorkerEnvironmentRecord } from "../worker-environments/store.js";
 import type {
   WorkerWorkspaceCommand,
   WorkerWorkspaceReconcileRequest,
@@ -144,6 +146,7 @@ let run: ReturnType<
   typeof vi.fn<(command: WorkerWorkspaceCommand) => ReturnType<NodeWorkerWorkspaceRuntime["exec"]>>
 >;
 let context: ReturnType<typeof requestContext>;
+let retainedEnvironment: WorkerEnvironmentRecord | undefined;
 
 function git(...args: string[]): string {
   return execFileSync("git", ["-C", workspace, ...args], { encoding: "utf8" }).trim();
@@ -216,6 +219,7 @@ function requestContext() {
       }): Promise<T> => (await params.mutate(params.assertCurrent)).value,
     },
     workerSessionPlacementService: {
+      listPendingWorkspaceResultsAsync: async () => [],
       getMany: () =>
         new Map([
           [
@@ -234,7 +238,23 @@ function requestContext() {
         ]),
     },
     workerEnvironmentService: {
-      get: () => ({ state: "attached", ownerEpoch: 1, attachedSessionIds: [identity.sessionId] }),
+      get: () =>
+        retainedEnvironment ?? {
+          state: "attached",
+          ownerEpoch: 1,
+          attachedSessionIds: [identity.sessionId],
+        },
+      inspectTurnLease: vi.fn(async (request: { assertCurrent: () => void }) => {
+        request.assertCurrent();
+        if (retainedEnvironment?.retention?.receipt) {
+          retainedEnvironment.retention.desiredState = "running";
+          retainedEnvironment.retention.receipt.observedState = "running";
+          retainedEnvironment.retention.receipt.computeWindow.state = "active";
+          retainedEnvironment.retention.receipt.computeWindow.expiresAt = new Date(
+            Date.now() + 60000,
+          ).toISOString();
+        }
+      }),
       startTunnel: async () => {
         await onTunnel?.();
         return { environmentId: identity.environmentId, ownerEpoch: 1, runWorkspaceCommand: run };
@@ -251,6 +271,7 @@ beforeEach(async () => {
   nodeRoot = createWorkspaceFixture("repository-files-node-");
   generation = 1;
   active = true;
+  retainedEnvironment = undefined;
   sessionId = identity.sessionId;
   lifecycleRevision = "original";
   archivedAt = undefined;
@@ -468,55 +489,117 @@ it("keeps incognito repository downloads alive after their RPC planning borrow e
   ).toBe(404);
 });
 
-it("downloads original live repository bytes in bounded windows and rejects stale placement", async () => {
-  using connection = createSessionFileDownloadClient();
-  const bytes = Buffer.alloc(8 * 1024 * 1024 + 3, 0xff);
-  writeFile("binary.zip", bytes);
-  const download = await files.ok("download", "binary.zip", undefined, connection);
-  expect(download.filename).toBe("binary.zip");
-  // The RPC prepares metadata without reading any file bytes.
-  expect(run.mock.calls.every(([command]) => JSON.parse(command.input!).offset === undefined)).toBe(
-    true,
-  );
-  const nextWindow = createDeferredCore();
-  onTestFinished(() => nextWindow.resolve());
-  const readWindow = run.getMockImplementation()!;
-  run.mockImplementation(async (command) => {
-    const { offset } = JSON.parse(command.input!);
-    if (offset > 0) {
-      await nextWindow.promise;
+it.each([false, true])(
+  "downloads original live repository bytes and rejects stale placement (retained disk: %s)",
+  async (disk) => {
+    if (disk) {
+      const env: WorkerEnvironmentRecord = {
+        ...environmentRecord(),
+        state: "attached",
+        leaseId: "synthetic-retained-lease",
+        nodeDeviceId: "synthetic-retained-node",
+      };
+      retainedEnvironment = {
+        ...env,
+        providerId: "crabbox",
+        state: "attached",
+        profileSnapshot: { settings: { provider: "azure-sandbox" } },
+        retention: {
+          policy: { mode: "session-disk", computeWindowSeconds: 60 },
+          owner: { agentId: "main", sessionId, sessionKey },
+          ownerBinding: "synthetic-owned-disk",
+          desiredState: "suspended",
+          operation: null,
+          receipt: {
+            schema: "synthetic",
+            mode: "session-disk",
+            ownerBinding: "synthetic-owned-disk",
+            policyVerified: true,
+            identity: {
+              leaseId: env.leaseId!,
+              attemptLeaseId: env.leaseId!,
+              slug: "synthetic",
+              resourceId: "synthetic-disk",
+            },
+            claimRevision: "1",
+            computeWindowSeconds: 60,
+            desiredState: "suspended",
+            observedState: "stopped",
+            stopPending: false,
+            computeWindow: {
+              id: "1",
+              authorizedAt: new Date(0).toISOString(),
+              expiresAt: new Date(1).toISOString(),
+              state: "closed",
+            },
+          },
+        },
+      };
+      source = await store.bindBase({
+        workspaceId: source.workspaceId,
+        expectedRevision: source.revision,
+        baseCommit: source.baseCommit!,
+        baseManifestHash: source.baseManifestHash!,
+        diskAuthority: retainedRepositoryDisk(
+          retainedEnvironment,
+          { agentId: "main", sessionId, sessionKey },
+          workspace,
+        ),
+        assertCurrent() {},
+      });
     }
-    return readWindow(command);
-  });
-  const response = await openSessionFileDownload(connection.client, download.url);
-  expect(response.status).toBe(200);
-  const reader = response.body!.getReader();
-  const first = await reader.read();
-  expect(first.value!.length).toBeGreaterThan(0);
-  expect(Buffer.from(first.value!).equals(bytes.subarray(0, first.value!.length))).toBe(true);
-  nextWindow.resolve();
-  const chunks = [first.value!];
-  for (;;) {
-    const next = await reader.read();
-    if (next.done) {
-      break;
+    using connection = createSessionFileDownloadClient();
+    const bytes = Buffer.alloc(8 * 1024 * 1024 + 3, 0xff);
+    writeFile("binary.zip", bytes);
+    const download = await files.ok("download", "binary.zip", undefined, connection);
+    expect(download.filename).toBe("binary.zip");
+    expect(context.workerEnvironmentService.inspectTurnLease).toHaveBeenCalledTimes(disk ? 1 : 0);
+    // The RPC prepares metadata without reading any file bytes.
+    expect(
+      run.mock.calls.every(([command]) => JSON.parse(command.input!).offset === undefined),
+    ).toBe(true);
+    const nextWindow = createDeferredCore();
+    onTestFinished(() => nextWindow.resolve());
+    const readWindow = run.getMockImplementation()!;
+    run.mockImplementation(async (command) => {
+      const { offset } = JSON.parse(command.input!);
+      if (offset > 0) {
+        await nextWindow.promise;
+      }
+      return readWindow(command);
+    });
+    const response = await openSessionFileDownload(connection.client, download.url);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(first.value!.length).toBeGreaterThan(0);
+    expect(Buffer.from(first.value!).equals(bytes.subarray(0, first.value!.length))).toBe(true);
+    nextWindow.resolve();
+    const chunks = [first.value!];
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      chunks.push(next.value);
     }
-    chunks.push(next.value);
-  }
-  expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
-  const windows = await Promise.all(run.mock.results.map((call) => call.value));
-  expect(windows.every((result) => Buffer.byteLength(result.stdout) < 2 * 1024 * 1024)).toBe(true);
-  for (const filePath of ["../outside", "/etc/passwd"]) {
-    await files.error("download", filePath, undefined, connection);
-  }
-  onResult = () => {
-    generation++;
-  };
-  expect(
-    (await fetchSessionFileDownload(connection.client, download.url)).response.statusCode,
-  ).toBe(404);
-  expect(mocks.workspace).not.toHaveBeenCalled();
-});
+    expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
+    const windows = await Promise.all(run.mock.results.map((call) => call.value));
+    expect(windows.every((result) => Buffer.byteLength(result.stdout) < 2 * 1024 * 1024)).toBe(
+      true,
+    );
+    for (const filePath of ["../outside", "/etc/passwd"]) {
+      await files.error("download", filePath, undefined, connection);
+    }
+    onResult = () => {
+      generation++;
+    };
+    expect(
+      (await fetchSessionFileDownload(connection.client, download.url)).response.statusCode,
+    ).toBe(404);
+    expect(mocks.workspace).not.toHaveBeenCalled();
+  },
+);
 
 it("browses, previews, edits and diffs only the live repository without a Gateway checkout", async () => {
   const list = await files.ok("list");

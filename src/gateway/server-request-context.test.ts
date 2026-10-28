@@ -369,7 +369,7 @@ describe("createGatewayRequestContext", () => {
 
   it("publishes worker services through the kernel bridge", () => {
     const workerPlacementDiskSpaceReader = { read: vi.fn(), version: vi.fn(() => 1) };
-    const repositoryWorkspaceMutationService = { mutate: vi.fn() };
+    const repositoryWorkspaceMutationService = { mutate: vi.fn(), captureCheckpoint: vi.fn() };
     const context = createGatewayRequestContext(
       makeContextParams({
         workerPlacementRuntime: {

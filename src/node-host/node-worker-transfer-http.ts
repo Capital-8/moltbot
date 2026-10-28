@@ -1,12 +1,18 @@
 import http, { type ClientRequest, type IncomingMessage } from "node:http";
 import https from "node:https";
 import type { TLSSocket } from "node:tls";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeTlsFingerprint } from "../../packages/gateway-client/src/client-address-utils.js";
 import {
   buildCloudflareAccessHeaders,
   type CloudflareAccessCredentials,
 } from "../../packages/gateway-client/src/cloudflare-access.js";
 import { createDeferredCore, type Deferred } from "../shared/deferred.js";
+import { readWorkspaceTransferBody as readResponseBody } from "../worker/node-workspace-transfer-body.js";
+import {
+  NodeWorkerWorkspaceTransferError,
+  isNodeWorkspaceTransferInvalidReason,
+} from "../worker/node-workspace-transfer-protocol.js";
 
 type NodeWorkerTransferHttpErrorReason =
   | "invalid-gateway-transport"
@@ -272,4 +278,43 @@ export async function withNodeWorkerTransferHttpRequest<T>(
   }
   params.signal?.throwIfAborted();
   return consumed.value;
+}
+
+export const NODE_WORKER_TRANSFER_RESULT_MAX_BYTES = 64 * 1024;
+
+export async function requireNodeWorkerTransferOk(response: IncomingMessage): Promise<void> {
+  if (response.statusCode === 200) {
+    return;
+  }
+  const body = (await readResponseBody(response, NODE_WORKER_TRANSFER_RESULT_MAX_BYTES)).toString(
+    "utf8",
+  );
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    payload = undefined;
+  }
+  if (
+    response.statusCode === 413 &&
+    isRecord(payload) &&
+    payload.error === "workspace_transfer_limit"
+  ) {
+    throw new NodeWorkerWorkspaceTransferError(
+      "workspace-transfer-limit: gateway rejected workspace transfer caps",
+    );
+  }
+  if (
+    response.statusCode === 400 &&
+    isRecord(payload) &&
+    payload.error === "workspace_transfer_invalid" &&
+    isNodeWorkspaceTransferInvalidReason(payload.reason)
+  ) {
+    throw new NodeWorkerWorkspaceTransferError(
+      `workspace-transfer-invalid: gateway rejected workspace transfer payload (${payload.reason})`,
+    );
+  }
+  throw new NodeWorkerWorkspaceTransferError(
+    `workspace-transfer-failed: gateway returned ${response.statusCode ?? 0}`,
+  );
 }

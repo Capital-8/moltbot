@@ -59,7 +59,11 @@ export function listSqliteSchemaInputs(): SqliteSchemaInput[] {
     inputs.push({ id, store, sql });
   };
   add("state", "state", OPENCLAW_STATE_SCHEMA_SQL);
-  const stateBeforeV31 = withLegacyLocalWorkspaceManifests(OPENCLAW_STATE_SCHEMA_SQL);
+  const stateBeforeV33 = withLegacyDiskAuthority(OPENCLAW_STATE_SCHEMA_SQL);
+  add("state-before-v33", "state", stateBeforeV33);
+  const stateBeforeV32 = withLegacyWorkerRetention(stateBeforeV33);
+  add("state-before-v32", "state", stateBeforeV32);
+  const stateBeforeV31 = withLegacyLocalWorkspaceManifests(stateBeforeV32);
   add("state-before-v31", "state", stateBeforeV31);
   const stateBeforeV27 = withLegacyStateWriteIndexes(stateBeforeV31);
   add("state-before-v27", "state", stateBeforeV27);

@@ -144,7 +144,12 @@ it.each(["worker-turn", "remote-exec"] as const)(
           });
           const prepared = await service.prepareAttachments({
             ...request,
-            environmentId: ENVIRONMENT_ID,
+            owner: {
+              environmentId: ENVIRONMENT_ID,
+              ownerEpoch: OWNER_EPOCH,
+              sessionId: SESSION_ID,
+              isAuthorized: () => true,
+            },
           });
           await runNodeWorkerWorkspaceTransfer({
             gatewayUrl: server.gatewayUrl,

@@ -13,15 +13,23 @@ import {
 } from "../../state/session-repository-workspaces.js";
 import type { SessionRepositoryWorkspaceRecord } from "../../state/session-repository-workspaces.types.js";
 import { readGitHubRepositoryPublicationMetadata } from "../github-repository-publication-snapshot.js";
+import type { WorkerSessionPlacementProjection } from "./placement-read-projection.types.js";
 import { boundedWorkerError } from "./worker-error.js";
-import { parseWorkspaceManifestPair } from "./workspace-manifest-worker.js";
+import { sameEntry } from "./workspace-manifest-comparison.js";
+import {
+  loadStagedWorkspaceManifest,
+  parseWorkspaceManifestPair,
+} from "./workspace-manifest-worker.js";
 import {
   requireWorkspaceResultGit,
   updateWorkspaceResultRefs,
   withWorkspaceResultRefMutation,
   workspaceResultCheckpointInitArgs,
 } from "./workspace-result-git.js";
-import type { StagedWorkerArtifactInventory } from "./workspace-result-inventory.js";
+import type {
+  StagedWorkerArtifactInventory,
+  WorkerWorkspaceGitHistory,
+} from "./workspace-result-inventory.js";
 import {
   deleteStagedWorkerWorkspaceResult,
   preparedWorkerWorkspaceResultRef,
@@ -191,6 +199,38 @@ async function refObjects(
   return objects;
 }
 
+async function publishCheckpointRefs(
+  root: string,
+  targets: readonly (readonly [string, string | undefined])[],
+  assertCurrent: () => void,
+): Promise<void> {
+  await withWorkspaceResultRefMutation(root, async (baseEnv) => {
+    const updates: string[] = [];
+    const existingObjects = await refObjects(
+      root,
+      targets.map(([target]) => target),
+      baseEnv,
+    );
+    for (const [target, expected] of targets) {
+      const existing = existingObjects.get(target);
+      if (existing !== undefined && existing !== expected) {
+        throw new Error("Repository checkpoint identity already contains a different result");
+      }
+      if (expected !== undefined && existing === undefined) {
+        updates.push(`create ${target}\0${expected}\0`);
+      }
+    }
+    assertCurrent();
+    if (updates.length) {
+      await requireWorkspaceResultGit(root, ["update-ref", "--stdin", "-z"], {
+        input: Buffer.from(updates.join("")),
+        baseEnv,
+        beforeInput: assertCurrent,
+      });
+    }
+  });
+}
+
 export async function readSessionRepositoryArtifacts(
   params: CheckpointSource & {
     previewPath?: string;
@@ -339,10 +379,41 @@ export async function stageSessionRepositoryCheckpoint(
     currentRaw: params.currentManifestRaw,
     currentRef: params.currentManifestRef,
   });
+  let originalBase = base;
+  let originalBaseRaw = params.baseManifestRaw;
+  let originalBaseRef = params.baseManifestRef;
+  let reusedObjects: Array<[string, string]> | undefined;
+  if (params.baseManifestRef !== workspace.baseManifestHash) {
+    if (
+      !workspace.checkpointRef ||
+      (params.baseManifestRef !== workspace.manifestHash &&
+        params.currentManifestRef !== workspace.manifestHash)
+    ) {
+      throw new Error("Repository incremental checkpoint has the wrong accepted parent");
+    }
+    const parent = await loadStagedWorkspaceManifest(root, checkpointRef(workspace));
+    assertBase(workspace, parent);
+    if (
+      parent.currentManifestRef !== workspace.manifestHash ||
+      base.baseCommit !== workspace.baseCommit
+    ) {
+      throw new Error("Repository incremental checkpoint parent changed");
+    }
+    originalBase = parent.base;
+    originalBaseRaw = parent.baseManifestRaw;
+    originalBaseRef = parent.baseManifestRef;
+    const previous = new Map(parent.current.entries.map((entry) => [entry.path, entry]));
+    reusedObjects = current.entries.flatMap<[string, string]>((entry) => {
+      const object = parent.objectsByPath.get(entry.path);
+      return object && sameEntry(entry, previous.get(entry.path))
+        ? [[entry.path, object.objectId]]
+        : [];
+    });
+  }
   const baseCommit = assertBase(workspace, {
-    base,
+    base: originalBase,
     current,
-    baseManifestRef: params.baseManifestRef,
+    baseManifestRef: originalBaseRef,
   });
   const assertRevision = () => {
     params.assertCurrent();
@@ -356,6 +427,79 @@ export async function stageSessionRepositoryCheckpoint(
     }
   };
   assertRevision();
+  if (workspace.checkpointRef && params.currentManifestRef === workspace.manifestHash) {
+    // Reuse only the exact durable checkpoint and unchanged publication identity.
+    // A new publication snapshot still gets its own immutable companion/ref.
+    const acceptedRef = checkpointRef(workspace);
+    const accepted = await readStagedWorkerWorkspaceResult(root, acceptedRef);
+    assertBase(workspace, accepted);
+    if (accepted.currentManifestRef !== params.currentManifestRef) {
+      throw new Error("Repository accepted checkpoint manifest changed");
+    }
+    let samePublication = !params.publicationDigest;
+    if (params.publicationDigest) {
+      const companion = publicationRef(acceptedRef);
+      if ((await refObjects(root, [companion])).has(companion)) {
+        try {
+          const binding: unknown = JSON.parse(
+            await requireWorkspaceResultGit(root, ["show", `${companion}:binding.json`]),
+          );
+          samePublication =
+            isRecord(binding) &&
+            binding.currentManifestRef === params.currentManifestRef &&
+            binding.publicationDigest === params.publicationDigest;
+        } catch {
+          // Optional publication corruption must not discard accepted recovery bytes.
+        }
+      }
+    }
+    assertRevision();
+    // Identical files can still carry a new commit or amended history. Only
+    // the same immutable Git lineage may skip pack import and checkpoint staging.
+    if (samePublication && isDeepStrictEqual(params.gitHistory, accepted.gitHistory)) {
+      const companionRef = publicationRef(acceptedRef);
+      const objects = await refObjects(root, [acceptedRef, companionRef]);
+      const object = objects.get(acceptedRef);
+      const companionObject = objects.get(companionRef);
+      const verify = async () => {
+        const observed = await refObjects(root, [acceptedRef, companionRef]);
+        if (
+          !object ||
+          observed.get(acceptedRef) !== object ||
+          observed.get(companionRef) !== companionObject
+        ) {
+          throw new Error("Repository accepted checkpoint identity changed");
+        }
+        assertRevision();
+      };
+      await verify();
+      return {
+        checkpointRef: acceptedRef,
+        verify,
+        discard: async () => {},
+        publish: async () => {
+          await verify();
+          if (params.checkpointRef && ref !== acceptedRef) {
+            // The pending-result pointer may be lost after acceptance. Its stable
+            // claim ref must still discover these same immutable recovery objects.
+            await publishCheckpointRefs(
+              root,
+              [
+                [ref, object],
+                [publicationRef(ref), companionObject],
+              ],
+              assertRevision,
+            );
+          }
+          const latest = currentWorkspace();
+          if (!latest) {
+            throw new Error("Repository workspace no longer exists");
+          }
+          return latest;
+        },
+      };
+    }
+  }
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   assertRevision();
   await requireWorkspaceResultGit(root, workspaceResultCheckpointInitArgs());
@@ -376,6 +520,9 @@ export async function stageSessionRepositoryCheckpoint(
   try {
     const objectId = await workerWorkspaceResultStaging.stageWorkerWorkspaceResult({
       ...params,
+      baseManifestRaw: originalBaseRaw,
+      baseManifestRef: originalBaseRef,
+      ...(reusedObjects ? { existingObjects: reusedObjects } : {}),
       root,
       stagedResultRef: candidateRef,
       assertCurrent: assertRevision,
@@ -441,35 +588,14 @@ export async function stageSessionRepositoryCheckpoint(
       verify,
       discard,
       publish: async () => {
-        await withWorkspaceResultRefMutation(root, async (baseEnv) => {
-          const updates: string[] = [];
-          const targets = [
+        await publishCheckpointRefs(
+          root,
+          [
             [ref, objectId],
             [publicationRef(ref), companionId],
-          ] as const;
-          const existingObjects = await refObjects(
-            root,
-            targets.map(([target]) => target),
-            baseEnv,
-          );
-          for (const [target, expected] of targets) {
-            const existing = existingObjects.get(target);
-            if (existing !== undefined && existing !== expected) {
-              throw new Error("Repository checkpoint identity already contains a different result");
-            }
-            if (expected !== undefined && existing === undefined) {
-              updates.push(`create ${target}\0${expected}\0`);
-            }
-          }
-          assertRevision();
-          if (updates.length) {
-            await requireWorkspaceResultGit(root, ["update-ref", "--stdin", "-z"], {
-              input: Buffer.from(updates.join("")),
-              baseEnv,
-              beforeInput: assertRevision,
-            });
-          }
-        });
+          ],
+          assertRevision,
+        );
         // Publish immutable artifacts before the SQLite pointer: if the commit
         // fence fails or the Gateway exits, the pending turn can recover this ref.
         const accepted = await recoverSessionRepositoryCheckpoint({

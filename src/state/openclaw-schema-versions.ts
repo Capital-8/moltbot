@@ -3,6 +3,8 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 // v32 replaces the PostgreSQL vector decoder without rewriting canonical rows.
 export const OPENCLAW_AGENT_SCHEMA_VERSION = 32;
 
+// v33 fences disk-authoritative workspaces from mirror-only writers.
+// v32 fences retained session-private disks from older destructive lifecycle readers.
 // v31 stores local workspace baselines by path and checkpoints as recoverable deltas.
 // v30 fences ordinary automation timing and delivery policies from older schedulers.
 // v29 moves client credentials and native socket material to the local credential owner.
@@ -30,7 +32,7 @@ export const OPENCLAW_AGENT_SCHEMA_VERSION = 32;
 // v7 retires the inert shared commitments table.
 // v6 makes every committed shared-state table part of the canonical runtime schema.
 // v5 records durable cloud-worker result refs on pending workspace fences.
-export const OPENCLAW_STATE_SCHEMA_VERSION = 31;
+export const OPENCLAW_STATE_SCHEMA_VERSION = 33;
 
 export type OpenClawSchemaVersions = {
   state: number;

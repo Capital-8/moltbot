@@ -161,9 +161,23 @@ const statePostgresSchema = {
     };
   }),
 };
-const statePostgresSchemaV30 = {
-  postgres: withLegacyLocalWorkspaceManifests(statePostgresSchema.postgres),
+const statePostgresSchemaV32 = {
+  postgres: withLegacyDiskAuthority(statePostgresSchema.postgres),
   postgresFragments: statePostgresSchema.postgresFragments.map((fragment) => ({
+    ...fragment,
+    sql: withLegacyDiskAuthority(fragment.sql),
+  })),
+};
+const statePostgresSchemaV31 = {
+  postgres: withLegacyWorkerRetention(statePostgresSchemaV32.postgres),
+  postgresFragments: statePostgresSchemaV32.postgresFragments.map((fragment) => ({
+    ...fragment,
+    sql: withLegacyWorkerRetention(fragment.sql),
+  })),
+};
+const statePostgresSchemaV30 = {
+  postgres: withLegacyLocalWorkspaceManifests(statePostgresSchemaV31.postgres),
+  postgresFragments: statePostgresSchemaV31.postgresFragments.map((fragment) => ({
     ...fragment,
     tables: fragment.tables.filter((table) => table !== "local_workspace_manifest_nodes"),
     sql: withLegacyLocalWorkspaceManifests(fragment.sql),

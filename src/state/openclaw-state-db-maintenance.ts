@@ -47,6 +47,7 @@ import {
   tableExists,
   tableHasColumn,
 } from "./openclaw-state-db-schema-helpers.js";
+import { stateMigrationSourceSchema } from "./openclaw-state-db-schema-source.js";
 import { migrateJsonCanonicalWideRowsV13 } from "./openclaw-state-db-schema-v13-widerow.js";
 import { statePredicateColumnMigration } from "./openclaw-state-db-schema-v21-columns.js";
 import {
@@ -575,14 +576,7 @@ export function migrateBoundedStateSchema(
   const indexes = getCanonicalSqliteNamedIndexContracts(OPENCLAW_STATE_SCHEMA_SQL).filter((index) =>
     tables.has(index.tableName),
   );
-  const manifestSourceSchema =
-    previousVersion < 31
-      ? withLegacyLocalWorkspaceManifests(OPENCLAW_STATE_SCHEMA_SQL)
-      : OPENCLAW_STATE_SCHEMA_SQL;
-  const indexSourceSchema =
-    previousVersion < 27 ? withLegacyStateWriteIndexes(manifestSourceSchema) : manifestSourceSchema;
-  const sourceSchema =
-    previousVersion < 26 ? withLegacyStateHeadLayout(indexSourceSchema) : indexSourceSchema;
+  const sourceSchema = stateMigrationSourceSchema(OPENCLAW_STATE_SCHEMA_SQL, previousVersion);
   // Older binaries can leave same-version repairs pending alongside a version change.
   if (
     !options.versionMigrationOnly &&

@@ -31,11 +31,13 @@ import {
   captureCheckpoint,
   prepareReceiptOwner,
 } from "./github-repository-publication-workspace.js";
+import type { PrepareRepositoryPublicationCheckpoint } from "./repository-publication-checkpoint.js";
 
 export function createRepositoryGitHubPublicationExecution(params: {
   instanceId: string;
   active: Map<string, string>;
   getCommittedRuntimeConfig: () => OpenClawConfig;
+  prepareRepositoryCheckpoint?: PrepareRepositoryPublicationCheckpoint;
   assertCurrent: () => void;
   prepareSource: (
     requester: Pick<GitHubPublicationRequesterPolicyV2, "prepareSource">,
@@ -136,6 +138,13 @@ export function createRepositoryGitHubPublicationExecution(params: {
         }
       }
       assertExecution();
+      if (!row.checkpoint_ref) {
+        await params.prepareRepositoryCheckpoint?.(
+          { sessionId: row.session_id, sessionKey: row.session_key, agentId: row.agent_id },
+          assertExecution,
+        );
+        assertExecution();
+      }
       if (
         !row.checkpoint_ref &&
         row.owner_profile_id === null &&

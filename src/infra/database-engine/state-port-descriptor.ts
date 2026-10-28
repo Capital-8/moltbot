@@ -49,8 +49,8 @@ export async function loadStatePortDescriptor(
     // v29 removes credential tables; v30 fences policies; v31 adds per-path workspace baselines.
     if (
       backup ||
-      OPENCLAW_STATE_SCHEMA_VERSION !== 31 ||
-      ![24, 25, 26, 27, 28, 29, 30].includes(sourceVersion)
+      OPENCLAW_STATE_SCHEMA_VERSION !== 33 ||
+      ![24, 25, 26, 27, 28, 29, 30, 31, 32].includes(sourceVersion)
     ) {
       throw new DatabasePortDataError(
         `Missing shared-state PostgreSQL backup descriptor for version ${sourceVersion}`,
@@ -98,7 +98,9 @@ export async function loadStatePortDescriptor(
     (fact): fact is typeof fact & { value: string[] } => fact.kind === "primaryKey",
   );
   const sourceSql = (sql: string) => {
-    const workspace = legacyWorkspace ? withLegacyLocalWorkspaceManifests(sql) : sql;
+    const disk = sourceVersion < 33 ? withLegacyDiskAuthority(sql) : sql;
+    const retention = legacyRetention ? withLegacyWorkerRetention(disk) : disk;
+    const workspace = legacyWorkspace ? withLegacyLocalWorkspaceManifests(retention) : retention;
     return historical ? withLegacyPublicationDraft(workspace) : workspace;
   };
   const schema = (

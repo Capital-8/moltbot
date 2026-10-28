@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { EngineConnection } from "../infra/sql-connection.js";
+import { extractSqliteTableSchema } from "../infra/sqlite-schema-sql.js";
 import { createUpdateRun } from "../infra/update-run-ledger.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import {
@@ -10,6 +11,7 @@ import {
   repairOpenClawStateDatabaseSchema,
 } from "./openclaw-state-db.js";
 import { removePreparedWorkerOwnershipColumns } from "./openclaw-state-schema-v17.test-support.js";
+import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 import {
   addPreCutoverClientCredentialTablesForTest,
   withStateMigrationBackupForTest,
@@ -82,6 +84,46 @@ function reopen(options: Parameters<typeof openOpenClawStateDatabase>[0]) {
 }
 
 describe("shared state schema publication", () => {
+  it("migrates v32 without inventing disk authority for legacy repository state", async () => {
+    const options = { env: { OPENCLAW_STATE_DIR: tempDirs.make("disk-authority-migration-") } };
+    const pathname = openOpenClawStateDatabase(options).path;
+    closeOpenClawStateDatabaseForTest();
+    const legacy = new DatabaseSync(pathname);
+    try {
+      for (const table of [
+        "session_repository_workspaces",
+        "worker_session_placements",
+        "worker_workspace_pending_results",
+      ]) {
+        legacy.exec(extractSqliteTableSchema(OPENCLAW_STATE_SCHEMA_SQL, table));
+      }
+      legacy.exec(`ALTER TABLE session_repository_workspaces DROP COLUMN disk_authority_json;
+        ALTER TABLE worker_workspace_pending_results DROP COLUMN disk_authority_json;
+        INSERT INTO session_repository_workspaces (workspace_id,agent_id,session_key,url,branch,revision,created_at_ms,updated_at_ms)
+        VALUES ('11111111-1111-1111-1111-111111111111','main','agent:main:synthetic','https://example.invalid/repo.git','openclaw/synthetic',7,1,2);
+        PRAGMA user_version = 32;
+        UPDATE schema_meta SET schema_version = 32 WHERE meta_key = 'primary';
+        UPDATE config_machine_state SET value_json = '32' WHERE state_key = 'state.schema.contentVersion';`);
+    } finally {
+      legacy.close();
+    }
+    await withStateMigrationBackupForTest(options, () => openOpenClawStateDatabase(options));
+    const db = openOpenClawStateDatabase(options).db;
+    expectVersion(db, 33);
+    expect(
+      db
+        .prepare(
+          "SELECT revision,disk_authority_json FROM session_repository_workspaces WHERE agent_id='main'",
+        )
+        .get(),
+    ).toEqual({ revision: 7, disk_authority_json: null });
+    expect(db.prepare("PRAGMA table_info(worker_workspace_pending_results)").all()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "disk_authority_json" })]),
+    );
+    closeOpenClawStateDatabaseForTest();
+    expectVersion(openOpenClawStateDatabase(options).db, 33);
+  });
+
   it.each(["runtime open", "doctor repair"] as const)(
     "captured %s applies current content while preserving the unfenced updater's v15 floor",
     async (entry) => {

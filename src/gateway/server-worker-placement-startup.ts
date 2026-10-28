@@ -16,6 +16,7 @@ import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { createGitHubPublicationRuntime } from "./github-publication-runtime.js";
 import type { NodeWorkerSupervisorTransport } from "./node-registry-private.js";
 import { measureGatewayCloseStep, measureGatewayRestartTrace } from "./restart-trace.js";
+import { createGatewayGitHubPublicationRuntime } from "./server-github-publication-startup.js";
 import { emitSessionsChanged } from "./server-methods/session-change-event.js";
 import { measureStartup, type GatewayStartupTrace } from "./server-startup-trace.js";
 import type { WorkerPlacementSessionWorkCancellation } from "./server-worker-placement-cancel.js";
@@ -77,6 +78,8 @@ const WORKER_PLACEMENT_RECONCILE_INTERVAL_MS = 60_000;
 
 type WorkerPlacementSidecar = { stop: () => Promise<void> };
 
+export { createGatewayGitHubPublicationRuntime } from "./server-github-publication-startup.js";
+
 export type GatewayWorkerPlacementRuntimeParams = {
   githubPublicationRuntime?: ReturnType<typeof createGitHubPublicationRuntime>;
   scheduler: GatewayScheduler;
@@ -94,21 +97,9 @@ export type GatewayWorkerPlacementRuntimeParams = {
   warn: (message: string) => void;
 };
 
-export function createGatewayGitHubPublicationRuntime(params: {
-  placements: WorkerSessionPlacementStore;
-  getCommittedRuntimeConfig: () => OpenClawConfig;
-  warn: (message: string) => void;
-}) {
-  return createGitHubPublicationRuntime({
-    ...params,
-    loadSessionRuntime: loadWorkerPlacementSessionRuntimeModule,
-  });
-}
-
 export type GatewayWorkerPlacementRuntime = ReturnType<typeof createGatewayWorkerPlacementRuntime>;
 
 export function createGatewayWorkerPlacementRuntime(params: GatewayWorkerPlacementRuntimeParams) {
-  const { scheduler } = params;
   let nodeWorkerSupervisorTransport: NodeWorkerSupervisorTransport | undefined;
   let stopped = false;
   const isStopping = () =>
@@ -124,6 +115,7 @@ export function createGatewayWorkerPlacementRuntime(params: GatewayWorkerPlaceme
     ready: githubPublicationReady,
     close: closeGitHubPublication,
     coordinator: githubPublication,
+    needsAcceptedWorkspacePublication,
     prepareAcceptedWorkspacePublication,
     publishAcceptedWorkspace,
     reconcilePublications,
@@ -294,6 +286,7 @@ export function createGatewayWorkerPlacementRuntime(params: GatewayWorkerPlaceme
             }),
         ),
       workspaceOperations,
+      needsAcceptedWorkspacePublication,
       prepareAcceptedWorkspacePublication,
       publishAcceptedWorkspace,
       resolveGitAuthor: (agentId) =>
@@ -387,6 +380,7 @@ export function createGatewayWorkerPlacementRuntime(params: GatewayWorkerPlaceme
     waitForInitialPlacement: dispatchService.waitForInitialPlacement,
     redispatchPlacement,
     workspaceOperations,
+    needsAcceptedWorkspacePublication,
     prepareAcceptedWorkspacePublication,
     publishAcceptedWorkspace,
     persistAbandonedPartial: params.persistAbandonedPartial,

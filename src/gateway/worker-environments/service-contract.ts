@@ -192,6 +192,14 @@ export type WorkerEnvironmentServiceContract = {
     requester?: DesktopObserveRequester;
   }): Promise<WorkerDesktopObserveResult>;
   launchDesktopApp(request: WorkerDesktopLaunchParams): Promise<WorkerDesktopLaunchResult>;
+  /** Existing exact-lease admission for explicit retained-file requests; never allocates a replacement. */
+  inspectTurnLease?(request: {
+    environmentId: string;
+    ownerEpoch: number;
+    leaseId: string;
+    assertCurrent: () => void;
+    signal?: AbortSignal;
+  }): Promise<void>;
   startTunnel(request: WorkerTunnelRequest): Promise<WorkerTunnelHandle>;
   stopTunnel(environmentId: string, ownerEpoch?: number): Promise<void>;
 };

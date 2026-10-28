@@ -337,15 +337,17 @@ export function createWorkerNodeProvisioning(options: WorkerNodeProvisioningOpti
         record.profileSnapshot.executionMode !== "remote-exec" &&
         !(await options.store.hasSessionAttachment(record.environmentId));
       assertCurrent();
-      nodeBuild = await options.ensureNodeWorkerBundle({
-        reason: "provision",
-        environmentId: record.environmentId,
-        deviceId: lease.node.deviceId,
-        artifact,
-        prewarm,
-        signal: workSignal,
-        assertCurrent,
-      });
+      nodeBuild = await measureWorkerProvisionPhase(record, "runtime.installation", () =>
+        ensureNodeWorkerBundle({
+          reason: "provision",
+          environmentId: record.environmentId,
+          deviceId: lease.node.deviceId,
+          artifact,
+          prewarm,
+          signal: workSignal,
+          assertCurrent,
+        }),
+      );
       assertCurrent();
       if (preparation && lease.sharedHost !== false) {
         throw new Error("Prepared worker requires a dedicated environment");
@@ -376,11 +378,13 @@ export function createWorkerNodeProvisioning(options: WorkerNodeProvisioningOpti
       }
       return await options.failBootstrap(record, lease.leaseId, provider, error, nodePatch);
     }
-    return options.commitReady(
-      record,
-      { ...nodeBuild, installKind: "bundle" },
-      nodePatch,
-      assertCurrent,
+    return measureWorkerProvisionPhase(record, "readiness.commit", () =>
+      options.commitReady(
+        record,
+        { ...nodeBuild, installKind: "bundle" },
+        nodePatch,
+        assertCurrent,
+      ),
     );
   };
 

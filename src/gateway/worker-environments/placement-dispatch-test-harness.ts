@@ -89,6 +89,8 @@ export async function createHarness(
     runMoveBarrier?: DispatchOptions["runMoveBarrier"];
     recoveryBarrierError?: Error;
     isShuttingDown?: () => boolean;
+    hasCurrentRunner?: DispatchOptions["hasCurrentRunner"];
+    waitForRecoveryNode?: DispatchOptions["waitForRecoveryNode"];
     prepareAcceptedWorkspacePublication?: DispatchOptions["prepareAcceptedWorkspacePublication"];
     publishAcceptedWorkspace?: DispatchOptions["publishAcceptedWorkspace"];
     beforeMoveBegin?: (abandoned: { runId: string } | undefined) => Promise<void>;
@@ -457,6 +459,8 @@ export async function createHarness(
     placements,
     environments,
     isShuttingDown: options.isShuttingDown,
+    hasCurrentRunner: options.hasCurrentRunner,
+    waitForRecoveryNode: options.waitForRecoveryNode,
     prepareGatewayMove: options.prepareGatewayMove,
     runReclaimPreparation: options.runReclaimPreparation ?? runReclaimPreparation,
     runnerAvailability: createWorkerPlacementRunnerAvailabilityReader({

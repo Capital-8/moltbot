@@ -75,6 +75,8 @@ export type WorkspaceStageInputSource<Raw = Uint8Array<ArrayBuffer>> =
       currentManifestRef: string;
       baseManifestRaw: Raw;
       currentManifestRaw: Raw;
+      /** Immutable object facts prepared by the accepted checkpoint owner, never the remote sender. */
+      existingObjects?: Array<[string, string]>;
     }
   | {
       publication: {

@@ -193,6 +193,15 @@ SQLite advances metadata only. PostgreSQL stores that have not admitted vector
 search remain unchanged until first use. Older binaries require the verified
 pre-upgrade backup with its matching build for catalog compatibility.
 
+Shared-state [schema 33](/reference/database-schemas/state-schema-history#state-schema-33)
+records authoritative retained repository disks and each pending result's selected
+mode. Older mirror-only writers are refused. Existing unresolved results keep
+their mirror recovery contract; a Gateway backup cannot restore later disk-only edits.
+
+Shared-state [schema 32](/reference/database-schemas/state-schema-history#state-schema-32)
+adds retained-session disk ownership without changing existing ephemeral workers.
+Older lifecycle writers are fenced from reclaiming retained resources.
+
 Shared-state [schema 31](/reference/database-schemas/state-schema-history#state-schema-31)
 stores local workspace baselines by path and checkpoints as recoverable deltas.
 The schema migration preserves legacy manifest documents and pending receipts;

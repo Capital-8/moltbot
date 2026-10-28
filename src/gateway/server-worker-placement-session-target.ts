@@ -578,6 +578,9 @@ export function createWorkerPlacementNodeWorkspaceBindingResolver(options: {
                 baseCommit: workspace.repository.baseCommit!,
                 baseManifestRef: workspace.repository.baseManifestHash!,
               },
+      ...(workspace.kind === "repository" && workspace.repository.diskAuthority
+        ? { diskAuthority: workspace.repository.diskAuthority }
+        : {}),
       manifestRef: placement.workspaceBaseManifestRef,
       remoteWorkspaceDir: placement.remoteWorkspaceDir,
       sessionKey: placement.sessionKey,

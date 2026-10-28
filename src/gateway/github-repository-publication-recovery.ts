@@ -184,24 +184,28 @@ export function createRepositoryGitHubPublicationRecovery(params: {
   ) => Promise<SessionGitHubPublicationResult>;
 }) {
   const { placements } = params;
+  const pendingForClaim = async (claim: WorkerSessionTurnClaim) =>
+    (
+      await listRepositoryGitHubPublicationsAsync({
+        sessionId: claim.sessionId,
+        ownerProfileId: null,
+        pending: true,
+      })
+    ).filter(
+      (candidate) =>
+        !candidate.checkpoint_ref &&
+        (candidate.claim_id === null || matchesRepositoryGitHubPublicationClaim(candidate, claim)),
+    );
   return {
+    needsClaimWorkspaceCapture: async (claim: WorkerSessionTurnClaim) =>
+      (await pendingForClaim(claim)).length > 0,
     async prepareClaimWorkspace(claim: WorkerSessionTurnClaim): Promise<void> {
       const assertCurrent = () => {
         if (!placements.validateWorkspaceResultClaim(claim)) {
           throw new Error("GitHub publication lost its workspace result claim.");
         }
       };
-      const pending = await listRepositoryGitHubPublicationsAsync({
-        sessionId: claim.sessionId,
-        ownerProfileId: null,
-        pending: true,
-      });
-      for (const row of pending.filter(
-        (candidate) =>
-          !candidate.checkpoint_ref &&
-          (candidate.claim_id === null ||
-            matchesRepositoryGitHubPublicationClaim(candidate, claim)),
-      )) {
+      for (const row of await pendingForClaim(claim)) {
         try {
           await placements.prepareWorkspaceResultClaim(claim);
           const requester = await restoreGitHubPublicationRequester(

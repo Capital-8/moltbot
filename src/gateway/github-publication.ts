@@ -67,6 +67,7 @@ import {
   sameWorktree,
 } from "./github-publication-workspace.js";
 import { createRepositoryGitHubPublicationCoordinator } from "./github-repository-publication.js";
+import type { PrepareRepositoryPublicationCheckpoint } from "./repository-publication-checkpoint.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "./session-utils-store-worker.js";
 import type {
   WorkerSessionPlacementStore,
@@ -113,6 +114,7 @@ export type GitHubPublicationCoordinator = ReturnType<typeof createGitHubPublica
 export function createGitHubPublicationCoordinator(params: {
   placements: WorkerSessionPlacementStore;
   getCommittedRuntimeConfig: () => OpenClawConfig;
+  prepareRepositoryCheckpoint?: PrepareRepositoryPublicationCheckpoint;
   assertCurrent?: () => void;
   signal?: AbortSignal;
 }) {
@@ -561,6 +563,7 @@ export function createGitHubPublicationCoordinator(params: {
         ? repository.requestForClaimV2(request)
         : requestForClaim(request);
     },
+    needsClaimWorkspaceCapture: repository.needsClaimWorkspaceCapture,
     async prepareClaimWorkspace(claim: WorkerSessionTurnClaim) {
       await prepareGitHubPublicationClaimWorkspace(
         { placements: params.placements, assertCurrent },

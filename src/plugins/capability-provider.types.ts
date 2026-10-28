@@ -366,6 +366,9 @@ export type WorkerProvider = {
     profile: WorkerProfile,
     operationId: string,
     options?: {
+      /** Correlation only; never allocation or effect authority. */
+      environmentId?: string;
+      retention?: WorkerSessionDiskRetention;
       /** Configured profile id for display; settings and operation id own allocation identity. */
       profileId?: string;
       /** Attempt-scoped display facts; the host rejects reports after provisioning closes. */

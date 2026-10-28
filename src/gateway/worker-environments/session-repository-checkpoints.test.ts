@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fstatSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -394,6 +395,200 @@ it.for([
     }
   },
 );
+
+it("imports only the acknowledged checkpoint delta and reuses unchanged durable state", async () => {
+  const f = await fixture();
+  const large = Buffer.alloc(256 * 1024, 137);
+  await fs.writeFile(path.join(f.remote, "first.bin"), large);
+  const importBytes: number[] = [];
+  const execute = processExec.runExec;
+  vi.spyOn(processExec, "runExec").mockImplementation(async (command, args, options) => {
+    if (
+      command === "git" &&
+      args.includes("fast-import") &&
+      typeof options === "object" &&
+      options.stdinFileDescriptor !== undefined
+    ) {
+      importBytes.push(fstatSync(options.stdinFileDescriptor).size);
+    }
+    return await execute(command, args, options);
+  });
+  const first = await f.stage("incremental-first");
+  await first.publish();
+  const artifact = f.store.artifactPath(f.workspace.workspaceId);
+  const parent = await readStagedWorkerWorkspaceResult(artifact, first.checkpointRef);
+  const firstObject = await git(artifact, ["rev-parse", `${first.checkpointRef}:first.bin`]);
+  const delta = path.join(f.root, "delta-only");
+  await fs.mkdir(delta);
+  const binary = Buffer.from([0, 255, 1, 128]);
+  await fs.writeFile(path.join(f.remote, "second.bin"), binary);
+  await fs.writeFile(path.join(delta, "second.bin"), binary);
+  await fs.rm(path.join(f.remote, "remove.txt"));
+  if (process.platform !== "win32") {
+    await fs.symlink("first.bin", path.join(f.remote, "alias"));
+    await fs.symlink("first.bin", path.join(delta, "alias"));
+  }
+  const captured = await captureWorkspaceManifest({ root: f.remote, baseCommit });
+  const acceptedBefore = (await f.store.get(f.workspace.workspaceId))!;
+  const second = await stageCheckpoint({
+    store: f.store,
+    workspaceId: f.workspace.workspaceId,
+    expectedRevision: acceptedBefore.revision,
+    stagingRoot: delta,
+    baseManifestRaw: parent.currentManifestRaw,
+    baseManifestRef: parent.currentManifestRef,
+    currentManifestRaw: serializeWorkerWorkspaceManifest(captured.manifest),
+    currentManifestRef: captured.manifestRef,
+    assertCurrent,
+  });
+  const accepted = await second.publish();
+  const stored = await readStagedWorkerWorkspaceResult(artifact, second.checkpointRef);
+  expect(stored.baseManifestRef).toBe(f.workspace.baseManifestHash);
+  expect(stored.base.baseCommit).toBe(baseCommit);
+  expect(await git(artifact, ["rev-parse", `${second.checkpointRef}:first.bin`])).toBe(firstObject);
+  expect(importBytes).toHaveLength(2);
+  expect(importBytes[0]).toBeGreaterThan(large.length);
+  expect(importBytes[1]).toBeLessThan(16 * 1024);
+  await expect(fs.stat(path.join(delta, "first.bin"))).rejects.toMatchObject({ code: "ENOENT" });
+  const unchanged = await stageCheckpoint({
+    store: f.store,
+    workspaceId: f.workspace.workspaceId,
+    expectedRevision: accepted.revision,
+    checkpointRef: workerWorkspaceResultRef("unchanged-claim"),
+    stagingRoot: delta,
+    baseManifestRaw: stored.currentManifestRaw,
+    baseManifestRef: stored.currentManifestRef,
+    currentManifestRaw: stored.currentManifestRaw,
+    currentManifestRef: stored.currentManifestRef,
+    assertCurrent,
+  });
+  expect(unchanged.checkpointRef).toBe(second.checkpointRef);
+  expect((await unchanged.publish()).revision).toBe(accepted.revision);
+  expect(importBytes).toHaveLength(2);
+  await fs.writeFile(path.join(f.remote, "third.txt"), "third");
+  const third = await captureWorkspaceManifest({ root: f.remote, baseCommit });
+  const stale = {
+    store: f.store,
+    workspaceId: f.workspace.workspaceId,
+    expectedRevision: accepted.revision,
+    stagingRoot: delta,
+    baseManifestRaw: parent.currentManifestRaw,
+    baseManifestRef: parent.currentManifestRef,
+    currentManifestRaw: serializeWorkerWorkspaceManifest(third.manifest),
+    currentManifestRef: third.manifestRef,
+    assertCurrent,
+  };
+  await expect(stageCheckpoint(stale)).rejects.toThrow("wrong accepted parent");
+  const foreign = await f.store.create({
+    agentId: "main",
+    sessionKey: "agent:main:foreign",
+    url: "https://github.com/example/project.git",
+    assertCurrent,
+  });
+  const foreignBase = await f.store.bindBase({
+    workspaceId: foreign.workspaceId,
+    expectedRevision: foreign.revision,
+    baseCommit,
+    baseManifestHash: parent.baseManifestRef,
+    assertCurrent,
+  });
+  await expect(
+    stageCheckpoint({
+      ...stale,
+      workspaceId: foreignBase.workspaceId,
+      expectedRevision: foreignBase.revision,
+    }),
+  ).rejects.toThrow("wrong accepted parent");
+  await closeOpenClawStateDatabaseByPathAsync(f.database.path);
+  openOpenClawStateDatabase({ path: f.database.path });
+  const reopened = createSessionRepositoryWorkspaceStore({ path: f.database.path });
+  await withCheckpoint(
+    { store: reopened, workspaceId: f.workspace.workspaceId },
+    async (snapshot) => {
+      expect(await fs.readFile(path.join(snapshot.stagingRoot, "first.bin"))).toEqual(large);
+      expect(await fs.readFile(path.join(snapshot.stagingRoot, "second.bin"))).toEqual(binary);
+      expect(snapshot.current.entries.some((entry) => entry.path === "remove.txt")).toBe(false);
+      if (process.platform !== "win32") {
+        expect(await fs.readlink(path.join(snapshot.stagingRoot, "alias"))).toBe("first.bin");
+      }
+    },
+  );
+  await git(artifact, ["update-ref", "-d", second.checkpointRef]);
+  await expect(
+    stageCheckpoint({
+      ...stale,
+      store: reopened,
+      baseManifestRaw: stored.currentManifestRaw,
+      baseManifestRef: stored.currentManifestRef,
+    }),
+  ).rejects.toThrow();
+  expect((await reopened.get(f.workspace.workspaceId))?.manifestHash).toBe(accepted.manifestHash);
+  console.info("Incremental checkpoint fixture bytes", {
+    firstImportBytes: importBytes[0],
+    nextImportBytes: importBytes[1],
+    newPayloadBytes: binary.length,
+    unchangedImports: 0,
+  });
+});
+
+it("retains an empty worker commit when the accepted checkpoint files are unchanged", async () => {
+  const f = await fixture("working edit\n", true);
+  const first = await f.stage("before-empty-commit");
+  const accepted = await first.publish();
+  const previous = await readStagedWorkerWorkspaceResult(f.artifact, first.checkpointRef);
+  const fileObject = await git(f.artifact, ["rev-parse", `${first.checkpointRef}:edit.txt`]);
+  await git(f.remote, [
+    "-c",
+    "user.name=Checkpoint Test",
+    "-c",
+    "user.email=checkpoint@example.invalid",
+    "-c",
+    "commit.gpgSign=false",
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "-m",
+    "worker empty commit",
+  ]);
+  const headCommit = await git(f.remote, ["rev-parse", "HEAD"]);
+  const pack = await processExec.runCommandBuffered(
+    ["git", "-C", f.remote, "pack-objects", "--revs", "--stdout"],
+    {
+      timeoutMs: 10_000,
+      input: Buffer.from(`${headCommit}\n`),
+      maxOutputBytes: 1024 * 1024,
+    },
+  );
+  expect(pack.code).toBe(0);
+  const gitPackPath = path.join(f.root, "worker.pack");
+  await fs.writeFile(gitPackPath, pack.stdout);
+  const delta = path.join(f.root, "empty-delta");
+  await fs.mkdir(delta);
+  const second = await stageCheckpoint({
+    store: f.store,
+    workspaceId: f.workspace.workspaceId,
+    expectedRevision: accepted.revision,
+    checkpointRef: workerWorkspaceResultRef("after-empty-commit"),
+    stagingRoot: delta,
+    baseManifestRaw: previous.currentManifestRaw,
+    baseManifestRef: previous.currentManifestRef,
+    currentManifestRaw: previous.currentManifestRaw,
+    currentManifestRef: previous.currentManifestRef,
+    gitHistory: { baseCommit: f.pinnedBaseCommit, headCommit, descendsFromBase: true },
+    gitPackPath,
+    assertCurrent,
+  });
+  await second.publish();
+  await git(f.artifact, ["gc", "--prune=now", "--quiet"]);
+  const recovered = await readStagedWorkerWorkspaceResult(f.artifact, second.checkpointRef);
+  expect(recovered.gitHistory?.headCommit).toBe(headCommit);
+  expect(await git(f.artifact, ["rev-parse", `${second.checkpointRef}^`])).toBe(headCommit);
+  expect(await git(f.artifact, ["rev-parse", `${second.checkpointRef}:edit.txt`])).toBe(fileObject);
+  await withCheckpoint(f.read(), async (snapshot) => {
+    expect(snapshot.gitHistory?.headCommit).toBe(headCommit);
+    expect(await readText(snapshot.stagingRoot, "edit.txt")).toBe("working edit\n");
+  });
+});
 
 it("retains cumulative multi-turn files, deletions and executable modes in a bare artifact repo", async () => {
   const { remote, artifact, current, stage, read } = await fixture();

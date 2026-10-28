@@ -432,6 +432,17 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
                 throw error;
               }
               placement = assertPreparationCurrent();
+              if (workspace.kind === "repository") {
+                const { prepareRetainedWorkspace } = await import("./retained-workspace.js");
+                assertPreparationCurrent();
+                workspace = await prepareRetainedWorkspace({
+                  workspace,
+                  placement,
+                  getEnvironment: () => options.environments.get(placement.environmentId),
+                  assertCurrent: assertPreparationCurrent,
+                });
+              }
+              placement = assertPreparationCurrent();
               const execute = remoteExec
                 ? (await raceNodeWorkerOperation(loadRemoteExecTurn(), turn.abortSignal))
                     .executeRemoteExecTurn
@@ -458,6 +469,7 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
                 placement,
                 placements: options.placements,
                 workspace,
+                needsAcceptedWorkspacePublication: options.needsAcceptedWorkspacePublication,
                 prepareAcceptedWorkspacePublication: options.prepareAcceptedWorkspacePublication,
                 publishAcceptedWorkspace: options.publishAcceptedWorkspace,
                 workspaceOperations: options.workspaceOperations,

@@ -248,38 +248,38 @@ export function createWorkerProviderLifecycle(
           : {}),
         signal: workSignal,
         ...(projectOperation ? { project: projectOperation.project } : {}),
-      } satisfies NonNullable<Parameters<WorkerProvider["provision"]>[2]> & {
-        assertCurrent: () => void;
-      };
+        ...projectImage,
+      } satisfies NonNullable<Parameters<WorkerProvider["provision"]>[2]>;
       cancellation?.assertActive();
-      const provision = async () => {
-        assertCurrent();
-        const preparedProvision = await provider.prepareProvision?.(
-          profile,
-          record.provisionOperationId,
-          provisionOptions,
-        );
-        const current = assertCurrent();
-        if (provider.prepareProvision && typeof preparedProvision !== "function") {
-          throw new Error("Worker provider preparation must return an allocation operation");
-        }
-        // Preparation and allocation share one timeout and settlement owner. Only a
-        // fresh requested row proves there was no earlier allocation to clean up.
-        record =
-          current.state === "requested"
-            ? await (provisioningTransition = move(
-                current,
-                "provisioning",
-                undefined,
-                assertCurrent,
-              ))
-            : current;
-        assertCurrent();
-        preparationComplete = true;
-        return preparedProvision
-          ? preparedProvision()
-          : provider.provision(profile, record.provisionOperationId, provisionOptions);
-      };
+      const provision = () =>
+        measureWorkerProvisionPhase(record, "provider.request", async () => {
+          assertCurrent();
+          const preparedProvision = await provider.prepareProvision?.(
+            profile,
+            record.provisionOperationId,
+            provisionOptions,
+          );
+          const current = assertCurrent();
+          if (provider.prepareProvision && typeof preparedProvision !== "function") {
+            throw new Error("Worker provider preparation must return an allocation operation");
+          }
+          // Preparation and allocation share one timeout and settlement owner. Only a
+          // fresh requested row proves there was no earlier allocation to clean up.
+          record =
+            current.state === "requested"
+              ? await (provisioningTransition = move(
+                  current,
+                  "provisioning",
+                  undefined,
+                  assertCurrent,
+                ))
+              : current;
+          assertCurrent();
+          preparationComplete = true;
+          return preparedProvision
+            ? preparedProvision()
+            : provider.provision(profile, record.provisionOperationId, provisionOptions);
+        });
       lease = requireWorkerLease(
         await callProvider(
           record.environmentId,

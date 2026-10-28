@@ -588,6 +588,11 @@ export async function recoverPendingWorkspaceResults(
               }
               return;
             }
+            // Ordinary nodes reconnect themselves. A retained worker may have stopped
+            // its compute window, so resume that same lease and supervisor before saving.
+            if (!(await prepareRecoveryNode())) {
+              return;
+            }
             recovery.assertCurrent();
             const tunnel = await environments.startTunnel({
               environmentId: active.environmentId,

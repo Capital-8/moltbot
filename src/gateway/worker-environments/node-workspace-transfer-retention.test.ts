@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createSolidPngBuffer } from "../../../test/helpers/image-fixtures.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
-import { requireGit } from "../../agents/worktrees/git.js";
+import { requireGit, requireGitBuffer } from "../../agents/worktrees/git.js";
 import {
   ensureStagedInputDirectory,
   stagedInputDirectory,
@@ -234,11 +234,10 @@ it.each([
               },
             },
           });
-          const applied = await verifyReconciledWorkspaceFinal(result, quiescence);
+          await verifyReconciledWorkspaceFinal(result, quiescence);
           expect(recorded).toBe(ref);
           expect(baseManifestRef).toBe(result.manifestRef);
           await deleteStagedWorkerWorkspaceResult({ root: localPath, stagedResultRef: ref });
-          return applied;
         } finally {
           await quiescence.resume();
         }
@@ -317,7 +316,7 @@ it.each([
           expect(await requireGit(localPath, ["ls-files", "--", "media/inbound"])).toBe("");
         }
       };
-      expect((await reconcile("first-input-turn"))?.conflictPaths).toEqual([]);
+      await reconcile("first-input-turn");
       await assertRetained();
 
       const nextDirectory = stagedInputDirectory("b".repeat(64));
@@ -336,7 +335,7 @@ it.each([
       const editedCache = Buffer.from("edited input cache\n");
       await fs.writeFile(path.join(remote, directory, "input-cache.pyc"), editedCache);
       expected.set(`${directory}/input-cache.pyc`, editedCache);
-      expect((await reconcile("next-input-turn"))?.conflictPaths).toEqual([]);
+      await reconcile("next-input-turn");
       await assertRetained();
 
       for (const { kind, identity, markerBefore } of [
@@ -484,7 +483,12 @@ it("restores node reconciliation after Gateway bootstrap changes without replaci
     try {
       const result = await restored.reconcileWorkspace(request);
       await verifyReconciledWorkspaceFinal(result, quiescence);
-      expect(result.getAppliedWorkspaceResult?.()?.conflictPaths).toEqual(["project.txt"]);
+      expect(
+        await requireGitBuffer(localPath, [
+          "show",
+          `${workerWorkspaceResultRef("restored-workspace")}:project.txt`,
+        ]),
+      ).toEqual(Buffer.from("worker project edit\n"));
       expect(accepted).toBe(result.manifestRef);
     } finally {
       await quiescence.resume();

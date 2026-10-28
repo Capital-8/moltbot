@@ -17,6 +17,10 @@ Starting a cloud session in the Control UI shows your submitted prompt immediate
 
 Session lifecycle admission refreshes its maintenance inventory once if another session's worker placement changes during preparation. A change to the admitting session's placement, or another inventory change during the retry, still rejects admission. This requires only a Gateway update and changes no stored data or worker protocol.
 
+Provisioning emits structured `info` timing records through the existing logger. Core phases are `provider.request`, `node.connection`, `runtime.installation`, and `readiness.commit`; records carry `environmentId`, `operationId`, and the inherited trace context. Provider request time includes provider setup and enrollment, so these spans can overlap and must not be summed. Crabbox's bounded stderr timing report supplies its separate `runnerPhases` duration partition and optional `creationEvents` count observations. Only fixed phase names, durations, outcomes, counts, and opaque flags enter these records. Azure Sandbox creation/readiness remains opaque where the API exposes no server disk-attach or boot timestamps.
+
+For console collectors, set `logging.consoleLevel` to `info` and `logging.consoleStyle` to `json` using the existing configuration. A `warn` console threshold filters these observations before a console collector can capture them. Repository synchronization still restores the pinned input, accepted checkpoint bytes, and verified manifest before readiness.
+
 ## Update the Gateway and worker runtime
 
 Gateway updates retain an attached cloud machine and install the new worker bundle in place. The Gateway stops the old worker and revokes its credential before admitting the new build. The machine's workspace, installed packages, and desktop remain available. Failed installation retains the lease for recovery rather than allocating a replacement. The node must support the current bundle installer and reconnect before recovery can finish. Node bundle cleanup keeps the Gateway's current build until every live environment on that node has recorded it, so cleanup that runs while provisioning or an in-place update is finishing cannot remove the bundle the next turn launches.
@@ -63,6 +67,38 @@ Workspace manifest downloads use gzip when the node supports it and remain compa
 
 For a Gateway-source worktree, synchronization is not continuous: OpenClaw sends a fresh eligible inventory at dispatch, not before every turn on an existing worker. Files created only on the Gateway after dispatch remain local until explicitly staged with `git add`. Staged paths join the accepted manifest at the next completed worker reconciliation. Unstaged new inputs require a fresh dispatch.
 
+### Retained Azure repository disks
+
+For a repository-only Azure Sandbox session with an owned preserved session disk,
+that disk is authoritative for files, edits, Git history and index, dependencies,
+and build outputs. Initial dispatch still admits the selected repository and
+revision and performs its authorized setup. Ordinary completed turns persist
+conversation, tool, run, and exact disk-result ownership metadata on the Gateway;
+they do not capture or upload workspace files, create Gateway recovery mirrors,
+capture publication files, or scan manifests for mirror stability.
+
+Stop suspends compute while preserving the active placement and disk. The next
+intentional input resumes that same owned disk, including after a Gateway restart,
+without restoring a Gateway file mirror over it. Missing or mismatched disks keep
+recovery held: OpenClaw does not allocate an empty replacement or restore a stale
+checkpoint. Unresolved old mirror results retain their original recovery path;
+no input or unknown tool effect is replayed to settle a disk result.
+
+Attachments, file reads/downloads, and explicit publication transfer files on
+demand. After reconnect or a Gateway restart, attachment staging lazily restores
+transport custody for the exact environment, owner epoch and session. This does
+not restore or scan the repository; each attachment retains its own turn authority
+and cancellation while later turns reuse the live transport owner. Publication captures a fresh immutable checkpoint under its existing
+workspace reservation; an already bound publication keeps its selected snapshot.
+Existing retained-session Move restrictions still apply. Gateway-source workspaces,
+other providers, and non-retained workers keep the synchronization behavior below.
+
+There is no automatic per-turn Gateway file backup on this path. Confirmed loss
+of the disk can lose unpushed edits and private outputs. Shared schema 33 prevents
+older mirror-only writers from opening the new authority state. Rollback requires
+exclusive verified backup recovery and an explicit choice about later disk-only
+changes; an older mirror must never be restored over newer disk contents.
+
 ### Deliver skills to the worker
 
 Remote-exec skill bundles are private, read-only turn inputs inside the execution workspace. Transfer groups their files into bounded batches to avoid a separate network round trip for every small file. They are ignored by ordinary Git staging and excluded from workspace synchronization and reconciliation. Normal turn cleanup removes them; cleanup failures are reported. Before preparing the next turn, OpenClaw removes leftover private skill copies from that workspace, including copies whose initialization response was lost. This also runs when the new turn selects no skills. Recovery preserves attachments and unrelated directories, and a cleanup failure stops preparation with retry guidance.
@@ -75,6 +111,8 @@ Disconnected workers have no cleanup deadline. Nodes also reclaim copies when th
 
 ### Accept a completed turn
 
+For mirror-authoritative workspaces, completed turns durably prepare recovery checkpoints and any requested publication snapshot before releasing workspace ownership. GitHub network publication then runs in the existing lifecycle reconciliation sweep; publication delays or failures do not hold turn settlement. Pending receipts survive restart, retain their original target and authority checks, and report completion or retry guidance through the same publication owner. Shutdown joins the sweep's existing lifecycle custody.
+
 Worker-turn replies are delivered as soon as the worker is terminal and its final assistant message is durable on the Gateway. Chat final events and `agent.wait` completion mean the reply is done; workspace reconciliation continues in the background under the existing pending-result fence and turn claim. The next turn still waits for reconciliation. Use the existing session placement state to follow workspace settlement.
 
 For Gateway-source workspaces on nodes, local journal recovery runs alongside the remote snapshot upload. Both remain bound to the current result claim and settle before uploaded staging is consumed or cleaned up. Final verification still checks the remote workspace first, then the local workspace, so local edits made during the remote check are detected before acceptance.
@@ -84,7 +122,7 @@ skips applying files. It verifies both after the final quiescence renewal, reche
 the live owner before acceptance, and preserves result refs for restart recovery.
 A change on either side uses the full reconciliation path, including conflict handling.
 
-Completed cloud turns preserve eligible, size-bounded workspace files before the turn claim is released. Repository-only sessions accept a cumulative immutable checkpoint in the Gateway's bare artifact repository. Gateway-source sessions apply those changes to their managed worktree. Worker-turn uses its terminal worker event to create the durable pending-result fence. Remote-exec waits for workspace quiescence and enters the same reconciliation flow after the local Codex attempt. Before applying the result, the Gateway stages complete authenticated base/current manifests plus each changed resulting blob as a Git ref under `refs/openclaw/worker-results/`; deletions are represented by the manifests and need no blob. This keeps the cloud delta recoverable even if the Gateway stops during the apply without duplicating unchanged baseline content. Workspace results use Git file semantics: regular files, executable bits, symlinks, additions, changes, and deletions are retained, while empty directories and other directory modes are not. Gateway-source changes remain in the managed worktree for normal review and commit; repository-only changes remain on the node and in the accepted checkpoint.
+Mirror-authoritative cloud turns preserve eligible, size-bounded workspace files before the turn claim is released. Repository-only sessions accept a cumulative immutable checkpoint in the Gateway's bare artifact repository. Gateway-source sessions apply those changes to their managed worktree. Worker-turn uses its terminal worker event to create the durable pending-result fence. Remote-exec waits for workspace quiescence and enters the same reconciliation flow after the local Codex attempt. Before applying the result, the Gateway stages complete authenticated base/current manifests plus each changed resulting blob as a Git ref under `refs/openclaw/worker-results/`; deletions are represented by the manifests and need no blob. This keeps the cloud delta recoverable even if the Gateway stops during the apply without duplicating unchanged baseline content. Repository workspace uploads compare the canonical capture with the last durably accepted session manifest, so earlier unpushed changes are not sent again. The receiver checks that incremental parent and reuses immutable objects from its accepted private Git checkpoint while preserving the original repository commit and base manifest as provenance. An unchanged workspace with the same publication snapshot reuses its accepted checkpoint without advancing durability. Missing or stale parents refuse rather than treating the workspace as empty. GitHub-normalized publication capture remains separate, and final remote stability verification still runs after quiescence renewal. Workspace results use Git file semantics: regular files, executable bits, symlinks, additions, changes, and deletions are retained, while empty directories and other directory modes are not. Gateway-source changes remain in the managed worktree for normal review and commit; repository-only changes remain on the node and in the accepted checkpoint.
 
 At the checkout root, `.cache/vitest/`, `.cache/openclaw/bun/`, `.cache/ms-playwright/`, and `.local/share/pnpm/store/` are derived caches, `.artifacts/vitest-workers/` contains generated compiler outputs, and `.artifacts/dist-artifacts.lock/` contains runtime ownership files. Workspace capture, transfer, and reconciliation exclude these exact roots. Recovery applies the same rule to previously retained results without changing their authenticated receipts. Other files under `.cache/`, `.local/`, and `.artifacts/`, nested paths, and explicit staged inputs remain subject to the normal workspace eligibility and size limits; genuine concurrent source edits still produce conflicts.
 
@@ -95,7 +133,7 @@ two minutes, with at most two idle workers per node. Follow-up turns reuse the
 loaded runtime with fresh turn authority; placement activation does not start a
 worker. Idle workers inherit the existing background-retention reconciliation
 contract: the process stays alive in both process and container mode, and the
-capture/renew/verify manifest fences detect concurrent workspace changes.
+capture/renew/verify manifest fences detect concurrent workspace changes on mirror-authoritative workspaces. Retained Azure repository disks instead keep their exact disk and terminal-result ownership fences.
 Turn connections and temporary profiles are disposed before idle readiness.
 Idle workers are evictable for capacity, updates, and disconnect cleanup;
 background commands are not. See [node session hosting](/nodes/session-hosting)

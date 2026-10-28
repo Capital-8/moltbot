@@ -1262,6 +1262,7 @@ CREATE TABLE "worker_workspace_pending_results" (
   "workspace_accepted_at_ms" bigint,
   "staged_result_ref" text COLLATE "C",
   "repository_workspace_id" text COLLATE "C",
+  "disk_authority_json" text COLLATE "C",
   "created_at_ms" bigint NOT NULL,
   PRIMARY KEY ("session_id"),
   CHECK (("owner_epoch" >= 1)),

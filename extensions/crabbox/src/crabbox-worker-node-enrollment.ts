@@ -170,12 +170,26 @@ const displayName = ${JSON.stringify(enrollment?.displayName)};
 const mode = ${JSON.stringify(enrollment?.mode)};
 const desktopEnvironment = ${JSON.stringify(desktopEnvironment)};
 const desktopSetup = ${JSON.stringify(params.desktopSetup)};
-const credentials = process.env.${CLOUD_BOOTSTRAP_TOKEN_ENV};
-const setupCode = process.env.${CLOUD_SETUP_CODE_ENV};
+const credentials = ${params.offline ? "undefined" : `process.env.${CLOUD_BOOTSTRAP_TOKEN_ENV}`};
+const setupCode = ${params.offline ? "undefined" : `process.env.${CLOUD_SETUP_CODE_ENV}`};
+const workerCodexBase64 = ${params.offline ? "undefined" : `process.env.${CLOUD_WORKER_CODEX_ENV}`};
 delete process.env.${CLOUD_BOOTSTRAP_TOKEN_ENV};
 delete process.env.${CLOUD_SETUP_CODE_ENV};
+delete process.env.${CLOUD_WORKER_CODEX_ENV};
 if (process.platform !== "win32") process.umask(0o077);
 let phase;
+const bootstrapTimings = [];
+let activationStarted;
+const timed = async (name, work, overlapping = false) => {
+  const started = performance.now();
+  try { return await work(); }
+  finally { bootstrapTimings.push({ name, ms: performance.now() - started, ...(overlapping ? { overlapping: true } : {}) }); }
+};
+const reportTiming = () => {
+  if (activationStarted !== undefined) bootstrapTimings.push({ name: "bootstrap.activation", ms: performance.now() - activationStarted });
+  // Fixed phase names and numeric observations only; never script output or authority.
+  console.error(JSON.stringify({ runnerPhases: bootstrapTimings }));
+};
 const failureMessage = (artifact, failedPhase, code, origin) => "Cloud worker " + artifact + " " + failedPhase + " failed" + (code ? " (" + code + ")" : "") + (origin ? " from " + origin : "");
 const setPhase = (next) => {
   if (phase === next) return;

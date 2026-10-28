@@ -686,20 +686,29 @@ describe("Gateway GitHub publication", () => {
     await placements.markWorkspaceResultPending(claim);
     await runtime.prepareAcceptedWorkspacePublication(claim);
     await placements.acceptWorkspaceResult(claim);
-    const processClaim = vi
-      .spyOn(runtime.coordinator, "processClaim")
-      .mockRejectedValueOnce(new Error("transient publication failure"));
-    await expect(runtime.publishAcceptedWorkspace(claim)).rejects.toThrow(
-      "transient publication failure",
+    const publicationCallsBeforeHandoff = commandCalls.length;
+    await runtime.publishAcceptedWorkspace(claim);
+    expect(commandCalls).toHaveLength(publicationCallsBeforeHandoff);
+    expect(await runtime.coordinator.readAsync(requested.requestId)).toMatchObject({
+      status: "requested",
+    });
+    // A sweep cannot publish while result settlement still owns the workspace.
+    await runtime.reconcilePublications();
+    expect(commandCalls).toHaveLength(publicationCallsBeforeHandoff);
+    await placements.completeWorkspaceResultAndReleaseTurn(claim);
+    vi.spyOn(runtime.coordinator, "resumeSessionRequests").mockRejectedValueOnce(
+      new Error("transient publication failure"),
     );
-    expect(warnings).toEqual([expect.stringContaining("GitHub publication deferred")]);
-    processClaim.mockRestore();
+    await runtime.reconcilePublications();
+    expect(await runtime.coordinator.readAsync(requested.requestId)).toMatchObject({
+      status: "requested",
+    });
+    expect(warnings).toEqual([expect.stringContaining("GitHub publication recovery deferred")]);
     warnings.length = 0;
     vi.spyOn(runtime.coordinator, "markReportedAsync").mockImplementationOnce(() => {
       throw new Error("Gateway stopped after transcript append");
     });
-
-    await expect(runtime.publishAcceptedWorkspace(claim)).resolves.toBeUndefined();
+    await runtime.reconcilePublications();
     expect(warnings).toEqual([
       expect.stringContaining("GitHub publication result reporting deferred"),
     ]);

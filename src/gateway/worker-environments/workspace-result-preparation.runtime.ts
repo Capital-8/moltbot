@@ -154,12 +154,14 @@ export async function buildWorkspaceStageInput(
       params.buildCacheInputs,
     ),
   );
+  const existingObjects = !("publication" in params) ? new Map(params.existingObjects) : undefined;
   // Deletions are represented by the authenticated manifests and need no blob.
   await writeWorkspaceGitInput({
     assertBeforeMutation,
     inputPath: params.inputPath,
     ref: stagedResultRef,
     entries: compared.entries,
+    existingObjects,
     message: stagedResultMessage({ ...source, gitHistory: params.gitHistory }),
     parentCommit: params.gitHistory?.descendsFromBase ? params.gitHistory.headCommit : undefined,
     readVerifiedContent: source.readVerifiedContent,
