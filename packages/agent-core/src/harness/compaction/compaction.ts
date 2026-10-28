@@ -442,8 +442,17 @@ export function prepareCompaction(
     ? pathEntries.findIndex((entry) => entry.id === requestEntryId)
     : -1;
   const admittedEntry = pathEntries[admittedIndex];
+  // Recovery hydrates only the latest semantic window. A processed request may already
+  // be summarized there; unprocessed input must still exist verbatim.
+  const requestWasCompacted = Boolean(
+    requestEntryId &&
+    !admittedEntry &&
+    !constraints?.requestBoundary?.preserve &&
+    pathEntries[prevBoundaryIndex]?.type === "compaction",
+  );
   if (
     requestEntryId &&
+    !requestWasCompacted &&
     (!admittedEntry || getMessageFromEntryForCompaction(admittedEntry)?.role !== "user")
   ) {
     return err(
@@ -451,9 +460,10 @@ export function prepareCompaction(
     );
   }
   const latestInput = contextMessages.findLast((message) => message.role === "user");
+  const requestStartIndex = requestWasCompacted ? prevBoundaryIndex + 1 : admittedIndex;
   const requestMessages =
-    admittedIndex >= 0
-      ? pathEntries.slice(admittedIndex).flatMap((entry) => {
+    requestStartIndex >= 0
+      ? pathEntries.slice(requestStartIndex).flatMap((entry) => {
           const message = getMessageFromEntryForCompaction(entry);
           return message ? [message] : [];
         })
@@ -463,7 +473,7 @@ export function prepareCompaction(
   const hasRequestInput = requestMessages.some((message) => message.role === "user");
   const selectedRequest = requestState
     ? (extractLatestUserRequest(requestMessages) ??
-      (hasRequestInput ? undefined : previousLatestUnresolvedUserRequest))
+      (hasRequestInput && !requestWasCompacted ? undefined : previousLatestUnresolvedUserRequest))
     : undefined;
   const requestSelection: CompactionPreparation["requestSelection"] = requestState
     ? selectedRequest
