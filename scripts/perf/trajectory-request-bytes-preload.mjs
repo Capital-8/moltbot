@@ -41,7 +41,7 @@ const hook = registerHooks({
   },
 });
 
-process.once("beforeExit", async () => {
+async function measure() {
   hook.deregister();
   delete globalThis[captureKey];
   assert(global.gc, "Use --expose-gc");
@@ -109,4 +109,11 @@ process.once("beforeExit", async () => {
       },
     }),
   );
+}
+
+process.once("beforeExit", () => {
+  void measure().catch((/** @type {unknown} */ error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 });
