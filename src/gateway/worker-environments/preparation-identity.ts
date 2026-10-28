@@ -29,6 +29,7 @@ export function createWorkerPreparationIdentity(params: {
   profileId: string;
   profileSnapshot: WorkerProfile;
   project?: WorkerProjectSnapshot;
+  imageReserve?: true;
   target: WorkerProjectPreparationIdentity["target"];
   artifacts: WorkerPreparationArtifacts;
   setupRecipe?: string;

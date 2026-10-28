@@ -16,6 +16,7 @@ import { controlUiClient } from "./server.sessions.create.projects.test-support.
 import { dispatchInboundMessageMock, testState } from "./test-helpers.js";
 import {
   directSessionReq,
+  getGatewayConfigModule,
   setupGatewaySessionsHandlerTestHarness,
 } from "./test/server-sessions.test-helpers.js";
 
@@ -169,6 +170,35 @@ test("sessions.create retains a cloud repository across replay without creating 
   expect(await fs.stat(workspace).catch(() => undefined)).toBeUndefined();
   expect(projectCloneMocks.materialize).not.toHaveBeenCalled();
   expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
+});
+
+test("sessions.create uses the configured prefix for a new remote branch and preserves it on replay", async () => {
+  await createSessionStoreDir();
+  const { getRuntimeConfig } = await getGatewayConfigModule();
+  let config = { ...getRuntimeConfig(), repositoryBranchPrefix: "clawson" };
+  const options = { ...controlUiClient, context: { getRuntimeConfig: () => config } };
+  const repository = { url: "https://github.com/openclaw/openclaw.git", ref: "main" };
+  const created = await directSessionReq<{ key: string; entry: { repositoryWorkspaceId: string } }>(
+    "sessions.create",
+    { agentId: "main", repository },
+    options,
+  );
+  expect(created.ok, JSON.stringify(created.error)).toBe(true);
+  const { key, entry } = created.payload!;
+  config = { ...config, repositoryBranchPrefix: "renamed" };
+  const replay = await directSessionReq(
+    "sessions.create",
+    { agentId: "main", key, repository },
+    options,
+  );
+  expect(replay.ok, JSON.stringify(replay.error)).toBe(true);
+  const listed = await directSessionReq<{
+    sessions: Array<{ key: string; repository?: { branch: string } }>;
+  }>("sessions.list", { agentId: "main", limit: 100 }, options);
+  expect(listed.ok, JSON.stringify(listed.error)).toBe(true);
+  expect(listed.payload?.sessions.find((row) => row.key === key)?.repository?.branch).toBe(
+    `clawson/${entry.repositoryWorkspaceId}`,
+  );
 });
 
 test.each([

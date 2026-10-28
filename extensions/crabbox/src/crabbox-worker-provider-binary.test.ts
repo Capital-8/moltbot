@@ -1,9 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+import * as fileAccess from "openclaw/plugin-sdk/file-access-runtime";
+import type {
+  WorkerRetainedLeaseReceipt,
+  WorkerSessionDiskRetention,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { expect, it, vi } from "vitest";
 import { ensureManagedCrabboxBinary, type CrabboxBinary } from "./crabbox-managed-binary.js";
 import type { CrabboxCommandRunner } from "./crabbox-worker-command.js";
+import { createCrabboxWorkerBinaryResolver } from "./crabbox-worker-provider-binary.js";
 import {
   commandResult,
   createProviderTestHarness,
@@ -44,6 +50,101 @@ function heldAcquisition(command?: CrabboxCommandRunner) {
   });
   return { ...fixture(command), started, finish };
 }
+
+it.each(["0.78.1-local.gce7e7554", "0.79.2-local.g22111202"])(
+  "inspects a retained lease through the deployed default after rejecting captured %s",
+  async (version) => {
+    vi.mocked(ensureManagedCrabboxBinary).mockImplementation(actual.ensureManagedCrabboxBinary);
+    const directory = tempDirs.make("crabbox-retained-binary-");
+    vi.stubEnv("OPENCLAW_STATE_DIR", path.join(directory, "state"));
+    const captured = path.join(directory, "captured-crabbox");
+    await fs.writeFile(captured, version);
+    const managed = actual.resolveManagedCrabboxBinaryPath();
+    await fs.mkdir(path.dirname(managed), { recursive: true });
+    await fs.writeFile(managed, actual.CRABBOX_MIN_VERSION);
+    const receipt: WorkerRetainedLeaseReceipt = {
+      schema: "crabbox.session-disk.v1",
+      mode: "session-disk",
+      ownerBinding: "b".repeat(64),
+      identity: {
+        leaseId: "cbx_0123456789ab",
+        attemptLeaseId: "cbx_abcdef123456",
+        slug: "owned",
+        resourceId: "resource-owned",
+      },
+      claimRevision: "revision-2",
+      computeWindowSeconds: 60,
+      desiredState: "running",
+      computeWindow: {
+        id: "window-owned",
+        authorizedAt: "2026-10-24T10:00:00Z",
+        expiresAt: "2026-10-24T10:01:00Z",
+        state: "active",
+      },
+      policyVerified: true,
+      observedState: "Running",
+      stopPending: false,
+    };
+    const retention: WorkerSessionDiskRetention = {
+      policy: { mode: "session-disk", computeWindowSeconds: 60 },
+      owner: { sessionId: "retained-session", sessionKey: "agent:main:retained", agentId: "main" },
+      ownerBinding: receipt.ownerBinding,
+      desiredState: "running",
+      receipt,
+      operation: null,
+    };
+    const versions = new Map([
+      [captured, version],
+      [SIBLING_BINARY, "0.79.2+local.g22111202"],
+      [managed, actual.CRABBOX_MIN_VERSION],
+    ]);
+    const { provider, runCommand, warn } = fixture(async ([binary, command]) => {
+      if (command === "--version") {
+        const observed = versions.get(String(binary));
+        if (!observed) {
+          throw new Error("Unexpected version candidate");
+        }
+        return commandResult({ stdout: `crabbox ${observed}` });
+      }
+      if (binary !== SIBLING_BINARY || command !== "status") {
+        throw new Error("Managed stock must not inspect the retained journal");
+      }
+      return commandResult({
+        stdout: JSON.stringify({
+          id: receipt.identity.leaseId,
+          state: "running",
+          retention: receipt,
+        }),
+      });
+    });
+    const profile = Object.freeze({
+      provider: "azure-sandbox",
+      ttl: "60m",
+      idleTimeout: "15m",
+      binary: captured,
+    });
+    const request = {
+      leaseId: receipt.identity.leaseId,
+      profile,
+      retention,
+      signal: new AbortController().signal,
+      assertCurrent() {},
+    };
+    await expect(provider.retainedLease!.inspect(request)).resolves.toEqual(receipt);
+    await expect(provider.retainedLease!.inspect(request)).resolves.toEqual(receipt);
+    expect(runCommand.mock.calls.map(([argv]) => argv.slice(0, 2))).toEqual([
+      [captured, "--version"],
+      [SIBLING_BINARY, "--version"],
+      [SIBLING_BINARY, "status"],
+      [SIBLING_BINARY, "status"],
+    ]);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toContain(`using current deployed binary "${SIBLING_BINARY}"`);
+    expect(profile.binary).toBe(captured);
+    expect(await fs.readFile(captured, "utf8")).toBe(version);
+    expect(await fs.readFile(managed, "utf8")).toBe(actual.CRABBOX_MIN_VERSION);
+  },
+);
 
 it.each([
   ["current", commandResult({ stdout: "crabbox 999.0.0" }), "", true],
@@ -204,4 +305,39 @@ it("aborts and drains shared acquisition on provider disposal", async () => {
     name: "AbortError",
   });
   expect(runCommand).not.toHaveBeenCalled();
+});
+
+it("qualifies the exact legacy artifact once and joins its in-flight hash at disposal", async () => {
+  const started = createDeferred<void>();
+  const finish = createDeferred<Awaited<ReturnType<typeof fileAccess.sha256File>>>();
+  const hash = vi.spyOn(fileAccess, "sha256File").mockImplementation(async () => {
+    started.resolve();
+    return await finish.promise;
+  });
+  const resolver = createCrabboxWorkerBinaryResolver({
+    openclawRoot: OPENCLAW_ROOT,
+    signal: new AbortController().signal,
+    warn: vi.fn(),
+  });
+  const first = resolver.qualifyLegacySnapshotContract("/qualified/ce7");
+  const joined = resolver.qualifyLegacySnapshotContract("/qualified/ce7");
+  await started.promise;
+  let settled = false;
+  const drain = resolver.settle().then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  finish.resolve({
+    bytes: 156898626,
+    digest: "101454dcb36d087e6c63ec2d556aa1178bfea4dac3f095077677133b2f17aa50",
+  });
+  await expect(first).resolves.toBe(true);
+  await expect(joined).resolves.toBe(true);
+  await drain;
+  expect(hash).toHaveBeenCalledOnce();
+  hash.mockResolvedValueOnce({ bytes: 1, digest: "0".repeat(64) });
+  await expect(resolver.qualifyLegacySnapshotContract("/other/consumer")).resolves.toBe(false);
+  hash.mockRejectedValueOnce(new Error("unreadable artifact"));
+  await expect(resolver.qualifyLegacySnapshotContract("/missing/consumer")).resolves.toBe(false);
 });

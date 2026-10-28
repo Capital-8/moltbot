@@ -25,6 +25,14 @@ Use an absolute Gateway-host path, `~` for the Gateway user's home directory, or
 
 Changes affect new allocations only. Registered worktrees retain their original paths for reuse, cleanup, and snapshot restore; existing checkouts are not moved automatically. Keep their original storage available while those records are still needed.
 
+## `repositoryBranchPrefix`
+
+Sets the prefix for new remote repository session branches. The default is `openclaw`; branches use `<prefix>/<workspace GUID>`. For example, `repositoryBranchPrefix: "clawson"` creates `clawson/<workspace GUID>`.
+
+The prefix must be one ASCII component of 1–64 characters: start with a letter or digit, then use letters, digits, underscores, or hyphens. Changing it leaves existing saved branches unchanged. This root setting does not change local worktree branch names.
+
+---
+
 ## `worktreeAcceleration`
 
 Optional global boolean for [managed worktree filesystem acceleration](/concepts/managed-worktrees#filesystem-acceleration). Defaults to `true`, which selects an available filesystem backend automatically and otherwise uses normal Git checkout.

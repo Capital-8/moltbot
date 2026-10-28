@@ -10,6 +10,7 @@ import {
   type createPreparedPoolPresence,
   isSupersededPresenceReserve,
   matchingPreparedPoolPresenceDemand,
+  preparedDemandSourceKey,
   type PreparedPoolPresenceOptions,
 } from "./prepared-pool-presence.js";
 import { readWorkerProjectSnapshot } from "./project-preparation.js";
@@ -132,7 +133,7 @@ export function admitSources(ctx: PassContext): Generations {
       demand &&
       (demand.retireAtMs ?? Infinity) > now() &&
       demand.profileId === record.profileId &&
-      demand.project.key === readWorkerProjectSnapshot(record.profileSnapshot.project)?.key &&
+      preparedDemandSourceKey(demand) === workerPreparationSourceKey(record.profileSnapshot) &&
       demand.preparationKey !== record.preparation?.key
     ) {
       continue;
@@ -244,8 +245,8 @@ export function assertGenerationCurrent(ctx: PassContext, generation: Generation
   const { options, presence, isAdmitted } = ctx;
   options.signal.throwIfAborted();
   if (generation.presenceOwned && !generation.activationEligible) {
-    if (!isAdmitted() || !presence.isPresent()) {
-      throw new Error("Authenticated human presence is unavailable for preparation");
+    if (!isAdmitted() || !presence.isDemandActive()) {
+      throw new Error("Prepared capacity demand is unavailable for preparation");
     }
   }
   if (!generation.retention?.isCurrent()) {

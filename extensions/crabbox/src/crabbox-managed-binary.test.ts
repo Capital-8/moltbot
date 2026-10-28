@@ -132,6 +132,46 @@ async function fixture(version = "0.66.0") {
 }
 
 describe("managed Crabbox", () => {
+  it("keeps the managed fallback when the deployed default is below the release floor", async () => {
+    const test = await fixture();
+    const deployed = path.join(test.root, "deployed-crabbox");
+    await fs.writeFile(deployed, "0.79.2-local.g22111202");
+    const probes = vi.fn(runCommand);
+    await expect(
+      ensureManagedCrabboxBinary({
+        binary: test.candidate,
+        fallbackBinary: deployed,
+        env: test.env,
+        runCommand: probes,
+      }),
+    ).resolves.toEqual(test.installed);
+    expect(probes.mock.calls.some(([argv]) => argv[0] === deployed)).toBe(true);
+    expect(await fs.readFile(deployed, "utf8")).toBe("0.79.2-local.g22111202");
+  });
+
+  it("cancels during the deployed-default probe before managed acquisition", async () => {
+    const test = await fixture();
+    const deployed = path.join(test.root, "deployed-crabbox");
+    const controller = new AbortController();
+    await expect(
+      ensureManagedCrabboxBinary({
+        binary: test.candidate,
+        fallbackBinary: deployed,
+        env: test.env,
+        signal: controller.signal,
+        runCommand: async (argv, options) => {
+          if (argv[0] === deployed) {
+            controller.abort(new Error("deployment probe cancelled"));
+            return versionResult("0.79.2+local.g22111202");
+          }
+          return runCommand(argv, options);
+        },
+      }),
+    ).rejects.toThrow("deployment probe cancelled");
+    expect(test.fetch).not.toHaveBeenCalled();
+    await expect(fs.access(test.env.OPENCLAW_STATE_DIR)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("probes the executable in the caller's supplied environment and working directory", async () => {
     const root = tempDirs.make("crabbox-probe-env-");
     const binary = path.join(root, "crabbox");

@@ -51,6 +51,20 @@ describe("config schema regressions", () => {
       );
     }
   });
+  it("accepts the repository branch prefix through canonical config validation", () => {
+    const result = validateConfigObject({ repositoryBranchPrefix: "clawson" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.repositoryBranchPrefix).toBe("clawson");
+    }
+  });
+
+  it.each(["", "../other", "refs/heads", "-option", "has space", " clawson", "a".repeat(65)])(
+    "rejects unsafe repository branch prefix %j",
+    (repositoryBranchPrefix) => {
+      expect(validateConfigObject({ repositoryBranchPrefix }).ok).toBe(false);
+    },
+  );
 
   it.each([["ops"], ["ops-*"], [], ["*"]].map((send) => ({ send })))(
     "accepts per-agent send destinations $send",

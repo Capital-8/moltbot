@@ -408,9 +408,86 @@ describe("prepared worker dispatch", () => {
     expect(harness.environments.destroy).toHaveBeenCalledWith(ready.environmentId);
     expect(harness.environments.schedulePreparedRefill).not.toHaveBeenCalled();
   });
-  it.each([true, false])(
-    "claims a repository-only reserve with setup %s and overlays its accepted checkpoint on the bound source",
-    async (runSetupScript) => {
+  it.each([false, true])(
+    "keeps Repository integration admission outside its image reserve (reader present: %s)",
+    async (hasReader) => {
+      vi.stubEnv("OPENCLAW_STATE_DIR", support.testState.root);
+      integrationState.enabled = true;
+      const originalConfig = getRuntimeConfig();
+      vi.mocked(getRuntimeConfig).mockReturnValue({
+        ...originalConfig,
+        tools: {
+          github: {
+            kind: "app-installation",
+            profileId: "ghp_6128c113c0df8c1a366dfe690c062d8e",
+            app: {
+              appId: 10,
+              installationId: 20,
+              accountId: 30,
+              repositories: [{ id: 40, fullName: "example/project" }],
+              permissions: { contents: "write" },
+              privateKey: "synthetic-unreachable-key",
+              keyVersion: "synthetic-v1",
+            },
+          },
+        },
+      });
+      onTestFinished(() => {
+        vi.unstubAllEnvs();
+        vi.mocked(getRuntimeConfig).mockReturnValue(originalConfig);
+      });
+      const repository = await getSessionRepositoryWorkspaceStore().create({
+        agentId: REQUEST.agentId,
+        sessionKey: REQUEST.sessionKey,
+        url: "https://github.com/example/project.git",
+        runSetupScript: false,
+        assertCurrent: () => {},
+      });
+      const { harness, store, ready, request } = await preparedHarness({
+        repository,
+        imageReserve: true,
+      });
+      const readNativeCredential = vi.fn(async () => {
+        expect(store.get(ready.environmentId)?.attachedSessionIds).toEqual([request.sessionId]);
+        expect(harness.environments.bindPreparedWorkspace).not.toHaveBeenCalled();
+        throw new Error("current actor repository admission denied");
+      });
+      await expect(
+        harness.service.dispatch({ ...request, ...(hasReader ? { readNativeCredential } : {}) }),
+      ).rejects.toThrow(
+        hasReader
+          ? "current actor repository admission denied"
+          : "current GitHub dispatch admission",
+      );
+      expect(harness.environments.createWithRequest).not.toHaveBeenCalled();
+      if (!hasReader) {
+        expect(harness.environments.prepareProjectIntent).not.toHaveBeenCalled();
+        expect(store.get(ready.environmentId)?.preparation?.consumedAtMs).toBeNull();
+        expect(readNativeCredential).not.toHaveBeenCalled();
+      } else {
+        expect(harness.environments.prepareProjectIntent).toHaveBeenCalledWith(request.profileId, {
+          imageReserve: true,
+          machineClass: undefined,
+          executionMode: request.executionMode,
+          inherited: undefined,
+          signal: undefined,
+          os: undefined,
+        });
+        expect(readNativeCredential).toHaveBeenCalledOnce();
+        expect(store.get(ready.environmentId)?.preparation?.consumedAtMs).toBe(1_000);
+        expect(harness.environments.destroy).toHaveBeenCalledWith(ready.environmentId);
+        expect(harness.environments.schedulePreparedRefill).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each([
+    { runSetupScript: true, missingCheckpointOwner: false },
+    { runSetupScript: false, missingCheckpointOwner: false },
+    { runSetupScript: false, missingCheckpointOwner: true },
+  ])(
+    "claims a repository-only reserve (setup=$runSetupScript, missing recovery owner=$missingCheckpointOwner)",
+    async ({ runSetupScript, missingCheckpointOwner }) => {
       vi.stubEnv("OPENCLAW_STATE_DIR", support.testState.root);
       onTestFinished(() => {
         vi.unstubAllEnvs();

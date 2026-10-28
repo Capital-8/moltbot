@@ -325,18 +325,26 @@ export function resolveCrabboxWarmImageProfileKey(
     .digest("hex");
 }
 
-export function resolveCrabboxPreparationTarget(
+export function resolveCrabboxPreparationProfile(
   profile: WorkerProfile,
   machineClass?: string,
   os?: string,
 ) {
   const parsed = parseCrabboxProfile(profile);
-  const effective = resolveCrabboxWarmImageProfile(
+  return resolveCrabboxWarmImageProfile(
     parsed,
     machineClass ?? parsed.class,
     os === undefined ? parsed.target : parseCrabboxOperatingSystem(os),
   );
-  return (effective.warmImage || Object.keys(effective.setupSecrets ?? {}).length > 0) &&
+}
+
+export function resolveCrabboxPreparationTarget(
+  profile: WorkerProfile,
+  machineClass?: string,
+  os?: string,
+) {
+  const effective = resolveCrabboxPreparationProfile(profile, machineClass, os);
+  return supportsResolvedCrabboxProjectPreparation(effective) &&
     effective.class &&
     effective.target === "linux"
     ? {
@@ -358,12 +366,30 @@ export function supportsCrabboxProjectPreparation(
     machineClass ?? parsed.class,
     os === undefined ? parsed.target : parseCrabboxOperatingSystem(os),
   );
-  return resolved.warmImage || Object.keys(resolved.setupSecrets ?? {}).length > 0;
+  return supportsResolvedCrabboxProjectPreparation(resolved);
+}
+
+function supportsResolvedCrabboxProjectPreparation(resolved: CrabboxProfile): boolean {
+  return (
+    resolved.warmImage ||
+    Boolean(resolved.setupInitializer) ||
+    Object.keys(resolved.setupSecrets ?? {}).length > 0 ||
+    Boolean(
+      resolved.provider === "azure-sandbox" &&
+      resolved.azureSandboxDiskId &&
+      resolved.target === "linux" &&
+      resolved.class,
+    )
+  );
 }
 
 export function resolveCrabboxPreparedIdleTimeoutMs(profile: WorkerProfile): number | undefined {
   const parsed = parseCrabboxProfile(profile);
-  return parsed.warmImage === false || parsed.target !== "linux" ? undefined : parsed.idleTimeoutMs;
+  return (!parsed.warmImage &&
+    !(parsed.azureSandboxDiskId && supportsResolvedCrabboxProjectPreparation(parsed))) ||
+    parsed.target !== "linux"
+    ? undefined
+    : parsed.idleTimeoutMs;
 }
 
 // Setup belongs to the configured target's interpreter, not the requested OS.

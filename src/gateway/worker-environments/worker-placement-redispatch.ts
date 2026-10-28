@@ -56,9 +56,17 @@ export function createWorkerPlacementRedispatch(params: {
       devicePlacement = await params.resolveDevicePlacementRequirement(identity);
     }
     const requiredProfile = getRuntimeConfig().cloudWorkers?.requiredProfile;
+    const readNativeCredential = repositoryChatDispatchCredentialReader(
+      identity,
+      { profileId, providerId, profileSnapshot, executionMode },
+      assertCurrent,
+    );
     return await params.dispatch(
       {
         ...identity,
+        ...(machineClass === undefined ? {} : { machineClass }),
+        ...(os === undefined ? {} : { os }),
+        ...(readNativeCredential ? { readNativeCredential } : {}),
         profileId,
         ...(requiredProfile ? { requiredProfile } : {}),
         expectedPlacement: {

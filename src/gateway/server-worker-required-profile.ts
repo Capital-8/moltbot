@@ -72,6 +72,15 @@ export function createRequiredWorkerSessionPreparation(options: {
             });
           },
         );
+        const readNativeCredential = repositoryChatDispatchCredentialReader(
+          {
+            sessionId: identity.sessionId,
+            sessionKey: identity.sessionKey!,
+            agentId: identity.agentId!,
+          },
+          { profileId: required, executionMode: "worker-turn", runSetupScript: false },
+          assertCurrent,
+        );
         const placement = await options.dispatch.ensurePlacement({
           request: {
             sessionId: identity.sessionId,
@@ -81,6 +90,7 @@ export function createRequiredWorkerSessionPreparation(options: {
             executionMode: "worker-turn",
             requiredProfile: required,
             runSetupScript: false,
+            ...(readNativeCredential ? { readNativeCredential } : {}),
             devicePlacement: { requiredNodeCommands: [], consumesWorkerSlot: true },
           },
           assertCurrent,

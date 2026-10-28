@@ -300,37 +300,47 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
         ? await environments.prepareProjectIntent(request.profileId, {
             machineClass: request.machineClass,
             executionMode: request.executionMode,
-            projectPath,
-            ...(workspace.kind === "repository"
-              ? {
-                  repository: {
-                    agentId: request.agentId,
-                    url: workspace.repository.url,
-                    ref: workspace.repository.requestedRef ?? undefined,
-                    baseCommit: workspace.repository.baseCommit ?? undefined,
-                  },
-                }
-              : {}),
             inherited: request.inheritedProfile,
             signal,
             os: request.os,
-            runSetupScript:
-              workspace.kind === "repository"
-                ? workspace.repository.runSetupScript && request.runSetupScript !== false
-                : request.runSetupScript,
-            setupAuthorized: request.runSetupScript !== undefined,
+            ...(imageReserve
+              ? { imageReserve: true }
+              : {
+                  projectPath,
+                  // Native App issuance still belongs to this dispatch when no
+                  // repository integration reader is selected.
+                  assertCurrent,
+                  retainCredentialCleanup,
+                  ...(readNativeCredential ? { readNativeCredential } : {}),
+                  ...(workspace.kind === "repository"
+                    ? {
+                        repository: {
+                          agentId: request.agentId,
+                          url: workspace.repository.url,
+                          ref: workspace.repository.requestedRef ?? undefined,
+                          baseCommit: workspace.repository.baseCommit ?? undefined,
+                        },
+                      }
+                    : {}),
+                  runSetupScript:
+                    workspace.kind === "repository"
+                      ? workspace.repository.runSetupScript && request.runSetupScript !== false
+                      : request.runSetupScript,
+                  setupAuthorized: request.runSetupScript !== undefined,
+                }),
           })
         : undefined;
       assertCurrent();
       diagnostics?.mark("reserveClaim");
-      const prepared = preparedIntent
-        ? await startup.bindPreparedPlacement({
-            request,
-            placement,
-            intent: preparedIntent,
-            assertCurrent,
-          })
-        : undefined;
+      const prepared =
+        preparedIntent && !preparedIntent.profileSnapshot.retention
+          ? await startup.bindPreparedPlacement({
+              request,
+              placement,
+              intent: preparedIntent,
+              assertCurrent,
+            })
+          : undefined;
       assertCurrent();
       const idempotencyKey =
         request.idempotencyKey ?? `session-dispatch:${request.sessionId}:${placement.generation}`;

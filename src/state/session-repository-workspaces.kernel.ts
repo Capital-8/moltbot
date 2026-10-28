@@ -119,6 +119,10 @@ export function createSessionRepositoryWorkspaceInDatabase(
     }
     return { ...changed(db, existing), changed: false };
   }
+  const branchPrefix = input.branchPrefix ?? "openclaw";
+  if (branch === undefined && !REPOSITORY_BRANCH_PREFIX_PATTERN.test(branchPrefix)) {
+    throw new Error("Repository branch prefix is invalid");
+  }
   const workspaceId = randomUUID();
   const inserted = executeSqliteQueryTakeFirstSync(
     db,
@@ -133,9 +137,11 @@ export function createSessionRepositoryWorkspaceInDatabase(
         run_setup_script: input.runSetupScript ? 1 : 0,
         base_commit: null,
         base_manifest_hash: null,
-        branch: branch ?? `openclaw/${workspaceId}`,
+        branch: branch ?? `${branchPrefix}/${workspaceId}`,
         checkpoint_ref: null,
         manifest_hash: null,
+        recovery_json: null,
+        disk_authority_json: null,
         revision: 0,
         created_at_ms: nowMs,
         updated_at_ms: nowMs,

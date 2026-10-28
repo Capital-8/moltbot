@@ -113,7 +113,7 @@ async function retain(
       }
     } else if (
       !generation?.deferred &&
-      (!generation?.presenceOwned || generation.activationEligible || ctx.presence.isPresent())
+      (!generation?.presenceOwned || generation.activationEligible || ctx.presence.isDemandActive())
     ) {
       work.push(latest);
     }
@@ -163,7 +163,7 @@ async function planRefill(ctx: PassContext, eligible: Generations): Promise<Gene
     });
     if (
       generation.expiresAtMs <= now() ||
-      (!presence.isPresent() &&
+      (!presence.isDemandActive() &&
         demand &&
         generation.preparation.key === demand.preparationKey &&
         !generation.activationEligible)
@@ -179,16 +179,20 @@ async function planRefill(ctx: PassContext, eligible: Generations): Promise<Gene
     }
     try {
       const preparation = generation.preparation;
+      const projectPreparation = "source" in preparation ? undefined : preparation;
       const intent = await options.prepareIntent(source.profileId, {
-        ...(project
-          ? "source" in project
-            ? { projectRepository: project }
-            : { projectPath: project.root, projectCommit: project.baseCommit }
-          : { emptyWorkspace: true }),
+        ...(workerPreparationSourceKey(source.profileSnapshot) === "image"
+          ? { imageReserve: true as const }
+          : project
+            ? "source" in project
+              ? { projectRepository: project }
+              : { projectPath: project.root, projectCommit: project.baseCommit }
+            : { emptyWorkspace: true }),
         ...readWorkerProfileSelection(source.profileSnapshot),
         setupAuthorized:
-          preparation.setupRecipe !== undefined && preparation.runSetupScript !== false,
-        runSetupScript: preparation.runSetupScript,
+          projectPreparation?.setupRecipe !== undefined &&
+          projectPreparation.runSetupScript !== false,
+        runSetupScript: projectPreparation?.runSetupScript,
         signal,
       });
       signal.throwIfAborted();

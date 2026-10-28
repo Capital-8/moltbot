@@ -1072,6 +1072,40 @@ it("renews before idle expiry", async () => {
   expect(heartbeat).toHaveBeenCalledTimes(2);
 });
 
+it("refreshes Sandbox activity without requesting an idle policy replacement", async () => {
+  const { provider, heartbeat, warnings } = heartbeatFixture(async (argv) =>
+    argv.includes("--idle-timeout")
+      ? commandResult({
+          code: 2,
+          stderr:
+            "provider=azure-sandbox does not support replacing the lease idle timeout while heartbeating",
+        })
+      : commandResult({
+          stdout: JSON.stringify({ id: LEASE_ID, provider: "azure-sandbox", state: "Running" }),
+        }),
+  );
+  const profile = { ...PROFILE, provider: "azure-sandbox", class: "small" };
+  try {
+    await provider.provision(profile, OPERATION_ID);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    expect(warnings).toEqual([]);
+    expect(heartbeat.mock.calls[0]?.[0]).toEqual([
+      SIBLING_BINARY,
+      "heartbeat",
+      "--provider",
+      "azure-sandbox",
+      "--id",
+      LEASE_ID,
+      "--json",
+    ]);
+  } finally {
+    await provider.destroy(lifecycleLease(LEASE_ID, profile));
+    vi.useRealTimers();
+  }
+});
+
 it("fences heartbeat before a delayed or failed teardown binary acquisition", async () => {
   vi.useFakeTimers();
   const heartbeatStarted = createDeferred<AbortSignal>();
@@ -1171,38 +1205,44 @@ it("keeps inspection and teardown available for persisted setupEnv leases withou
   expect(secretEgressRuntime.withSetupSecretEgress).not.toHaveBeenCalled();
 });
 
-it("maps deleted leases to unknown without renewing them", async () => {
-  vi.useFakeTimers();
-  let inspection = inspectJson();
-  const heartbeats = vi.fn();
-  const provider = providerWithRunner(async (argv) => {
-    if (argv[1] === "heartbeat") {
-      heartbeats();
-      return commandResult();
-    }
-    return commandResult({ stdout: inspection });
-  });
-  const lease = lifecycleLease();
+it.each(["deleted", "expired"])(
+  "maps %s leases to unknown without renewing them",
+  async (state) => {
+    vi.useFakeTimers();
+    let inspection = inspectJson();
+    const heartbeats = vi.fn();
+    const provider = providerWithRunner(async (argv) => {
+      if (argv[1] === "heartbeat") {
+        heartbeats();
+        return commandResult();
+      }
+      return commandResult({ stdout: inspection });
+    });
+    const lease = lifecycleLease();
 
-  await expect(provider.inspect(lease)).resolves.toEqual(active);
-  await vi.advanceTimersByTimeAsync(0);
-  expect(heartbeats).toHaveBeenCalledTimes(1);
-  inspection = inspectJson({ state: "deleted", ready: false });
-  await expect(provider.inspect(lease)).resolves.toStrictEqual({ status: "unknown" });
-  await vi.advanceTimersByTimeAsync(60_000);
-  expect(heartbeats).toHaveBeenCalledTimes(1);
-});
+    await expect(provider.inspect(lease)).resolves.toEqual(active);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heartbeats).toHaveBeenCalledTimes(1);
+    inspection = inspectJson({ state, ready: false });
+    await expect(provider.inspect(lease)).resolves.toStrictEqual({ status: "unknown" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(heartbeats).toHaveBeenCalledTimes(1);
+  },
+);
 
-it("rejects deleted leases during provision even if SSH is ready", async () => {
-  const { provider, calls } = recordedProvider({
-    inspect: commandResult({ stdout: inspectJson({ state: "deleted", ready: true }) }),
-  });
-  await expect(provider.provision(CLASSLESS_PROFILE)).rejects.toMatchObject({
-    code: "cleanup_complete",
-    message: "Crabbox warmup lease entered a terminal state",
-  });
-  expect(calls.map((argv) => argv[1])).toEqual(["warmup", "inspect", "stop"]);
-});
+it.each(["deleted", "expired"])(
+  "rejects %s leases during provision even if SSH is ready",
+  async (state) => {
+    const { provider, calls } = recordedProvider({
+      inspect: commandResult({ stdout: inspectJson({ state, ready: true }) }),
+    });
+    await expect(provider.provision(CLASSLESS_PROFILE)).rejects.toMatchObject({
+      code: "cleanup_complete",
+      message: "Crabbox warmup lease entered a terminal state",
+    });
+    expect(calls.map((argv) => argv[1])).toEqual(["warmup", "inspect", "stop"]);
+  },
+);
 
 it("maps lease recognition failures to unknown while observation failures still throw", async () => {
   const lease = lifecycleLease();
@@ -1266,3 +1306,46 @@ it.each([
   },
 );
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
+
+it("offers Sandbox capacity and provisions the selected disk without cross-disk reuse", async () => {
+  const calls: string[][] = [];
+  const provider = providerWithRunner(async (argv) => {
+    calls.push([...argv]);
+    return commandResult({
+      stdout:
+        argv[1] === "providers"
+          ? catalogJson("azure-sandbox", ["linux"], [classProfile("small")])
+          : argv[1] === "inspect"
+            ? inspectJson()
+            : "",
+    });
+  });
+  const profile = {
+    ...PROFILE,
+    provider: "azure-sandbox",
+    class: "small",
+    azureSandboxDiskId: "synthetic-disk-v2",
+  };
+  expect(await provider.listMachineOptions?.(profile)).toContainEqual({
+    id: "small",
+    os: "linux",
+    label: "Small",
+    default: true,
+  });
+  const target = provider.resolvePreparationTarget?.({ ...profile, warmImage: true });
+  expect(target).toMatchObject({ machineClass: "small", platform: "linux" });
+  expect(
+    provider.resolvePreparationTarget?.({
+      ...profile,
+      warmImage: true,
+      azureSandboxDiskId: "synthetic-disk-v1",
+    })?.profileKey,
+  ).not.toBe(target?.profileKey);
+  await expect(provider.provision(profile, OPERATION_ID)).resolves.toMatchObject({
+    leaseId: LEASE_ID,
+  });
+  const allocation = calls.find((argv) => argv[1] === "warmup")!;
+  const diskFlag = allocation.indexOf("--azure-sandbox-disk-id");
+  expect(diskFlag).toBeGreaterThanOrEqual(0);
+  expect(allocation[diskFlag + 1]).toBe("synthetic-disk-v2");
+});

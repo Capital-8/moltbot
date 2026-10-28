@@ -1,21 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
 } from "../../config/runtime-snapshot.js";
 import type { WorkerProvider } from "../../plugins/types.js";
 import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
-import {
-  readPreparedPoolPresenceDemand,
-  writePreparedPoolPresenceDemand,
-} from "./prepared-pool-presence-worker.js";
-import {
-  createPreparationArtifacts,
-  PREPARATION_TARGET,
-  usePreparedPoolFixture,
-} from "./prepared-pool.test-support.js";
+import type { PreparedPoolPresenceDemand } from "./prepared-pool-presence.types.js";
+import { usePreparedPoolFixture } from "./prepared-pool.test-support.js";
 import {
   AUTHORIZATION,
   TOKEN,

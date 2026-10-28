@@ -3,6 +3,7 @@ import { createWorkerPreparationIdentity } from "./preparation-identity.js";
 import {
   readWorkerPreparation,
   readWorkerProjectPreparation,
+  workerPreparationSourceKey,
 } from "./preparation-identity.schema.js";
 import type { WorkerLocalProjectSnapshot } from "./workspace-git-base.js";
 

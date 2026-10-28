@@ -184,12 +184,14 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       | Awaited<ReturnType<typeof prepareRepositoryWorkerProjectSource>>
       | undefined;
     const profile = requireWorkerProfile(profileSnapshot.settings);
+    let assertImageCurrent: (() => void) | undefined;
     if (
       [
         projectPath,
         createOptions.repository,
         createOptions.projectRepository,
         createOptions.emptyWorkspace,
+        createOptions.imageReserve,
       ].filter(Boolean).length > 1
     ) {
       throw serviceError(
@@ -255,17 +257,18 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
           },
         });
       }
-      const project = createOptions.emptyWorkspace
-        ? null
-        : (repositoryAdmission?.project ??
-          (projectPath
-            ? await prepareWorkerProjectSnapshot({
-                localPath: projectPath,
-                namespace: options.projectNamespace,
-                baseCommit: createOptions.projectCommit,
-                signal,
-              })
-            : undefined));
+      const project =
+        createOptions.emptyWorkspace || createOptions.imageReserve
+          ? null
+          : (repositoryAdmission?.project ??
+            (projectPath
+              ? await prepareWorkerProjectSnapshot({
+                  localPath: projectPath,
+                  namespace: options.projectNamespace,
+                  baseCommit: createOptions.projectCommit,
+                  signal,
+                })
+              : undefined));
       signal?.throwIfAborted();
       if (project !== undefined) {
         const target = provider.resolvePreparationTarget?.(profile, machineClass, os);
@@ -283,34 +286,71 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
           target &&
           provider.requiresNodeEnrollment &&
           options.prepareNodeArtifacts &&
-          (!setupRecipe ||
-            createOptions.runSetupScript === false ||
-            createOptions.setupAuthorized === true)
+          (!setupRecipe || runSetupScript === false || createOptions.setupAuthorized === true)
         ) {
+          const admittedTarget = createOptions.imageReserve ? structuredClone(target) : undefined;
           const prepared = await options.prepareNodeArtifacts(profileSnapshot, signal);
           signal?.throwIfAborted();
+          if (createOptions.imageReserve) {
+            assertImageCurrent = () => {
+              createOptions.assertCurrent?.();
+              requireProfileId(profileId, signal);
+              const current = resolveProfile(profileId, { ...createOptions, inherited: undefined });
+              const currentProfile = requireWorkerProfile(current.profileSnapshot.settings);
+              if (
+                current.provider !== provider ||
+                current.providerId !== providerId ||
+                !isDeepStrictEqual(current.profileSnapshot, resolved.profileSnapshot) ||
+                !provider.requiresNodeEnrollment ||
+                !provider.supportsProjectPreparation?.(currentProfile, machineClass, os) ||
+                !isDeepStrictEqual(
+                  provider.resolvePreparationTarget?.(currentProfile, machineClass, os),
+                  admittedTarget,
+                )
+              ) {
+                throw serviceError("invalid_profile", "Runtime-only worker preparation changed");
+              }
+            };
+            assertImageCurrent();
+          }
           const preparation = createWorkerPreparationIdentity({
             namespace: options.projectNamespace,
             providerId,
             profileId,
             profileSnapshot,
-            project: project ?? undefined,
+            project:
+              profileSnapshot.retention && !supportsProjectPreparation
+                ? undefined
+                : (project ?? undefined),
+            ...(createOptions.imageReserve ? { imageReserve: true as const } : {}),
             target,
             artifacts: prepared.artifacts,
-            setupRecipe,
-            recipe,
-            runSetupScript: createOptions.runSetupScript,
+            // Private capacity prepares runtime only; repository setup belongs to session restore.
+            ...(profileSnapshot.retention && !supportsProjectPreparation
+              ? {}
+              : { setupRecipe, recipe, runSetupScript }),
           });
-          profileSnapshot = project
-            ? { ...resolved.profileSnapshot, project: { ...project, preparation } }
-            : {
-                ...resolved.profileSnapshot,
-                runtimePreparation: { source: "empty", ...preparation },
-              };
+          profileSnapshot =
+            project && (!profileSnapshot.retention || supportsProjectPreparation)
+              ? { ...resolved.profileSnapshot, project: { ...project, preparation } }
+              : {
+                  ...resolved.profileSnapshot,
+                  runtimePreparation: {
+                    source: createOptions.imageReserve ? "image" : "empty",
+                    ...preparation,
+                  },
+                };
         } else if (project && supportsProjectPreparation) {
           profileSnapshot = { ...resolved.profileSnapshot, project };
         }
       }
+    }
+    const preparation = readWorkerPreparation(profileSnapshot);
+    if (createOptions.imageReserve && !preparation) {
+      throw serviceError(
+        "invalid_profile",
+        "Worker profile cannot prepare runtime-only image capacity",
+      );
     }
     const intent = {
       providerId,
@@ -318,9 +358,19 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
     };
     preparedIntents.set(intent, {
       profileId,
+      repository: repositoryAdmission,
       // Private repository authority remains live; profile and plugin metadata
       // are the snapshot selected when preparation began.
-      assertCurrent: () => repositoryAdmission?.assertCurrent(),
+      assertCurrent: () => {
+        // Repository credentials belong to the original request. Local prepared
+        // artifacts instead outlive their producer and are reused by async builds.
+        if (repositoryAdmission) {
+          createOptions.assertCurrent?.();
+          signal?.throwIfAborted();
+          repositoryAdmission.assertCurrent();
+        }
+        assertImageCurrent?.();
+      },
     });
     return intent;
   };
@@ -342,7 +392,10 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
     if (!options.prepareNodeArtifacts || !options.projectNamespace) {
       return invalid("preparation runtime is unavailable");
     }
+    const projectPreparation = "source" in preparation ? undefined : preparation;
+    const source = workerPreparationSourceKey(record.profileSnapshot);
     const createOptions: WorkerProviderIntentPreparationOptions = {
+      ...(source === "image" ? { imageReserve: true as const } : {}),
       machineClass:
         typeof record.profileSnapshot.machineClass === "string"
           ? record.profileSnapshot.machineClass
@@ -430,11 +483,43 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       return invalid("provider preparation target changed");
     }
     const prepared = await options.prepareNodeArtifacts(profileSnapshot, signal);
-    const isCurrent = () =>
-      isSourceOwnerCurrent() &&
-      (!project ||
-        !("source" in project) ||
-        matchesAgentLifecycleBinding(options.getConfig(), project.source.owner.agent));
+    const isCurrent = () => {
+      if (source === "image") {
+        try {
+          const current = resolveProfile(record.profileId, createOptions);
+          const currentProfile = requireWorkerProfile(current.profileSnapshot.settings);
+          if (
+            current.provider !== provider ||
+            current.providerId !== providerId ||
+            !isDeepStrictEqual(current.profileSnapshot, profileSnapshot) ||
+            !provider.requiresNodeEnrollment ||
+            !provider.supportsProjectPreparation?.(
+              currentProfile,
+              createOptions.machineClass,
+              createOptions.os,
+            ) ||
+            !isDeepStrictEqual(
+              provider.resolvePreparationTarget?.(
+                currentProfile,
+                createOptions.machineClass,
+                createOptions.os,
+              ),
+              preparation.target,
+            )
+          ) {
+            return false;
+          }
+        } catch {
+          return false;
+        }
+      }
+      return (
+        isSourceOwnerCurrent() &&
+        (!project ||
+          !("source" in project) ||
+          matchesAgentLifecycleBinding(options.getConfig(), project.source.owner.agent))
+      );
+    };
     if (!isCurrent()) {
       return invalid("repository owner changed during retention");
     }
@@ -444,13 +529,14 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
       profileId: record.profileId,
       profileSnapshot,
       project,
+      ...(source === "image" ? { imageReserve: true as const } : {}),
       target,
       artifacts: prepared.artifacts,
-      setupRecipe: preparation.setupRecipe,
-      recipe: preparation.recipe,
-      runSetupScript: preparation.runSetupScript,
+      setupRecipe: projectPreparation?.setupRecipe,
+      recipe: projectPreparation?.recipe,
+      runSetupScript: projectPreparation?.runSetupScript,
     });
-    return isDeepStrictEqual(project ? observed : { source: "empty", ...observed }, preparation)
+    return isDeepStrictEqual(project ? observed : { source, ...observed }, preparation)
       ? { isCurrent }
       : invalid("runtime artifacts or preparation identity changed");
   };
