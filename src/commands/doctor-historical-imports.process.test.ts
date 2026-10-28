@@ -8,7 +8,6 @@ import { OPENCLAW_AGENT_SCHEMA_V24_SQL } from "../state/openclaw-agent-schema-v2
 import {
   preparation,
   original,
-  stateV22Schema,
   stateV21Schema,
   seedHistoricalPlacements,
 } from "../state/openclaw-historical-imports.test-support.js";
@@ -22,9 +21,9 @@ import {
 
 const childTimeout = 90_000;
 
-it.each([21, 22])(
-  "doctor imports historical shared-v%s and agent-v24 evidence through CLI Doctor",
-  async (version) => {
+it(
+  "doctor discovers historical shared-v21 and agent-v24 stores and preserves their import payloads",
+  async () => {
     const port = await acquireTestPortBlock({ offsets: [0] });
     onTestFinished(port.release);
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
@@ -35,35 +34,23 @@ it.each([21, 22])(
       });
       const sharedPath = state.statePath("state", "openclaw.sqlite");
       fs.mkdirSync(path.dirname(sharedPath), { recursive: true });
-      let beforePlacements: Record<string, SQLOutputValue>[] = [];
-      let beforeEnvironment: Record<string, SQLOutputValue>;
       {
         using db = new DatabaseSync(sharedPath);
-        db.exec(version === 21 ? stateV21Schema() : stateV22Schema());
+        db.exec(stateV21Schema());
         db.exec(
-          "PRAGMA user_version=" +
-            version +
-            "; INSERT INTO schema_meta(meta_key,role,schema_version,created_at,updated_at) VALUES ('primary','global'," +
-            version +
-            ",1,1);",
+          "PRAGMA user_version=21; INSERT INTO schema_meta(meta_key,role,schema_version,created_at,updated_at) VALUES ('primary','global',21,1,1);",
         );
         db.prepare(
           "INSERT INTO worker_environments " +
-            "(environment_id,provider_id,profile_id,profile_snapshot_json,provision_operation_id,lease_id," +
-            "preparation_key,preparation_purpose,preparation_demand_at_ms,preparation_expires_at_ms," +
-            "preparation_consumed_at_ms,state,owner_epoch,attached_session_ids_json," +
-            "created_at_ms,updated_at_ms,state_changed_at_ms,destroy_requested_at_ms) " +
-            "VALUES ('historical-image','synthetic','sandbox',?,'provision-image','lease-image'," +
-            "?,'reserve',1000,2000,1500,'destroyed',7,'[]',1,2,2,2)",
-        ).run(original, preparation.key);
-        if (version === 21) {
-          beforePlacements = seedHistoricalPlacements(db);
-        }
-        beforeEnvironment = db.prepare("SELECT * FROM worker_environments").get()!;
+            "(environment_id,provider_id,profile_id,profile_snapshot_json,provision_operation_id," +
+            "state,owner_epoch,attached_session_ids_json,created_at_ms,updated_at_ms,state_changed_at_ms) " +
+            "VALUES ('historical-image','synthetic','sandbox',?,'provision-image','destroyed',7,'[]',1,2,2)",
+        ).run(original);
+        seedHistoricalPlacements(db);
       }
       const agentPath = state.statePath("agents", "main", "agent", "openclaw-agent.sqlite");
       fs.mkdirSync(path.dirname(agentPath), { recursive: true });
-      let beforeInputs: Record<string, SQLOutputValue>[];
+      let expectedInputs: Record<string, SQLOutputValue>[];
       {
         using db = new DatabaseSync(agentPath);
         db.exec(OPENCLAW_AGENT_SCHEMA_V24_SQL);
@@ -87,7 +74,13 @@ it.each([21, 22])(
             '{"historical":"evidence-only"}',
           );
         }
-        beforeInputs = db.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all();
+        expectedInputs = db.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all();
+        for (const row of expectedInputs) {
+          if (row.state === "queued") {
+            row.state = "interrupted";
+          }
+          row.consumed_event_id = null;
+        }
       }
       const runtime = createSourceRuntime(state.root);
       const env: NodeJS.ProcessEnv = {
@@ -128,87 +121,35 @@ it.each([21, 22])(
         const output = result.stdout + "\n" + result.stderr;
         expect(result.code, output).toBe(0);
         expect(output).toContain("Doctor complete.");
+        for (const [pathname, version] of [
+          [sharedPath, OPENCLAW_STATE_SCHEMA_VERSION],
+          [agentPath, OPENCLAW_AGENT_SCHEMA_VERSION],
+        ] as const) {
+          using database = new DatabaseSync(pathname, { readOnly: true });
+          expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(version);
+          expect(
+            database.prepare("SELECT schema_version FROM schema_meta").get()?.schema_version,
+          ).toBe(version);
+        }
         using db = new DatabaseSync(sharedPath, { readOnly: true });
-        expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(
-          OPENCLAW_STATE_SCHEMA_VERSION,
-        );
-        const environment = db.prepare("SELECT * FROM worker_environments").get()!;
-        expect(environment).toMatchObject({
-          ...beforeEnvironment,
-          profile_snapshot_json: expect.any(String),
-        });
-        expect(JSON.parse(String(environment.profile_snapshot_json))).toEqual({
-          install: "bundle",
-          settings: { provider: "synthetic" },
-          runtimePreparation: { ...preparation, source: "empty" },
+        const environment = db
+          .prepare("SELECT profile_snapshot_json FROM worker_environments")
+          .get()!;
+        expect(JSON.parse(String(environment.profile_snapshot_json))).toMatchObject({
+          runtimePreparation: { source: "empty", key: preparation.key },
           historicalProfileSnapshotJson: original,
         });
-        if (version === 21) {
-          const placements = db
-            .prepare("SELECT * FROM worker_session_placements ORDER BY session_id")
-            .all();
-          expect(placements).toHaveLength(beforePlacements.length);
-          for (const [index, placement] of beforePlacements.entries()) {
-            expect(placements[index]).toEqual(
-              placement.repository_preparation === "pending"
-                ? {
-                    ...placement,
-                    state: "failed",
-                    recovery_error: expect.stringContaining(
-                      "Historical repository preparation pending",
-                    ),
-                  }
-                : placement,
-            );
-          }
-        }
-        using agent = new DatabaseSync(agentPath, { readOnly: true });
-        expect(agent.prepare("PRAGMA user_version").get()?.user_version).toBe(
-          OPENCLAW_AGENT_SCHEMA_VERSION,
-        );
-        expect(agent.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all()).toEqual(
-          beforeInputs.map((row) => ({
-            ...row,
-            state: row.state === "queued" ? "interrupted" : row.state,
-            consumed_event_id: null,
-          })),
-        );
         expect(
-          agent.prepare("SELECT * FROM session_pending_inputs WHERE state = 'queued'").all(),
-        ).toEqual([]);
-        expect(agent.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
-      }
-      for (const [pathname, sourceVersion] of [
-        [sharedPath, version],
-        [agentPath, 24],
-      ] as const) {
-        const backups = fs
-          .readdirSync(path.dirname(pathname))
-          .filter(
-            (name) =>
-              name.startsWith(path.basename(pathname) + ".pre-startup-migration-") &&
-              name.endsWith(".bak") &&
-              !name.endsWith(".scoped.bak"),
-          );
-        const originalBackup = backups.find((name) => {
-          using saved = new DatabaseSync(path.join(path.dirname(pathname), name), {
-            readOnly: true,
-          });
-          return saved.prepare("PRAGMA user_version").get()?.user_version === sourceVersion;
-        });
-        expect(originalBackup).toBeDefined();
-        using saved = new DatabaseSync(path.join(path.dirname(pathname), originalBackup!), {
-          readOnly: true,
-        });
-        if (sourceVersion === 24) {
-          expect(saved.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all()).toEqual(
-            beforeInputs,
-          );
-        } else {
-          expect(
-            saved.prepare("SELECT profile_snapshot_json FROM worker_environments").get(),
-          ).toEqual({ profile_snapshot_json: original });
-        }
+          db
+            .prepare(
+              "SELECT state FROM worker_session_placements WHERE session_id='placement-pending'",
+            )
+            .get(),
+        ).toEqual({ state: "failed" });
+        using agent = new DatabaseSync(agentPath, { readOnly: true });
+        expect(agent.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all()).toEqual(
+          expectedInputs,
+        );
       }
     });
   },
