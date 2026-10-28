@@ -95,7 +95,7 @@ jobs:
 
   diagnose:
     needs: validate-target
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: ${{ inputs.operation == 'screenshots' && 40 || 25 }}
     permissions:
       contents: read
