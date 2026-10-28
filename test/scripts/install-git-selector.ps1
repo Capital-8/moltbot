@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
 $FixtureRoot = [IO.Path]::GetFullPath($FixtureRoot)
 if (Test-Path -LiteralPath $FixtureRoot) { throw 'Fixture root must be new' }
-$script:FixtureGit = (Get-Command git -CommandType Application -ErrorAction Stop).Source
+$script:FixtureGit = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $null = Get-Command node -CommandType Application -ErrorAction Stop
 $installerHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $remote = Join-Path $FixtureRoot 'remote.git'
