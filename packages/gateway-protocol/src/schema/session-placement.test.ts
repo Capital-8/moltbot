@@ -101,7 +101,7 @@ describe("session dispatch protocol schemas", () => {
     );
   });
 
-  it("accepts exactly the reclaim owner's terminal outcomes", () => {
+  it("accepts reclaim, retained pause, and Gateway recovery outcomes", () => {
     const result = (value: unknown) => ({
       ok: true,
       key,

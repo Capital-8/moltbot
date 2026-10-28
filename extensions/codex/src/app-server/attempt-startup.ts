@@ -442,6 +442,17 @@ export async function startCodexAttemptThread(params: {
             ) =>
               ({
                 client: activeStartupClient,
+                nativeWorkerPlacement: params.nativeWorkerPlacement,
+                ...(params.sandbox &&
+                "placementRetainedSession" in params.sandbox &&
+                params.sandbox.placementRetainedSession === true
+                  ? { retainedSession: true as const }
+                  : {}),
+                ...(params.sandbox &&
+                "placementRequireExistingNativeState" in params.sandbox &&
+                params.sandbox.placementRequireExistingNativeState === true
+                  ? { requireExistingThread: true as const }
+                  : {}),
                 reserveResumeThread,
                 bindingStore: params.bindingStore,
                 assertCurrent: params.assertCurrent,

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
+import {
+  ErrorCodes,
+  validateSessionsReclaimResult,
+} from "../../../packages/gateway-protocol/src/index.js";
 import { registerAgentHarness } from "../../agents/harness/registry.js";
 import type { AgentHarness } from "../../agents/harness/types.js";
 import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
@@ -834,6 +837,29 @@ describe("sessions.dispatch", () => {
   });
   describe("sessions.reclaim", () => {
     beforeEach(() => useWorktreeSession());
+    it("suspends retained compute through Stop without reclaiming the private disk", async () => {
+      const active = activePlacementRecord();
+      const reclaim = vi.fn();
+      const pause = vi.fn().mockResolvedValue(active);
+      const context = reclaimContext(() => active, reclaim);
+      context.workerPlacementDispatchService!.pause = pause;
+      vi.spyOn(context.workerEnvironmentService!, "get").mockReturnValue({
+        ...createDispatchEnvironmentFixtures().attached,
+        retention: {
+          owner: { sessionId, sessionKey, agentId: "main" },
+          ownerBinding: "a".repeat(64),
+          policy: { mode: "session-disk", computeWindowSeconds: 60 },
+          desiredState: "running",
+          receipt: null,
+          operation: null,
+        },
+      });
+      const respond = await invokeSessionReclaim(context);
+      expectReclaimed(respond, "active");
+      expect(validateSessionsReclaimResult(vi.mocked(respond).mock.calls[0]?.[1])).toBe(true);
+      expect(pause).toHaveBeenCalledWith({ sessionId, sessionKey, agentId: "main" }, undefined);
+      expect(reclaim).not.toHaveBeenCalled();
+    });
     it("returns an unchanged reclaimed placement without publishing a change", async () => {
       const reclaimed = reclaimedPlacementRecord();
       const reclaim = vi.fn().mockResolvedValue(reclaimed);

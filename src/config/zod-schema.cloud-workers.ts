@@ -43,9 +43,23 @@ const CloudWorkerProfileSchema = z
         label: "Cloud Worker Idle Suspend Duration",
         help: "Automatically reclaims an idle cloud worker after this duration, such as 45m or 2h; the next message provisions a replacement. Minimum: 1m. Leave unset to keep workers running.",
       }),
+    retention: z
+      .strictObject({
+        mode: z.literal("session-disk"),
+        computeWindowSeconds: z.number().int().positive().max(2_147_483),
+      })
+      .optional()
+      .register(configUiMetadata, {
+        label: "Session Disk Retention",
+        help: "Retain a private disk until session archive or deletion. Each activation admits work for the finite compute window; provider idle stop and pending-stop recovery do not guarantee a physical billing deadline. Applies only to new session allocations.",
+      }),
     readyWorkers: z.number().int().nonnegative().optional().register(configUiMetadata, {
       label: "Cloud Worker Ready Reserve Target",
       help: "Target unassigned prepared workers per eligible project using this profile (default: 1), subject to the Gateway-wide prepared pool cap. Set 0 to disable this profile's reserves while preserving snapshot reuse. Preparing workers and unconfirmed reserve cleanup count toward the target.",
+    }),
+    lostWorkerRecovery: z.literal("repository-ref").optional().register(configUiMetadata, {
+      label: "Lost Worker Recovery",
+      help: "Recover a definitively lost dedicated worker from the session's recorded GitHub branch after exact provider cleanup. Worker files, disks, packages, and unpushed commits are ephemeral. Unset preserves workspace reconciliation and retained-checkpoint recovery; session history, Goal, original authority, and unknown-effect holds remain intact.",
     }),
     settings: CloudWorkerSettingsSchema.optional().register(configUiMetadata, {
       label: "Cloud Worker Provider Settings",

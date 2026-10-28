@@ -1,4 +1,5 @@
 import { redactSensitiveText } from "openclaw/plugin-sdk/logging-core";
+import type { WorkerRetainedLeaseReceipt } from "openclaw/plugin-sdk/plugin-entry";
 import {
   isRecord,
   normalizeOptionalString as nonEmptyString,
@@ -6,6 +7,7 @@ import {
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { parseCrabboxJson, sanitizeCrabboxNotice } from "./crabbox-worker-command.js";
 import { parseCrabboxDurationMs } from "./crabbox-worker-profile.js";
+import { parseCrabboxRetention } from "./crabbox-worker-retention.js";
 
 export type CrabboxLeaseLifetime = {
   expiresAtMs?: number;
@@ -55,6 +57,8 @@ export function parseCrabboxLeaseLifetime(value: Record<string, unknown>): Crabb
 }
 
 export type ParsedInspect = {
+  azureSandboxId?: string;
+  retention?: WorkerRetainedLeaseReceipt;
   awsInstanceProfileAttached?: boolean;
   failureError?: string;
   id: string;

@@ -663,6 +663,18 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
           providerId,
           profileId: normalizedProfileId,
           profileSnapshot,
+          ...(profileSnapshot.retention
+            ? {
+                retention: createWorkerSessionDiskRetention({
+                  provider,
+                  policy:
+                    options.getConfig().cloudWorkers?.profiles?.[normalizedProfileId]?.retention,
+                  owner: createOptions.retentionOwner,
+                  environmentId,
+                  provisionOperationId,
+                }),
+              }
+            : {}),
           provisionOperationId,
         },
         () => {

@@ -30,6 +30,7 @@ import {
 } from "./session-repository-workspaces.receipts.js";
 import type {
   RepositoryWorkspaceBase,
+  RepositoryWorkspaceBranchReset,
   RepositoryWorkspaceCheckpoint,
   RepositoryWorkspaceCreate,
   RepositoryWorkspaceMutationResult,

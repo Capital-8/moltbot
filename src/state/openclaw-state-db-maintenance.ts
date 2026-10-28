@@ -538,6 +538,8 @@ export const versionedStateMigrations: ReadonlyArray<{
   stateWriteIndexMigration,
   statePublicationDraftMigration,
   stateLocalWorkspaceManifestMigration,
+  stateRetentionMigration,
+  stateDiskAuthorityMigration,
 ];
 
 /** Recent version migrations own only their tables; Doctor owns unrelated historical repair. */
@@ -558,6 +560,8 @@ export function migrateBoundedStateSchema(
     stateClientCredentialMigration,
     stateAutomationPolicyMigration,
     stateLocalWorkspaceManifestMigration,
+    stateRetentionMigration,
+    stateDiskAuthorityMigration,
   ];
   const pending = migrations.filter(({ version }) => version > previousVersion);
   // An undeclared destination keeps the legacy full runner and full-backup requirement.

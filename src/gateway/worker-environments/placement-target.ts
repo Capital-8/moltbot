@@ -1,6 +1,10 @@
+import { RequiredWorkerProfileError } from "../../config/required-worker-profile.js";
+import type { OpenClawConfig } from "../../config/types.js";
 import { supportsCurrentWorkerLaunch } from "../../worker/worker-build-identity.js";
+import { DEVICE_WORKER_PROVIDER_ID } from "./device-provider-identity.js";
 import type { WorkerEnvironmentRecord } from "./environment-record.js";
 import type { WorkerSessionPlacementRecord } from "./placement-record.js";
+import type { WorkerPlacementReclaimRequest } from "./service-contract.js";
 
 export type WorkerPlacementCancellationTarget = Readonly<
   Pick<WorkerSessionPlacementRecord, "state" | "generation" | "environmentId" | "activeOwnerEpoch">
@@ -99,5 +103,47 @@ export function isFailedWorkerPlacementEnvironmentGone(params: {
     );
   } catch {
     return false;
+  }
+}
+
+/** Explicit Gateway recovery requires a failed placement and proven old cleanup. */
+export function assertWorkerGatewayRecoverySource({
+  request,
+  source,
+  config,
+  environmentService,
+}: {
+  request: WorkerPlacementReclaimRequest;
+  source: WorkerSessionPlacementRecord | undefined;
+  config: OpenClawConfig;
+  environmentService: Parameters<
+    typeof isFailedWorkerPlacementEnvironmentGone
+  >[0]["environmentService"];
+}) {
+  if (request.recoverToGateway && config.cloudWorkers?.requiredProfile) {
+    throw new RequiredWorkerProfileError(
+      "Gateway recovery is disabled by the required worker profile policy; Stop retains the workspace for remote recovery.",
+    );
+  }
+  if (!request.recoverToGateway) {
+    return;
+  }
+  if (
+    source?.state !== "failed" ||
+    source.generation !== request.recoverToGateway.expectedGeneration ||
+    source.sessionKey !== request.sessionKey ||
+    source.agentId !== request.agentId
+  ) {
+    throw new Error(`Session ${request.sessionKey} changed before Gateway recovery. Retry.`);
+  }
+  if (
+    !isFailedWorkerPlacementEnvironmentGone({
+      environmentService,
+      placement: source,
+    })
+  ) {
+    throw new Error(
+      "Failed cloud worker environment cleanup is still pending; use Stop cloud worker",
+    );
   }
 }

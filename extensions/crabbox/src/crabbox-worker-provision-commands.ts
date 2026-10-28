@@ -3,7 +3,9 @@ import {
   WorkerProviderError,
   type WorkerDesktopEndpoint,
   type WorkerProvider,
+  type WorkerSessionDiskRetention,
 } from "openclaw/plugin-sdk/plugin-entry";
+import { reportCrabboxProvisionTiming } from "./crabbox-provision-timing.js";
 import {
   crabboxCommandError,
   crabboxCommandOutput,
@@ -159,18 +161,52 @@ export async function runProvisionWarmup(
   params: LeaseCommandContext & {
     profile: ReturnType<typeof parseCrabboxProfile>;
     slug: string;
+    timingIdentity?: { operationId: string; environmentId?: string };
+    retention?: WorkerSessionDiskRetention;
     timeoutMs: () => number;
     signal?: AbortSignal;
   },
-): Promise<void> {
+): Promise<{ kind: "cold" }> {
+  if (
+    params.retention &&
+    (params.profile.provider !== "azure-sandbox" || params.profile.target !== "linux")
+  ) {
+    throw new Error("Session disk retention requires Linux Azure Sandbox");
+  }
   const result = await runCrabboxCommand({
     ...params,
     action: "warmup",
-    args: ["warmup", ...buildCrabboxAllocationArgs(params.profile, params.id, params.slug)],
+    args: [
+      "warmup",
+      ...buildCrabboxAllocationArgs(
+        params.retention
+          ? { ...params.profile, ttl: `${params.retention.policy.computeWindowSeconds}s` }
+          : params.profile,
+        params.id,
+        params.slug,
+      ),
+      ...(params.retention
+        ? [
+            "--azure-sandbox-retention",
+            "session-disk",
+            "--azure-sandbox-owner-binding",
+            params.retention.ownerBinding,
+          ]
+        : []),
+      "--timing-json",
+    ],
+    observeResult: (observed) => {
+      if (params.timingIdentity) {
+        reportCrabboxProvisionTiming(observed, params.timingIdentity);
+      }
+    },
     timeoutMs: params.timeoutMs(),
   });
   if (result.termination === "exit" && result.code === 0) {
-    return;
+    return { kind: "cold" };
+  }
+  if (params.profile.azureSandboxSnapshotId && isCrabboxSnapshotBindingRejection(result)) {
+    throw new CrabboxSnapshotBindingRejectedError();
   }
   // Crabbox internal/cli/run.go rejects this capability before Warmup/Acquire.
   if (isFixedLeaseIdUnsupported(result, params.provider)) {

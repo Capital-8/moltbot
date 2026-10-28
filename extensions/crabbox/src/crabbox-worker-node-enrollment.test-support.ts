@@ -1,41 +1,244 @@
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   fixtureReceiptClientSource,
   type FixtureReceiptChannel,
   withinTest,
 } from "openclaw/plugin-sdk/test-fixtures";
 import * as tar from "tar";
-import { expect } from "vitest";
-import type {
-  CrabboxWorkerNodeEnrollment,
-  CrabboxWorkerNodeRuntimePreparation,
+import { expect, it } from "vitest";
+import { withCrabboxWorkerEnvProfile } from "./crabbox-worker-env-profile.js";
+import {
+  createCrabboxNodeEnrollmentSetup,
+  createCrabboxNodeRuntimeSetup,
+  type CrabboxWorkerNodeEnrollment,
+  type CrabboxWorkerNodeRuntimePreparation,
 } from "./crabbox-worker-node-enrollment.js";
+import type { CrabboxOperatingSystem } from "./crabbox-worker-profile.js";
+import { readCrabboxRuntimeInstallation } from "./crabbox-worker-runtime-verification.js";
 
-export type DesktopFixture = { enabled: boolean } & Partial<
-  Record<"setup" | "display" | "dbus" | "runtimeDir", string>
->;
+export type DesktopFixture = {
+  enabled: boolean;
+  setup?: string;
+  display?: string;
+  dbus?: string;
+  runtimeDir?: string;
+};
 
-export const createWorkerArchiveFixture =
-  (): CrabboxWorkerNodeRuntimePreparation["workerBundle"] => ({
+export function createNodeEnrollmentRunner(leaseId: string, setupCode: string) {
+  return async function enroll(
+    home: string,
+    nodeBootstrap: CrabboxWorkerNodeEnrollment["nodeBootstrap"],
+    desktop?: DesktopFixture,
+    runtimeOnly = false,
+    workerBundle?: CrabboxWorkerNodeEnrollment["nodeBootstrap"] & { packageRelativePath: string },
+    options?: {
+      credentials?: string;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      workerCodex?: NonNullable<CrabboxWorkerNodeEnrollment["workerCodex"]>;
+      trustBin?: string;
+      target?: CrabboxOperatingSystem;
+    },
+  ) {
+    const bin = path.join(home, "bin");
+    const proc = path.join(home, "proc");
+    fs.mkdirSync(bin, { recursive: true });
+    // The generated Linux enrollment must never refresh the test host's trust store.
+    fs.writeFileSync(path.join(bin, "update-ca-certificates"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o700,
+    });
+    fs.writeFileSync(
+      path.join(bin, "sudo"),
+      '#!/bin/sh\nset -eu\ntest "$1" = -n && test "$2" = --\nshift 2\nexec "$@"\n',
+      { mode: 0o700 },
+    );
+    if (desktop) {
+      fs.mkdirSync(path.join(proc, "123"), { recursive: true });
+      fs.writeFileSync(path.join(home, "desktop.env"), "CRABBOX_DESKTOP_ENV=xfce\nDISPLAY=:99\n");
+      fs.writeFileSync(
+        path.join(proc, "123", "environ"),
+        [
+          `DISPLAY=${desktop.display ?? ":99"}`,
+          `DBUS_SESSION_BUS_ADDRESS=${desktop.dbus ?? "unix:path=/run/fixture/bus"}`,
+          `XDG_RUNTIME_DIR=${desktop.runtimeDir ?? "/run/fixture"}`,
+          "UNRELATED_DESKTOP_VALUE=do-not-export",
+          "",
+        ].join("\0"),
+      );
+      fs.writeFileSync(
+        path.join(bin, "pgrep"),
+        `#!/bin/sh
+set -eu
+[ "$*" = "-u $(id -u) -x xfce4-session" ]
+[ -z "\${CRABBOX_WORKER_BOOTSTRAP_TOKEN-}" ]
+[ -z "\${CRABBOX_WORKER_SETUP_CODE-}" ]
+echo 123
+`,
+        { mode: 0o700 },
+      );
+    }
+    const setup = runtimeOnly
+      ? createCrabboxNodeRuntimeSetup({
+          leaseId,
+          nodeBootstrap,
+          workerBundle: workerBundle!,
+          target: options?.target,
+        })
+      : createCrabboxNodeEnrollmentSetup({
+          leaseId,
+          target: options?.target,
+          desktop: desktop?.enabled,
+          desktopSetup: desktop?.setup,
+          enrollment: {
+            mode: "connect",
+            setupCode,
+            setupId: "bootstrap-test",
+            openclawVersion: "2026.8.1",
+            nodeBootstrap,
+            workerCodex: options?.workerCodex,
+            displayName: "Bootstrap test",
+            waitForDeviceId: async () => "device-test",
+          },
+        });
+    expect(setup.command).not.toContain(nodeBootstrap.token);
+    expect(setup.command).not.toContain(setupCode);
+    const timers = path.join(home, "bootstrap-test-timers.cjs");
+    fs.writeFileSync(timers, 'require("node:timers/promises").setTimeout = async () => {};\n');
+    if (options?.workerCodex) {
+      await withCrabboxWorkerEnvProfile(setup.forwardedEnv, async (names, profilePath) => {
+        expect(names).toContain("CRABBOX_WORKER_CODEX_CONFIG_BASE64");
+        expect(profilePath).toBeDefined();
+      });
+    }
+    const child = spawn("/bin/sh", [], {
+      env: {
+        HOME: home,
+        NODE_OPTIONS: `--require ${JSON.stringify(timers)}`,
+        PATH: `${options?.trustBin ?? bin}:${process.env.PATH}`,
+        ...(desktop
+          ? {
+              DISPLAY: ":0",
+              DBUS_SESSION_BUS_ADDRESS: "wrong-login-session",
+              XDG_RUNTIME_DIR: "/run/wrong",
+            }
+          : {}),
+        ...setup.forwardedEnv,
+        ...(options?.credentials ? { CRABBOX_WORKER_BOOTSTRAP_TOKEN: options.credentials } : {}),
+        // Exercise the installer overriding an inherited package-manager default.
+        NPM_CONFIG_IGNORE_SCRIPTS: "true",
+        npm_config_registry: "http://127.0.0.1:9/unreachable-registry",
+      },
+      detached: true,
+      stdio: "pipe",
+    });
+    const timeout = options?.timeoutMs
+      ? setTimeout(() => {
+          if (child.pid) {
+            process.kill(-child.pid, "SIGKILL");
+          }
+        }, options.timeoutMs)
+      : undefined;
+    const output: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => output.push(chunk));
+    // Replace only OS fixture roots; the generated bootstrap and credential flow execute unchanged.
+    child.stdin.end(
+      setup.command
+        .replaceAll(
+          "/usr/sbin/update-ca-certificates",
+          path.join(options?.trustBin ?? bin, "update-ca-certificates"),
+        )
+        .replaceAll("/var/lib/crabbox/desktop.env", path.join(home, "desktop.env"))
+        .replaceAll("/proc/$process_pid/environ", `${proc}/$process_pid/environ`),
+    );
+    const closed = once(child, "close");
+    try {
+      const [code] = await (options?.signal ? withinTest(closed, options.signal) : closed);
+      return {
+        code,
+        output: Buffer.concat(output).toString("utf8"),
+        ...(runtimeOnly && workerBundle ? { installation: { nodeBootstrap, workerBundle } } : {}),
+      };
+    } finally {
+      clearTimeout(timeout);
+      const active = child.exitCode === null && child.signalCode === null;
+      if (options?.signal?.aborted && child.pid && active) {
+        // The enrollment shell owns desktop setup; stop its group before releasing the FIFO.
+        process.kill(-child.pid, "SIGKILL");
+      }
+      await closed;
+    }
+  };
+}
+
+export function createWorkerArchiveFixture(): CrabboxWorkerNodeRuntimePreparation["workerBundle"] {
+  return {
     url: "https://gateway.example.test/__openclaw__/worker-bootstrap/artifacts/worker",
     token: "synthetic-worker-archive-token",
     sha256: "b".repeat(64),
     bytes: 100,
     packageRelativePath: `worker-artifacts/${"b".repeat(64)}.tgz`,
-  });
+  };
+}
 
-export const createNodeBootstrapFixture = (
+export function createNodeBootstrapFixture(
   overrides: Partial<CrabboxWorkerNodeEnrollment["nodeBootstrap"]> = {},
-): CrabboxWorkerNodeEnrollment["nodeBootstrap"] => ({
-  url: "https://gateway.example.test/__openclaw__/node-bootstrap/v1/artifact",
-  token: "synthetic-bootstrap-token",
-  sha256: "a".repeat(64),
-  bytes: 100,
-  openclawVersion: "2026.8.1",
-  enabledPluginIds: ["demo"],
-  ...overrides,
-});
+): CrabboxWorkerNodeEnrollment["nodeBootstrap"] {
+  return {
+    url: "https://gateway.example.test/__openclaw__/node-bootstrap/v1/artifact",
+    token: "synthetic-bootstrap-token",
+    sha256: "a".repeat(64),
+    bytes: 100,
+    openclawVersion: "2026.8.1",
+    buildId: "fixture-runtime-build",
+    enabledPluginIds: ["demo"],
+    ...overrides,
+  };
+}
+
+/** Real bytes and hashes for virtual-filesystem runtime verification tests. */
+export function createRuntimeVerificationFixture(
+  platform: "linux" | "darwin",
+  options: { arch?: string; files?: ReadonlyMap<string, Buffer> } = {},
+) {
+  const files = new Map<string, Buffer>([
+    ["package.json", Buffer.from(JSON.stringify({ name: "openclaw", version: "2026.8.1" }))],
+    [
+      "node-runtime.json",
+      Buffer.from(
+        JSON.stringify({
+          buildId: "fixture-runtime-build",
+          openclawVersion: "2026.8.1",
+          platforms: [{ platform, arch: options.arch ?? "x64", prefix: "" }],
+        }),
+      ),
+    ],
+    ["openclaw.mjs", Buffer.from("// synthetic runtime probe entrypoint\n")],
+  ]);
+  for (const [name, bytes] of options.files ?? []) {
+    files.set(name, bytes);
+  }
+  const inventory = [...files].map(([name, bytes]) => ({
+    path: "package/" + name,
+    size: bytes.length,
+    mode: 0o600,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  }));
+  const manifest = Buffer.from(JSON.stringify(inventory));
+  files.set("node-runtime.manifest.json", manifest);
+  return {
+    files,
+    nodeBootstrap: createNodeBootstrapFixture({
+      manifestSha256: createHash("sha256").update(manifest).digest("hex"),
+    }),
+  };
+}
 
 export async function readLaunch(
   stateDir: string,

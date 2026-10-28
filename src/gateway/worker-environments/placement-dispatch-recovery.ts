@@ -4,7 +4,10 @@ import { runTasksWithConcurrency } from "../../utils/run-with-concurrency.js";
 import { DEVICE_FOLDER_MANIFEST_REF } from "../../worker/device-folder.js";
 import { supportsCurrentWorkerLaunch } from "../../worker/worker-build-identity.js";
 import { measureGatewayRestartTrace } from "../restart-trace.js";
-import { hasForcedWorkerEnvironmentAbandonment } from "./environment-errors.js";
+import {
+  hasForcedWorkerEnvironmentAbandonment,
+  WorkerRetainedLeaseInspectionUnavailableError,
+} from "./environment-errors.js";
 import {
   isUnavailableEnvironment,
   workerDisappearanceError,
@@ -218,6 +221,26 @@ export function createPlacementRecoveryActions(
     }
   };
 
+  // A stopped lifecycle operation can leave draining committed before its final-save claim.
+  // Enroll once; the existing pending-result owner resumes only workspace cleanup, never input.
+  const enrollInterruptedDrain = async (
+    placement: Extract<WorkerDispatchPlacement, { state: "draining" }>,
+  ) => {
+    const claimId = `reclaim-${randomUUID()}`;
+    const claim = await placements.claimReclaimWorkspaceResult(
+      {
+        sessionId: placement.sessionId,
+        sessionKey: placement.sessionKey,
+        agentId: placement.agentId,
+        claimId,
+        runId: claimId,
+        owner: placementTurnOwner(placement),
+      },
+      (recoveryClaim) => environments.fenceWorkerTurnForRecovery(recoveryClaim),
+    );
+    await placements.handoffWorkspaceResultRecovery(claim);
+  };
+
   const recoverSession = async (
     sessionId: string,
     mode: "startup" | "restart" | "runtime",
@@ -259,6 +282,25 @@ export function createPlacementRecoveryActions(
           await failure.retryFailedTeardown(placement);
         } else if (placement.state === "active") {
           await reconcileActivePlacement(placement, "runtime", facts);
+        } else if (
+          placement.state === "draining" &&
+          !placement.turnClaim &&
+          !facts.moves.has(sessionId)
+        ) {
+          const environment = environments.get(placement.environmentId);
+          const loss = workerDisappearanceError(environment);
+          if (loss) {
+            await failure.failDraining(
+              placement,
+              new Error(
+                `Worker lost; recovery required. Unresolved workspace changes remain unverified. ${loss.message}`,
+              ),
+            );
+          } else if (isCurrentActiveWorkerEnvironment(placement, environment)) {
+            // One enrollment per admitted sweep. Offline workers retain the durable
+            // final-save fence until reconnect; no worker command is redispatched.
+            await enrollInterruptedDrain(placement);
+          }
         }
         continue;
       }
@@ -327,6 +369,7 @@ export function createPlacementRecoveryActions(
     if (deps.isShuttingDown?.()) {
       return;
     }
+    const heldEnvironments = new Set<string>();
     // Environment reconciliation can resume provisioning through session admission.
     // It must finish outside admission, before any recoverSession unit enters it.
     if (mode === "startup") {
@@ -380,19 +423,7 @@ export function createPlacementRecoveryActions(
           ) {
             return;
           }
-          const claimId = `reclaim-${randomUUID()}`;
-          const claim = await placements.claimReclaimWorkspaceResult(
-            {
-              sessionId: placement.sessionId,
-              sessionKey: placement.sessionKey,
-              agentId: placement.agentId,
-              claimId,
-              runId: claimId,
-              owner: placementTurnOwner(placement),
-            },
-            (recoveryClaim) => environments.fenceWorkerTurnForRecovery(recoveryClaim),
-          );
-          await placements.handoffWorkspaceResultRecovery(claim);
+          await enrollInterruptedDrain(placement);
         });
         const environmentId = abandonedEnvironmentId;
         if (environmentId) {
@@ -404,18 +435,39 @@ export function createPlacementRecoveryActions(
       }
       // Drain the bounded environment pass before recovering placement authority or results.
       // Unowned teardown remains in the service-owned sweep.
+      const environmentIds = new Set<string>();
+      for (const {
+        environmentId,
+        state,
+        moveSourceEnvironmentId,
+      } of await placements.readRecoveryCandidates()) {
+        if (environmentId && state !== "failed" && state !== "local" && state !== "reclaimed") {
+          environmentIds.add(environmentId);
+        }
+        if (moveSourceEnvironmentId && environments.get(moveSourceEnvironmentId)?.retention) {
+          environmentIds.add(moveSourceEnvironmentId);
+        }
+      }
       const reconciled = await runTasksWithConcurrency({
-        tasks: (await placements.readRecoveryCandidates()).flatMap(({ environmentId, state }) =>
-          environmentId && state !== "failed" && state !== "local" && state !== "reclaimed"
-            ? [
-                async () => {
-                  if (!deps.isShuttingDown?.()) {
-                    await environments.reconcileEnvironment(environmentId);
-                  }
-                },
-              ]
-            : [],
-        ),
+        tasks: [...environmentIds].map((environmentId) => async () => {
+          if (deps.isShuttingDown?.()) {
+            return;
+          }
+          try {
+            await environments.reconcileEnvironment(environmentId);
+          } catch (error) {
+            if (
+              !(error instanceof WorkerRetainedLeaseInspectionUnavailableError) ||
+              deps.isShuttingDown?.()
+            ) {
+              throw error;
+            }
+            heldEnvironments.add(environmentId);
+            log.warn(
+              `Retained worker startup recovery held (${environmentId}): ${boundedWorkerError(error)}`,
+            );
+          }
+        }),
         limit: 8,
         errorMode: "stop",
       });
@@ -435,9 +487,16 @@ export function createPlacementRecoveryActions(
           ? { placements: initialPlacements, rootsBySession: new Map(), completedRoots: new Set() }
           : undefined;
     }
-    for (const { sessionId } of candidates) {
+    for (const { sessionId, environmentId, moveSourceEnvironmentId } of candidates) {
       if (deps.isShuttingDown?.()) {
         return;
+      }
+      // An unavailable observation grants no authority to adopt, settle or move its session.
+      if (
+        (environmentId && heldEnvironments.has(environmentId)) ||
+        (moveSourceEnvironmentId && heldEnvironments.has(moveSourceEnvironmentId))
+      ) {
+        continue;
       }
       await admit([sessionId], () => recoverSession(sessionId, mode ?? "restart"));
     }
@@ -450,8 +509,8 @@ export function createPlacementRecoveryActions(
     }
   };
 
-  // Runtime sweeps must not classify a live dispatch preparation as a crash. They only repair
-  // durable active ownership and retry teardown already fenced by a previous failure.
+  // Runtime sweeps leave live dispatch preparation alone. Session admission excludes live
+  // lifecycle work while interrupted drains rejoin the existing final-save owner.
   const reconcileActive = async (
     environmentId?: string,
     admit: WorkerPlacementRecoveryAdmission = admitRecovery,

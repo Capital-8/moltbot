@@ -364,7 +364,12 @@ describe("worker turn launcher reclaimed placement", () => {
           expect(onLaneWait.mock.calls).toEqual([[{ waitMs: 0, queuedAhead: 0, waiting: false }]]);
         }
         expect(placements.get(SESSION_ID)).toMatchObject({ state: "active", turnClaim: null });
-        expectUncalled(environments.get, environments.startTunnel, runLocal);
+        expectUncalled(
+          environments.get,
+          environments.inspectTurnLease,
+          environments.startTunnel,
+          runLocal,
+        );
       } finally {
         resumeWorkspaceResolution.resolve();
         uninstallPlacement();

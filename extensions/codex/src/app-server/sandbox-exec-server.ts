@@ -400,6 +400,13 @@ export function readCodexPlacementWorkspaceIdentity(sandbox: SandboxContext): {
     throw new Error("Codex node execution requires its exact placement workspace identity.");
   }
   return {
+    ...("placementRetainedSession" in sandbox && sandbox.placementRetainedSession === true
+      ? { retainedSession: true as const }
+      : {}),
+    ...("placementRequireExistingNativeState" in sandbox &&
+    sandbox.placementRequireExistingNativeState === true
+      ? { requireExistingNativeState: true as const }
+      : {}),
     environmentId: sandbox.placementEnvironmentId,
     sessionId: sandbox.placementSessionId,
     ownerEpoch: sandbox.placementOwnerEpoch,

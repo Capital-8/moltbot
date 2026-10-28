@@ -1,10 +1,6 @@
 import { getRuntimeConfig } from "../../config/config.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
-import {
-  workerDisappearanceError,
-  type WorkerDispatchPlacement,
-} from "./placement-dispatch-failure.js";
+import { workerDisappearanceError } from "./placement-dispatch-failure.js";
 import { createPendingGatewayMovePreparation } from "./placement-dispatch-pending-move.js";
 import type { WorkerSessionPlacementProjection } from "./placement-read-projection.types.js";
 import { placementTurnOwner } from "./placement-record.js";
@@ -13,16 +9,21 @@ import type { WorkerSessionTurnClaim } from "./placement-store.js";
 import { isCurrentActiveWorkerEnvironment } from "./placement-target.js";
 import { completeRecoveredWorkspaceTeardown } from "./placement-teardown.js";
 import type { PlacementTurnClaimCurrentCheck } from "./placement-turn-claims.types.js";
+import { isWorkerReclaimWorkspaceResult } from "./placement-workspace-result-owner.js";
 import {
   matchesWorkspaceResultClaim,
   isCurrentWorkerWorkspacePendingResultOwner,
 } from "./placement-workspace-result.js";
-import type { WorkerWorkspacePendingResult } from "./placement-workspace-result.types.js";
+import {
+  prepareRetainedResultNode,
+  settleRetainedWorkspaceResult,
+  type WorkerOwnedPendingPlacement,
+} from "./retained-workspace-result.js";
 import {
   createWorkerWorkspaceReconcileRequest,
+  createPendingWorkerSessionWorkspaceResolver,
   recoverSessionWorkspaceCheckpoint,
   sessionWorkspaceRoot,
-  type WorkerSessionWorkspace,
 } from "./session-workspace.js";
 import { boundedWorkerError } from "./worker-error.js";
 import { verifyReconciledWorkspaceFinal } from "./workspace-finalize.js";
@@ -46,11 +47,6 @@ import {
 } from "./workspace-result-staging.js";
 
 const log = createSubsystemLogger("gateway/worker-placement");
-
-type WorkerOwnedPendingPlacement = Extract<
-  WorkerDispatchPlacement,
-  { state: "active" | "draining" }
->;
 
 async function prepareAcceptedPublication(
   deps: PlacementRecoveryDeps,
@@ -169,7 +165,30 @@ export async function recoverPendingWorkspaceResults(
           try {
             let active: WorkerOwnedPendingPlacement = pendingPlacement;
             const workspace = await resolveWorkspace(active, pending, recovery.workspace);
+            const prepareRecoveryNode = () =>
+              prepareRetainedResultNode(deps, active, turnClaim, recovery.assertCurrent);
             recovery.assertCurrent();
+            if (
+              await settleRetainedWorkspaceResult({
+                ...deps,
+                placements,
+                turnClaim,
+                workspace,
+                assertCurrent: recovery.assertCurrent,
+                stop: async (assertDiskCurrent) => {
+                  if (!(await prepareRecoveryNode())) {
+                    throw new Error(
+                      "Retained node recovery is unavailable; native cleanup is held",
+                    );
+                  }
+                  // The retention owner settles its operation before disk-result acceptance.
+                  assertDiskCurrent();
+                  await environments.stopTunnel(active.environmentId, active.activeOwnerEpoch);
+                },
+              })
+            ) {
+              return;
+            }
             if (workspace.kind === "device-folder") {
               // A restart revokes the old turn, but not this device's authoritative files.
               // Join process cleanup without capturing or reconciling the folder.
@@ -271,8 +290,6 @@ export async function recoverPendingWorkspaceResults(
                 return (
                   current?.state === "draining" &&
                   isCurrentWorkerWorkspacePendingResultOwner(current, pending) &&
-                  current.environmentId === pending.environmentId &&
-                  current.activeOwnerEpoch === pending.ownerEpoch &&
                   move?.operationId === blockedMove?.operationId &&
                   move?.source.generation + 1 === current.generation &&
                   move.source.environmentId === current.environmentId &&
@@ -553,10 +570,17 @@ export async function recoverPendingWorkspaceResults(
                 return;
               }
               recovery.assertCurrent();
+              const loss = workerDisappearanceError(environment);
               const failed = await placements.failWorkspaceResultAndReleaseTurn(
                 pending,
-                workerDisappearanceError(environment) ??
-                  new Error(`Pending cloud workspace result lost its worker: ${pending.sessionId}`),
+                loss && reclaimResult
+                  ? new Error(
+                      `Worker lost; recovery required. Unresolved workspace changes remain unverified. ${loss.message}`,
+                    )
+                  : (loss ??
+                      new Error(
+                        `Pending cloud workspace result lost its worker: ${pending.sessionId}`,
+                      )),
                 recovery.assertCurrent,
               );
               if (failed.state === "failed") {

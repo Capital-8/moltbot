@@ -1,15 +1,81 @@
+import { isDeepStrictEqual } from "node:util";
+import type { GitHubCredentialReader } from "../../agents/github-credential-reader.js";
+import { resolveGitHubHost } from "../../agents/github-host-runtime.js";
+import { prepareGitHubReadIdentity } from "../../agents/github-tool-identity.js";
+import { getRuntimeConfig } from "../../config/config.js";
+import { getRepositoryIntegration } from "../../plugins/repository-integration-runtime.js";
+import { getActiveSecretsRuntimeConfigSnapshot } from "../../secrets/runtime-state.js";
+import type { RetainedWorkspaceAuthority } from "../../state/retained-workspace-authority.js";
 import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
 import type { SessionRepositoryWorkspaceRecord } from "../../state/session-repository-workspaces.types.js";
+import { requestCurrentGitHubOAuthRefresh } from "../github-oauth-lifecycle.js";
+import { parseGitHubRemoteUrl } from "../github-remote.js";
 import { prepareRepositoryGitHubIdentity } from "./repository-github-identity.js";
+import { prepareRepositoryWorkerProjectSource } from "./repository-project-admission.js";
+import type { WorkerPlacementDispatchRequest } from "./service-contract.js";
 import {
+  prepareMissingSessionRepositoryCheckpoint,
   stageSessionRepositoryCheckpoint,
   withSessionRepositoryCheckpoint,
 } from "./session-repository-checkpoints.js";
+import type { WorkerSessionWorkspace } from "./session-workspace.js";
 import type {
   PreparedRepositoryWorkspace,
   WorkerTunnelHandle,
   WorkerWorkspaceSyncRequest,
 } from "./tunnel-contract.js";
+
+/** Pin branch-only legacy resets before selecting replacement capacity. */
+export async function prepareRepositoryRecovery(
+  workspace: WorkerSessionWorkspace,
+  request: WorkerPlacementDispatchRequest,
+  params: {
+    assertCurrent: () => void;
+    signal?: AbortSignal;
+    retainCredentialCleanup: (revoke: () => Promise<void>) => void;
+  },
+): Promise<WorkerSessionWorkspace> {
+  if (
+    workspace.kind !== "repository" ||
+    request.deviceId ||
+    workspace.repository.baseCommit ||
+    workspace.repository.checkpointRef ||
+    workspace.repository.requestedRef !== `refs/heads/${workspace.repository.branch}`
+  ) {
+    return workspace;
+  }
+  // Older lost-worker resets retained only the generated branch. Never substitute
+  // a default branch when the original source and unpublished checkpoint are unknown.
+  const repository = workspace.repository;
+  const source = await prepareRepositoryWorkerProjectSource({
+    namespace: "repository-ref-recovery",
+    getConfig: getRuntimeConfig,
+    assertCurrent: params.assertCurrent,
+    signal: params.signal,
+    readNativeCredential: request.readNativeCredential,
+    retainCredentialCleanup: params.retainCredentialCleanup,
+    repository: {
+      agentId: request.agentId,
+      url: repository.url,
+      ref: `refs/heads/${repository.branch}`,
+      requirePublishedRef: true,
+    },
+  });
+  const assertCurrent = () => {
+    params.assertCurrent();
+    source.assertCurrent();
+  };
+  assertCurrent();
+  return {
+    kind: "repository",
+    repository: await getSessionRepositoryWorkspaceStore().resetToBranch({
+      workspaceId: repository.workspaceId,
+      expectedRevision: repository.revision,
+      sourceCommit: source.project.baseCommit,
+      assertCurrent,
+    }),
+  };
+}
 
 /** Prepare source on the worker and durably accept its initial state before activation. */
 export async function syncSessionRepositoryWorkspace(params: {
@@ -130,7 +196,7 @@ export async function syncSessionRepositoryWorkspace(params: {
     ...(github?.token ? { gitToken: github.token } : {}),
   };
   const sync = async (checkpoint?: typeof source.checkpoint) => {
-    params.assertCurrent();
+    assertSourceCurrent();
     const start = () =>
       params.tunnel.syncWorkspace({
         sessionId: params.sessionId,
@@ -138,15 +204,19 @@ export async function syncSessionRepositoryWorkspace(params: {
         generation: params.generation,
         gitAuthor: params.gitAuthor,
         source: { ...source, ...(checkpoint ? { checkpoint } : {}) },
-        authorize: github?.assertSelected ?? params.assertCurrent,
+        authorize: () => {
+          assertSourceCurrent();
+          github?.assertSelected();
+        },
       });
     return github ? await github.start(start) : await start();
   };
   params.markPhase?.("repositorySync");
-  const synced = repository.checkpointRef
-    ? await withSessionRepositoryCheckpoint({ workspaceId: repository.workspaceId }, sync)
-    : await sync();
-  params.assertCurrent();
+  const synced =
+    repository.checkpointRef && !missingCheckpoint
+      ? await withSessionRepositoryCheckpoint({ workspaceId: repository.workspaceId }, sync)
+      : await sync();
+  assertSourceCurrent();
   if (synced.mode !== "repository") {
     throw new Error("Repository preparation did not return a repository workspace");
   }
@@ -183,7 +253,7 @@ export async function syncSessionRepositoryWorkspace(params: {
   const quiescence = await params.tunnel.quiesceWorkspace(synced.remoteWorkspaceDir);
   let reconciliation: Awaited<ReturnType<WorkerTunnelHandle["reconcileWorkspace"]>> | undefined;
   try {
-    params.assertCurrent();
+    assertSourceCurrent();
     params.markPhase?.("repositoryReconcile");
     reconciliation = await params.tunnel.reconcileWorkspace({
       remoteWorkspaceDir: synced.remoteWorkspaceDir,
@@ -191,15 +261,27 @@ export async function syncSessionRepositoryWorkspace(params: {
       source: {
         kind: "repository",
         markPhase: params.markPhase,
-        authorize: params.assertCurrent,
+        authorize: assertSourceCurrent,
         referenceManifestRef: synced.manifestRef,
-        prepareCheckpoint: (payload) =>
-          stageSessionRepositoryCheckpoint({
+        prepareCheckpoint: (payload) => {
+          assertSourceCurrent();
+          if (
+            missingCheckpoint &&
+            (payload.baseManifestRef !== missingCheckpoint.manifestRef ||
+              payload.currentManifestRef !== missingCheckpoint.manifestRef)
+          ) {
+            throw new Error(
+              "Repository source does not match the missing checkpoint; restore its artifact from backup.",
+            );
+          }
+          return stageSessionRepositoryCheckpoint({
             ...payload,
+            ...(missingCheckpoint ? { checkpointRef: missingCheckpoint.checkpointRef } : {}),
             workspaceId: repository.workspaceId,
             expectedRevision: repository.revision,
-            assertCurrent: params.assertCurrent,
-          }),
+            assertCurrent: assertSourceCurrent,
+          });
+        },
       },
     });
     params.markPhase?.("repositoryQuiescenceRenewal");
@@ -208,10 +290,10 @@ export async function syncSessionRepositoryWorkspace(params: {
     await reconciliation.verifyStable();
     params.markPhase?.("repositoryLocalVerification");
     await reconciliation.verifyLocalStable();
-    params.assertCurrent();
+    assertSourceCurrent();
     params.markPhase?.("repositoryAcceptance");
     await reconciliation.publishStagedResult();
-    params.assertCurrent();
+    assertSourceCurrent();
     return { ...synced, manifestRef: reconciliation.manifestRef };
   } finally {
     params.markPhase?.("repositoryCleanup");

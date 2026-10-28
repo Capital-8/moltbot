@@ -11,7 +11,8 @@ export function createCrabboxNodeProcessRuntime(
   desktopTarget: CrabboxOperatingSystem | undefined,
   leaseId: string,
 ): string {
-  return `const desktopTarget = ${JSON.stringify(desktopTarget)};
+  return `let nodeExecutable = process.execPath;
+const desktopTarget = ${JSON.stringify(desktopTarget)};
 ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher() : ""}
   // The watchdog only stops a hung tool; enrollment owns total time. CPU-starved macOS
   // hosts measured ps/lsof identity probes at up to 27 s, so Darwin gets the 60 s subprocess budget.
@@ -29,7 +30,7 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
   const macosHostPath = ${JSON.stringify(`${CRABBOX_MACOS_APP_PATH}/Contents/MacOS/OpenClaw`)};
   const macosDesktopDirectory = ${JSON.stringify(desktopTarget === "macos" ? crabboxMacosDesktopDirectory(leaseId) : undefined)};
   const macosGuiLaunchScript = ${JSON.stringify(desktopTarget === "macos" ? createCrabboxMacosGuiLaunchScript() : undefined)};
-  const macosHostArgs = (enrollmentMode) => ["--cloud-worker-host", "--node-executable", process.execPath, "--runtime-dir", runtimeDir, "--state-dir", stateDir, "--desktop-dir", macosDesktopDirectory, "--lease-id", leaseId, "--display-name", displayName, "--enrollment-mode", enrollmentMode];
+  const macosHostArgs = (enrollmentMode) => ["--cloud-worker-host", "--node-executable", nodeExecutable, "--runtime-dir", runtimeDir, "--state-dir", stateDir, "--desktop-dir", macosDesktopDirectory, "--lease-id", leaseId, "--display-name", displayName, "--enrollment-mode", enrollmentMode];
   const inspectMacosHost = (launch, nodePid) => {
     if (!launch || !Number.isSafeInteger(launch.hostPid) || launch.hostPid < 1 || typeof launch.hostStartTime !== "string" || !launch.hostStartTime) return null;
     let actual;
@@ -59,13 +60,13 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
     const actual = inspectMacosHost(launch, pid);
     const directory = macosRuntimeDirectory();
     const node = actual?.node;
-    if (actual?.state !== "active" || !macosHostMatches(launch, actual.host, directory) || !node || node.pid !== pid || node.startTime !== launch.startTime || node.uid !== process.getuid() || node.parentPid !== launch.hostPid || !macosCwdMatches(node.cwd, directory) || !Array.isArray(node.arguments) || fs.realpathSync(node.executablePath) !== fs.realpathSync(process.execPath)) return false;
-    return ["openclaw", "openclaw-connect", "openclaw-node"].includes(node.arguments[0]) || (node.arguments.length >= 2 && fs.realpathSync(node.arguments[0]) === fs.realpathSync(process.execPath) && node.arguments[1] === cli);
+    if (actual?.state !== "active" || !macosHostMatches(launch, actual.host, directory) || !node || node.pid !== pid || node.startTime !== launch.startTime || node.uid !== process.getuid() || node.parentPid !== launch.hostPid || !macosCwdMatches(node.cwd, directory) || !Array.isArray(node.arguments) || fs.realpathSync(node.executablePath) !== fs.realpathSync(nodeExecutable)) return false;
+    return ["openclaw", "openclaw-connect", "openclaw-node"].includes(node.arguments[0]) || (node.arguments.length >= 2 && fs.realpathSync(node.arguments[0]) === fs.realpathSync(nodeExecutable) && node.arguments[1] === cli);
   };
   const verifyDarwinNode = (launch, pid) => {
     const startTime = processStartTime(pid);
     const command = probeProcess("ps", ["-ww", "-o", "command=", "-p", String(pid)]);
-    const invocation = process.execPath + " " + cli;
+    const invocation = nodeExecutable + " " + cli;
     const nodeInvocation = command !== null && (["openclaw", "openclaw-connect", "openclaw-node"].includes(command) || command === invocation || command.startsWith(invocation + " "));
     return launch.pid === pid && Boolean(startTime) && launch.startTime === startTime && launch.runtimeDir === runtimeDir && launch.stateDir === stateDir && launch.cli === cli && nodeInvocation && processCwdMatches(pid);
   };
@@ -82,9 +83,9 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
     // cannot contain quotes; accept quoted or unquoted path tokens in those positions.
     // CIM retains this command line even when Node changes the console title.
     const invocation = entry.commandLine.match(/^(?:"([^"]+)"|([^\\s"]+))\\s+(?:"([^"]+)"|([^\\s"]+))(?:\\s|$)/);
-    return invocation !== null && (invocation[3] ?? invocation[4]) === cli && fs.realpathSync(invocation[1] ?? invocation[2]) === fs.realpathSync(process.execPath) && fs.realpathSync(entry.executablePath) === fs.realpathSync(process.execPath);
+    return invocation !== null && (invocation[3] ?? invocation[4]) === cli && fs.realpathSync(invocation[1] ?? invocation[2]) === fs.realpathSync(nodeExecutable) && fs.realpathSync(entry.executablePath) === fs.realpathSync(nodeExecutable);
   };
-  const reuseNodeProcess = () => {
+  const reuseNodeProcess = (prepareLaunch) => {
   const hasPid = mode && fs.existsSync(pidFile);
   if (mode && !hasPid) {
     // The runtime pointer precedes detached launch; a lost PID cannot prove no process survived.
@@ -141,8 +142,11 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
       const launch = JSON.parse(fs.readFileSync(launchFile, "utf8"));
       if (inspectMacosHost(launch)?.state !== "gone") throw new Error("Cloud worker desktop host is still running or could not be verified; release and reprovision the worker");
     }
-    fs.unlinkSync(pidFile);
   }
+  // Keep the positively dead launch receipt if prerequisite preparation fails.
+  // A retry must not mistake that known outcome for an unknown missing PID.
+  prepareLaunch?.();
+  if (hasPid) fs.unlinkSync(pidFile);
   return false;
   };
   const launchNodeProcess = async () => {
@@ -176,13 +180,13 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
       }
       throw new Error("Cloud worker native desktop host did not become ready; inspect node.log and reprovision the worker");
     } else if (desktopTarget === "windows/normal") {
-      desktopIdentity = await launchWindowsDesktopNode({ nodePath: process.execPath, nodeArgs, cwd: runtimeDir, stateDir, logPath });
+      desktopIdentity = await launchWindowsDesktopNode({ nodePath: nodeExecutable, nodeArgs, cwd: runtimeDir, stateDir, logPath });
       ({ pid, startTime } = desktopIdentity);
     } else if (process.platform === "win32") {
       const quote = (value) => "'" + value.replaceAll("'", "''") + "'";
       // The managed launcher owns OpenSSH job breakaway. Its hidden PowerShell child
       // owns logging because detached processes must not inherit SSH stdio handles.
-      const launchScript = "$env:OPENCLAW_STATE_DIR = " + quote(stateDir) + "; & " + [process.execPath, ...nodeArgs].map(quote).join(" ") + " *>> " + quote(logPath) + "; exit $LASTEXITCODE";
+      const launchScript = "$env:OPENCLAW_STATE_DIR = " + quote(stateDir) + "; & " + [nodeExecutable, ...nodeArgs].map(quote).join(" ") + " *>> " + quote(logPath) + "; exit $LASTEXITCODE";
       const argumentList = "-NoLogo -NoProfile -NonInteractive -EncodedCommand " + Buffer.from(launchScript, "utf16le").toString("base64");
       const launched = probeProcess("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", launcher, "-FilePath", "powershell.exe", "-ArgumentList", argumentList, "-WorkingDirectory", runtimeDir]);
       if (!/^[1-9][0-9]*$/.test(launched || "")) throw new Error("Cloud worker managed Windows launcher failed; release and reprovision the worker");
@@ -196,7 +200,7 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
       }
       if (!pid) throw new Error("Cloud worker node start time is unavailable; release and reprovision the worker");
     } else {
-      child = spawn(process.execPath, nodeArgs, { cwd: runtimeDir, env: nodeEnv, detached: true, windowsHide: true, stdio: ["ignore", log, log] });
+      child = spawn(nodeExecutable, nodeArgs, { cwd: runtimeDir, env: nodeEnv, detached: true, windowsHide: true, stdio: ["ignore", log, log] });
       await once(child, "spawn");
       pid = child.pid;
       if (process.platform !== "linux") startTime = processStartTime(pid);
@@ -242,3 +246,58 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
   };
 `;
 }
+
+/** The outer bootstrap retains download, verification, publication, and cancellation custody. */
+export const CRABBOX_NPM_RUNTIME_INSTALL_SOURCE = String.raw`
+async function installCrabboxNpmRuntime({ archive, installDir, stage, nodeEnv, downloadAbort }) {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const { spawn, spawnSync } = require("node:child_process");
+        // npm 12 requires a project policy even when ignore-scripts is false.
+        // Trust only the verified artifact; dependency script policy stays unchanged.
+        fs.writeFileSync(path.join(installDir, "package.json"), JSON.stringify({ private: true, allowScripts: { ["file:" + archive]: true } }), { mode: 0o600 });
+        const logPath = path.join(stage, "install.log");
+        const log = fs.openSync(logPath, "w", 0o600);
+        let installed;
+        try {
+          const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+          if (process.platform === "win32" && !fs.existsSync(npmCli)) throw new Error("Cloud worker requires npm beside node.exe; update the Crabbox Windows bootstrap image and reprovision the worker");
+          installed = await new Promise((resolve) => {
+            const child = spawn(process.platform === "win32" ? process.execPath : "npm", [...(process.platform === "win32" ? [npmCli] : []), "install", "--prefix", installDir, "--omit=dev", "--no-save", "--package-lock=false", "--no-audit", "--no-fund", "--ignore-scripts=false", archive], { cwd: stage, env: nodeEnv, detached: process.platform !== "win32", windowsHide: true, stdio: ["ignore", log, log] });
+            let error;
+            const stopInstall = () => {
+              if (!child.pid) return;
+              // Kill the owned npm group, including lifecycle scripts, then join close below.
+              try {
+                if (process.platform === "win32") {
+                  const stopped = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { env: nodeEnv, windowsHide: true, stdio: "ignore", timeout: 10000 });
+                  if (stopped.error) error = stopped.error;
+                } else process.kill(-child.pid, "SIGKILL");
+              } catch (cause) { if (cause.code !== "ESRCH") error = cause; }
+            };
+            const timeout = setTimeout(() => {
+              error = new Error("Cloud worker bootstrap package installation timed out");
+              stopInstall();
+            }, 600000);
+            const cancelInstall = () => downloadAbort.abort(new Error("Cloud worker bootstrap installation cancelled"));
+            process.once("SIGTERM", cancelInstall);
+            process.once("SIGINT", cancelInstall);
+            child.once("error", (cause) => { error = cause; });
+            child.once("close", (status, signal) => {
+              clearTimeout(timeout);
+              process.removeListener("SIGTERM", cancelInstall);
+              process.removeListener("SIGINT", cancelInstall);
+              downloadAbort.signal.removeEventListener("abort", stopInstall);
+              resolve({ status, signal, error });
+            });
+            downloadAbort.signal.addEventListener("abort", stopInstall, { once: true });
+            if (downloadAbort.signal.aborted) stopInstall();
+          });
+        } finally { fs.closeSync(log); }
+        downloadAbort.signal.throwIfAborted();
+        if (installed.status !== 0 || installed.error) {
+          const tail = fs.readFileSync(logPath, "utf8").slice(-2048);
+          throw new Error("Cloud worker bootstrap package installation failed (" + (installed.error?.message || installed.signal || "exit code " + installed.status) + "): " + tail);
+        }
+}
+`;

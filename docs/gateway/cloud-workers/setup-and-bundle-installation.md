@@ -9,15 +9,30 @@ OpenClaw installs its runtime automatically from the running Gateway. Profiles n
 
 ## Automatic Linux Node toolchains
 
-Linux x64 and arm64 workers need no Node installation in `settings.setup`. OpenClaw preserves a supported Node on `PATH` when npm, npx, and Corepack are available; otherwise it installs its pinned official release after SHA-256 verification. The image needs compatible glibc, `curl`, `tar`, and `sha256sum`, plus HTTPS access to nodejs.org.
+Linux x64 and arm64 workers need no Node installation in `settings.setup`. OpenClaw preserves a supported Node on `PATH`; otherwise it installs its pinned official release after SHA-256 verification. The image needs compatible glibc, `curl`, `tar`, and `sha256sum`, plus HTTPS access to nodejs.org.
 
 Prepared repositories select their Node requirement from `.nvmrc`, `.node-version`, `.tool-versions` (`nodejs` or `node`), `mise.toml` (`[tools] node`), then `package.json` `engines.node`. Versions, majors, SemVer ranges, `node`/`latest`, and LTS aliases resolve to a matching official Linux release; `system` retains the bootstrap Node. Invalid declarations or missing releases fail with a repair hint.
 
-Verified toolchains survive snapshot forks. Repository commands use the prepared HOME's `.local/bin` shims first. A declared `packageManager` gets user-writable Corepack shims without sudo. The OpenClaw runtime uses its own supported Node, independently of the repository's version. Custom profile Node installs remain supported. macOS and Windows need image- or setup-provided Node and npm; OpenClaw does not install them there.
+Verified toolchains survive snapshot forks. Repository commands use the prepared HOME's `.local/bin` shims first. A declared `packageManager` gets user-writable Corepack shims without sudo. The OpenClaw runtime uses its own supported Node, independently of the repository's version. Custom profile Node installs remain supported. macOS and Windows need image- or setup-provided Node and tar; OpenClaw does not install them there.
+
+## Platform certificate trust
+
+Before Linux node enrollment, OpenClaw refreshes the system certificate bundle with
+`/usr/sbin/update-ca-certificates` when installed, using noninteractive sudo when
+needed. This registers provider-installed certificates on cold machines and snapshot
+forks. Failure stops enrollment with a repair hint. Runtime-only installation and
+cache verification do not change system trust.
+
+Dedicated ephemeral native worker turns retain the node's admitted CA bundle paths,
+including when using a prepared HOME. Caller overrides for these paths remain
+forbidden. The platform image owns the certificates and tool-specific trust setup.
 
 ## The setup command
 
 `settings.setup` runs on a cold machine after readiness and before repository preparation and enrollment. Provision replay can repeat it, so make it idempotent. Snapshot forks skip it because their compatible image already contains its filesystem results. Use repository `postStartCommand` for processes that must start on each new worker.
+Worker-profile settings allow string values up to 128 KiB within the existing 256 KiB serialized JSON budget. Object keys remain limited to 64 KiB, and the depth, node-count, plain-JSON, and SecretRef checks still apply. Generic plugin hook payloads retain their 64 KiB string limit.
+
+Crabbox coordinator transport timeouts before profile setup, node runtime preparation, or node enrollment scripts start allow up to three attempts with backoff, within the existing phase budget. Only output consisting entirely of coordinator timeout diagnostics qualifies; any script output prevents retry. Lease inspection, readiness reads, heartbeat, and release use the same bounded retry policy; allocation remains owned by Gateway provisioning replay. Exhausted retries preserve the coordinator diagnostic and report the number of attempts.
 
 Do not install OpenClaw globally or maintain a versioned runtime/plugin URL in setup. Bootstrap supplies the Gateway's runtime and required plugins. For additional packages, account for image initialization: wait for cloud-init and use your package manager's lock-wait option to avoid failing the first dispatch on a held lock. Setup or enrollment failures report an error and stop the incomplete lease.
 

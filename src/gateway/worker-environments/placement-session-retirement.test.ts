@@ -19,7 +19,7 @@ import {
   sessionIdentity,
 } from "./placement-suite.test-support.js";
 
-function createHarness(records: WorkerSessionPlacementRecord[]) {
+function createHarness(records: WorkerSessionPlacementRecord[], retained = false) {
   const placements = new Map(records.map((record) => [record.sessionId, record]));
   const destroyed = new Set<string>();
   const retired: WorkerSessionPlacementRetirement[] = [];
@@ -73,6 +73,20 @@ function createHarness(records: WorkerSessionPlacementRecord[]) {
           environmentId,
           state: destroyed.has(environmentId) ? "destroyed" : "attached",
           leaseId: destroyed.has(environmentId) ? null : `lease:${environmentId}`,
+          retention: retained
+            ? {
+                policy: { mode: "session-disk", computeWindowSeconds: 60 },
+                owner: {
+                  sessionId: "session-retained",
+                  sessionKey: "agent:main:session-retained",
+                  agentId: "main",
+                },
+                ownerBinding: "a".repeat(64),
+                desiredState: "suspended",
+                receipt: null,
+                operation: null,
+              }
+            : null,
         } as never;
       },
     },
@@ -92,6 +106,30 @@ function createHarness(records: WorkerSessionPlacementRecord[]) {
     retirement,
   };
 }
+
+it("keeps reclaimed private disk evidence through unknown deletion and retires only after confirmation", async () => {
+  const placement: WorkerSessionPlacementRecord = {
+    ...activePlacement("session-retained"),
+    state: "reclaimed",
+    turnClaim: null,
+    terminalReason: "reclaimed",
+    terminalAtMs: 2,
+  };
+  const harness = createHarness([placement], true);
+  harness.forceDestroyEnvironment.mockRejectedValueOnce(new Error("deletion outcome unknown"));
+  await harness.retirement.reconcile();
+  expect(harness.placements.get(placement.sessionId)).toEqual(placement);
+  expect(harness.retired).toEqual([]);
+  await harness.retirement.reconcile();
+  expect(harness.retired).toEqual([
+    {
+      sessionId: placement.sessionId,
+      expectedState: "reclaimed",
+      expectedGeneration: placement.generation,
+    },
+  ]);
+  expect(harness.forceDestroyEnvironment).toHaveBeenCalledTimes(2);
+});
 
 it("reuses evidence until invalidation, including receipts during discovery", async () => {
   const placement = localPlacement("session-current");

@@ -69,6 +69,7 @@ describe("createWorkerPlacementRedispatch", () => {
       expect(dispatch).toHaveBeenCalledExactlyOnceWith(
         {
           ...identity,
+          machineClass: "large",
           profileId,
           expectedPlacement: { state, generation, environmentId, activeOwnerEpoch },
           inheritedProfile: { providerId, profileSnapshot },

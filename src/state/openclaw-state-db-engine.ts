@@ -257,7 +257,7 @@ export const stateEngineSchema: StoreSchema = {
     {
       version: 31,
       fromSchema: statePostgresSchemaV30,
-      schema: statePostgresSchema,
+      schema: statePostgresSchemaV31,
       sql: `DO $workspace$
         DECLARE baseline_constraint text;
         BEGIN
@@ -280,6 +280,24 @@ export const stateEngineSchema: StoreSchema = {
           END IF;
         END $workspace$;
         ${statePostgresVersionSql(31)}`,
+    },
+    {
+      version: 32,
+      fromSchema: statePostgresSchemaV31,
+      schema: statePostgresSchemaV32,
+      sql: `ALTER TABLE IF EXISTS worker_environments ADD COLUMN session_retention_json text COLLATE "C";
+        ALTER TABLE IF EXISTS worker_session_placements ADD COLUMN repository_preparation text COLLATE "C";
+        ALTER TABLE IF EXISTS worker_session_placements ADD COLUMN confirmed_loss_recovery_json text COLLATE "C";
+        ALTER TABLE IF EXISTS session_repository_workspaces ADD COLUMN recovery_json text COLLATE "C";
+        ${statePostgresVersionSql(32)}`,
+    },
+    {
+      version: 33,
+      fromSchema: statePostgresSchemaV32,
+      schema: statePostgresSchema,
+      sql: `ALTER TABLE IF EXISTS session_repository_workspaces ADD COLUMN disk_authority_json text COLLATE "C";
+        ALTER TABLE IF EXISTS worker_workspace_pending_results ADD COLUMN disk_authority_json text COLLATE "C";
+        ${statePostgresVersionSql(33)}`,
     },
   ],
 };

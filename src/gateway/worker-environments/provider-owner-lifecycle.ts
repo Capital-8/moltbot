@@ -60,6 +60,7 @@ export function createWorkerProviderOwnerLifecycle(
 
   const lifecycleLease = (record: WorkerEnvironmentRecord, leaseId: string) => ({
     leaseId,
+    ...(record.retention ? { retention: record.retention } : {}),
     profile: requireWorkerProfile(record.profileSnapshot.settings),
   });
 
@@ -181,6 +182,29 @@ export function createWorkerProviderOwnerLifecycle(
         if (requireCurrentOwner(record).state !== record.state) {
           throw serviceError("invalid_state", "Worker environment owner changed during teardown");
         }
+        if (record.retention) {
+          if (!provider.retainedLease) {
+            throw serviceError(
+              "provider_failure",
+              "Retained cleanup provider is unavailable; disk ownership is preserved",
+            );
+          }
+          return provider.retainedLease.destroy({
+            leaseId: lease.leaseId,
+            profile: lease.profile,
+            retention: record.retention,
+            signal: new AbortController().signal,
+            assertCurrent: () => {
+              const live = requireCurrentOwner(record);
+              if (
+                live.destroyRequestedAtMs === null ||
+                live.retention?.ownerBinding !== record.retention?.ownerBinding
+              ) {
+                throw serviceError("invalid_state", "Retained cleanup intent is no longer current");
+              }
+            },
+          });
+        }
         return provider.destroy(lease);
       },
       timeoutMs,
@@ -240,27 +264,38 @@ export function createWorkerProviderOwnerLifecycle(
         : leasePatch?.nodeDeviceId
           ? "Worker node bootstrap failed"
           : "Worker bootstrap failed";
-    const requested = await store.requestDestroy({
-      environmentId: record.environmentId,
-      state: record.state,
-      terminalState: "failed",
-      lastError: detail,
-    });
-    const stopped = await stopOwner(requested);
-    const draining = await move(stopped, "draining", { ...leasePatch, lastError: detail });
-    const destroying = await beginDestroy(draining);
+    let cleanupOwner = record;
     try {
-      await destroyLease(destroying, provider, lifecycleLease(destroying, leaseId));
+      cleanupOwner = await store.requestDestroy({
+        environmentId: record.environmentId,
+        state: record.state,
+        terminalState: "failed",
+        lastError: detail,
+        assertCurrent: () => {
+          requireCurrentOwner(record);
+        },
+      });
+      cleanupOwner = await stopOwner(cleanupOwner);
+      cleanupOwner = await move(cleanupOwner, "draining", { ...leasePatch, lastError: detail });
+      cleanupOwner = await beginDestroy(cleanupOwner);
+      await destroyLease(cleanupOwner, provider, lifecycleLease(cleanupOwner, leaseId));
+      await finishProvenDestroy(cleanupOwner);
     } catch (cleanupError: unknown) {
-      // An indeterminate destroy must remain retryable; never hide a possibly-live paid lease
-      // behind terminal failed state.
-      await saveError(
-        destroying,
-        new Error(`${detail}; provider teardown pending: ${boundedWorkerError(cleanupError)}`),
-      );
+      try {
+        requireCurrentOwner(cleanupOwner);
+        await saveError(
+          cleanupOwner,
+          new Error(`${detail}; provider teardown pending: ${boundedWorkerError(cleanupError)}`),
+          () => {
+            requireCurrentOwner(cleanupOwner);
+          },
+        );
+      } catch {
+        // A replacement owner keeps its own diagnostics and must never be torn down here.
+        // The caller still receives the original failure and the unsettled cleanup verdict.
+      }
       throw serviceError(failureCode, `${failureLabel}; teardown is pending: ${detail}`);
     }
-    await finishProvenDestroy(destroying);
     throw serviceError(failureCode, `${failureLabel}: ${detail}`);
   };
 

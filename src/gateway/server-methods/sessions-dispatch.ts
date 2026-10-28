@@ -32,11 +32,9 @@ import {
   resolveProjectProfileDestination,
   resolveWorkerPlacementDestination,
 } from "../worker-environments/placement-destination.js";
+import { stopWorkerSessionPlacement } from "../worker-environments/placement-disk-pause.js";
 import { canRetryDeviceDispatch } from "../worker-environments/placement-dispatch-failure.js";
-import {
-  projectWorkerSessionPlacement,
-  readWorkerPlacementIdentity,
-} from "../worker-environments/placement-projector.js";
+import { readWorkerPlacementIdentity } from "../worker-environments/placement-projector.js";
 import {
   isForceAbandonedWorkerPlacement,
   type WorkerSessionPlacementRecord,
@@ -51,7 +49,11 @@ import { readSessionWorkerPlacementAsync } from "../worker-environments/session-
 import type { WorkerSessionWorkspace } from "../worker-environments/session-workspace.js";
 import { listGatewayEnvironments } from "./environments.js";
 import { emitSessionsChanged } from "./session-change-event.js";
-import { isWorkerDispatchInputError, requireSessionKey } from "./sessions-shared.js";
+import {
+  respondWorkerPlacement,
+  respondWorkerDispatchError,
+} from "./sessions-dispatch-response.js";
+import { requireSessionKey } from "./sessions-shared.js";
 import type {
   GatewayRequestContext,
   GatewayRequestHandlers,
@@ -187,46 +189,6 @@ async function resolveSessionWorkspace(params: {
     respondInvalidWorkerSession(params.respond, formatErrorMessage(error));
     return undefined;
   }
-}
-
-function respondWorkerPlacement(params: {
-  respond: RespondFn;
-  key: string;
-  sessionId: string;
-  context: GatewayRequestContext;
-  placement: Parameters<typeof projectWorkerSessionPlacement>[0];
-}): void {
-  params.respond(
-    true,
-    {
-      ok: true,
-      key: params.key,
-      sessionId: params.sessionId,
-      placement: projectWorkerSessionPlacement(
-        params.placement,
-        params.context.workerPlacementDiskSpaceReader?.read(params.placement),
-        // Canonical fenced runner reader; a node lost after durable provision
-        // must project offline here exactly as sessions.list would.
-        params.context.workerPlacementRunnerAvailabilityReader?.read(params.placement),
-        readWorkerPlacementIdentity(params.placement, params.context.workerEnvironmentService),
-      ),
-    },
-    undefined,
-  );
-}
-
-function respondWorkerDispatchError(error: unknown, respond: RespondFn): void {
-  if (error instanceof SessionMutationAuthorizationChangedError) {
-    throw error;
-  }
-  respond(
-    false,
-    undefined,
-    errorShape(
-      isWorkerDispatchInputError(error) ? ErrorCodes.INVALID_REQUEST : ErrorCodes.UNAVAILABLE,
-      formatErrorMessage(error),
-    ),
-  );
 }
 
 export const sessionDispatchHandlers: GatewayRequestHandlers = {
@@ -721,7 +683,10 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
       }
       let placement: WorkerSessionPlacementRecord;
       try {
-        placement = await placementService.reclaim!(
+        placement = await stopWorkerSessionPlacement(
+          placementService,
+          context.workerEnvironmentService,
+          existingPlacement,
           {
             ...session,
             ...(params.recoverToGateway ? { recoverToGateway: params.recoverToGateway } : {}),

@@ -131,6 +131,10 @@ export type WorkerProviderLifecycleOptions = Omit<
     patch?: WorkerEnvironmentTransitionPatch,
     assertCurrent?: () => void,
   ) => Promise<WorkerEnvironmentRecord>;
-  saveError: (record: WorkerEnvironmentRecord, error: unknown) => Promise<WorkerEnvironmentRecord>;
+  saveError: (
+    record: WorkerEnvironmentRecord,
+    error: unknown,
+    assertCurrent?: () => void,
+  ) => Promise<WorkerEnvironmentRecord>;
   withLock: <T>(environmentId: string, task: () => Promise<T>) => Promise<T>;
 };

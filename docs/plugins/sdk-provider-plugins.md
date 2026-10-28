@@ -762,3 +762,20 @@ resolve here.
 - [Building plugins](/plugins/building-plugins)
 - [Building channel plugins](/plugins/sdk-channel-plugins)
 - [Model providers](/concepts/model-providers)
+
+## Retained worker leases
+
+Worker providers can implement the optional `retainedLease` contract exported
+through `openclaw/plugin-sdk/plugin-entry`. The host binds a session-disk policy,
+immutable session owner, and owner binding before provisioning. Provisioning must
+return the exact `retainedLease` receipt alongside the lease. Inspect, pause,
+resume, and destroy consume that identity; awaited effects must call the provided
+`assertCurrent` immediately before execution and after awaited preparation.
+
+Pause/resume use the host's persisted operation ID and original expected claim
+revision. Replaying the current operation must not extend its compute window;
+a successor supersedes historical operations. Inspect, copy, heartbeat, and run
+cannot implicitly wake a retained resource or grant compute. Destroy must verify
+all provider identity fields and independently confirm deletion before returning.
+The existing environment writer and lifecycle reconciler own persistence and
+recovery; plugins do not introduce a second scheduler or durable host store.

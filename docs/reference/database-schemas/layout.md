@@ -774,3 +774,18 @@ written. Subsequent preparation, activation, and recovery reject unsupported
 generations before drain. Status and preview do not adopt the policy or migrate
 the control database. The inventory does not enable collection, disk-space
 reclamation, or host-maintenance deletion.
+
+### Session-private worker disks
+
+Shared-state schema 27 adds nullable `worker_environments.session_retention_json`
+to the existing environment row. It records immutable session ownership and disk
+policy, the exact provider receipt, desired compute state, and a pending lifecycle
+operation with its original claim revision. The existing environment worker writer
+publishes these facts; placement projections carry them without another database
+owner. Existing rows remain ephemeral. No private disk is adopted after creation.
+
+Older schema readers must refuse version 27: an old destructive idle-reclaim path
+cannot safely interpret retained resources. Downgrade requires the matching
+pre-migration backup and binary. Pending retained cleanup cannot be pruned or
+retired until exact resource deletion is confirmed. Both SQLite and PostgreSQL
+use the same additive column and schema fence.

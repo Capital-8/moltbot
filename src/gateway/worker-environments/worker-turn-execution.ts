@@ -12,7 +12,6 @@ import { createOpenClawCodingToolsInternalAsync } from "../../agents/agent-tools
 import { applyEmbeddedAttemptToolsAllow } from "../../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
 import { admitEmbeddedContextEngine } from "../../agents/embedded-agent-runner/run/context-engine-admission.js";
 import type { EmbeddedAgentRunResult } from "../../agents/embedded-agent-runner/types.js";
-import { createModelVisibilityPolicy } from "../../agents/model-visibility-policy.js";
 import { acquireAgentRunPreparedModelRuntime } from "../../agents/prepared-model-runtime.js";
 import { createLibrarySkillWorkshopTool } from "../../agents/tools/skill-workshop-tool-library.js";
 import { registerAgentRunDelegatedAuthorityClosedHandler } from "../../infra/agent-run-registry.js";
@@ -32,6 +31,7 @@ import {
   assertWorkerTurnInputAdmitted,
   getWorkerTurnToolSurface,
 } from "./placement-turn-claim-events.js";
+import { boundRetainedWorkerTurn } from "./retained-lease-lifecycle.js";
 import { prepareWorkerDesktopLaunchPlan } from "./worker-desktop-launch-plan.js";
 import type { WorkerGatewayToolRuntime } from "./worker-gateway-tool-contract.js";
 import { createWorkerGatewayToolRuntime } from "./worker-gateway-tool-runtime.js";
@@ -44,7 +44,7 @@ import {
   type WorkerTurnEnvironmentService,
 } from "./worker-turn-failure.js";
 import { prepareWorkerTurnMedia } from "./worker-turn-media.js";
-import { prepareWorkerTurnModel } from "./worker-turn-model.js";
+import { assertWorkerLocalModelAdmission, prepareWorkerTurnModel } from "./worker-turn-model.js";
 import {
   assertSupportedTurn,
   captureWorkerTurnInputAuthority,
@@ -88,40 +88,22 @@ export async function executeWorkerTurn(
   );
   params.assertRunCurrent();
   input.abortSignal?.throwIfAborted();
-  const turn = { ...input, config: preparedRuntime.snapshot.config };
-  const modelRef = assertSupportedTurn(turn);
+  const preparedTurn = { ...input, config: preparedRuntime.snapshot.config };
+  const modelRef = assertSupportedTurn(preparedTurn);
   const { environment, bootstrapReceipt } = requireCurrentWorkerTurnEnvironment({
     environments: params.environments,
     placement,
   });
+  const turn = boundRetainedWorkerTurn(preparedTurn, environment.retention);
   const inferencePlacement = workerInferencePlacement(environment);
   if (inferencePlacement === "worker") {
-    const policy = createModelVisibilityPolicy({
-      cfg: turn.config ?? {},
-      catalog: [],
-      defaultProvider: modelRef.provider,
+    assertWorkerLocalModelAdmission({
+      turn,
+      modelRef,
       agentId: placement.agentId,
+      nodeDeviceId: environment.nodeDeviceId,
+      protocolFeatures: bootstrapReceipt.protocolFeatures,
     });
-    if (!policy.allows(modelRef)) {
-      throw new Error(
-        `Worker-local inference cannot use ${modelRef.provider}/${modelRef.model} for agent ` +
-          `${placement.agentId}. Allow that model in the agent model policy or choose an allowed model.`,
-      );
-    }
-    if (!environment.nodeDeviceId) {
-      throw new Error(
-        "Worker-local inference requires a paired device profile. Set " +
-          "cloudWorkers.profiles.<id>.settings.device to a connected node.",
-      );
-    }
-    if (!bootstrapReceipt.protocolFeatures.includes(WORKER_LOCAL_INFERENCE_PROTOCOL_FEATURE)) {
-      throw new Error(
-        `Worker-local inference is unavailable on paired device ${environment.nodeDeviceId}. ` +
-          "Update and restart its OpenClaw node host, use a non-Windows host with " +
-          'nodeHost.workerRuns.isolation set to "none", and configure a compatible ' +
-          "models.providers model with a usable node-local credential.",
-      );
-    }
   }
   await recoverWorkspaceBeforeTurn({ ...params, signal: turn.abortSignal });
   params.assertRunCurrent();
@@ -275,7 +257,6 @@ export async function executeWorkerTurn(
     assertSourceCurrent,
   });
   assertActive();
-  const authority = runtimeIdentity.approvalAuthority;
   const authorityAbort = new AbortController();
   const signal = turn.abortSignal
     ? AbortSignal.any([turn.abortSignal, authorityAbort.signal])

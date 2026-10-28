@@ -218,6 +218,8 @@ export function createGatewayWorkerPlacementRuntime(params: GatewayWorkerPlaceme
       // Must read true before enrollment cancellation in every shutdown path, so an interrupted
       // provisioning is retained rather than terminalized. Runtime reset replaces the drain signal.
       isShuttingDown: isStopping,
+      hasCurrentRunner: (id) => nodeWorkerSupervisorTransport?.hasCurrentRunner(id) === true,
+      waitForRecoveryNode: runtimeRefresh.waitForRecoveryNode,
       runnerAvailability,
       resolveDevicePlacementRequirement,
       isCurrentNodePlacement: createDevicePlacementAuthority(() => nodeWorkerSupervisorTransport),

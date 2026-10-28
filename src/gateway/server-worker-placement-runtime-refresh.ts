@@ -44,6 +44,20 @@ export function createWorkerRuntimeRefreshWaiter(params: {
       }
     };
     assertWaitingCurrent();
+    if (isNodeConnected && !(await isNodeConnected(environment.nodeDeviceId))) {
+      assertWaitingCurrent();
+      if (!environment.leaseId) {
+        throw new Error("Worker node recovery has no retained lease");
+      }
+      await params.environments.resumeNode({
+        environmentId: environment.environmentId,
+        ownerEpoch: environment.ownerEpoch,
+        leaseId: environment.leaseId,
+        signal: waitingSignal,
+        assertCurrent: assertWaitingCurrent,
+      });
+      assertWaitingCurrent();
+    }
     await waitForNode(environment.nodeDeviceId, {
       signal: waitingSignal,
       assertCurrent: assertWaitingCurrent,

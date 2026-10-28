@@ -225,7 +225,7 @@ export function requireWorkerAllocation(
   return { leaseId: value.leaseId.trim(), sharedHost: value.sharedHost };
 }
 
-export function requireWorkerLease(value: unknown): WorkerLease {
+export function requireWorkerLease(value: WorkerLease): WorkerLease {
   const hasSsh = isRecord(value) && Object.hasOwn(value, "ssh");
   const hasNode = isRecord(value) && Object.hasOwn(value, "node");
   if (
@@ -241,6 +241,7 @@ export function requireWorkerLease(value: unknown): WorkerLease {
   }
   const common = {
     leaseId: value.leaseId.trim(),
+    ...(value.retainedLease ? { retainedLease: value.retainedLease } : {}),
     ...(value.sharedHost === undefined ? {} : { sharedHost: value.sharedHost }),
     ...(value.desktop === undefined
       ? {}

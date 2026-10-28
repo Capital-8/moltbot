@@ -41,15 +41,11 @@ import {
 } from "./service-contract.js";
 import type { WorkerEnvironmentService } from "./service.js";
 import type { WorkerEnvironmentReconcileCore } from "./service.types.js";
+import { prepareCheckpointRecovery } from "./session-repository-checkpoints.js";
 import type { WorkerSessionWorkspace } from "./session-workspace.js";
 import { AcceptedWorkspacePublicationIndeterminateError } from "./workspace-accepted-publication.js";
 
-export type WorkerDevicePlacementRequirementResolver = (
-  identity: Pick<
-    WorkerPlacementDispatchRequest,
-    "sessionId" | "sessionKey" | "agentId" | "executionMode"
-  >,
-) => Promise<DevicePlacementRequirement>;
+export type { WorkerDevicePlacementRequirementResolver } from "./device-placement-eligibility.js";
 
 type WorkerNodePlacementAdmission = {
   node: NodeWorkerSupervisorNodeProof;
@@ -406,6 +402,8 @@ export function createWorkerPlacementDispatchStartup(options: {
                 runSetupScript: request.runSetupScript,
                 recovery: params.recovery,
                 assertCurrent: assertSyncOwner,
+                prepareCheckpointRecovery: () =>
+                  prepareCheckpointRecovery(placements, syncingPlacement, assertSyncOwner),
               })
             : await tunnel.syncWorkspace({
                 source: {

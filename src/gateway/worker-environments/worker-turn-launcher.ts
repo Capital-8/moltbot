@@ -18,7 +18,7 @@ import { WORKER_ADMISSION_DEADLINE_MS } from "../../worker/worker-connection-con
 import { StaleWorkerBuildError } from "./admission.js";
 import { raceNodeWorkerOperation } from "./node-worker-abort.js";
 import { isCurrentPlacementTurnClaim, sameWorkerSessionTurnClaim } from "./placement-record.js";
-import type { WorkerSessionTurnClaim } from "./placement-store.js";
+import type { WorkerSessionPlacementRecord, WorkerSessionTurnClaim } from "./placement-store.js";
 import { matchesWorkerPlacementTarget } from "./placement-target.js";
 import { ActiveTurnClaimError } from "./placement-turn-claims.js";
 import { WorkerRuntimeRefreshPendingError } from "./provider-runtime-refresh.js";
@@ -200,11 +200,7 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
             prepared.pendingResult &&
             (prepared.pendingResult.runId !== claim.runId || !current.turnClaim),
           );
-          let routablePlacement = await requiredAdmission.recoverInterruptedTurn(
-            current,
-            inputTurn,
-            assertAdmissionCurrent,
-          );
+          let routablePlacement: WorkerSessionPlacementRecord = current;
           for (;;) {
             if (routablePlacement.state === "local") {
               return await runLocalTurn();
@@ -234,10 +230,7 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
               initialSetup = ready;
               await previousSetup?.release();
             }
-            if (
-              routablePlacement.state === "reclaimed" ||
-              (routablePlacement.state === "failed" && routablePlacement.activeOwnerEpoch !== null)
-            ) {
+            if (requiredAdmission.needsRedispatch(routablePlacement)) {
               reportProvisioning();
               preparedResultPending = undefined;
               routablePlacement = await options.redispatchPlacement(routablePlacement, {
@@ -249,6 +242,14 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
                 { ...claim, agentId: identity.agentId, sessionKey: identity.sessionKey },
                 routablePlacement,
               );
+            }
+            if (routablePlacement.state === "draining") {
+              routablePlacement = await requiredAdmission.recoverTurnPlacement(
+                routablePlacement,
+                inputTurn,
+                assertAdmissionCurrent,
+              );
+              preparedResultPending = undefined;
             }
             const resultPending =
               preparedResultPending ??
@@ -265,9 +266,16 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
               );
               continue;
             }
+            routablePlacement = await requiredAdmission.recoverTurnPlacement(
+              routablePlacement,
+              inputTurn,
+              assertAdmissionCurrent,
+            );
+            if (requiredAdmission.needsRedispatch(routablePlacement)) {
+              continue;
+            }
             placement = requireActivePlacement(routablePlacement);
-            const environmentId = placement.environmentId;
-            const refresh = options.environments.readRuntimeRefresh?.(environmentId);
+            const refresh = options.environments.readRuntimeRefresh?.(placement.environmentId);
             if (refresh) {
               reportProvisioning();
               await waitForWorkerRuntimeRefresh({
@@ -291,7 +299,7 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
             }
             const assertClaimCurrent = () => {
               assertAdmissionCurrent();
-              if (options.environments.readRuntimeRefresh?.(environmentId)) {
+              if (options.environments.readRuntimeRefresh?.(placement.environmentId)) {
                 throw new WorkerRuntimeRefreshPendingError(
                   "Worker runtime refresh started during turn admission",
                 );

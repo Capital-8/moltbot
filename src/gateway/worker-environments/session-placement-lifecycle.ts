@@ -99,6 +99,19 @@ function isWorkerPlacementSafeForMutation(
   context: SessionWorkerPlacementContext,
   placement: Placement,
 ): placement is RetirablePlacement {
+  if (
+    placement.state !== "local" &&
+    placement.state !== "reclaimed" &&
+    placement.state !== "failed"
+  ) {
+    return false;
+  }
+  const environment = placement.environmentId
+    ? context.workerEnvironmentService?.get(placement.environmentId)
+    : undefined;
+  if (environment?.retention && environment.state !== "destroyed") {
+    return false;
+  }
   if (placement.state === "failed") {
     return isFailedWorkerPlacementEnvironmentGone({
       environmentService: context.workerEnvironmentService,

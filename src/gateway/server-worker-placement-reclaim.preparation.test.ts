@@ -729,6 +729,7 @@ async function barrierFixture(name: string) {
     placements: {
       get: () => ({ ...placement }) as never,
       getAsync: async () => ({ ...placement }) as never,
+      listPendingWorkspaceResultsAsync: async () => [],
       waitForTurnClaimRelease: async () => {},
     },
     loadSessionRuntime: async () => sessionRuntime(storePath),

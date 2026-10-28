@@ -547,7 +547,23 @@ describe("prepared worker dispatch", () => {
         sourceManifestRef: base.manifestRef,
         preparedManifestRef: base.manifestRef,
       };
+      const recoveryPlacements = createWorkerSessionPlacementStore({
+        database: support.testState.stateDb,
+        now: () => support.testState.nowMs,
+      });
+      if (missingCheckpointOwner) {
+        const readProjection = recoveryPlacements.readProjection.bind(recoveryPlacements);
+        const interruptedRead = vi
+          .spyOn(recoveryPlacements, "readProjection")
+          .mockImplementation(async (...args) => {
+            const facts = await readProjection(...args);
+            // An unavailable authoritative owner must never authorize reconstruction.
+            return { ...facts, placements: new Map() };
+          });
+        onTestFinished(() => interruptedRead.mockRestore());
+      }
       const { harness, store, ready, request } = await preparedHarness({
+        placements: recoveryPlacements,
         repository: { ...accepted, baseCommit },
         boundWorkspace,
         ...(runSetupScript ? { recipe: lifecycleRecipe } : {}),
@@ -584,6 +600,17 @@ describe("prepared worker dispatch", () => {
         return tunnel;
       });
 
+      if (missingCheckpointOwner) {
+        const artifact = repositoryStore.artifactPath(accepted.workspaceId);
+        await fs.rm(artifact, { recursive: true });
+        await expect(harness.service.dispatch({ ...request, runSetupScript })).rejects.toThrow(
+          "unresolved worker recovery",
+        );
+        expect(harness.log).not.toContain("sync");
+        expect(await repositoryStore.get(accepted.workspaceId)).toEqual(accepted);
+        await expect(fs.stat(artifact)).rejects.toMatchObject({ code: "ENOENT" });
+        return;
+      }
       const active = await harness.service.dispatch({ ...request, runSetupScript });
 
       expect(harness.environments.prepareProjectIntent).toHaveBeenCalledWith(request.profileId, {

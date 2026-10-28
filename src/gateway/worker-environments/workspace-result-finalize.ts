@@ -27,6 +27,8 @@ import type {
   WorkerSessionPlacementStore,
   WorkerSessionTurnClaim,
 } from "./placement-store.js";
+import { boundRetainedWorkerTurn } from "./retained-lease-lifecycle.js";
+import { settleRetainedWorkspaceResult } from "./retained-workspace-result.js";
 import type { WorkerEnvironmentService } from "./service.js";
 import {
   createWorkerWorkspaceReconcileRequest,
@@ -370,52 +372,62 @@ export async function executeRemoteExecTurn(params: {
   ) {
     throw new Error("Active remote-exec placement does not match its attached environment");
   }
-  await recoverWorkspaceBeforeTurn({ ...params, signal: params.turn.abortSignal });
-  params.assertRunCurrent?.();
+  const executionParams = {
+    ...params,
+    turn: boundRetainedWorkerTurn(params.turn, environment.retention),
+  };
+  await recoverWorkspaceBeforeTurn({
+    ...executionParams,
+    signal: executionParams.turn.abortSignal,
+  });
+  executionParams.assertRunCurrent?.();
   const tunnel = await waitForTurnOperation({
     start: () =>
-      params.environments.startTunnel({
-        environmentId: params.placement.environmentId,
-        ownerEpoch: params.placement.activeOwnerEpoch,
+      executionParams.environments.startTunnel({
+        environmentId: executionParams.placement.environmentId,
+        ownerEpoch: executionParams.placement.activeOwnerEpoch,
       }),
-    ...(params.turn.abortSignal ? { signal: params.turn.abortSignal } : {}),
-    timeoutMs: params.turn.timeoutMs,
+    ...(executionParams.turn.abortSignal ? { signal: executionParams.turn.abortSignal } : {}),
+    timeoutMs: executionParams.turn.timeoutMs,
   });
-  const transcriptTarget = resolveWorkerTurnTranscriptTarget(params.turn);
+  const transcriptTarget = resolveWorkerTurnTranscriptTarget(executionParams.turn);
   const attachmentNote = await prepareWorkerTurnAttachments({
-    turn: params.turn,
+    turn: executionParams.turn,
     tunnel,
-    remoteWorkspaceDir: params.placement.remoteWorkspaceDir,
-    assertRunCurrent: params.assertRunCurrent,
+    remoteWorkspaceDir: executionParams.placement.remoteWorkspaceDir,
+    assertRunCurrent: executionParams.assertRunCurrent,
     assertCurrent: () => {
-      if (!params.placements.validateTurnClaim(params.turnClaim)) {
+      if (!executionParams.placements.validateTurnClaim(executionParams.turnClaim)) {
         throw new Error("Cloud attachment transfer lost its turn claim");
       }
     },
   });
-  params.assertRunCurrent?.();
-  await params.placements.markWorkspaceResultPending(params.turnClaim, params.assertRunCurrent);
-  params.assertRunCurrent?.();
-  params.onHandoff();
+  executionParams.assertRunCurrent?.();
+  await executionParams.placements.markWorkspaceResultPending(
+    executionParams.turnClaim,
+    executionParams.assertRunCurrent,
+  );
+  executionParams.assertRunCurrent?.();
+  executionParams.onHandoff();
   let execution: Result<EmbeddedAgentRunResult, unknown>;
   let executionActive = true;
-  const originalPrompt = params.turn.prompt;
-  const originalTranscriptPrompt = params.turn.transcriptPrompt;
+  const originalPrompt = executionParams.turn.prompt;
+  const originalTranscriptPrompt = executionParams.turn.transcriptPrompt;
   let computer: PreparedWorkerComputer | undefined;
   let skillResources: Awaited<ReturnType<typeof transferSkillResources>>;
   try {
     skillResources = await transferSkillResources({
-      snapshot: params.turn.skillsSnapshot,
-      workspaceDir: params.turn.workspaceDir,
-      explicitSelections: params.turn.explicitSkillSelections,
+      snapshot: executionParams.turn.skillsSnapshot,
+      workspaceDir: executionParams.turn.workspaceDir,
+      explicitSelections: executionParams.turn.explicitSkillSelections,
       tunnel,
-      remoteWorkspaceDir: params.placement.remoteWorkspaceDir,
-      signal: params.turn.abortSignal,
-      assertRunCurrent: params.assertRunCurrent,
+      remoteWorkspaceDir: executionParams.placement.remoteWorkspaceDir,
+      signal: executionParams.turn.abortSignal,
+      assertRunCurrent: executionParams.assertRunCurrent,
       assertCurrent: () => {
-        const current = params.environments.get(environment.environmentId);
+        const current = executionParams.environments.get(environment.environmentId);
         if (
-          !params.placements.validateTurnClaim(params.turnClaim) ||
+          !executionParams.placements.validateTurnClaim(executionParams.turnClaim) ||
           current?.state !== "attached" ||
           current.ownerEpoch !== environment.ownerEpoch ||
           current.leaseId !== environment.leaseId
@@ -424,54 +436,56 @@ export async function executeRemoteExecTurn(params: {
         }
       },
     });
-    params.assertRunCurrent?.();
-    computer = await params.environments.prepareComputer?.(params.turnClaim);
-    params.assertRunCurrent?.();
+    executionParams.assertRunCurrent?.();
+    computer = await executionParams.environments.prepareComputer?.(executionParams.turnClaim);
+    executionParams.assertRunCurrent?.();
     const sandboxToolPolicy = resolveSandboxToolPolicyForAgent(
-      params.turn.config,
-      params.placement.agentId,
+      executionParams.turn.config,
+      executionParams.placement.agentId,
       {
         containedToolNames: computer ? ["computer"] : [],
       },
     );
     if (attachmentNote) {
-      params.turn.transcriptPrompt ??= originalPrompt;
-      params.turn.prompt = `${originalPrompt}\n\n${attachmentNote}`;
+      executionParams.turn.transcriptPrompt ??= originalPrompt;
+      executionParams.turn.prompt = `${originalPrompt}\n\n${attachmentNote}`;
     }
+    const runLocal = () =>
+      measureTurnPhase(executionParams.turnClaim, "agent-execution", executionParams.runLocal);
     const result = await withPluginRuntimeGatewayRequestScope(
       {
         isWebchatConnect: () => false,
         ...getPluginRuntimeGatewayRequestScope(),
         assertNodeExecutionCurrent: (request) => {
-          params.assertRunCurrent?.();
-          const placement = params.placements.get(params.placement.sessionId);
-          const currentEnvironment = params.environments.get(environment.environmentId);
+          executionParams.assertRunCurrent?.();
+          const placement = executionParams.placements.get(executionParams.placement.sessionId);
+          const currentEnvironment = executionParams.environments.get(environment.environmentId);
           if (
             !executionActive ||
-            params.turn.abortSignal?.aborted ||
-            !params.placements.validateTurnClaim(params.turnClaim) ||
-            request.runId !== params.turnClaim.runId ||
-            request.agentId !== params.placement.agentId ||
-            request.workspace.sessionId !== params.placement.sessionId ||
-            request.workspace.sessionKey !== params.placement.sessionKey ||
-            request.workspace.environmentId !== params.placement.environmentId ||
-            request.workspace.ownerEpoch !== params.placement.activeOwnerEpoch ||
-            request.workspace.workspaceDir !== params.placement.remoteWorkspaceDir ||
+            executionParams.turn.abortSignal?.aborted ||
+            !executionParams.placements.validateTurnClaim(executionParams.turnClaim) ||
+            request.runId !== executionParams.turnClaim.runId ||
+            request.agentId !== executionParams.placement.agentId ||
+            request.workspace.sessionId !== executionParams.placement.sessionId ||
+            request.workspace.sessionKey !== executionParams.placement.sessionKey ||
+            request.workspace.environmentId !== executionParams.placement.environmentId ||
+            request.workspace.ownerEpoch !== executionParams.placement.activeOwnerEpoch ||
+            request.workspace.workspaceDir !== executionParams.placement.remoteWorkspaceDir ||
             placement?.state !== "active" ||
             placement.executionMode !== "remote-exec" ||
-            placement.generation !== params.turnClaim.placementGeneration ||
-            placement.sessionKey !== params.placement.sessionKey ||
-            placement.agentId !== params.placement.agentId ||
-            placement.environmentId !== params.placement.environmentId ||
-            placement.activeOwnerEpoch !== params.placement.activeOwnerEpoch ||
-            placement.remoteWorkspaceDir !== params.placement.remoteWorkspaceDir ||
+            placement.generation !== executionParams.turnClaim.placementGeneration ||
+            placement.sessionKey !== executionParams.placement.sessionKey ||
+            placement.agentId !== executionParams.placement.agentId ||
+            placement.environmentId !== executionParams.placement.environmentId ||
+            placement.activeOwnerEpoch !== executionParams.placement.activeOwnerEpoch ||
+            placement.remoteWorkspaceDir !== executionParams.placement.remoteWorkspaceDir ||
             currentEnvironment?.state !== "attached" ||
             currentEnvironment.ownerEpoch !== environment.ownerEpoch ||
             currentEnvironment.leaseId !== environment.leaseId ||
             currentEnvironment.nodeDeviceId !== environment.nodeDeviceId ||
             currentEnvironment.nodeDeviceId !== request.nodeId ||
             currentEnvironment.attachedSessionIds.length !== 1 ||
-            currentEnvironment.attachedSessionIds[0] !== params.placement.sessionId
+            currentEnvironment.attachedSessionIds[0] !== executionParams.placement.sessionId
           ) {
             throw new Error("node execution placement authority is no longer current");
           }
@@ -480,16 +494,13 @@ export async function executeRemoteExecTurn(params: {
       () =>
         withSessionPlacementComputer(
           {
-            runId: params.turnClaim.runId,
-            agentId: params.placement.agentId,
+            runId: executionParams.turnClaim.runId,
+            agentId: executionParams.placement.agentId,
             isActive: () => executionActive,
             sandboxToolPolicy: computer ? sandboxToolPolicy : undefined,
             bind: (run) => (computer ? computer.bind(run) : null),
           },
-          () =>
-            skillResources
-              ? withSessionSkillResources(skillResources, params.runLocal)
-              : params.runLocal(),
+          () => (skillResources ? withSessionSkillResources(skillResources, runLocal) : runLocal()),
         ),
     );
     execution = { ok: true, value: result };
@@ -540,7 +551,7 @@ export async function executeRemoteExecTurn(params: {
         currentEnvironment.ownerEpoch === environment.ownerEpoch &&
         currentEnvironment.nodeDeviceId === environment.nodeDeviceId &&
         currentEnvironment.attachedSessionIds.length === 1 &&
-        currentEnvironment.attachedSessionIds[0] === params.placement.sessionId,
+        currentEnvironment.attachedSessionIds[0] === executionParams.placement.sessionId,
       );
     };
     if (
@@ -549,8 +560,8 @@ export async function executeRemoteExecTurn(params: {
       reconciliationError.cause instanceof WorkerTunnelOwnerDisconnectedError
     ) {
       // Offline nodes keep their exact lease; the next turn reconciles its dirty workspace.
-      await params.placements.cancelWorkspaceResultAndReleaseTurn(
-        params.turnClaim,
+      await executionParams.placements.cancelWorkspaceResultAndReleaseTurn(
+        executionParams.turnClaim,
         { reason: "node-disconnect" },
         () => {
           if (!isDisconnectedOwnerCurrent()) {
@@ -580,7 +591,7 @@ export async function executeRemoteExecTurn(params: {
     ?.flatMap((payload) => (payload.text ? [payload.text] : []))
     .join("\n\n");
   await Promise.resolve(
-    params.turn.onAgentEvent?.({
+    executionParams.turn.onAgentEvent?.({
       stream: "assistant",
       data: {
         text: resultText

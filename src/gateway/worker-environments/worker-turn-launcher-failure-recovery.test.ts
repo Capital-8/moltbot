@@ -686,80 +686,134 @@ describe("worker turn launcher failure recovery", () => {
     expect(await fx.placements.listPendingWorkspaceResultsAsync()).toEqual([]);
   });
 
-  it("preserves a disconnected node-backed placement after failed paired-device execution for a fresh attempt", async () => {
-    await fx.seedActivePlacement("remote-exec");
-    const original = activePlacement();
-    let connected = false;
-    const quiesceWorkspace = vi.fn(async () => {
-      if (!connected) {
-        throw new WorkerTunnelOwnerDisconnectedError(
-          "device worker node is not connected with the supervisor dialect",
-        );
+  it.each([
+    { label: "failed paired-device execution", providerId: "device" },
+    { label: "failed dedicated-cloud execution", providerId: "crabbox" },
+  ])(
+    "preserves a disconnected node-backed placement after $label for a fresh attempt",
+    async ({ providerId }) => {
+      await fx.seedActivePlacement("remote-exec");
+      const original = fx.placements.get(fx.SESSION_ID);
+      if (original?.state !== "active") {
+        throw new Error("expected an active paired-device placement");
       }
-      return { assertActive: vi.fn(async () => {}), resume: vi.fn(async () => {}) };
-    });
-    const reconcileWorkspace = vi.fn(fx.reconcileUnchangedLocalWorkspace);
-    const launchTurn = vi.fn();
-    const tunnel: WorkerTunnelHandle = fx.createWorkerTurnTunnel({
-      launchTurn,
-      runWorkspaceCommand: vi.fn(async () => success()),
-      quiesceWorkspace,
-      syncWorkspace: vi.fn(),
-      reconcileWorkspace,
-    });
-    const environment = {
-      ...fx.attachedEnvironment(),
-      providerId: "device",
-      nodeDeviceId: "paired-node-1",
-      sshEndpoint: null,
-    };
-    const environments: fx.WorkerTurnEnvironmentService = {
-      ...fx.unusedEnvironments(),
-      get: vi.fn(() => environment),
-      startTunnel: vi.fn(async () => tunnel),
-    };
-    const reconcileActivePlacement = vi.fn(async () => {});
-    const provider = createLauncher({
-      environments,
-      reconcileActivePlacement,
-    });
-    const executionFailure = "Codex paired execution device disconnected; start a fresh attempt";
+      let connected = true;
+      const reconnectStarted = createDeferred();
+      const reconnected = createDeferred();
+      const quiesceWorkspace = vi.fn(async () => {
+        if (!connected) {
+          throw new WorkerTunnelOwnerDisconnectedError(
+            "device worker node is not connected with the supervisor dialect",
+          );
+        }
+        return { assertActive: vi.fn(async () => {}), resume: vi.fn(async () => {}) };
+      });
+      const reconcileWorkspace = vi.fn(
+        async (request: Parameters<WorkerTunnelHandle["reconcileWorkspace"]>[0]) => {
+          if (request.source.kind !== "local") {
+            throw new Error("expected a local workspace source");
+          }
+          await request.source.journal.commit(fx.MANIFEST_REF);
+          return {
+            manifestRef: fx.MANIFEST_REF,
+            changed: false,
+            verifyStable: vi.fn(async () => {}),
+            verifyLocalStable: vi.fn(async () => {}),
+            publishStagedResult: async () => {},
+            discardPreparedStagedResult: async () => {},
+          };
+        },
+      );
+      const tunnel: WorkerTunnelHandle = fx.createWorkerTurnTunnel({
+        launchTurn: vi.fn(),
+        runWorkspaceCommand: vi.fn(async () => success()),
+        quiesceWorkspace,
+        syncWorkspace: vi.fn(),
+        reconcileWorkspace,
+      });
+      const environment = {
+        ...fx.attachedEnvironment(),
+        providerId,
+        nodeDeviceId: "paired-node-1",
+        sharedHost: providerId === "device",
+        sshEndpoint: null,
+      };
+      const environments: fx.WorkerTurnEnvironmentService = {
+        ...fx.unusedEnvironments(),
+        get: vi.fn(() => environment),
+        startTunnel: vi.fn(async () => tunnel),
+      };
+      const reconcileActivePlacement = vi.fn(async () => {});
+      const provider = createLauncher({
+        environments,
+        reconcileActivePlacement,
+        waitForAdmissionNode: async ({ assertCurrent }) => {
+          assertCurrent();
+          if (!connected) {
+            reconnectStarted.resolve();
+            await reconnected.promise;
+            assertCurrent();
+          }
+        },
+      });
+      const executionFailure = "Codex node execution disconnected; start a fresh attempt";
 
-    await expect(
-      executeTurn(provider, "run-paired-device-disconnected", async () => {
-        throw new Error(executionFailure);
-      }),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining(
-        `${executionFailure}\n\nWorkspace recovery also failed: device worker node is not connected`,
-      ),
-      cause: expect.any(Error),
-    });
+      await expect(
+        executeTurn(provider, "run-paired-device-disconnected", async () => {
+          connected = false;
+          throw new Error(executionFailure);
+        }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining(
+          `${executionFailure}\n\nWorkspace recovery also failed: device worker node is not connected`,
+        ),
+        cause: expect.any(Error),
+      });
 
-    expectPlacement({
-      state: "active",
-      generation: original.generation,
-      environmentId: original.environmentId,
-      activeOwnerEpoch: original.activeOwnerEpoch,
-      workspaceBaseManifestRef: original.workspaceBaseManifestRef,
-      turnClaim: null,
-      terminalReason: null,
-    });
-    expect(await fx.placements.listPendingWorkspaceResultsAsync()).toEqual([]);
-    expectUncalled(reconcileWorkspace, reconcileActivePlacement);
+      expect(fx.placements.get(fx.SESSION_ID)).toMatchObject({
+        state: "active",
+        generation: original.generation,
+        environmentId: original.environmentId,
+        activeOwnerEpoch: original.activeOwnerEpoch,
+        workspaceBaseManifestRef: original.workspaceBaseManifestRef,
+        turnClaim: null,
+      });
+      expect(await fx.placements.listPendingWorkspaceResultsAsync()).toEqual([]);
+      expect(reconcileWorkspace).not.toHaveBeenCalled();
+      expect(reconcileActivePlacement).not.toHaveBeenCalled();
 
-    connected = true;
-    await expect(
-      executeTurn(provider, "run-paired-device-fresh-attempt", async () => ({
+      const runFresh = vi.fn(async () => ({
         payloads: [{ text: "fresh node attempt" }],
-        meta: { durationMs: 1 },
-      })),
-    ).resolves.toMatchObject({ payloads: [{ text: "fresh node attempt" }] });
+        meta: {
+          durationMs: 1,
+          terminalReply: { disposition: "visible" as const, text: "fresh node attempt" },
+        },
+      }));
+      const fresh = executeTurn(provider, "run-paired-device-fresh-attempt", runFresh);
+      // Fresh input must not reach the model against the disconnected old owner.
+      // The failed input is never replayed when the same worker reconnects.
+      await Promise.race([
+        reconnectStarted.promise,
+        fresh.then(
+          () => {
+            throw new Error("Fresh turn bypassed disconnected-node admission");
+          },
+          (error: unknown) => {
+            throw new Error("Fresh turn failed before reconnect admission", { cause: error });
+          },
+        ),
+      ]);
+      expect(runFresh).not.toHaveBeenCalled();
+      expect(fx.placements.get(fx.SESSION_ID)?.turnClaim).toBeNull();
+      connected = true;
+      reconnected.resolve();
+      await expect(fresh).resolves.toMatchObject({ payloads: [{ text: "fresh node attempt" }] });
+      expect(runFresh).toHaveBeenCalledOnce();
 
-    expect(reconcileWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ baseManifestRef: original.workspaceBaseManifestRef }),
-    );
-    expect(launchTurn).not.toHaveBeenCalled();
-    expectPlacement({ state: "active", turnClaim: null });
-  });
+      expect(reconcileWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ baseManifestRef: original.workspaceBaseManifestRef }),
+      );
+      expect(fx.placements.get(fx.SESSION_ID)).toMatchObject({ state: "active", turnClaim: null });
+    },
+  );
 });

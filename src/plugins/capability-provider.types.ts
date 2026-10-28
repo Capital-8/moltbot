@@ -190,6 +190,7 @@ export type WorkerNodeEnrollment = WorkerNodeBootstrapAccess & {
 
 /** Durable lease identity and endpoint returned by a successful provision operation. */
 export type WorkerLease = {
+  retainedLease?: WorkerRetainedLeaseReceipt;
   leaseId: string;
   /** The SSH account also owns processes unrelated to this worker lease. */
   sharedHost?: boolean;
@@ -465,10 +466,36 @@ export type WorkerProvider = {
    * proves teardown complete and lets core skip destroy.
    */
   inspect: (lease: {
+    retention?: WorkerSessionDiskRetention;
     leaseId: string;
     profile: WorkerProfile;
     signal?: AbortSignal;
   }) => Promise<WorkerLeaseStatus>;
+  /** Exact retained-lease operations never allocate, clone, pair, or reset a workspace. */
+  retainedLease?: {
+    destroy(this: void, request: WorkerRetainedLeaseRequest): Promise<void>;
+    inspect(this: void, request: WorkerRetainedLeaseRequest): Promise<WorkerRetainedLeaseReceipt>;
+    pause(
+      this: void,
+      request: WorkerRetainedLeaseRequest & { operationId: string },
+    ): Promise<WorkerRetainedLeaseReceipt>;
+    resume(
+      this: void,
+      request: WorkerRetainedLeaseRequest & { operationId: string },
+    ): Promise<WorkerRetainedLeaseReceipt>;
+  };
+  /** Resume only a confirmed-dead enrolled node on this existing lease; never pair or provision. */
+  resumeNode?: (request: {
+    leaseId: string;
+    profile: WorkerProfile;
+    deviceId: string;
+    nodeBootstrapSha256: string;
+    openclawVersion: string;
+    /** Current core-owned Linux prerequisite, used only before a confirmed-dead node launches. */
+    linuxToolchainSetup?: string;
+    signal: AbortSignal;
+    assertCurrent: () => void;
+  }) => Promise<void>;
   /**
    * Resolves provider-owned dynamic identities. When absent, the gateway uses its generic
    * SecretRef resolver; when present, failures are authoritative and never fall back.
@@ -499,6 +526,7 @@ export type WorkerProvider = {
      * Providers without this capability ignore the callback and keep blocking reclaim.
      */
     onCleanupAccepted?: () => void;
+    retention?: WorkerSessionDiskRetention;
   }) => Promise<void>;
   /** Maximum core wait for teardown, including provider-owned checkpointing and cleanup. */
   resolveDestroyTimeoutMs?: (profile: WorkerProfile) => number;
@@ -583,3 +611,13 @@ export type MediaUnderstandingProviderPlugin = MediaUnderstandingProvider;
 export type ImageGenerationProviderPlugin = ImageGenerationProvider;
 export type VideoGenerationProviderPlugin = VideoGenerationProvider;
 export type MusicGenerationProviderPlugin = MusicGenerationProvider;
+
+export type WorkerRetainedLeaseRequest = {
+  leaseId: string;
+  profile: WorkerProfile;
+  retention: WorkerSessionDiskRetention;
+  signal: AbortSignal;
+  assertCurrent: () => void;
+};
+
+export type * from "./worker-retention.types.js";

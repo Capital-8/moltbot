@@ -45,9 +45,14 @@ import {
   isNonRunnableState,
   prepareProvisionDesktop,
   remainingProvisionTimeout,
+  runProvisionWarmup,
   runProvisionSetup,
   waitForProvisionReady,
 } from "./crabbox-worker-provision-commands.js";
+import {
+  createCrabboxRetainedLeaseOperations,
+  createCrabboxRetentionCapabilityReader,
+} from "./crabbox-worker-retention.js";
 import {
   assertCrabboxSetupEgressSupport,
   createCrabboxSetupCommandRunner,
@@ -104,17 +109,25 @@ export function createCrabboxWorkerProvider(
     warn,
   });
   const resolveBinary = binaryResolver.resolve;
+  const retainedLease = createCrabboxRetainedLeaseOperations(
+    resolveBinary,
+    (context) => warmImages.release(context),
+    (context) => warmImages.releaseRejectedSnapshot(context),
+  );
+  const requireRetentionCapability = createCrabboxRetentionCapabilityReader();
   const machineOptions = createCrabboxMachineOptionsResolver({
     resolveBinary: async (...args) => (await resolveBinary(...args)).binary,
     warn,
   });
   const warmImages = createCrabboxWarmImageManager({
     state: dependencies.state,
+    qualifyLegacySnapshotContract: binaryResolver.qualifyLegacySnapshotContract,
+    snapshotHelperPath: dependencies.snapshotHelperPath,
     warn,
     policy: dependencies.warmImagePolicy,
     prepareCapture: async (context) => {
       heartbeats.start({ ...context.profile, ...context });
-      await prepareCrabboxCaptureLifetime(context, {
+      return await prepareCrabboxCaptureLifetime(context, {
         observe: (inspected) =>
           heartbeats.start({
             ...context.profile,
@@ -295,17 +308,21 @@ export function createCrabboxWorkerProvider(
         }
         // The provider owns idle protection as soon as allocation is known,
         // including readiness, transfer, enrollment, and admitted capture.
-        heartbeats.start({
-          binary,
-          id: leaseId,
-          provider: parsed.provider,
-          heartbeatIntervalMs: parsed.heartbeatIntervalMs,
-          heartbeatTimeoutMs: parsed.heartbeatTimeoutMs,
-          idleTimeout: parsed.idleTimeout,
-          lifetime: inspected.lifetime,
-        });
+        if (!options?.retention) {
+          heartbeats.start({
+            binary,
+            providerEnv: context.providerEnv,
+            id: leaseId,
+            provider: parsed.provider,
+            heartbeatIntervalMs: parsed.heartbeatIntervalMs,
+            heartbeatTimeoutMs: parsed.heartbeatTimeoutMs,
+            idleTimeout: parsed.idleTimeout,
+            lifetime: inspected.lifetime,
+          });
+        }
         const inspectedParams = {
           ...context,
+          timingIdentity: { operationId, environmentId: options?.environmentId },
           deadline,
           inspect: inspected,
           profile: parsed,

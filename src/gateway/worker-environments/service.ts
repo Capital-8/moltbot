@@ -3,7 +3,7 @@ import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import { throwCollectedErrors } from "../../infra/error-graph-internal.js";
 import { withTimeout } from "../../infra/fs-safe.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
-import type { WorkerExecutionMode, WorkerProvider } from "../../plugins/types.js";
+import type { WorkerExecutionMode } from "../../plugins/types.js";
 import { isGatewayWorkAdmissionClosed } from "../../process/gateway-work-admission.js";
 import { runOutsideAsyncWorkScope } from "../../shared/async-work-scope.js";
 import { createDeferredCore } from "../../shared/deferred.js";
@@ -37,7 +37,6 @@ import { createWorkerProviderLifecycle } from "./provider-lifecycle.js";
 import type { WorkerEnvironmentAbandonment } from "./provider-lifecycle.types.js";
 import { createWorkerReconcileCancellation } from "./provider-provisioning-cancellation.js";
 import type { WorkerEnvironmentServiceContract } from "./service-contract.js";
-import { requireWorkerProfile } from "./service-validation.js";
 import type {
   WorkerEnvironmentCreateRequest,
   WorkerEnvironmentServiceOptions,
@@ -631,43 +630,19 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
     listMachineOptions: providerLifecycle.listMachineOptions,
     listOperatingSystems: providerLifecycle.listOperatingSystems,
     bindPreparedWorkspace: environmentAccess.bindPreparedWorkspace,
-    runProjectLifecycleCommand: async (
+    runProjectLifecycleCommand: (
       environmentId: string,
       ownerEpoch: number,
-      command: Parameters<NonNullable<WorkerProvider["runSetupCommand"]>>[1],
-    ) => {
-      const signal = command.signal
-        ? AbortSignal.any([scope.signal, command.signal])
-        : scope.signal;
-      const assertCurrent = () => {
-        signal.throwIfAborted();
-        command.assertCurrent();
-        const record = store.get(environmentId);
-        if (
-          !record ||
-          record.ownerEpoch !== ownerEpoch ||
-          record.state !== "attached" ||
-          record.destroyRequestedAtMs !== null ||
-          !record.leaseId
-        ) {
-          throw new Error("Cloud lifecycle command lost its attached lease owner");
-        }
-        return { record, leaseId: record.leaseId };
-      };
-      const { record, leaseId } = assertCurrent();
-      const provider = options.resolveProvider(record.providerId);
-      if (!provider?.runSetupCommand) {
-        return undefined;
-      }
-      const result = await trackOperation(
-        provider.runSetupCommand(
-          { leaseId, profile: requireWorkerProfile(record.profileSnapshot.settings) },
-          { ...command, signal, assertCurrent },
+      command: Parameters<typeof environmentAccess.runProjectLifecycleCommand>[2],
+    ) =>
+      trackOperation(
+        environmentAccess.runProjectLifecycleCommand(
+          environmentId,
+          ownerEpoch,
+          command,
+          scope.signal,
         ),
-      );
-      assertCurrent();
-      return result;
-    },
+      ),
     createWithRequest: createEnvironment,
     create: (...args: Parameters<WorkerEnvironmentServiceContract["create"]>) =>
       createEnvironment({
@@ -734,6 +709,16 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
     },
     beginClose,
     installReconcileEnvironmentGuard,
+    inspectTurnLease: (params: Parameters<typeof providerLifecycle.inspectTurnLease>[0]) =>
+      racePromiseWithAbortSignal(
+        withLock(params.environmentId, async () => {
+          await store.ready();
+          await providerLifecycle.inspectTurnLease(params);
+        }),
+        params.signal,
+      ),
+    pauseRetained: providerLifecycle.pauseRetained,
+    resumeNode: providerLifecycle.resumeNode,
     reconcileEnvironment,
     reconcileOnce,
     ready: async () =>
