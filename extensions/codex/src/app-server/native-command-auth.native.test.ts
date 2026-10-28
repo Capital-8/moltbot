@@ -15,7 +15,7 @@ import {
   tempDir,
 } from "./run-attempt-test-harness.js";
 import { createIsolatedCodexAppServerClient } from "./shared-client.js";
-import { sendNativeResponse } from "./thread-native.test-support.js";
+import { nativeProviderConfig, sendNativeResponse } from "./thread-native.test-support.js";
 
 // Public test leaf signed by PROXY_FIXTURE_CERTIFICATE; native rustls rejects CA certificates as server leaves.
 const SERVER_CERTIFICATE = `-----BEGIN CERTIFICATE-----
@@ -33,20 +33,23 @@ IVAnJ8E0VJ6i
 setupRunAttemptTestHooks();
 vi.unmock("node:child_process");
 
-it("runs a custom HTTPS model through Codex command auth without borrowing host credentials", async () => {
+it("enforces the command bearer and effective endpoint before native inference", async () => {
   const root = await fs.realpath(tempDir);
   const native = await createCodexNativeTestState(root);
-  for (const [key, value] of Object.entries(native.env)) {
+  const ca = path.join(root, "fixture-ca.pem");
+  const env = {
+    ...native.env,
+    SSL_CERT_FILE: ca,
+    OPENAI_API_KEY: "synthetic-ambient-openai-key",
+    CODEX_API_KEY: "synthetic-ambient-codex-key",
+    CODEX_ACCESS_TOKEN: "synthetic-ambient-token",
+  };
+  for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) {
       vi.stubEnv(key, value);
     }
   }
-  vi.stubEnv("OPENAI_API_KEY", "synthetic-ambient-openai-key");
-  vi.stubEnv("CODEX_API_KEY", "synthetic-ambient-codex-key");
-  vi.stubEnv("CODEX_ACCESS_TOKEN", "synthetic-ambient-token");
-  const ca = path.join(root, "fixture-ca.pem");
   await fs.writeFile(ca, PROXY_FIXTURE_CERTIFICATE);
-  vi.stubEnv("SSL_CERT_FILE", ca);
   const command = path.join(root, "credential.mjs");
   await fs.writeFile(
     command,
@@ -96,27 +99,12 @@ it("runs a custom HTTPS model through Codex command auth without borrowing host 
   await fs.writeFile(
     path.join(native.codexHome, "config.toml"),
     [
-      "model=" + JSON.stringify(modelId),
-      "model_provider=" + JSON.stringify(provider),
-      'cli_auth_credentials_store="ephemeral"',
-      'web_search="disabled"',
-      'approval_policy="never"',
-      'sandbox_mode="read-only"',
-      "allow_login_shell=false",
-      "[features]",
-      "shell_snapshot=false",
-      "[analytics]",
-      "enabled=false",
-      "[feedback]",
-      "enabled=false",
-      "[model_providers." + provider + "]",
-      'name="Synthetic command provider"',
-      "base_url=" + JSON.stringify(baseUrl),
-      'wire_api="responses"',
-      "requires_openai_auth=false",
-      "supports_websockets=false",
-      "request_max_retries=0",
-      "stream_max_retries=0",
+      nativeProviderConfig(
+        provider,
+        address.port,
+        ['sandbox_mode="read-only"', "allow_login_shell=false"],
+        ["shell_snapshot=false"],
+      ).replace('base_url="http:', 'base_url="https:'),
       "[model_providers." + provider + ".auth]",
       "command=" + JSON.stringify(process.execPath),
       "args=[" + JSON.stringify(command) + "]",
@@ -177,26 +165,15 @@ it("runs a custom HTTPS model through Codex command auth without borrowing host 
         homeScope: "user",
         sandbox: "read-only",
         approvalPolicy: "never",
-        clearEnv: Object.keys(process.env).filter(
-          (key) =>
-            !(key in native.env) &&
-            !["SSL_CERT_FILE", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN"].includes(
-              key,
-            ),
-        ),
+        clearEnv: Object.keys(process.env).filter((key) => !(key in env)),
       },
     },
     nativeHookRelay: { enabled: false },
-    clientFactory: async (clientOptions) => {
-      expect(clientOptions?.authProfileId).toBeNull();
-      expect(clientOptions?.preparedAuth).toBeUndefined();
-      client ??= await createIsolatedCodexAppServerClient(clientOptions);
-      return client;
-    },
+    clientFactory: async (clientOptions) =>
+      (client ??= await createIsolatedCodexAppServerClient(clientOptions)),
   };
   try {
-    const result = await runCodexAppServerAttempt(params, options);
-    expect(result.terminal).toEqual({ kind: "ok" });
+    expect((await runCodexAppServerAttempt(params, options)).terminal).toEqual({ kind: "ok" });
     expect(requests).toEqual([{ authorization: "Bearer synthetic-command-token", model: modelId }]);
     expect(
       await fs.stat(path.join(native.codexHome, "auth.json")).catch(() => undefined),

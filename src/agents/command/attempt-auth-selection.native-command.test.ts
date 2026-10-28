@@ -1,5 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  nativeCommandAuthFixture,
+  prepareAuthFixture,
+} from "../runtime-plan/prepare-auth.test-support.js";
 import { resolveHarnessAuthProfileSelection } from "./attempt-auth-selection.js";
 
 const mocks = vi.hoisted(() => ({ store: vi.fn() }));
@@ -8,46 +11,40 @@ vi.mock("../auth-profiles/store-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../auth-profiles/store-runtime.js")>()),
   ensureAuthProfileStoreAsync: mocks.store,
 }));
-
+const { params, provider } = nativeCommandAuthFixture();
 beforeEach(() => {
-  mocks.store.mockReset().mockResolvedValue({
-    version: 1,
-    profiles: { "openai:decoy": { type: "api_key", provider: "openai", key: "synthetic-decoy" } },
-  });
+  mocks.store.mockReset().mockResolvedValue(params.authProfileStore);
 });
 
-function select(auth: "native-command" | "api-key", source?: "auto" | "user") {
-  const config: OpenClawConfig = {
-    plugins: { enabled: false },
-    models: { providers: { custom: { baseUrl: "https://fixture.example/v1", auth, models: [] } } },
-  };
-  return resolveHarnessAuthProfileSelection({
-    config,
-    agentDir: "/fixture",
-    workspaceDir: "/fixture/workspace",
-    provider: "custom",
-    authProfileProvider: "custom",
-    harnessRuntime: "codex",
-    allowHarnessAuthProfileForwarding: true,
-    ...(source ? { sessionAuthProfileId: "openai:decoy", sessionAuthProfileSource: source } : {}),
-  });
-}
-
-it.each([undefined, "auto"] as const)(
-  "does not choose an unrelated OpenAI account for native command auth (%s)",
-  async (source) => {
-    expect(await select("native-command", source)).toEqual({ authProfileProvider: "custom" });
-    expect(mocks.store).not.toHaveBeenCalled();
+it.each([
+  ["native-command", undefined, undefined],
+  ["native-command", "auto", undefined],
+  ["native-command", "user", "user"],
+  ["api-key", undefined, "auto"],
+] as const)(
+  "selects %s with %s pin before auth preparation",
+  async (auth, source, expectedSource) => {
+    const selected = await resolveHarnessAuthProfileSelection({
+      ...params,
+      config: { models: { providers: { autodev: { ...provider, auth } } } },
+      agentDir: "/fixture",
+      workspaceDir: "/fixture/workspace",
+      authProfileProvider: params.provider,
+      allowHarnessAuthProfileForwarding: true,
+      ...(source ? { sessionAuthProfileId: "openai:decoy", sessionAuthProfileSource: source } : {}),
+    });
+    expect(selected.authProfileId).toBe(expectedSource ? "openai:decoy" : undefined);
+    expect(selected.authProfileIdSource).toBe(expectedSource);
+    expect(selected.authProfileProvider).toBe(expectedSource ? "openai" : params.provider);
+    if (auth === "native-command") {
+      const prepare = () =>
+        prepareAuthFixture({ ...params, sessionAuthProfileId: selected.authProfileId });
+      if (source === "user") {
+        expect(prepare).toThrow("auth profile binding");
+      } else {
+        expect(mocks.store).not.toHaveBeenCalled();
+        expect(prepare().plan.credentialSource).toEqual({ kind: "none" });
+      }
+    }
   },
 );
-
-it("retains explicit pins for planner rejection and existing non-command automatic selection", async () => {
-  expect(await select("native-command", "user")).toMatchObject({
-    authProfileId: "openai:decoy",
-    authProfileIdSource: "user",
-  });
-  expect(await select("api-key")).toMatchObject({
-    authProfileId: "openai:decoy",
-    authProfileIdSource: "auto",
-  });
-});
