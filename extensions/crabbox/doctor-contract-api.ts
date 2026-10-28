@@ -9,10 +9,12 @@ import {
   projectCrabboxLegacyWarmLeases,
   WARM_IMAGE_MAX_ENTRIES,
 } from "./src/crabbox-worker-warm-image-records.js";
-import type {
-  WarmAllocationRecord,
-  WarmImageRecord,
-  WarmProfileRecord,
+import {
+  isCrabboxWarmProfileV3,
+  upgradeCrabboxWarmProfileV3,
+  type WarmProfileV3,
+  type WarmAllocationRecord,
+  type WarmImageRecord,
 } from "./src/crabbox-worker-warm-image-store.js";
 
 type LegacyWarmImageRecord = Omit<
@@ -20,13 +22,13 @@ type LegacyWarmImageRecord = Omit<
   "lastDemandAtMs" | "preparationKey" | "cacheKey" | "purpose"
 > & {
   lastUsedAtMs: number;
-  operation?: WarmProfileRecord["operation"];
+  operation?: WarmProfileV3["operation"];
 };
 type LegacyWarmAllocationRecord = Omit<
   WarmAllocationRecord,
   "preparationKey" | "cacheKey" | "purpose" | "demandAtMs" | "imageGeneration"
 >;
-type LegacyWarmProfileRecord = Omit<WarmProfileRecord, "version" | "image" | "allocations"> & {
+type LegacyWarmProfileRecord = Omit<WarmProfileV3, "version" | "image" | "allocations"> & {
   version: 2;
   image?: LegacyWarmImageRecord;
   allocations: Record<string, LegacyWarmAllocationRecord>;
@@ -58,7 +60,7 @@ const nonempty = (value: unknown): value is string =>
 const timestamp = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
-function isLegacyOperation(value: unknown): value is WarmProfileRecord["operation"] {
+function isLegacyOperation(value: unknown): value is WarmProfileV3["operation"] {
   if (value === undefined) {
     return true;
   }
@@ -164,7 +166,7 @@ async function listLegacyWarmLeases(context: PluginDoctorStateMigrationContext) 
 
 export const stateMigrations: PluginDoctorStateMigration[] = [
   {
-    id: "crabbox-warm-profile-v3",
+    id: "crabbox-warm-profile-v4",
     label: "Crabbox warm profiles",
     doctorOnly: true,
     // The host recovery inventory already includes shared plugin-state SQLite.
@@ -177,7 +179,7 @@ export const stateMigrations: PluginDoctorStateMigration[] = [
           overflowPolicy: "reject-new",
         })
         .entries();
-      const pending = images.filter(({ value }) => asOptionalRecord(value)?.version !== 3).length;
+      const pending = images.filter(({ value }) => asOptionalRecord(value)?.version !== 4).length;
       const leases = await listLegacyWarmLeases(context);
       return pending || leases.length
         ? {
@@ -204,11 +206,13 @@ export const stateMigrations: PluginDoctorStateMigration[] = [
         overflowPolicy: "reject-new",
       });
       for (const { key, value } of await store.entries()) {
-        if (asOptionalRecord(value)?.version === 3) {
+        if (asOptionalRecord(value)?.version === 4) {
           continue;
         }
-        let migrated: WarmProfileRecord;
-        if (isLegacyProfile(value)) {
+        let migrated: WarmProfileV3;
+        if (isCrabboxWarmProfileV3(value)) {
+          migrated = value;
+        } else if (isLegacyProfile(value)) {
           const { image, allocations, ...profile } = value;
           migrated = {
             ...profile,
@@ -254,6 +258,7 @@ export const stateMigrations: PluginDoctorStateMigration[] = [
           continue;
         }
         try {
+          const upgraded = upgradeCrabboxWarmProfileV3(migrated);
           // The maintenance owner excludes the Gateway; compare again so a changed row
           // cannot lose a paid capture or retirement obligation during publication.
           let changed = false;
@@ -264,7 +269,7 @@ export const stateMigrations: PluginDoctorStateMigration[] = [
               const result = await store.compareAndApply(key, observation.comparison, {
                 operation: "update",
                 action: "set",
-                value: migrated,
+                value: upgraded,
               });
               if (result.status !== "conflict") {
                 changed = result.status === "applied";

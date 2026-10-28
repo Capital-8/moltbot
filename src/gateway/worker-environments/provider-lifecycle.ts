@@ -1,5 +1,4 @@
 import type { WorkerEnvironmentStartStatus } from "../../../packages/gateway-protocol/src/schema/environments.js";
-import type { WorkerAdmissionHandshake } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import {
   WorkerProviderError,
   type WorkerExecutionMode,
@@ -20,13 +19,20 @@ import { createWorkerReconcileTrace } from "./environment-operation.js";
 import { readWorkerPreparation } from "./preparation-identity.schema.js";
 import { readWorkerProjectSnapshot } from "./project-preparation.js";
 import { createWorkerProviderIntent } from "./provider-intent.js";
+import { createWorkerLeaseInspection } from "./provider-lease-inspection.js";
 import type { WorkerProviderLifecycleOptions } from "./provider-lifecycle.types.js";
 import { createWorkerMachineCatalog } from "./provider-machine-catalog.js";
 import { createWorkerNodeProvisioning } from "./provider-node-provisioning.js";
 import { createWorkerProviderOwnerLifecycle } from "./provider-owner-lifecycle.js";
-import { prepareWorkerProviderProject } from "./provider-project-preparation.js";
+import {
+  prepareWorkerProviderProject,
+  retainedWorkerProjectImage,
+  type WorkerProviderRepositorySource,
+} from "./provider-project-preparation.js";
 import { createWorkerProvisionCancellation } from "./provider-provisioning-cancellation.js";
 import { createWorkerRuntimeRefresher } from "./provider-runtime-refresh.js";
+import { measureWorkerProvisionPhase } from "./provision-timing.js";
+import { createWorkerRetainedLeaseLifecycle } from "./retained-lease-lifecycle.js";
 import {
   requireProviderOperationTimeoutMs,
   requireWorkerLease,
@@ -42,7 +48,7 @@ const ORPHANED_LEASE_ERROR = "Worker provider no longer recognizes the lease";
 export function createWorkerProviderLifecycle(
   options: WorkerProviderLifecycleOptions & { ownerSignal: AbortSignal },
 ) {
-  const { store, callBootstrap, callProvider, move, saveError } = options;
+  const { store, callProvider, move, saveError } = options;
   const now = options.now ?? Date.now;
   const startStatuses = new Map<
     string,
@@ -134,6 +140,7 @@ export function createWorkerProviderLifecycle(
     cancellation?: ReturnType<typeof createWorkerProvisionCancellation>,
     nodeRuntimeIdentity?: WorkerNodeRuntimeIdentity,
     beforeProvision?: () => void,
+    repositorySource?: WorkerProviderRepositorySource,
   ) => {
     let record = initialRecord;
     let lease: WorkerLease;
@@ -189,45 +196,50 @@ export function createWorkerProviderLifecycle(
         nodeRuntimeIdentity,
         beforeProvision,
       );
-      const project = readWorkerProjectSnapshot(record.profileSnapshot.project);
-      if (project) {
-        if (
-          !provider.supportsProjectPreparation?.(profile, machineClass, os) ||
-          !options.projectNamespace
-        ) {
-          throw new Error("Worker provider cannot resume its prepared project contract");
-        }
-        const requireProjectOwner = () => {
-          cancellation?.assertActive();
-          beforeProvision?.();
-          const current = requireCurrentOwner(record);
-          if (options.isStopping() || current.destroyRequestedAtMs !== null) {
-            throw new Error("Worker project preparation owner is no longer current");
-          }
-        };
-        projectOperation = await prepareWorkerProviderProject({
-          project,
-          preparation,
-          record,
-          namespace: options.projectNamespace,
-          getConfig: options.getConfig,
-          requireCurrent: requireProjectOwner,
-          signal: workSignal,
-        });
-      }
       const assertCurrent = () => {
         cancellation?.assertActive();
         if (!attemptOpen || options.isStopping()) {
           throw closedAttempt;
         }
         beforeProvision?.();
-        const current = requireCurrentOwner(record);
+        const current =
+          enrollmentOperation?.current(record, requireCurrentOwner) ?? requireCurrentOwner(record);
         if (current.destroyRequestedAtMs !== null) {
           throw new Error("Worker provisioning operation is closed");
         }
         return current;
       };
+      const project = readWorkerProjectSnapshot(record.profileSnapshot.project);
+      const projectImage = retainedWorkerProjectImage(
+        record,
+        provider,
+        profile,
+        project,
+        preparation,
+        machineClass,
+        os,
+      );
+      if (project && (!record.retention || projectImage.projectImage)) {
+        if (
+          !provider.supportsProjectPreparation?.(profile, machineClass, os) ||
+          !options.projectNamespace
+        ) {
+          throw new Error("Worker provider cannot resume its prepared project contract");
+        }
+        projectOperation = await prepareWorkerProviderProject({
+          project,
+          preparation,
+          record,
+          namespace: options.projectNamespace,
+          getConfig: options.getConfig,
+          requireCurrent: assertCurrent,
+          signal: workSignal,
+          repositorySource,
+        });
+      }
       const provisionOptions = {
+        environmentId: record.environmentId,
+        ...(record.retention ? { retention: record.retention } : {}),
         nodeBootstrapTimeoutMs,
         profileId: record.profileId,
         assertCurrent,
@@ -414,6 +426,7 @@ export function createWorkerProviderLifecycle(
     signal?: AbortSignal,
     retainProviderSettlement?: (settled: Promise<void>) => void,
     beforeProvision?: () => void,
+    repositorySource?: WorkerProviderRepositorySource,
   ) => {
     const workSignal = signal
       ? AbortSignal.any([options.ownerSignal, signal])
@@ -470,6 +483,7 @@ export function createWorkerProviderLifecycle(
         cancellation,
         preparedNode?.identity,
         beforeProvision,
+        repositorySource,
       );
     } finally {
       await cancellation?.close();
@@ -481,6 +495,7 @@ export function createWorkerProviderLifecycle(
     signal?: AbortSignal,
     retainProviderSettlement?: (settled: Promise<void>) => void,
     beforeProvision?: () => void,
+    repositorySource?: WorkerProviderRepositorySource,
   ): Promise<void> => {
     const step = createWorkerReconcileTrace(initialRecord);
     const workSignal = signal
@@ -532,7 +547,14 @@ export function createWorkerProviderLifecycle(
       await (
         record.destroyRequestedAtMs !== null
           ? finishDestroy(record, provider, workSignal)
-          : resumeProvision(record, provider, signal, retainProviderSettlement, beforeProvision)
+          : resumeProvision(
+              record,
+              provider,
+              signal,
+              retainProviderSettlement,
+              beforeProvision,
+              repositorySource,
+            )
       ).catch(() => undefined);
       return;
     }
@@ -685,6 +707,7 @@ export function createWorkerProviderLifecycle(
             signal ?? new AbortController().signal,
             (settled) => providerSettlements.push(settled),
             beforeReconcile,
+            repositorySource,
           );
         } finally {
           await Promise.all(providerSettlements);

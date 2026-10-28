@@ -459,3 +459,13 @@ otherwise the canonical manifest catalog; provider readiness does not change its
 definition. See the
 [manifest reference](/plugins/manifest/capabilities#decision-models-reference)
 for the bounded descriptor fields.
+
+### Native worker context recovery
+
+The existing agent-harness-session-runtime boundary exports typed native worker
+owner and confirmed-loss schemas. SandboxContext.nativeWorkerPlacement carries
+prepared owner/lineage facts to a harness; its current host authority still gates
+effects. A loss fact never authorizes a generic thread reset. Native bindings must
+match the exact predecessor, retain protected native ownership, and acknowledge
+bounded history before committing a successor. See the
+[retained native recovery contract](/reference/retained-native-loss-recovery-design).

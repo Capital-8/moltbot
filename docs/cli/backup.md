@@ -24,6 +24,7 @@ openclaw backup create --output ~/Backups
 openclaw backup create --dry-run --json
 openclaw backup create --verify
 openclaw backup create --no-include-workspace
+openclaw backup create --exclude-worktree-templates
 openclaw backup create --only-config
 openclaw backup create --to offsite --keep-daily 7 --keep-weekly 4 --keep-monthly 12
 openclaw backup list --from offsite
@@ -700,6 +701,21 @@ pending or recovering allocations and live worktrees under a previous
 `worktreeRoot`. Only recorded checkout paths are excluded; neighboring files and
 paths from removed registrations remain eligible. Config, credentials, and
 agent databases nested inside an excluded checkout remain included.
+
+`--exclude-worktree-templates` omits regenerable `.templates` caches under the
+managed worktree root (the default state `worktrees/` root and a configured
+`worktreeRoot`). The default remains a full backup. The JSON result and embedded
+manifest record `excludeWorktreeTemplates: true`; existing cache roots appear in
+`skipped` as `worktree templates` with reason `regenerable`. Explicitly configured
+durable agent, credential, workspace, and plugin resources nested inside a cache
+remain included.
+
+This option does **not** exclude checkout files: a live checkout can contain unique
+uncommitted edits. Checkout payloads, source Git repositories and snapshot refs,
+retained restore data, history, databases, and private session context keep their
+normal backup policy. Safe checkout omission requires a backup-owned lossless
+capture of its current files, index, and source Git objects; a snapshot reference
+alone does not provide that archive coverage. The option does not remove local files.
 
 `--only-config` skips state, agent, credentials-directory, workspace, and
 plugin-resource discovery and archives only the active config file path.

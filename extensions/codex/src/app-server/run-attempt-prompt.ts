@@ -216,6 +216,11 @@ export async function prepareCodexAttemptPrompt(context: CodexAttemptContext) {
       : undefined;
     const historyBudget = reserveCodexHistoryBudget(promptBudget);
     try {
+      if (connection.recoveringWorkerHistory && !historyBudget) {
+        throw new CodexContextAttachmentError(
+          "Confirmed worker-loss recovery requires a finite model history budget",
+        );
+      }
       const assembled: Awaited<ReturnType<typeof assembleHarnessContextEngine>> =
         activeContextEngine
           ? await assembleHarnessContextEngine({
@@ -262,6 +267,7 @@ export async function prepareCodexAttemptPrompt(context: CodexAttemptContext) {
           currentUserMessage: admittedMessage,
         },
         historyTokenBudget: historyBudget?.tokenBudget,
+        bootstrapHistoryOnly: connection.recoveringWorkerHistory && !params.authoredContextTokenCap,
         baseDeveloperInstructions,
         assertCurrent: assertProjectionCurrent,
       });
@@ -293,6 +299,7 @@ export async function prepareCodexAttemptPrompt(context: CodexAttemptContext) {
       }
     } catch (assembleErr) {
       if (
+        connection.recoveringWorkerHistory ||
         assembleErr instanceof CodexContextAttachmentError ||
         params.continuation ||
         params.pluginRuntimeRefreshMessages
@@ -555,6 +562,9 @@ export async function prepareCodexAttemptPrompt(context: CodexAttemptContext) {
             (message.role === "assistant" &&
               message.content.some((part) => part.type === "text" && part.text.trim())))),
     );
+    if (connection.recoveringWorkerHistory) {
+      return false;
+    }
     if (usesSelectedHistory) {
       if (configuredContextBudget !== undefined) {
         return false;

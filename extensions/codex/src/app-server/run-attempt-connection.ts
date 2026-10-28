@@ -66,6 +66,10 @@ import {
 } from "./shared-client.js";
 import { rotateOversizedCodexAppServerStartupBinding } from "./startup-binding.js";
 import { withCodexAppServerGitConfig } from "./transport-stdio.js";
+import {
+  isCodexWorkerLossPredecessor,
+  createCodexWorkerClientFactory,
+} from "./worker-loss-recovery.js";
 
 export async function prepareCodexAttemptConnection({ params, options }: CodexRunAttemptInput) {
   const attemptStartedAt = Date.now();
@@ -123,12 +127,23 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
       }
     },
   };
+  const pairedNode = isCodexPairedNodeRemoteExecPlacementSandbox(sandbox);
+  const workerHostedCloud = pluginConfig.appServer?.workerHostedCloud === true && pairedNode;
   // Upstream cannot remove registered environments, so node leases own one disposable client.
   const attemptClientFactory =
     options.clientFactory ??
-    (isCodexPairedNodeRemoteExecPlacementSandbox(sandbox)
-      ? createIsolatedCodexAppServerClient
-      : getLeasedSharedCodexAppServerClient);
+    (workerHostedCloud
+      ? createCodexWorkerClientFactory({
+          runtime: options.runtime,
+          sandbox,
+          agentId: sessionAgentId,
+          signal: params.abortSignal,
+          assertCurrent: params.hostCapabilities.assertActive,
+          confirmedLossPredecessor: () => lostWorkerBinding,
+        })
+      : pairedNode
+        ? createIsolatedCodexAppServerClient
+        : getLeasedSharedCodexAppServerClient);
   preDynamicStartupStages.mark("sandbox");
   const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
     // Explicit modes replace legacy fields; full also replaces approval-file floors.
@@ -297,7 +312,11 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
     assertModelExecutionCurrent();
   };
   const authority = bindingAuthority.withLiveness(assertCurrent);
-  let startupBinding = admittedBinding;
+  // History must be assembled as a full bootstrap, never a delta to the lost thread.
+  const lostWorkerBinding =
+    workerHostedCloud &&
+    isCodexWorkerLossPredecessor(sandbox?.nativeWorkerPlacement, admittedBinding);
+  let startupBinding = lostWorkerBinding ? undefined : admittedBinding;
   preDynamicStartupStages.mark("read-binding");
   const usesSupervisionConnection = startupBinding?.connectionScope === "supervision";
   if (usesSupervisionConnection && isCodexResponsesOAuthRun(params)) {

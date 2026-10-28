@@ -551,10 +551,18 @@ setPhase("preparation");
       }
     }
   };
+  // Verification never repairs a cache, prunes older archives or binds runtime Node.
+  if (${Boolean(params.verifyOnly)}) {
+    await timed("bootstrap.verification", () => verifyRuntime(runtimeDir));
+    if (!await timed("bootstrap.worker.verification", () => verifyWorkerArchive(runtimeDir))) throw new Error("Cloud worker prepared archive is missing");
+    reportRuntimeInstallation("existing-verified");
+    setPhase("complete");
+    return;
+  }
   fs.mkdirSync(runtimeRoot, { recursive: true, ...directoryOptions });
   const existingRuntime = fs.existsSync(runtimeDir);
-  if (existingRuntime) verifyRuntime(runtimeDir);
-  if (existingRuntime && (!workerBundle || await verifyWorkerArchive(runtimeDir))) {
+  if (existingRuntime) await timed("bootstrap.verification", () => verifyRuntime(runtimeDir));
+  if (existingRuntime && (!workerBundle || await timed("bootstrap.worker.verification", () => verifyWorkerArchive(runtimeDir)))) {
     publishWorkerArchive(runtimeDir);
   } else {
   const stage = fs.mkdtempSync(path.join(runtimeRoot, "node-bootstrap-"));
@@ -644,9 +652,11 @@ setPhase("preparation");
   installRuntimePrefetch();
   // A project snapshot contains only verified runtime bytes, never enrollment state.
   if (!mode) {
+    if (workerBundle) reportRuntimeInstallation(existingRuntime ? "existing-verified" : "installed");
     setPhase("complete");
     return;
   }
+  activationStarted = performance.now();
   setPhase("activation");
   try {
     if (!fs.lstatSync(runtimeLink).isSymbolicLink()) throw new Error("Cloud worker runtime pointer is occupied");

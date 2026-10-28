@@ -3,7 +3,10 @@ import type { BigIntStats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { sameFileIdentity } from "@openclaw/fs-safe/advanced";
+import { isPathInside } from "@openclaw/fs-safe/path";
+import { buildBackupArchiveBasename, type BackupAsset } from "../commands/backup-shared.js";
 import { resolveCommandProcessSignal } from "../process/exec-spawn.js";
+import { resolveHomeDir, resolveUserPath } from "../utils.js";
 import {
   removePreparedBackupArchive,
   type BackupArchiveCleanupReceipt,
@@ -16,7 +19,7 @@ import {
   requireDirectorySync,
   syncDirectoryIfSupported,
 } from "./directory-durability.js";
-import { pathEntryExists } from "./path-existence.js";
+import { pathEntryExists, safeStat } from "./path-existence.js";
 
 type BackupArchiveLogger = (message: string) => void;
 
@@ -234,4 +237,34 @@ export async function publishPreparedBackupArchive(params: {
       }.`,
     );
   });
+}
+
+export async function resolveBackupArchiveOutputPath(params: {
+  output?: string;
+  nowMs: number;
+  includedAssets: BackupAsset[];
+  stateDir: string;
+}): Promise<string> {
+  const basename = buildBackupArchiveBasename(params.nowMs);
+  const rawOutput = params.output?.trim();
+  if (!rawOutput) {
+    const cwd = path.resolve(process.cwd());
+    const canonicalCwd = await fs.realpath(cwd).catch(() => cwd);
+    const cwdInsideSource = params.includedAssets.some((asset) =>
+      isPathInside(asset.sourcePath, canonicalCwd),
+    );
+    const defaultDir = cwdInsideSource ? (resolveHomeDir() ?? path.dirname(params.stateDir)) : cwd;
+    return path.resolve(defaultDir, basename);
+  }
+
+  const resolved = resolveUserPath(rawOutput);
+  if (rawOutput.endsWith("/") || rawOutput.endsWith("\\")) {
+    return path.join(resolved, basename);
+  }
+
+  if ((await safeStat(resolved))?.isDirectory()) {
+    return path.join(resolved, basename);
+  }
+
+  return resolved;
 }

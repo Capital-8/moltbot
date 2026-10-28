@@ -99,10 +99,11 @@ it("recovers only the exact selected capture without clearing retained images or
   const record = pendingCapture();
   await expect(runCli("--acknowledge-provider-cleanup")).rejects.toThrow("requires --recover");
   expect(openWarmImageStore().lookup("profile")).toEqual(record);
+  const { operation: _capture, ...retiringFields } = record;
   const retiring: WarmProfileRecord = {
-    ...record,
+    ...retiringFields,
     image: { ...record.image, checkpointId: "chk_replacement" },
-    operation: { type: "retire", checkpointId: "chk_predecessor" },
+    retirements: [{ type: "retire", checkpointId: "chk_predecessor" }],
   };
   openWarmImageStore().register("other", retiring);
 
@@ -126,7 +127,7 @@ it.each(["scrubbing", "uncertain"] as const)(
     const record = pendingCapture(phase);
     openWarmImageStore().register("retiring", {
       ...record,
-      operation: { type: "retire", checkpointId: "chk_predecessor" },
+      retirements: [{ type: "retire", checkpointId: "chk_predecessor" }],
     });
 
     await runCli();

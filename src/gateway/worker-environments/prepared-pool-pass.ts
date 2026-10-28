@@ -124,6 +124,11 @@ async function planRefill(ctx: PassContext, eligible: Generations): Promise<Gene
   const { options, presence, activeDemand: demand, presenceDeferred: deferred } = ctx;
   const { store, signal, now } = options;
   for (const [key, generation] of eligible) {
+    // The foreground request owns repository preparation. Maintenance may still
+    // expire/destroy it, but cannot reacquire its user-bound source or allocate.
+    if (pool.isRequestScopedRepositoryBuild(generation.source)) {
+      continue;
+    }
     if (deferred && generation.presenceOwned && !generation.activationEligible) {
       continue;
     }

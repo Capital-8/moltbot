@@ -281,7 +281,7 @@ it.each(["dispose", "authority", "operator delete"] as const)(
       await rejected;
       await stopping;
     }
-    expect(s.store.lookup("expired")?.operation).toEqual(retirement);
+    expect(s.store.lookup("expired")?.retirements).toEqual([retirement]);
     expect(s.checkpoints("delete")).toEqual(deletionArgs("/opt/a/crabbox"));
     await closeOpenClawStateDatabaseAsync();
     resetPluginStateStoreForTests();
@@ -346,7 +346,7 @@ it.each(["exit", "command"])("retains deletion on first-catalog %s errors", asyn
   await s.provider.maintain!(mixedContext());
   await s.provider.maintain!(mixedContext());
 
-  expect(s.store.lookup("expired")?.operation).toEqual(retirement);
+  expect(s.store.lookup("expired")?.retirements).toEqual([retirement]);
   expect(s.calls.map(({ argv }) => argv)).toEqual(deletionArgs("/opt/a/crabbox", "/opt/a/crabbox"));
   expect(s.warn).toHaveBeenCalledOnce();
   expect(s.warn).toHaveBeenCalledWith(expect.stringContaining("deletion obligation retained"));
@@ -401,7 +401,7 @@ it.each([
       expect(s.store.lookup("expired-cold-only")).toBeUndefined();
     }
   } else {
-    expect(s.store.lookup("expired")?.operation).toEqual(retirement);
+    expect(s.store.lookup("expired")?.retirements).toEqual([retirement]);
     expect(s.store.lookup("expired-cold-only")?.captureUnsupported).toBeDefined();
   }
   expect(s.warn).not.toHaveBeenCalled();

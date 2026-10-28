@@ -1,18 +1,32 @@
 import assert from "node:assert/strict";
+import { AsyncResource } from "node:async_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../agents/test-helpers/fast-bash-tools.js";
 import "../../agents/test-helpers/fast-coding-tools.js";
 import { finalizeAgentToolAvailability } from "../../agents/agent-tool-availability.js";
+import { bindAgentToolExecutionLocation } from "../../agents/agent-tool-metadata.js";
 import { createOpenClawCodingToolsInternal } from "../../agents/agent-tools.js";
 import type { AnyAgentTool } from "../../agents/agent-tools.types.js";
 import { resolveNodeExecutionTarget } from "../../agents/bash-tools.exec-host-node-phases.js";
 import * as conversationPolicy from "../../agents/conversation-capability-profile.js";
 import { applyEmbeddedAttemptToolsAllow } from "../../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
+import { createAgentHarnessToolSurfaceRuntimeCore } from "../../agents/harness/tool-surface-bridge.js";
 import type { SessionPlacementTurnParams } from "../../agents/session-placement-admission.js";
 import { createInstalledSkillTools } from "../../agents/tools/installed-skill-tools.js";
+import {
+  patchSessionEntryCore,
+  upsertSessionEntryCore,
+} from "../../config/sessions/session-accessor.js";
 import { createFixtureSkillEntry } from "../../skills/test-support/test-helpers.js";
+import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.js";
+import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { createWorkerGatewayToolProxies } from "../../worker/worker-gateway-tools.js";
 import { createWorkerPlacementTools } from "../../worker/worker-placement-tools.js";
+import { createTranscriptCommitIdentity } from "./transcript-commit.test-support.js";
+import { createWorkerGatewayToolRuntime } from "./worker-gateway-tool-runtime.js";
 import { resolveWorkerToolAuthority } from "./worker-tool-authority.js";
+import { captureWorkerTurnInputAuthority } from "./worker-turn-payload.js";
+import { withWorkerTurnTranscriptDatabase } from "./worker-turn-transcript-target.js";
 
 const gatewayMocks = vi.hoisted(() => ({ callGatewayTool: vi.fn() }));
 type TurnOverrides = Partial<SessionPlacementTurnParams>;
@@ -181,6 +195,151 @@ describe("resolveWorkerToolAuthority", () => {
     await expect(search.execute("search-closed", { query: "canary" })).rejects.toThrow(
       "source authority closed",
     );
+  });
+
+  it("dispatches discovered skills from the worker RPC context with the admitted transcript", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      const target = {
+        ...placement,
+        sessionId: "recovered-worker-tool-context",
+        storePath: resolveOpenClawAgentSqlitePath({ agentId: placement.agentId, env: state.env }),
+        expectedLifecycleRevision: "retained-session",
+        expectedWriterRunId: "recovered-turn",
+      };
+      await upsertSessionEntryCore(target, {
+        sessionId: target.sessionId,
+        lifecycleRevision: target.expectedLifecycleRevision,
+        activeWriterRunId: target.expectedWriterRunId,
+        updatedAt: 1,
+      });
+      // Incoming worker messages belong to the connection, not the launching turn's ALS.
+      const incoming = new AsyncResource("recovered-worker-tool-rpc");
+      const identity = createTranscriptCommitIdentity(target.sessionId, 2);
+      let runCurrent = true;
+      const assertRunCurrent = () => {
+        if (!runCurrent) {
+          throw new Error("Worker run closed");
+        }
+      };
+      let retainedContext: (() => void) | undefined;
+      try {
+        await withWorkerTurnTranscriptDatabase(
+          { ...target, sessionTarget: target },
+          {
+            assertCurrent: assertRunCurrent,
+            prepareAuthority: async () => ({ isCurrent: () => runCurrent, release() {} }),
+          },
+          async (pinned) => {
+            const { assertContextCurrent } = captureWorkerTurnInputAuthority({
+              transcriptTarget: pinned,
+              recorder: undefined,
+              assertRunCurrent,
+              isBlocked: () => false,
+            });
+            retainedContext = assertContextCurrent;
+            const wrongSession = captureWorkerTurnInputAuthority({
+              transcriptTarget: { ...pinned, sessionId: "foreign-session" },
+              recorder: undefined,
+              assertRunCurrent,
+              isBlocked: () => false,
+            });
+            expect(() => incoming.runInAsyncScope(wrongSession.assertContextCurrent)).toThrow(
+              "transcript identity is no longer current",
+            );
+            const skill = {
+              ...createFixtureSkillEntry("recovery-guide").skill,
+              readContent: "# Recovery guide\nVerify the canary after recovery.\n",
+            };
+            const resolved = await resolvedAuthority(
+              {
+                skillsSnapshot: {
+                  prompt: "",
+                  skills: [{ name: skill.name }],
+                  discoverySkills: [skill],
+                },
+              },
+              false,
+              assertContextCurrent,
+            );
+            const tools = createInstalledSkillTools(resolved.installedSkills);
+            finalizeAgentToolAvailability(tools);
+            for (const tool of tools) {
+              bindAgentToolExecutionLocation(tool, { kind: "gateway" });
+            }
+            const controller = new AbortController();
+            const runtime = createWorkerGatewayToolRuntime({
+              assertCurrent: assertRunCurrent,
+              signal: controller.signal,
+              prepare: async () => ({
+                tools,
+                policy: resolved.policy,
+                presentation: resolved.presentation,
+              }),
+            });
+            const harness = createAgentHarnessToolSurfaceRuntimeCore({
+              modelToolsEnabled: true,
+              supportsDeferredToolCalls: false,
+              config: { tools: { codeMode: false, toolSearch: { enabled: true, mode: "tools" } } },
+            });
+            try {
+              const surface = await runtime.getSurface(identity);
+              const proxies = createWorkerGatewayToolProxies(surface, {
+                invokeGatewayTool: async (request) => ({
+                  type: "res",
+                  id: request.toolCallId,
+                  ok: true,
+                  payload: await incoming.runInAsyncScope(() =>
+                    runtime.invoke(identity, request, { send() {} }),
+                  ),
+                }),
+                cancelGatewayTool: async (request) => ({
+                  type: "res",
+                  id: request.toolCallId,
+                  ok: true,
+                  payload: runtime.cancel(request),
+                }),
+              });
+              const modelTools = harness
+                .compactTools(proxies, { prepared: { preserveToolNames: [] } })
+                .promptToolPolicy.apply().tools;
+              const search = modelTools.find((tool) => tool.name === "tool_search")!;
+              const dispatch = modelTools.find((tool) => tool.name === "dispatch_action")!;
+              const discovered = await search.execute("discover", { query: "skills_search" });
+              expect(JSON.stringify(discovered)).toContain("openclaw:core:skills_search");
+              const invoke = (id: string) =>
+                dispatch.execute(id, {
+                  id: "openclaw:core:skills_search",
+                  args: { query: "canary" },
+                });
+              expect((await invoke("recovered-skill-search")).details).toMatchObject({
+                result: { details: { skills: [{ name: skill.name }] } },
+              });
+              await patchSessionEntryCore(target, () => ({
+                activeWriterRunId: "replacement-writer",
+              }));
+              expect((await invoke("stale-skill-search")).details).toMatchObject({
+                result: {
+                  details: {
+                    status: "error",
+                    error: expect.stringContaining("transcript identity is no longer current"),
+                  },
+                },
+              });
+              runCurrent = false;
+              await expect(invoke("closed-skill-search")).rejects.toThrow("Worker run closed");
+              runCurrent = true;
+            } finally {
+              await runtime.close();
+              harness.cleanup();
+            }
+          },
+        );
+        expect(retainedContext).toBeDefined();
+        expect(retainedContext).toThrow("Cloud worker transcript authority has been released");
+      } finally {
+        incoming.emitDestroy();
+      }
+    });
   });
 
   it.each([

@@ -33,6 +33,14 @@ export type Generation = {
   slots?: number;
 };
 export const DEFAULT_MAX_TOTAL = 4;
+/** Explicit repository builds have no service-owned user credential after their RPC closes. */
+export function isRequestScopedRepositoryBuild(record: Environment): boolean {
+  if (record.preparation?.purpose !== "build") {
+    return false;
+  }
+  const project = readWorkerProjectSnapshot(record.profileSnapshot.project);
+  return Boolean(project && "source" in project);
+}
 export type PoolOptions = Omit<PreparedPoolPresenceOptions, "schedule" | "prepareIntent"> & {
   resolveProvider: (providerId: string) => WorkerProvider | undefined;
   prepareIntent: (
@@ -213,7 +221,9 @@ export function admitSources(ctx: PassContext): Generations {
             activationExpiresAtMs ?? 0,
           ),
           presenceOwned: Boolean(presenceOwned),
-          deferred: Boolean(presenceOwned && deferred && !activationEligible),
+          deferred:
+            isRequestScopedRepositoryBuild(record) ||
+            Boolean(presenceOwned && deferred && !activationEligible),
           activationEligible,
         });
       } else {

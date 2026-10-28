@@ -1,23 +1,31 @@
+import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { WorkerProvider, WorkerProfile } from "../../plugins/types.js";
 import type { WorkerProjectPreparationIdentity } from "./preparation-identity.schema.js";
 import { createWorkerProjectPreparation } from "./project-preparation.js";
 import { prepareRepositoryWorkerProjectSource } from "./repository-project-admission.js";
 import type { WorkerEnvironmentRecord } from "./store.js";
 import type { WorkerProjectSnapshot } from "./workspace-git-base.js";
 
+export type WorkerProviderRepositorySource = Awaited<
+  ReturnType<typeof prepareRepositoryWorkerProjectSource>
+>;
+
 export async function prepareWorkerProviderProject(params: {
   project: WorkerProjectSnapshot;
   preparation: WorkerProjectPreparationIdentity | undefined;
-  record: Pick<WorkerEnvironmentRecord, "preparation" | "createdAtMs">;
+  record: Pick<WorkerEnvironmentRecord, "preparation" | "createdAtMs" | "profileSnapshot">;
   namespace: string;
   getConfig: () => OpenClawConfig;
   requireCurrent: () => void;
   signal?: AbortSignal;
+  repositorySource?: WorkerProviderRepositorySource;
 }) {
   const { project, preparation, record } = params;
   const repository =
     "source" in project
-      ? await prepareRepositoryWorkerProjectSource({
+      ? (params.repositorySource ??
+        (await prepareRepositoryWorkerProjectSource({
           expected: project,
           namespace: params.namespace,
           getConfig: params.getConfig,
@@ -26,9 +34,12 @@ export async function prepareWorkerProviderProject(params: {
           knownRecipe: preparation
             ? () => ({ setupRecipe: preparation.setupRecipe, recipe: preparation.recipe })
             : undefined,
-        })
+        })))
       : undefined;
   params.requireCurrent();
+  if (repository && !isDeepStrictEqual(repository.project, project)) {
+    throw new Error("Prepared repository source differs from its admitted worker intent");
+  }
   if (repository && preparation && repository.setupRecipe !== preparation.setupRecipe) {
     throw new Error("Prepared repository recipe no longer matches its admission");
   }
@@ -49,10 +60,42 @@ export async function prepareWorkerProviderProject(params: {
         }
       : undefined,
     setupAuthorized: true,
+    runSetupScript: record.profileSnapshot.runSetupScript === false ? false : undefined,
     signal: params.signal,
     requireCurrent: () => {
       params.requireCurrent();
       repository?.assertCurrent();
     },
   });
+}
+
+export function retainedWorkerProjectImage(
+  record: WorkerEnvironmentRecord,
+  provider: WorkerProvider,
+  profile: WorkerProfile,
+  project: WorkerProjectSnapshot | undefined,
+  preparation: WorkerProjectPreparationIdentity | undefined,
+  machineClass?: string,
+  os?: string,
+): Pick<NonNullable<Parameters<WorkerProvider["provision"]>[2]>, "projectImage"> {
+  return project &&
+    record.retention &&
+    provider.supportsRetainedProjectImages?.(profile, machineClass, os)
+    ? {
+        projectImage: {
+          key: project.key,
+          baseCommit: project.baseCommit,
+          ...(preparation
+            ? {
+                preparation: {
+                  key: preparation.key,
+                  cacheKey: preparation.cacheKey,
+                  purpose: "session" as const,
+                  demandAtMs: record.createdAtMs,
+                },
+              }
+            : {}),
+        },
+      }
+    : {};
 }

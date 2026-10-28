@@ -249,7 +249,7 @@ export function createWorkerNodeEnrollmentManager(options: WorkerNodeEnrollmentM
 
   const prepareRuntime = async (
     record: WorkerEnvironmentRecord,
-    bundle: TransferArtifact,
+    bundle: TransferArtifact & { bundleHash?: string; protocolFeatures?: readonly string[] },
     operationSignal?: AbortSignal,
   ): Promise<WorkerNodeRuntimePreparation> => {
     await options.store.ready();
@@ -267,6 +267,8 @@ export function createWorkerNodeEnrollmentManager(options: WorkerNodeEnrollmentM
         workerBundle: {
           ...grantArtifact(prepared, bundle, enrollmentSignal, isAuthorized, transferBytes),
           packageRelativePath: workerBundleArchiveRelativePath(bundle.tarballSha256),
+          ...(bundle.bundleHash ? { bundleHash: bundle.bundleHash } : {}),
+          ...(bundle.protocolFeatures ? { protocolFeatures: bundle.protocolFeatures } : {}),
         },
       };
       enrollmentClosers.set(runtime, binding.close);

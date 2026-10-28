@@ -26,6 +26,10 @@ import { parseInspectJson, type ParsedInspect } from "./crabbox-worker-inspect.j
 import { buildCrabboxAllocationArgs, type parseCrabboxProfile } from "./crabbox-worker-profile.js";
 import { runCrabboxSetupEgress } from "./crabbox-worker-setup-egress.js";
 import {
+  CrabboxSnapshotBindingRejectedError,
+  isCrabboxSnapshotBindingRejection,
+} from "./crabbox-worker-snapshot-rejection.js";
+import {
   CRABBOX_LIFECYCLE_TIMEOUT_MS,
   CRABBOX_MACHINE0_READY_WAIT_TIMEOUT,
   CRABBOX_SETUP_TIMEOUT_MS,
@@ -103,6 +107,7 @@ export async function inspectWithContext(
       "--json",
     ],
     binary: params.binary,
+    providerEnv: params.providerEnv,
     signal: params.signal,
     timeoutMs: params.timeoutMs ?? resolveCrabboxLifecycleTimeoutMs(params.provider),
   });
@@ -312,7 +317,8 @@ export async function runProvisionSetup(
     forwardedEnv?: Record<string, string>;
     assertCurrent?: () => void;
   },
-): Promise<void> {
+): Promise<string> {
+  let output: string;
   try {
     const run =
       params.phase === "profile setup" ||
@@ -359,12 +365,13 @@ export async function runProvisionSetup(
               ),
             }),
           );
-    crabboxCommandOutput(params.phase, result);
+    output = crabboxCommandOutput(params.phase, result);
   } catch (error) {
     params.signal?.throwIfAborted();
     return await failProvisionAfterCleanup({ ...params, id: params.inspect.id }, error);
   }
   params.signal?.throwIfAborted();
+  return output;
 }
 
 export async function prepareProvisionDesktop(

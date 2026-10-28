@@ -70,6 +70,39 @@ it("keys snapshots by resolved disk inputs while ignoring allocation policy", ()
   expect(resolveCrabboxWarmImageProfileKey(profile, "project-b")).not.toBe(key);
 });
 
+it.each([
+  { provider: "aws", sdkPython: "/qualified/bin/python" },
+  { provider: "azure-sandbox", sdkPython: "python3" },
+  { provider: "azure-sandbox", sdkPython: " " },
+  { provider: "azure-sandbox", sdkPython: 42 },
+])("rejects an unqualified SDK interpreter selection: %j", (settings) => {
+  expect(() => parseCrabboxProfile({ ...PROFILE, ...settings })).toThrow(
+    "sdkPython requires an azure-sandbox profile and an absolute qualified interpreter path",
+  );
+});
+
+it("separates Sandbox provider scopes while keeping host interpreter location out of image identity", () => {
+  const profile = parseCrabboxProfile({
+    ...PROFILE,
+    provider: "azure-sandbox",
+    sdkPython: "/qualified/bin/python",
+    configFile: "/qualified/sandbox.yaml",
+    sdkIdentity: { kind: "azure-cli" },
+  });
+  expect(profile.sdkPython).toBe("/qualified/bin/python");
+  const scoped = { ...profile, azureSandboxScope: "azure-sandbox:region:subscription:rg:group" };
+  const key = resolveCrabboxWarmImageProfileKey(scoped);
+  expect(
+    resolveCrabboxWarmImageProfileKey({ ...scoped, sdkPython: "/other-qualified/bin/python" }),
+  ).toBe(key);
+  expect(
+    resolveCrabboxWarmImageProfileKey({
+      ...scoped,
+      azureSandboxScope: "azure-sandbox:region:subscription:rg:other-group",
+    }),
+  ).not.toBe(key);
+});
+
 it("pins the Linux warm-image profile key without setup secrets", () => {
   const profile = parseCrabboxProfile({ ...PROFILE, class: "tiny" });
   // Changing this value invalidates every user's warm images on update; change deliberately and explain why in the PR.
@@ -118,3 +151,37 @@ it.each([{ setupEnv: [] }, { setupEnv: ["TOKEN"] }, { setupEnv: "TOKEN" }])(
     );
   },
 );
+it.each([
+  { provider: "aws", azureSandboxDiskId: "synthetic-disk" },
+  { provider: "azure-sandbox", azureSandboxDiskId: " " },
+  { provider: "azure-sandbox", azureSandboxDiskId: 42 },
+  { provider: "azure-sandbox", azureSandboxDiskId: "d".repeat(257) },
+])("rejects invalid Sandbox disk settings: %j", (settings) => {
+  expect(() => parseCrabboxProfile({ ttl: "24h", idleTimeout: "60m", ...settings })).toThrow(
+    "Crabbox Azure Sandbox disk ID requires",
+  );
+});
+
+it("validates image-owned initializer projection and binds it to prepared image identity", () => {
+  const setupInitializer = {
+    command: ["/usr/bin/env", "node", "/opt/fixture/feed.mjs", "--setup-env"],
+    envKeys: ["FEED_TOKEN"],
+  };
+  const base = parseCrabboxProfile(PROFILE);
+  const profile = parseCrabboxProfile({ ...PROFILE, setupInitializer });
+  expect(profile.setupInitializer).toEqual(setupInitializer);
+  expect(resolveCrabboxWarmImageProfileKey(profile)).not.toBe(
+    resolveCrabboxWarmImageProfileKey(base),
+  );
+  for (const invalid of [
+    { ...setupInitializer, command: ["relative-helper"] },
+    { ...setupInitializer, envKeys: ["IDENTITY_HEADER"] },
+    { ...setupInitializer, envKeys: ["PATH"] },
+    { ...setupInitializer, envKeys: ["NODE_OPTIONS"] },
+    { ...setupInitializer, envKeys: ["FEED_TOKEN", "FEED_TOKEN"] },
+  ]) {
+    expect(() => parseCrabboxProfile({ ...PROFILE, setupInitializer: invalid })).toThrow(
+      /setupInitializer/,
+    );
+  }
+});

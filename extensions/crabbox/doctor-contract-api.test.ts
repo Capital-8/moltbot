@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import type {
   OpenKeyedStoreOptions,
@@ -75,7 +76,7 @@ const capture = {
   phase: "creating",
 };
 const reserved = { ...image, checkpointId: "", kind: "", state: "pending" };
-function v2Case(operation: object) {
+function v2Case(operation: { type: string; [key: string]: unknown }) {
   const runtimeIdentity = {
     nodeBootstrapSha256: "a".repeat(64),
     workerBundleSha256: "b".repeat(64),
@@ -102,9 +103,11 @@ function v2Case(operation: object) {
     demandAtMs: null,
     imageGeneration: null,
   };
+  const { operation: _oldOperation, ...recordFields } = record;
   const expected = {
-    ...record,
-    version: 3,
+    ...recordFields,
+    ...(operation.type === "retire" ? { retirements: [operation] } : { operation }),
+    version: 4,
     image: { ...migratedImage, runtimeIdentity },
     allocations: { cbx_v2: migratedAllocation },
   };
@@ -115,7 +118,7 @@ it.each([
   [
     "legacy capture",
     { ...image, operation: capture },
-    { version: 3, image: migratedImage, allocations: {}, operation: capture },
+    { version: 4, image: migratedImage, allocations: {}, operation: capture },
   ],
   ["v2 capture", ...v2Case({ ...capture, provider: "aws", phase: "uncertain" })],
   ["v2 retirement", ...v2Case({ type: "retire", checkpointId: "chk_old" })],
@@ -123,7 +126,7 @@ it.each([
     "ownerless capture",
     reserved,
     {
-      version: 3,
+      version: 4,
       allocations: {},
       operation: {
         type: "capture",
@@ -168,7 +171,7 @@ it("keeps every unsupported record and future version untouched", async () => {
   const rows = [
     { ...image, operation: { type: "capture", checkpointId: "unknown-paid-artifact" } },
     { ...image, unrecognizedCleanupObligation: "preserve" },
-    { version: 4, allocations: {} },
+    { version: 5, allocations: {} },
   ];
   const store = legacyImages();
   const entries = rows.map((value, index) => [String(index), value] as const);
@@ -207,7 +210,7 @@ it.each(["changed", "write-failed", "metadata-conflict"])(
     );
     if (retried) {
       expect(await store.lookup("profile")).toMatchObject({
-        version: 3,
+        version: 4,
         image: { checkpointId: image.checkpointId },
       });
     } else {
@@ -215,3 +218,60 @@ it.each(["changed", "write-failed", "metadata-conflict"])(
     }
   },
 );
+
+it("migrates v3 retirement in one row preserving opaque scope, borrowers, slots and pins", async () => {
+  const debt = {
+    type: "retire",
+    checkpointId: "chk_held",
+    azureSandbox: {
+      providerScope: "original-scope",
+      operationId: "original-effect",
+      route: {
+        sdkPython: "/qualified/python",
+        configFile: "/qualified/config",
+        sdkIdentity: "managed",
+      },
+    },
+    originalEffect: { phase: "unknown" },
+  };
+  const record = {
+    version: 3,
+    image: { ...migratedImage, pinned: { atMs: 10 } },
+    previous: { ...migratedImage, checkpointId: "chk_previous" },
+    allocations: {
+      borrower: {
+        choice: { kind: "checkpoint", checkpointId: debt.checkpointId },
+        machineClass: "standard",
+        phase: "enrolled",
+        preparationKey: null,
+        cacheKey: null,
+        purpose: null,
+        demandAtMs: null,
+        imageGeneration: { checkpointId: debt.checkpointId, createdAtMs: 1 },
+        retentionOwnerBinding: "a".repeat(64),
+      },
+    },
+    operation: debt,
+  };
+  await legacyImages().register("profile", record);
+  expect((await migrate()).warnings).toEqual([]);
+  const { operation: _operation, ...rest } = record;
+  expect(await legacyImages().lookup("profile")).toEqual({
+    ...rest,
+    version: 4,
+    retirements: [debt],
+  });
+  await reopen();
+  expect((await lookup())?.retirements).toEqual([debt]);
+  expect(await migrate()).toEqual({ changes: [], warnings: [] });
+});
+
+it("declares the v4 maintenance migration in the public Doctor manifest", async () => {
+  const manifest = JSON.parse(
+    await fs.readFile(new URL("./openclaw.plugin.json", import.meta.url), "utf8"),
+  );
+  expect(manifest.doctorContract.stateMigrations).toEqual([
+    { id: "crabbox-warm-profile-v4", doctorOnly: true },
+  ]);
+  expect(migration.id).toBe("crabbox-warm-profile-v4");
+});

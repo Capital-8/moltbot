@@ -244,8 +244,9 @@ export function createNodeWorkerWorkspaceActions(params: {
             throw new Error("Repository workspace changed during checkpoint capture");
           }
         };
-        await verifyStable();
-        if (!uploaded.base.baseCommit) {
+        const unchanged = uploaded.currentManifestRef === source.referenceManifestRef;
+        const baseCommit = uploaded.base.baseCommit;
+        if (!baseCommit) {
           throw new Error("Repository checkpoint has no pinned Git base");
         }
         let publicationToken: string | undefined;
@@ -297,12 +298,13 @@ export function createNodeWorkerWorkspaceActions(params: {
               await params.workspaceTransfer.discardUpload(params.environmentId, publicationToken);
             }
           }
-          // Publication restrictions never own recovery acceptance. Its remote
-          // stability, live owner and final quiescence fences still run below.
-          await verifyStable();
+          // Recovery acceptance retains remote stability, owner, and final quiescence fences.
+          if (!unchanged) {
+            await verifyStable();
+          }
           authorize?.();
           markPhase?.("repositoryCheckpointStage");
-          const prepared = await request.source.prepareCheckpoint({
+          const prepared = await source.prepareCheckpoint({
             stagingRoot: uploaded.stagingRoot,
             ...(publication && publicationDigest
               ? { publicationStagingRoot: publication.stagingRoot, publicationDigest }
@@ -313,14 +315,17 @@ export function createNodeWorkerWorkspaceActions(params: {
             currentManifestRef: uploaded.currentManifestRef,
           });
           preparedCheckpoint = prepared;
+          const verifyLocalStable = () => {
+            authorize?.();
+            return prepared.verify();
+          };
           return {
             manifestRef: uploaded.currentManifestRef,
-            changed: uploaded.currentManifestRef !== uploaded.baseManifestRef,
+            // Cumulative snapshots are unchanged relative to the last accepted checkpoint.
+            changed: !unchanged,
+            ...(unchanged ? { acceptUnchangedStagedResult: verifyLocalStable } : {}),
             verifyStable,
-            verifyLocalStable: () => {
-              authorize?.();
-              return prepared.verify();
-            },
+            verifyLocalStable,
             publishStagedResult: async () => {
               authorize?.();
               await prepared.publish();
@@ -556,24 +561,7 @@ export function createNodeWorkerWorkspaceActions(params: {
       }
     } else if (source.runSetupScript) {
       const setup = await exec({
-        argv: [
-          "node",
-          "-e",
-          String.raw`const fs = require("node:fs");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-const root = process.cwd();
-const script = path.join(root, ".openclaw", "worktree-setup.sh");
-const stat = fs.statSync(script, { throwIfNoEntry: false });
-if (stat?.isFile() && (stat.mode & 0o111)) {
-  const run = spawnSync(script, [], {
-    cwd: root,
-    env: { ...process.env, OPENCLAW_SOURCE_TREE_PATH: root, OPENCLAW_WORKTREE_PATH: root },
-    stdio: "inherit",
-  });
-  process.exitCode = run.status ?? 1;
-}`,
-        ],
+        argv: ["node", "-e", REMOTE_WORKSPACE_SETUP_JS],
         timeoutMs: 120_000,
         transportRetry: "never",
         assertCurrent: request.authorize,

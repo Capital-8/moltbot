@@ -40,21 +40,56 @@ Do not install OpenClaw globally or maintain a versioned runtime/plugin URL in s
 
 Private package access uses [setup secrets](/gateway/config-cloud-workers#setup-secrets) through protected egress, including when snapshots are disabled. Keep raw credentials out of setup commands and files.
 
+### Worker-side setup initializer
+
+Linux Crabbox profiles may configure `settings.setupInitializer` with an absolute
+image-owned command argv and an explicit `envKeys` allowlist. This is an operator
+prerequisite, never a repository command. The helper runs outside the repository
+with the worker's platform environment before each preparation or post-binding
+lifecycle command, including each parallel branch. Completed prepared workspaces
+and inspection-only operations do not rerun preparation hooks or their initializer.
+
+The helper receives JSON `{ "timeoutMs": remainingCommandBudget }` on stdin and
+must write exactly one JSON string map to stdout. Output is limited to 32 KiB,
+each value to 4096 characters, and names must exactly match the configured list.
+Execution-control and platform identity transport variables cannot be projected.
+Initializer variables override repository variables; they cannot overlap protected
+`setupSecrets`. Returned values stay in worker memory and enter only the isolated
+lifecycle child. OpenClaw does not return initializer or credential-bearing hook
+output to Gateway diagnostics. Failure or cancellation prevents that command from
+starting; its existing owner settles the initializer process group first.
+
+Failures save a bounded diagnostic envelope in the existing recipe failure metadata
+and log its closed facts: phase, outcome, exit or signal, elapsed time, and a native
+reason even when the command emits no marker. Recognized `TEAMCLAW_SETUP_V1`
+markers retain their emitting channel (initializer or repository); they do not
+prove helper identity or grant authority. At most 32 events fit the 16 KiB
+artifact, with explicit truncation and failure events preferred over progress.
+Raw credential-bearing output remains excluded. These diagnostics describe new
+attempts; output discarded by an earlier runtime cannot be recovered afterward.
+
+The image helper owns credential scope, audience and expiry. It must reject
+credentials that cannot remain valid for the supplied command budget rather than
+relying on refresh inside a sanitized repository hook. Initializer settings are
+part of the prepared image identity. The default remains the minimal environment
+without an initializer; Gateway credentials and platform metadata are never
+forwarded to the worker by this feature.
+
 ### Native Windows prerequisites
 
 For `windows/normal`, Crabbox executes `settings.setup` with Windows PowerShell. Write setup commands for PowerShell; Linux, macOS, and Windows (WSL2) continue to use POSIX scripts. A profile with setup cannot override its OS across that interpreter boundary: OpenClaw rejects the request before allocation and omits incompatible OS and machine choices. Use a separate profile with `settings.target: "windows/normal"` and PowerShell setup for native Windows. Profiles without setup retain all backend-supported OS choices. OpenClaw does not inspect or translate scripts; you remain responsible for compatibility between POSIX targets.
 
-For example, this prerequisite check uses the machine's existing Node and npm installation:
+For example, this prerequisite check uses the machine's existing Node and tar installation:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 & (Get-Command node.exe -CommandType Application -ErrorAction Stop).Source --version
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& (Get-Command npm.cmd -CommandType Application -ErrorAction Stop).Source --version
+& (Get-Command tar.exe -CommandType Application -ErrorAction Stop).Source --version
 exit $LASTEXITCODE
 ```
 
-Use a Crabbox bootstrap or image that supplies a supported Node.js release and npm on the machine `PATH`, with npm's CLI installed beside `node.exe` under `node_modules/npm`. OpenClaw fails enrollment with a prerequisite message if Node or that npm installation is missing; it does not install Node. npm installs the node runtime archive, and OpenClaw extracts worker bundles with its Node archive library.
+Use a Crabbox bootstrap or image that supplies a supported Node.js release and tar on the machine `PATH`. For `install: "bundle"`, OpenClaw directly extracts the verified runtime archive; npm is neither required nor invoked. Profiles using `install: "npm"` also need npm beside Node for target-native dependency installation. Missing prerequisites give an actionable error; OpenClaw does not install them on Windows.
 
 Headless Windows guests must include Crabbox's managed launcher at `C:\Program Files\Crabbox\bin\Start-CrabboxDetachedProcess.ps1`. It keeps the node alive after Crabbox closes its SSH command. Enrollment fails with guidance if the launcher is absent. A hidden PowerShell parent redirects node output to `node.log` under its isolated state directory because the launcher does not inherit SSH output handles.
 

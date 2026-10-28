@@ -1,9 +1,11 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import {
-  type CrabboxState,
-  crabboxCaptureUnsupportedSentence,
   crabboxWarmImageRecoveryHint,
   CRABBOX_WARM_IMAGE_WAIT_HINT,
+} from "./crabbox-worker-warm-image-records.js";
+import {
+  type CrabboxState,
+  crabboxCaptureUnsupportedSentence,
   listCrabboxLegacyWarmLeases,
   listCrabboxWarmImages,
   recoverCrabboxWarmImageCapture,
@@ -92,9 +94,9 @@ export function registerCrabboxWarmImageCommands(program: CliProgram, state: Cra
               lines.push(`  ${CRABBOX_WARM_IMAGE_WAIT_HINT}`);
             }
           }
-          if (image.retirement) {
+          for (const retirement of image.retirements) {
             lines.push(
-              `  Checkpoint deletion pending: ${image.retirement.checkpointId}; retried during the next warm-image capture or worker teardown.`,
+              `  Checkpoint deletion pending: ${retirement.checkpointId}; retried during the next warm-image capture or worker teardown.`,
             );
           }
         }

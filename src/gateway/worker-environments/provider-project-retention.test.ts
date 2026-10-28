@@ -17,7 +17,12 @@ vi.mock("./repository-project-admission.js", () => ({
 describe("prepared project retention compatibility", () => {
   const fixture = usePreparedPoolFixture();
 
-  async function setup() {
+  async function setup(
+    retention?: { mode: "session-disk"; computeWindowSeconds: number },
+    resumeProvision: Parameters<typeof createWorkerProviderIntent>[0]["resumeProvision"] = async (
+      environment,
+    ) => environment,
+  ) {
     sourceAdmission
       .mockReset()
       .mockRejectedValue(new Error("Retention must not access the repository"));
@@ -39,7 +44,16 @@ describe("prepared project retention compatibility", () => {
         },
       },
     };
-    const profileSnapshot = { settings: {}, install: "bundle", executionMode: "worker-turn" };
+    if (retention) {
+      fixture.developmentProfile.retention = retention;
+      fixture.provider.supportsRetainedProjectImages = () => true;
+    }
+    const profileSnapshot = {
+      settings: {},
+      install: "bundle",
+      executionMode: "worker-turn",
+      ...(retention ? { retention } : {}),
+    };
     const preparation = createWorkerPreparationIdentity({
       namespace: "gateway",
       providerId: fixture.provider.id,
@@ -69,7 +83,7 @@ describe("prepared project retention compatibility", () => {
       prepareNodeArtifacts,
       isStopping: () => false,
       withLock: async (_id, run) => await run(),
-      resumeProvision: async (environment) => environment,
+      resumeProvision,
     });
     return {
       record,
@@ -83,6 +97,34 @@ describe("prepared project retention compatibility", () => {
     };
   }
 
+  it.each(["unchanged", "window", "removed", "settings"] as const)(
+    "validates retained project preparation when policy is %s",
+    async (change) => {
+      const retention = { mode: "session-disk" as const, computeWindowSeconds: 14400 };
+      const { owner, record, preparation } = await setup(retention);
+      const profile = fixture.developmentProfile;
+      if (change === "window") {
+        profile.retention = { ...retention, computeWindowSeconds: 7200 };
+      }
+      if (change === "removed") {
+        delete profile.retention;
+      }
+      if (change === "settings") {
+        profile.settings = { ...profile.settings, setup: "changed" };
+      }
+      const invalid = vi.fn();
+      const current = await owner.prepareRetention(record, preparation, undefined, invalid);
+      if (change === "unchanged") {
+        expect(current?.isCurrent()).toBe(true);
+        expect(invalid).not.toHaveBeenCalled();
+      } else {
+        expect(current).toBeUndefined();
+        expect(invalid).toHaveBeenCalledWith("configured profile changed");
+      }
+      expect(sourceAdmission).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses repository admission and fences a changed source owner before allocation", async () => {
     const { owner, project } = await setup();
     let current = true;
@@ -90,6 +132,7 @@ describe("prepared project retention compatibility", () => {
       request.assertCurrent();
       return {
         project,
+        recoverySource: undefined,
         setupRecipe: "e".repeat(40),
         recipe: {
           source: "script",
@@ -131,6 +174,91 @@ describe("prepared project retention compatibility", () => {
     expect(fixture.store.list()).toEqual(before);
   });
 
+  it.each(["fresh", "replay", "revoked replay"] as const)(
+    "retains the admitted repository owner during %s provisioning",
+    async (mode) => {
+      const packStopped = new Error("Admitted pack reached provider preparation");
+      let consume = mode === "fresh";
+      let current = true;
+      const prepareGitPack = vi.fn(async () => {
+        if (!current) {
+          throw new Error("Repository owner changed");
+        }
+        throw packStopped;
+      });
+      const { owner, project } = await setup(
+        undefined,
+        async (record, _provider, signal, _retainSettlement, beforeProvision, repositorySource) => {
+          if (!consume) {
+            return record;
+          }
+          beforeProvision?.();
+          const operation = await prepareWorkerProviderProject({
+            project,
+            preparation: undefined,
+            record,
+            namespace: "gateway",
+            getConfig: () => fixture.config,
+            requireCurrent: () => beforeProvision?.(),
+            signal,
+            repositorySource,
+          });
+          const runScript = vi.fn(async () =>
+            JSON.stringify({
+              ready: false,
+              directory: `/node/.openclaw-worker/git-seeds/gateway/.tmp-${workerProjectSeedKey(project)}-fixture`,
+            }),
+          );
+          try {
+            await operation.project.prepare({ runScript, upload: vi.fn() });
+          } finally {
+            operation.close();
+          }
+          return record;
+        },
+      );
+      sourceAdmission.mockResolvedValue({
+        project,
+        recoverySource: undefined,
+        setupRecipe: undefined,
+        recipe: { source: "none", inputs: {}, env: {} },
+        assertCurrent: () => {
+          if (!current) {
+            throw new Error("Repository owner changed");
+          }
+        },
+        revalidate: async () => {},
+        prepareGitPack,
+      });
+      const intent = await owner.prepareIntent("development", {
+        projectRepository: project,
+        executionMode: "worker-turn",
+      });
+      // Reopening cannot recover the original caller's reader or revoke owner.
+      sourceAdmission.mockRejectedValue(new Error("Admitted repository owner was lost"));
+      const create = () =>
+        owner.createWithProfile(
+          "development",
+          "admitted-repository",
+          { executionMode: "worker-turn", signal: fixture.abort.signal },
+          intent,
+        );
+      if (mode !== "fresh") {
+        await create();
+        consume = true;
+        current = mode !== "revoked replay";
+      }
+      if (mode === "revoked replay") {
+        await expect(create()).rejects.toThrow("Repository owner changed");
+        expect(prepareGitPack).not.toHaveBeenCalled();
+      } else {
+        await expect(create()).rejects.toBe(packStopped);
+        expect(prepareGitPack).toHaveBeenCalledOnce();
+      }
+      expect(sourceAdmission).toHaveBeenCalledOnce();
+    },
+  );
+
   it("passes private pack production through the provisioning owner instead of worker fetch", async () => {
     const { project, record } = await setup();
     const stopped = new Error("Private pack producer stopped before transfer");
@@ -139,6 +267,7 @@ describe("prepared project retention compatibility", () => {
     });
     sourceAdmission.mockResolvedValue({
       project,
+      recoverySource: undefined,
       setupRecipe: undefined,
       recipe: { source: "none", inputs: {}, env: {} },
       assertCurrent: () => {},

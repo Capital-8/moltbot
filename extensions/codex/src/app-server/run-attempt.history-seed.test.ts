@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
 import type { EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams } from "openclaw/plugin-sdk/agent-harness";
+import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
 import { buildCodexSelectedHistoryItems } from "./context-engine-history-items.js";
@@ -20,7 +21,9 @@ import {
   runCodexAppServerAttempt,
   writeCodexAppServerBinding,
 } from "./run-attempt.context-engine.test-support.js";
+import { createSandboxContext } from "./sandbox-exec-server.test-helpers.js";
 import { readCodexAppServerBinding } from "./session-binding.test-helpers.js";
+import { attachSqliteSessionTarget } from "./sqlite-session.test-helpers.js";
 
 setupRunAttemptTestHooks();
 
@@ -87,9 +90,10 @@ async function runTurn(
   harness: TurnHarness,
   runId: string,
   threadId = "thread-selected-1",
+  options: Parameters<typeof runCodexAppServerAttempt>[1] = {},
 ) {
   const offset = harness.requests.length;
-  const run = runCodexAppServerAttempt({ ...params, runId });
+  const run = runCodexAppServerAttempt({ ...params, runId }, options);
   await run.waitForTurnAccepted();
   await harness.completeTurn("completed", threadId);
   await run;
@@ -131,6 +135,114 @@ describe("Codex configured assembled-history delivery", () => {
     expect(next.some(({ method }) => method === "thread/start")).toBe(false);
     expect(next.some(({ method }) => method === "thread/compact/start")).toBe(false);
   });
+  it.each([true, false])(
+    "hydrates confirmed lost worker history before one distinct current turn (engine=%s)",
+    async (engine) => {
+      const { params } = seedParams();
+      params.authoredContextTokenCap = undefined;
+      if (!engine) {
+        params.contextEngine = undefined;
+        await attachSqliteSessionTarget(
+          params,
+          path.join(tempDir, "lost-native-history.sqlite"),
+          params.sessionId,
+        );
+        const manager = SessionManager.open(
+          {
+            agentId: "main",
+            sessionId: params.sessionId,
+            sessionKey: params.sessionKey!,
+            storePath: params.sessionTarget!.storePath!,
+          },
+          params.workspaceDir,
+        );
+        await manager.appendMessageAsync(userMessage(original, 1));
+      }
+      const oldOwner = {
+        agentId: "main",
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey!,
+        environmentId: "lost-worker",
+        ownerEpoch: 7,
+        retentionOwnerBinding: "a".repeat(64),
+      };
+      const owner = { ...oldOwner, environmentId: "replacement-worker", ownerEpoch: 11 };
+      params.sandbox = Object.assign(createSandboxContext({}), {
+        backendId: "node" as const,
+        backend: undefined,
+        sessionKey: params.sessionKey!,
+        workspaceDir: params.workspaceDir,
+        agentWorkspaceDir: params.workspaceDir,
+        placementExecutionMode: "remote-exec" as const,
+        placementNodeId: "replacement-node",
+        placementEnvironmentId: owner.environmentId,
+        placementSessionId: owner.sessionId,
+        placementOwnerEpoch: owner.ownerEpoch,
+        placementRetainedSession: true as const,
+        placementRequireExistingNativeState: true as const,
+        nativeWorkerPlacement: {
+          owner,
+          recovery: {
+            version: 1 as const,
+            predecessor: oldOwner,
+            predecessorGeneration: 9,
+            replacementDispatchGeneration: 10,
+          },
+        },
+      });
+      const harness = selectedHarness();
+      await writeCodexAppServerBinding(params.sessionFile, {
+        threadId: "lost-native-thread",
+        cwd: params.workspaceDir,
+        workerPlacementOwner: oldOwner,
+        model: params.modelId,
+        modelProvider: params.provider,
+      });
+      const requests = await runTurn(
+        params,
+        harness,
+        "fresh-after-confirmed-loss",
+        "thread-selected-1",
+        { pluginConfig: { appServer: { workerHostedCloud: true } } },
+      );
+      expect(JSON.stringify(selectedItems(requests))).toContain(original);
+      const methods = requests.map(({ method }) => method);
+      expect(methods.indexOf("thread/inject_items")).toBeLessThan(methods.indexOf("turn/start"));
+      expect(methods.filter((method) => method === "turn/start")).toHaveLength(1);
+      expect(methods).not.toContain("thread/resume");
+      expect(
+        JSON.stringify(requests.find(({ method }) => method === "turn/start")?.params),
+      ).not.toContain(original);
+      expect(await readCodexAppServerBinding(params.sessionFile)).toMatchObject({
+        threadId: "thread-selected-1",
+        workerPlacementOwner: owner,
+        recoveredFrom: { owner: oldOwner, threadId: "lost-native-thread" },
+      });
+      params.prompt = "A distinct continuation after available-history recovery";
+      const resumedHarness = createStartedThreadHarness(
+        async (method) =>
+          method === "thread/resume" ? threadStartResult("thread-selected-1") : undefined,
+        { persistedThreads: [threadStartResult("thread-selected-1")] },
+      );
+      const continuation = runCodexAppServerAttempt(
+        { ...params, runId: "post-recovery-continuation" },
+        { pluginConfig: { appServer: { workerHostedCloud: true } } },
+      );
+      await continuation.waitForTurnAccepted();
+      await resumedHarness.completeTurn("completed", "thread-selected-1");
+      await continuation;
+      const resumed = resumedHarness.requests;
+      expect(resumed.filter(({ method }) => method === "turn/start")).toHaveLength(1);
+      expect(
+        JSON.stringify(resumed.find(({ method }) => method === "turn/start")?.params),
+      ).toContain(params.prompt);
+      expect(resumed.map(({ method }) => method)).not.toContain("thread/start");
+      expect(JSON.stringify(selectedItems(resumed))).not.toContain(original);
+      expect(await readCodexAppServerBinding(params.sessionFile)).toMatchObject({
+        threadId: "thread-selected-1",
+      });
+    },
+  );
 
   it("installs >1,048,576 characters in UTF-8-bounded quotes with ordered media before readiness", async () => {
     const { params, assemble } = seedParams();

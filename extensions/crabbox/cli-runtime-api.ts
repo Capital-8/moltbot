@@ -28,3 +28,10 @@ export async function ensureManagedCrabboxBinary(
   const managed = await import("./src/crabbox-managed-binary.js");
   return managed.ensureManagedCrabboxBinary(params);
 }
+
+export {
+  parseCrabboxRuntimeInstallation,
+  readCrabboxRuntimeInstallation,
+  type CrabboxRuntimeInstallation,
+  type CrabboxRuntimeInstallationIdentity,
+} from "./src/crabbox-worker-runtime-verification.js";

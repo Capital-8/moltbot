@@ -589,8 +589,8 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
 
   const service = {
     ...sessionAttachments,
-    prepare: (request: { profileId: string; projectPath: string }, authorize?: () => void) =>
-      trackOperation(prepareBuild(request, authorize)),
+    prepare: (...args: Parameters<WorkerEnvironmentServiceContract["prepare"]>) =>
+      trackOperation(prepareBuild(...args)),
     isStopping: () => stopping,
     recordError: saveError,
     list: environmentAccess.list,

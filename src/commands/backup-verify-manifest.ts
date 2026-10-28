@@ -234,6 +234,7 @@ export type BackupManifest = {
   nodeVersion: string;
   options?: {
     includeWorkspace?: boolean;
+    excludeWorktreeTemplates?: boolean;
     onlyConfig?: boolean;
   };
   paths?: {

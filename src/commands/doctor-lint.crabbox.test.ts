@@ -25,7 +25,7 @@ it.each([false, true])("awaits read-only worker findings (existing=%s)", (existi
     const cfg = { cloudWorkers: { profiles: { worker: { provider: "crabbox" } } } };
     await state.writeConfig(cfg);
     const pending = {
-      version: 3,
+      version: 4,
       allocations: {},
       operation: {
         type: "capture",

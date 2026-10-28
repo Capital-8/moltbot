@@ -282,6 +282,7 @@ test("sessions.recover settles its active placement before archiving a real sess
     placements: {
       get: () => placement,
       getAsync: async () => placement,
+      listPendingWorkspaceResultsAsync: async () => [],
       waitForTurnClaimRelease: vi.fn(async () => {}),
     },
     loadSessionRuntime: async () => ({
@@ -423,6 +424,7 @@ test.each(["before-interrupt", "before-drain"] as const)(
       placements: {
         get: () => placement,
         getAsync: async () => placement,
+        listPendingWorkspaceResultsAsync: async () => [],
         waitForTurnClaimRelease: async () => {
           if (phase === "before-drain") {
             await wait();

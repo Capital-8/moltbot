@@ -359,6 +359,8 @@ export function createWorkerPlacementDispatchStartup(options: {
           sessionKey: request.sessionKey,
           preparationKey: preparation.key,
           cacheKey: preparation.cacheKey,
+          readNativeCredential: request.readNativeCredential,
+          retainCredentialCleanup: params.retainCredentialCleanup,
           signal: params.signal,
           assertCurrent: assertSyncOwner,
         });

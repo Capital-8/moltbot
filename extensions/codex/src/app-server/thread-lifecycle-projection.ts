@@ -4,7 +4,10 @@ import {
   type CodexPluginThreadConfig,
 } from "./plugin-thread-config.js";
 import type { CodexAppServerThreadBinding } from "./session-binding.js";
-import { fingerprintCodexThreadConfig } from "./thread-fingerprints.js";
+import {
+  areCodexDynamicToolFingerprintsCompatible,
+  fingerprintCodexThreadConfig,
+} from "./thread-fingerprints.js";
 import {
   buildCodexThreadRequestConfig,
   prepareCodexThreadFinalConfigPatch,
@@ -13,12 +16,46 @@ import {
 import type { CodexStartOrResumeThreadParams } from "./thread-lifecycle-types.js";
 
 /** Projection identity omits persistent instructions: qualify using warm reuse's full policy. */
-export async function canRetainCodexProjectionBackgroundWork(
-  params: CodexStartOrResumeThreadParams,
-  binding: CodexAppServerThreadBinding,
-  context: CodexThreadRequestContext,
-  pluginThreadConfig: CodexPluginThreadConfig | undefined,
-): Promise<boolean> {
+export async function canRetainCodexProjectionBackgroundWork(options: {
+  params: CodexStartOrResumeThreadParams;
+  binding: CodexAppServerThreadBinding;
+  preflight: Pick<
+    CodexThreadRequestContext,
+    "contextEngineBinding" | "dynamicToolsFingerprint" | "legacyDynamicToolsFingerprint"
+  >;
+  buildLoadedPluginThreadConfig: (
+    binding: CodexAppServerThreadBinding,
+  ) => Promise<CodexPluginThreadConfig | undefined>;
+  prepareRequestContext: () => Promise<CodexThreadRequestContext>;
+}): Promise<boolean> {
+  const { params, binding } = options;
+  const { contextEngineBinding, dynamicToolsFingerprint, legacyDynamicToolsFingerprint } =
+    options.preflight;
+  // Only a projection refresh can hand the conversation forward while native
+  // background work retains its original subscription and cleanup authority.
+  if (
+    !(
+      binding.clientId === params.client.getInstanceId() &&
+      binding.contextEngine?.engineId === contextEngineBinding?.engineId &&
+      binding.contextEngine?.policyFingerprint === contextEngineBinding?.policyFingerprint &&
+      Boolean(contextEngineBinding) &&
+      (!binding.dynamicToolsFingerprint ||
+        areCodexDynamicToolFingerprintsCompatible({
+          previous: binding.dynamicToolsFingerprint,
+          next: dynamicToolsFingerprint,
+          nextLegacy: legacyDynamicToolsFingerprint,
+        })) &&
+      isCodexAppServerLiveThreadBackgroundOnly(params.client, binding.threadId)
+    )
+  ) {
+    return false;
+  }
+  const currentPluginConfig = await options.buildLoadedPluginThreadConfig(binding);
+  if (currentPluginConfig && currentPluginConfig.fingerprint !== binding.pluginAppsFingerprint) {
+    return false;
+  }
+  const context = await options.prepareRequestContext();
+  const pluginThreadConfig = currentPluginConfig;
   const finalConfig = await prepareCodexThreadFinalConfigPatch(
     params,
     context.nativeModelInputTools,

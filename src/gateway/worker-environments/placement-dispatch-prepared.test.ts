@@ -55,6 +55,15 @@ describe("prepared worker dispatch", () => {
         reserve,
         recipe: lifecycleRecipe,
       });
+      const readNativeCredential = vi.fn(async () => undefined);
+      const revoke = vi.fn(async () => {});
+      const bind = vi.mocked(harness.environments.bindPreparedWorkspace);
+      const ordinaryBind = bind.getMockImplementation()!;
+      bind.mockImplementation(async (binding) => {
+        await binding.readNativeCredential?.({});
+        binding.retainCredentialCleanup?.(revoke);
+        return await ordinaryBind(binding);
+      });
       const previousDiagnostics = areDiagnosticsEnabledForProcess();
       setDiagnosticsEnabledForProcess(true);
       onTestFinished(() => {
@@ -83,9 +92,11 @@ describe("prepared worker dispatch", () => {
         });
       }
 
-      const active = await harness.service.dispatch(request);
+      const active = await harness.service.dispatch({ ...request, readNativeCredential });
 
       expect(active.state).toBe("active");
+      expect(readNativeCredential).toHaveBeenCalledOnce();
+      expect(revoke).toHaveBeenCalledOnce();
       expect(warn).toHaveBeenCalledExactlyOnceWith("slow placement dispatch", {
         operation: "sessions.dispatch",
         elapsedMs: reserve ? 1_200 : 1_800,
@@ -234,10 +245,20 @@ describe("prepared worker dispatch", () => {
     expect(active.environmentId).toBe(ready.environmentId);
     expect(harness.environments.createWithRequest).toHaveBeenCalledWith({
       profileId: request.profileId,
+      retentionOwner: {
+        sessionId: request.sessionId,
+        sessionKey: request.sessionKey,
+        agentId: request.agentId,
+      },
       idempotencyKey: expect.any(String),
+      machineClass: undefined,
       executionMode: request.executionMode,
       projectPath: "/gateway/workspace",
+      signal: undefined,
+      os: undefined,
+      runSetupScript: undefined,
       admittedIntent: intent,
+      inheritedProfile: undefined,
     });
     expect(store.get(ready.environmentId)?.preparation).toBeNull();
     expect(harness.environments.bindPreparedWorkspace).toHaveBeenCalledOnce();

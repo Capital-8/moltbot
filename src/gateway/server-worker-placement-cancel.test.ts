@@ -236,6 +236,7 @@ it.each(["success", "failed-write", "setup-failed-write"] as const)(
         placements: {
           get: () => placement as never,
           getAsync: async () => placement as never,
+          listPendingWorkspaceResultsAsync: async () => [],
           waitForTurnClaimRelease: async () => {},
         },
         loadSessionRuntime: async () => ({

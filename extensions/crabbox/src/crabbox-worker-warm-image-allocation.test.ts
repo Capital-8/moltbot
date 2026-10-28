@@ -23,13 +23,14 @@ import {
   unsupportedCaptureReceipt,
 } from "./crabbox-worker-warm-image.test-support.js";
 
+type PrepareCapture = Parameters<typeof createCrabboxWarmImageManager>[0]["prepareCapture"];
+const captureInspection = (id: string) => ({ id, state: "running", tailscaleEnabled: false });
+
 function fixture(
   failCreate = false,
   onCommand?: (argv: string[]) => ReturnType<typeof commandResult> | void,
   policy?: CrabboxWarmImagePolicy,
-  prepareCapture: Parameters<
-    typeof createCrabboxWarmImageManager
-  >[0]["prepareCapture"] = async () => {},
+  prepareCapture: PrepareCapture = async (context) => captureInspection(context.id),
 ) {
   vi.stubEnv("OPENCLAW_STATE_DIR", tempDirs.make("openclaw-crabbox-allocation-"));
   const calls: string[][] = [];
@@ -145,13 +146,14 @@ async function publish<T extends Allocation>(owner: Owner, source: T, commit?: s
 
 it("admits lifetime only for a claimed capture before preparing or scrubbing its source", async () => {
   const events: string[] = [];
-  const prepareCapture = vi.fn(async () => {
+  const prepareCapture = vi.fn<PrepareCapture>(async (source) => {
     expect(record()?.operation).toMatchObject({
       type: "capture",
       leaseId: "cbx_lifetime",
       phase: "scrubbing",
     });
     events.push("lifetime");
+    return captureInspection(source.id);
   });
   const { owner, context } = fixture(false, undefined, undefined, prepareCapture);
   const source = await enroll(owner, context("cbx_lifetime"));
@@ -198,6 +200,7 @@ it.each(["runtime grant", "lifetime admission"])(
       if (phase === "lifetime admission") {
         await gate.wait();
       }
+      return captureInspection(source.id);
     });
     const { owner, context, calls } = fixture(false, undefined, undefined, prepareCapture);
     const source = await enroll(owner, context("cbx_recovered_admission"));
@@ -358,8 +361,8 @@ it.each([
 
     const failed = context("cbx_failed");
     await expect(owner.allocate(failed)).rejects.toThrow("not found");
-    expect(record()?.operation).toEqual(
-      retired ? { type: "retire", checkpointId: CHECKPOINT_ID } : undefined,
+    expect(record()?.retirements).toEqual(
+      retired ? [{ type: "retire", checkpointId: CHECKPOINT_ID }] : undefined,
     );
 
     if (!retired) {
@@ -394,6 +397,30 @@ it("returns false and permits enrollment only after an unsupported capture recei
   expect((await owner.lookupLease(project.id))?.phase).toBe("enrolled");
   expect(record()?.operation).toBeUndefined();
 });
+it("publishes a cold setup/runtime successor while retaining an unpinned predecessor borrower", async () => {
+  const { owner, projectContext, calls } = fixture(false, undefined, retainPrevious);
+  await publish(owner, projectContext("cbx_source"), "a".repeat(40));
+  const borrower = projectContext("cbx_borrower");
+  expect(await owner.allocate(borrower)).toEqual(checkpointChoice);
+  const predecessor = structuredClone(record()!.image);
+  const next = runtime(projectContext("cbx_next", "c".repeat(64)), "d");
+  expect(await owner.allocate(next)).toEqual({ kind: "cold" });
+  await owner.markPrepared(next.id, "e".repeat(40));
+  calls.length = 0;
+  expect(await owner.capture(next)).toBe(true);
+  expect(record()).toMatchObject({
+    image: {
+      checkpointId: `${CHECKPOINT_ID}_2`,
+      cacheKey: next.preparation.cacheKey,
+      runtimeIdentity: next.nodeRuntimeIdentity,
+    },
+    previous: predecessor,
+  });
+  expect(calls.some((argv) => argv[2] === "delete" && argv[3] === CHECKPOINT_ID)).toBe(false);
+  await owner.release(next);
+  await owner.release(borrower);
+});
+
 it("starts incompatible preparation cold and retains its missing pinned predecessor", async () => {
   const { owner, projectContext, calls } = fixture(false, (argv) => {
     if (argv[2] === "inspect") {
@@ -429,26 +456,33 @@ it("starts incompatible preparation cold and retains its missing pinned predeces
   expect(calls.some((argv) => argv[2] === "delete")).toBe(false);
 });
 
-it("does not let an older cold admission overwrite a newly pinned generation", async () => {
-  const { owner, projectContext, calls } = fixture(false, undefined, retainPrevious);
-  await publish(owner, projectContext("cbx_source"), "a".repeat(40));
-  await owner.pin(CHECKPOINT_ID, true);
-  const older = projectContext("cbx_older", "c".repeat(64));
-  const newer = projectContext("cbx_newer", "d".repeat(64));
-  expect(await owner.allocate(older)).toEqual({ kind: "cold" });
-  expect(await owner.allocate(newer)).toEqual({ kind: "cold" });
-  await owner.markPrepared(older.id, "b".repeat(40));
-  await owner.markPrepared(newer.id, "c".repeat(40));
-  expect(await owner.capture(newer)).toBe(true);
-  await owner.release(newer);
-  await owner.pin(CHECKPOINT_ID, false);
-  await owner.pin(`${CHECKPOINT_ID}_2`, true);
-  const published = structuredClone(record()!.image);
-  calls.length = 0;
-  expect(await owner.capture(older)).toBe(false);
-  expect(calls.some((argv) => argv[2] === "create")).toBe(false);
-  expect(record()?.image).toEqual(published);
-});
+it.each([false, true])(
+  "does not let an older cold admission overwrite a newer generation (pinned=%s)",
+  async (pinned) => {
+    const { owner, projectContext, calls } = fixture(false, undefined, retainPrevious);
+    await publish(owner, projectContext("cbx_source"), "a".repeat(40));
+    if (pinned) {
+      await owner.pin(CHECKPOINT_ID, true);
+    }
+    const older = projectContext("cbx_older", "c".repeat(64));
+    const newer = projectContext("cbx_newer", "d".repeat(64));
+    expect(await owner.allocate(older)).toEqual({ kind: "cold" });
+    expect(await owner.allocate(newer)).toEqual({ kind: "cold" });
+    await owner.markPrepared(older.id, "b".repeat(40));
+    await owner.markPrepared(newer.id, "c".repeat(40));
+    expect(await owner.capture(newer)).toBe(true);
+    await owner.release(newer);
+    if (pinned) {
+      await owner.pin(CHECKPOINT_ID, false);
+      await owner.pin(`${CHECKPOINT_ID}_2`, true);
+    }
+    const published = structuredClone(record()!.image);
+    calls.length = 0;
+    expect(await owner.capture(older)).toBe(false);
+    expect(calls.some((argv) => argv[2] === "create")).toBe(false);
+    expect(record()?.image).toEqual(published);
+  },
+);
 
 it("preserves two pinned generations and warns once instead of publishing a third", async () => {
   const { owner, projectContext, calls, warn } = fixture();
@@ -470,8 +504,10 @@ it("preserves two pinned generations and warns once instead of publishing a thir
 it("keeps one predecessor and retires the older previous only after its borrower releases", async () => {
   const { owner, context, calls } = fixture(false, undefined, retainPrevious);
   await publish(owner, context("cbx_source"));
-  const borrower = context("cbx_borrower");
-  await owner.allocate(borrower);
+  const borrowers = ["cbx_borrower1", "cbx_borrower2", "cbx_borrower3"].map((id) => context(id));
+  for (const borrower of borrowers) {
+    await owner.allocate(borrower);
+  }
   for (const [index, digest] of ["b", "c"].entries()) {
     const next = runtime(context(`cbx_next_${index}`), digest);
     await enroll(owner, next);
@@ -484,14 +520,31 @@ it("keeps one predecessor and retires the older previous only after its borrower
   expect(openWarmImageStore().entries()).toHaveLength(1);
   expect(record()).toMatchObject({
     image: { checkpointId: `${CHECKPOINT_ID}_3` },
-    operation: { type: "retire", checkpointId: CHECKPOINT_ID },
+    retirements: [{ type: "retire", checkpointId: CHECKPOINT_ID }],
   });
   expect(calls.some((argv) => argv[2] === "delete")).toBe(false);
-  await owner.release(borrower);
+  const originalBorrowers = Object.fromEntries(
+    borrowers.map(({ id }) => [id, record()!.allocations[id]]),
+  );
+  const next = runtime(context("cbx_next_2"), "d");
+  await enroll(owner, next);
+  expect(await owner.capture(next)).toBe(true);
+  await owner.release(next);
+  expect(record()).toMatchObject({
+    image: { checkpointId: `${CHECKPOINT_ID}_4` },
+    previous: { checkpointId: `${CHECKPOINT_ID}_3` },
+    retirements: [{ type: "retire", checkpointId: CHECKPOINT_ID }],
+    allocations: originalBorrowers,
+  });
+  for (const borrower of borrowers.slice(0, 2)) {
+    await owner.release(borrower);
+    expect(calls.some((argv) => argv[2] === "delete" && argv[3] === CHECKPOINT_ID)).toBe(false);
+  }
+  await owner.release(borrowers[2]!);
   const deleted = calls.filter((argv) => argv[2] === "delete").map((argv) => argv[3]);
-  expect(deleted).toEqual([CHECKPOINT_ID]);
+  expect(deleted).toEqual([`${CHECKPOINT_ID}_2`, CHECKPOINT_ID]);
   expect(record()?.operation).toBeUndefined();
-  expect(record()?.previous?.checkpointId).toBe(`${CHECKPOINT_ID}_2`);
+  expect(record()?.previous?.checkpointId).toBe(`${CHECKPOINT_ID}_3`);
 });
 
 it("preserves exact preparation replay and cache compatibility across reopen", async () => {
@@ -717,4 +770,63 @@ it("captures newly completed setup only from the current image generation", asyn
   await owner.capture({ ...stale, projectCaptureRequired: true });
   expect(calls.filter((argv) => argv[2] === "create")).toHaveLength(captures);
   expect(captures).toBe(1);
+});
+
+it.each(["retirement-capacity", "row-capacity"] as const)(
+  "refuses %s before provider capture without losing debt",
+  async (reason) => {
+    const { owner, context, calls } = fixture();
+    const source = await enroll(owner, context("cbx_budget"));
+    const entry = openWarmImageStore().entries()[0]!;
+    const retirements = Array.from(
+      { length: reason === "retirement-capacity" ? 64 : 1 },
+      (_, i) => ({ type: "retire" as const, checkpointId: `chk_held_${i}` }),
+    );
+    const allocations = Object.fromEntries(
+      retirements.map((debt, i) => [
+        `held-${i}`,
+        {
+          ...entry.value.allocations[source.id]!,
+          choice: { kind: "checkpoint" as const, checkpointId: debt.checkpointId },
+        },
+      ]),
+    );
+    openWarmImageStore().register(entry.key, {
+      ...entry.value,
+      retirements,
+      allocations: { ...entry.value.allocations, ...allocations },
+      ...(reason === "row-capacity" ? { projectLabel: "x".repeat(950_000) } : {}),
+    });
+    const before = snapshot();
+    calls.length = 0;
+    expect(await owner.capture(source)).toBe(false);
+    expect(calls.some((argv) => argv[2] === "create" || argv[1] === "run")).toBe(false);
+    expect(snapshot()).toEqual(before);
+  },
+);
+
+it("retains independent debt when provider capture has an unknown outcome", async () => {
+  const { owner, context, calls } = fixture(true);
+  const source = await enroll(owner, context("cbx_unknown"));
+  const entry = openWarmImageStore().entries()[0]!;
+  const debt = { type: "retire" as const, checkpointId: "chk_held" };
+  openWarmImageStore().register(entry.key, {
+    ...entry.value,
+    retirements: [debt],
+    allocations: {
+      ...entry.value.allocations,
+      held: {
+        ...entry.value.allocations[source.id]!,
+        choice: { kind: "checkpoint", checkpointId: debt.checkpointId },
+      },
+    },
+  });
+  expect(await owner.capture(source)).toBe(false);
+  expect(record()?.operation).toMatchObject({
+    type: "capture",
+    phase: "uncertain",
+    leaseId: source.id,
+  });
+  expect(record()?.retirements).toEqual([debt]);
+  expect(calls.some((argv) => argv[2] === "delete")).toBe(false);
 });

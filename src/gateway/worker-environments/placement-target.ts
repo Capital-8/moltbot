@@ -78,6 +78,32 @@ export function isCurrentActiveWorkerEnvironment(
   );
 }
 
+/** Initial setup never owned a workspace; completed teardown may admit a fresh attempt. */
+export function isCompletedInitialRetainedWorkerCleanup(
+  placement: WorkerSessionPlacementRecord,
+  environment: WorkerEnvironmentRecord | undefined,
+): boolean {
+  return Boolean(
+    placement.state === "failed" &&
+    placement.activeOwnerEpoch === null &&
+    placement.workspaceBaseManifestRef === null &&
+    placement.remoteWorkspaceDir === null &&
+    !placement.turnClaim &&
+    !placement.confirmedLossRecovery &&
+    environment &&
+    environment.environmentId === placement.environmentId &&
+    environment.providerId !== DEVICE_WORKER_PROVIDER_ID &&
+    environment.sharedHost !== true &&
+    environment.state === "destroyed" &&
+    environment.lastActivatedAtMs === null &&
+    environment.attachedSessionIds.length === 0 &&
+    environment.retention &&
+    environment.retention.owner.sessionId === placement.sessionId &&
+    environment.retention.owner.sessionKey === placement.sessionKey &&
+    environment.retention.owner.agentId === placement.agentId,
+  );
+}
+
 export function isFailedWorkerPlacementEnvironmentGone(params: {
   environmentService:
     | {

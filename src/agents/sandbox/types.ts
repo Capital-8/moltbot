@@ -2,6 +2,7 @@ import type { SchemaContract } from "../../../packages/gateway-protocol/src/sche
 import type { AgentSandboxConfig } from "../../config/types.agents-shared.js";
 import type { SandboxDockerSettings } from "../../config/types.sandbox.js";
 import type { SkillEligibilityContext, SkillUsagePath } from "../../skills/types.js";
+import type { NativeWorkerPlacement } from "../harness/native-session/worker-placement.js";
 import type { SandboxBackendHandle, SandboxBackendId } from "./backend-handle.types.js";
 import type { SandboxFsBridge } from "./fs-bridge.types.js";
 

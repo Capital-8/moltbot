@@ -29,6 +29,21 @@ describe("OpenClawSchema cloudWorkers config", () => {
     });
   });
 
+  it("accepts only a boolean repository setup policy without changing the default", () => {
+    expect(
+      OpenClawSchema.parse(cloudProfile({})).cloudWorkers?.profiles?.development,
+    ).not.toHaveProperty("runSetupScript");
+    for (const runSetupScript of [false, true]) {
+      expect(
+        OpenClawSchema.parse(cloudProfile({ runSetupScript })).cloudWorkers?.profiles?.development
+          ?.runSetupScript,
+      ).toBe(runSetupScript);
+    }
+    for (const runSetupScript of ["false", null, {}]) {
+      expect(OpenClawSchema.safeParse(cloudProfile({ runSetupScript })).success).toBe(false);
+    }
+  });
+
   it("accepts provider-owned secret maps without admitting plaintext", () => {
     const setupSecrets = {
       registry_token: { source: "store", provider: "default", id: "NPM_TOKEN" },

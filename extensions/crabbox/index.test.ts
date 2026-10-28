@@ -245,7 +245,7 @@ it.each(["binary acquisition", "image deletion"])("joins aborted %s on stop", as
   const store = openWarmImageStore();
   const old = Date.now() - 14 * 24 * 60 * 60 * 1_000;
   store.register("expired", {
-    version: 3,
+    version: 4,
     allocations: {},
     image: {
       checkpointId: "chk_expired",
@@ -298,8 +298,8 @@ it.each(["binary acquisition", "image deletion"])("joins aborted %s on stop", as
     await stopping;
   }
   expect(generation.stopped).toBe(true);
-  expect(store.lookup("expired")?.operation).toEqual(
-    stage === "image deletion" ? { type: "retire", checkpointId: "chk_expired" } : undefined,
+  expect(store.lookup("expired")?.retirements).toEqual(
+    stage === "image deletion" ? [{ type: "retire", checkpointId: "chk_expired" }] : undefined,
   );
   expect(store.lookup("expired")?.image?.checkpointId).toBe("chk_expired");
 });

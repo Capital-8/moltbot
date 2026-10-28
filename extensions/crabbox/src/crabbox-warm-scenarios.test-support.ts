@@ -58,7 +58,7 @@ export const warmImage = (
 });
 
 export const warmRecord = (overrides: Partial<WarmProfileRecord> = {}): WarmProfileRecord => ({
-  version: 3,
+  version: 4,
   allocations: {},
   ...overrides,
 });

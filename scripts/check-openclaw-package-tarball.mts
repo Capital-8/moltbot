@@ -7,10 +7,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { extract as extractTar, list as listTar, type ReadEntry } from "tar";
 import { coerceErrorMessage } from "./lib/error-format.mts";
 import { collectNpmPackInventory, compareNpmPackInventory } from "./lib/npm-pack-inventory.mts";
 import { assertNpmShrinkwrapDependencies } from "./lib/npm-shrinkwrap-dependencies.mjs";
+import { extractPackageTarball } from "./lib/openclaw-package-tarball.mts";
 import { collectBundledDependencyErrors } from "./lib/package-bundled-dependencies.mts";
 import { collectPackageDistImportErrors } from "./lib/package-dist-imports.mjs";
 import {
@@ -85,6 +85,32 @@ function parseArgs(argv: string[]) {
     throw new Error(usage());
   }
   return { help: false, requireBundledWorkspaceDeps, tarball };
+}
+
+if (process.argv[2] === "--extract-only") {
+  const [workspace, sha256, bytes, candidate, ...extra] = process.argv.slice(3);
+  if (
+    !workspace ||
+    !candidate ||
+    !sha256 ||
+    !/^[a-f0-9]{64}$/u.test(sha256 ?? "") ||
+    !/^[1-9][0-9]*$/u.test(bytes ?? "") ||
+    extra.length ||
+    !Number.isSafeInteger(Number(bytes))
+  ) {
+    fail("Invalid package extraction arguments");
+  }
+  try {
+    await extractPackageTarball({
+      tarball: candidate,
+      workspace,
+      expected: { sha256, bytes: Number(bytes) },
+      inspectLimits: true,
+    });
+  } catch (error) {
+    fail(coerceErrorMessage(error));
+  }
+  process.exit(0);
 }
 
 let cliArgs: ReturnType<typeof parseArgs>;
@@ -213,206 +239,16 @@ function runPhase<Result>(label: string, action: () => Result): Result {
   }
 }
 
-type MaterialTarEntry = {
-  kind: "directory" | "file";
-  path: string;
-};
-
-function isRegularTarEntry(entry: ReadEntry): boolean {
-  return entry.type === "File" || entry.type === "OldFile" || entry.type === "ContiguousFile";
-}
-
-function canonicalMaterialPath(entry: ReadEntry, errors: string[]): string | null {
-  const rawPath = entry.header.path ?? "";
-  const parseParts = (candidate: string): string[] | null => {
-    const parts = candidate.split("/");
-    if (
-      !candidate ||
-      candidate.includes("\\") ||
-      candidate.startsWith("/") ||
-      /^[A-Za-z]:/u.test(candidate) ||
-      parts.some(
-        (part, index) =>
-          part === "." ||
-          part === ".." ||
-          (part === "" && index > 0 && !(entry.type === "Directory" && index === parts.length - 1)),
-      )
-    ) {
-      return null;
-    }
-    if (entry.type === "Directory" && parts.at(-1) === "") {
-      parts.pop();
-    }
-    return parts;
-  };
-  const rawParts = parseParts(rawPath);
-  if (!rawParts) {
-    errors.push(`unsafe tar entry path: ${rawPath || "<empty>"}`);
-    return null;
-  }
-  const finalPath = entry.path;
-  const parts = finalPath === rawPath ? rawParts : parseParts(finalPath);
-  if (!parts) {
-    errors.push(`unsafe tar entry path: ${finalPath || "<empty>"}`);
-    return null;
-  }
-  if (parts[0] !== "package" || (parts.length === 1 && entry.type !== "Directory")) {
-    errors.push(`tar entry is outside package/: ${finalPath || "<empty>"}`);
-    return null;
-  }
-  return parts.join("/");
-}
-
-// tar@7.5.22 winchars.encode applies this mapping before Windows extraction.
-function portableExtractionPathKey(value: string): string {
-  return value
-    .normalize("NFC")
-    .replace(/[|<>?:]/gu, (char) => String.fromCodePoint(0xf000 + char.codePointAt(0)!))
-    .toLowerCase();
-}
-
-function scanTarball(archivePath: string): {
-  entries: string[];
-  files: string[];
-} {
-  const errors: string[] = [];
-  const materialEntries: MaterialTarEntry[] = [];
-  const inspectEntry = (entry: ReadEntry) => {
-    const rawPath = entry.header.path ?? entry.path;
-    const isFile = isRegularTarEntry(entry);
-    if ((!isFile && entry.type !== "Directory") || Boolean(entry.linkpath)) {
-      errors.push(`unsupported tar entry type ${entry.type}: ${rawPath}`);
-      return;
-    }
-    const materialPath = canonicalMaterialPath(entry, errors);
-    if (!materialPath) {
-      return;
-    }
-    const mode = entry.mode;
-    const needsExec = entry.type === "Directory" || (mode !== undefined && (mode & 0o111) !== 0);
-    if (mode === undefined || (mode & 0o444) !== 0o444 || (needsExec && (mode & 0o111) !== 0o111)) {
-      errors.push(
-        `tar entry is not world-readable (${mode === undefined ? "<missing>" : `0${mode.toString(8)}`}): ${rawPath}`,
-      );
-    }
-    materialEntries.push({
-      kind: isFile ? "file" : "directory",
-      path: materialPath,
-    });
-  };
-
-  runPhase("tar preflight", () => {
-    let parseError: Error | undefined;
-    const parser = listTar({ sync: true, strict: true, onReadEntry: inspectEntry });
-    parser.on("ignoredEntry", inspectEntry);
-    parser.on("error", (error: Error) => {
-      parseError ??= error;
-    });
-    const input = fs.openSync(archivePath, "r");
-    const chunk = Buffer.allocUnsafe(64 * 1024);
-    try {
-      let bytesRead = 0;
-      while ((bytesRead = fs.readSync(input, chunk, 0, chunk.length, null)) > 0) {
-        parser.write(chunk.subarray(0, bytesRead));
-        if (parseError) {
-          break;
-        }
-      }
-      if (!parseError) {
-        parser.end();
-      }
-    } finally {
-      fs.closeSync(input);
-    }
-    if (parseError) {
-      throw parseError;
-    }
-  });
-
-  const exactPaths = new Map<string, MaterialTarEntry>();
-  const portablePaths = new Map<string, MaterialTarEntry>();
-  for (const entry of materialEntries) {
-    const existing = exactPaths.get(entry.path);
-    if (existing) {
-      errors.push(
-        existing.kind === entry.kind
-          ? `package tarball contains duplicate paths: ${entry.path}`
-          : `package tarball contains file-directory conflict: ${entry.path}`,
-      );
-    } else {
-      exactPaths.set(entry.path, entry);
-    }
-    const portablePath = portableExtractionPathKey(entry.path);
-    const portableExisting = portablePaths.get(portablePath);
-    if (portableExisting && portableExisting.path !== entry.path) {
-      errors.push(
-        `package tarball contains portable path collision: ${portableExisting.path}, ${entry.path}`,
-      );
-    } else {
-      portablePaths.set(portablePath, entry);
-    }
-  }
-  for (const entry of exactPaths.values()) {
-    const parts = entry.path.split("/");
-    for (let index = 1; index < parts.length; index += 1) {
-      const ancestor = portablePaths.get(
-        portableExtractionPathKey(parts.slice(0, index).join("/")),
-      );
-      if (ancestor?.kind === "file") {
-        errors.push(
-          `package tarball contains file-ancestor conflict: ${ancestor.path}, ${entry.path}`,
-        );
-        break;
-      }
-    }
-  }
-  const packageManifests = materialEntries.filter(
-    (entry) => entry.path === "package/package.json" && entry.kind === "file",
-  );
-  if (packageManifests.length !== 1) {
-    errors.push(
-      `package tarball must contain exactly one regular package/package.json (found ${packageManifests.length})`,
-    );
-  }
-  if (errors.length > 0) {
-    throw new Error(errors.join("\n"));
-  }
-
-  return {
-    entries: [...exactPaths.values()]
-      .filter((entry) => entry.path !== "package")
-      .map((entry) => {
-        const relativePath = entry.path.slice("package/".length);
-        return entry.kind === "directory" ? `${relativePath}/` : relativePath;
-      }),
-    files: [...exactPaths.values()]
-      .filter((entry) => entry.kind === "file")
-      .map((entry) => entry.path.slice("package/".length)),
-  };
-}
-
 const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-package-tarball-"));
-const archiveSnapshot = path.join(archiveRoot, "candidate.tgz");
 const extractDir = path.join(archiveRoot, "extract");
 let normalized: string[];
 let tarFileEntries: string[];
 try {
-  // Both passes consume one private byte snapshot, so path replacement cannot
-  // make preflight approve different bytes than extraction materializes.
   fs.chmodSync(archiveRoot, 0o700);
-  fs.copyFileSync(tarball, archiveSnapshot, fs.constants.COPYFILE_EXCL);
-  fs.chmodSync(archiveSnapshot, 0o400);
-  ({ entries: normalized, files: tarFileEntries } = scanTarball(archiveSnapshot));
-  fs.mkdirSync(extractDir);
-  runPhase("tar extract", () =>
-    extractTar({
-      cwd: extractDir,
-      file: archiveSnapshot,
-      preserveOwner: false,
-      strict: true,
-      sync: true,
-    }),
-  );
+  ({ entries: normalized, files: tarFileEntries } = await extractPackageTarball({
+    tarball,
+    workspace: archiveRoot,
+  }));
 } catch (error) {
   fs.rmSync(archiveRoot, { recursive: true, force: true });
   fail(`OpenClaw package tarball preflight failed:\n${coerceErrorMessage(error)}`);

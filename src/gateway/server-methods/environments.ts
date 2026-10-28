@@ -393,8 +393,29 @@ export const environmentsHandlers: GatewayRequestHandlers = {
   "environments.prepare": defineEnvironmentMutation(
     "prepare",
     validateEnvironmentsPrepareParams,
-    (options, service) =>
-      service.prepare(options.params, readGatewayRequestMutationAuthority(options).assertCurrent),
+    async (options, service) => {
+      const authority = readGatewayRequestMutationAuthority(options);
+      if ("projectPath" in options.params) {
+        return service.prepare(options.params, authority.assertCurrent);
+      }
+      const cleanups = new Set<() => Promise<void>>();
+      const readNativeCredential = repositoryProjectCredentialReader({
+        client: options.client,
+        requestDigest: sha256Hex(JSON.stringify(options.params)),
+        assertCurrent: authority.assertCurrent,
+      });
+      try {
+        return await service.prepare(options.params, authority.assertCurrent, {
+          signal: options.signal,
+          readNativeCredential,
+          retainCredentialCleanup: (revoke) => {
+            cleanups.add(revoke);
+          },
+        });
+      } finally {
+        await Promise.all([...cleanups].map((revoke) => revoke()));
+      }
+    },
   ),
   "environments.destroy": defineEnvironmentMutation(
     "destroy",

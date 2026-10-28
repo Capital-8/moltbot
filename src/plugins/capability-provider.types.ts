@@ -52,8 +52,24 @@ import type {
 } from "../tts/provider-types.js";
 import type { VideoGenerationProvider } from "../video-generation/types.js";
 import type { PluginJsonValue } from "./host-hook-json.js";
+import type {
+  WorkerSessionDiskRetention,
+  WorkerRetainedLeaseReceipt,
+} from "./worker-retention.types.js";
 
 export type WorkerProfile = Readonly<Record<string, PluginJsonValue>>;
+
+/** Snapshot inspection facts derived by native cache owners, never an execution grant. */
+export type WorkerValidatedMachineCaches = {
+  nodeToolchain?: {
+    version: string;
+    platform: "linux";
+    arch: "x64" | "arm64";
+    archiveSha256: string;
+    inventorySha256: string;
+  };
+  workerBundle?: { bundleHash: string };
+};
 
 /** Provider-authored picker metadata for one machine class or exact machine type. */
 export type WorkerMachineOption = Readonly<SchemaContract<ProtocolWorkerMachineOption>>;
@@ -133,6 +149,18 @@ export type WorkerNodeRuntimeIdentity = {
   workerBundleSha256?: string;
 };
 
+/** Admission-derived image selection only; no source credential or setup capability. */
+export type WorkerProjectImageSelection = {
+  key: string;
+  baseCommit: string;
+  preparation?: {
+    key: string;
+    cacheKey: string;
+    purpose: "session" | "reserve";
+    demandAtMs: number;
+  };
+};
+
 type WorkerNodeBootstrapAccess = {
   /** Core-owned command window for downloading and installing this grant's artifacts. */
   bootstrapTimeoutMs?: number;
@@ -160,6 +188,9 @@ type WorkerNodeBootstrapAccess = {
 /** Operation-bound immutable artifacts without a node identity or enrollment credential. */
 export type WorkerNodeRuntimePreparation = WorkerNodeBootstrapAccess & {
   workerBundle: {
+    /** Canonical content manifest identity; snapshot capture requires this producer fact. */
+    bundleHash?: string;
+    protocolFeatures?: readonly string[];
     url: string;
     token: string;
     sha256: string;
@@ -328,6 +359,14 @@ export type WorkerProvider = {
     machineClass?: string,
     os?: string,
   ) => boolean;
+  /** Opt in to borrowing an admitted project image for a new private retained lease.
+   * Existing retained leases resume their original resource; this never grants setup.
+   */
+  supportsRetainedProjectImages?: (
+    profile: WorkerProfile,
+    machineClass?: string,
+    os?: string,
+  ) => boolean;
   /** Immutable target resolved before project preparation or allocation. */
   resolvePreparationTarget?: (
     profile: WorkerProfile,
@@ -388,27 +427,40 @@ export type WorkerProvider = {
       nodeBootstrapTimeoutMs?: number;
       prepareNodeRuntime?: () => Promise<WorkerNodeRuntimePreparation>;
       beginNodeEnrollment?: () => Promise<WorkerNodeEnrollment>;
-      project?: {
-        key: string;
-        baseCommit: string;
+      projectImage?: WorkerProjectImageSelection;
+      project?: WorkerProjectImageSelection & {
         label?: string;
         /** Gateway-local checkout root for display and explicit rebuild requests. */
         root?: string;
-        preparation?: {
-          key: string;
-          cacheKey: string;
-          purpose: "session" | "reserve";
-          demandAtMs: number;
-        };
         secretNames?: readonly string[];
         signal: AbortSignal;
         assertCurrent: () => void;
         /** Verify an already enrolled allocation without transferring, running setup, or capturing it. */
         inspectPreparedWorkspace?: (transport: {
           runScript: (script: string, signal: AbortSignal) => Promise<string>;
-        }) => Promise<void>;
+          /** Verify the complete selected cache inventory before reusable image capture. */
+          snapshot?: true;
+          /** Current producer identity for snapshot-only machine bundle inspection. */
+          snapshotWorkerBundle?: {
+            bundleHash: string;
+            openclawVersion: string;
+            protocolFeatures: readonly string[];
+          };
+        }) => Promise<void | {
+          namespace: string;
+          seedKey: string;
+          cacheKey: string;
+          baseCommit: string;
+          workspaceDir: string;
+          homeDir: string;
+          sourceManifestRef: string;
+          preparedManifestRef: string;
+          validatedMachineCaches?: WorkerValidatedMachineCaches;
+        }>;
         /** Bound to this provision attempt; retained callbacks reject after it closes. */
         prepare: (transport: {
+          /** Operator-owned worker initializer; its bounded environment never returns to the host. */
+          setupInitializer?: { command: string[]; envKeys: string[] };
           runScript: (script: string, signal: AbortSignal) => Promise<string>;
           /** Render using this provider command's remaining budget before repository code runs. */
           runScriptWithBudget?: (
@@ -442,7 +494,10 @@ export type WorkerProvider = {
   runSetupCommand?: (
     lease: { leaseId: string; profile: WorkerProfile },
     command: {
-      createScript: (setupEnv?: Record<string, string>) => string;
+      createScript: (
+        setupEnv?: Record<string, string>,
+        setupInitializer?: { command: string[]; envKeys: string[] },
+      ) => string;
       workspaceDir: string;
       homeDir: string;
       timeoutMs: number;

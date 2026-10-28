@@ -43,6 +43,10 @@ export function registerBackupCommand(program: Command) {
     .option("--verify", "Verify the archive after writing it", false)
     .option("--only-config", "Back up only the active JSON config file", false)
     .option("--no-include-workspace", "Exclude workspace directories from the backup")
+    .option(
+      "--exclude-worktree-templates",
+      "Exclude regenerable managed worktree template caches; keep checkouts and retained state",
+    )
     .addHelpText(
       "after",
       () =>

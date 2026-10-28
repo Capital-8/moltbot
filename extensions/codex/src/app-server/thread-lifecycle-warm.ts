@@ -34,6 +34,7 @@ import {
   fingerprintCodexThreadConfig,
   fingerprintRestrictedThreadConfig,
 } from "./thread-fingerprints.js";
+import type { CodexRetainedThreadRefusalReason } from "./thread-lifecycle-errors.js";
 import { CodexThreadBindingConflictError } from "./thread-lifecycle-errors.js";
 import {
   buildCodexThreadRequestConfig,
@@ -55,6 +56,7 @@ import {
   CodexIncognitoPolicyChangeError,
   refreshCodexThreadInstructions,
 } from "./thread-policy.js";
+import { codexWorkerBindingProvenance } from "./worker-loss-recovery.js";
 
 type CodexWarmThreadReuseParams = CodexThreadRequestContext & {
   params: CodexStartOrResumeThreadParams;
@@ -72,7 +74,7 @@ type CodexWarmThreadReuseResult =
       binding: CodexAppServerThreadLifecycleBinding;
       cleanupOnFailure?: () => Promise<void>;
     }
-  | { kind: "rotate" }
+  | { kind: "rotate"; reason: CodexRetainedThreadRefusalReason }
   | { kind: "resume"; prebuiltFinalConfigPatch?: CodexThreadFinalConfigPatchResult };
 
 type CodexLiveThreadReleaseParams = {
@@ -293,7 +295,7 @@ export async function tryReuseCodexLiveThread(
   // configuration ownership. Keep their existing live-only continuation path.
   if (incognito && (binding.preserveNativeModel || binding.connectionScope === "supervision")) {
     if (options.admittedNativeThread?.status?.type === "notLoaded") {
-      return { kind: "rotate" };
+      return { kind: "rotate", reason: "ephemeral binding unavailable" };
     }
     if (
       binding.clientId === clientId &&
@@ -310,7 +312,7 @@ export async function tryReuseCodexLiveThread(
       params.assertCurrent?.();
       return { kind: "ready", binding: { ...binding, lifecycle: { action: "resumed" } } };
     }
-    return { kind: "rotate" };
+    return { kind: "rotate", reason: "ephemeral binding unavailable" };
   }
 
   if (!binding.clientId || binding.clientId !== clientId || (ringZeroActive && !incognito)) {
@@ -431,7 +433,7 @@ export async function tryReuseCodexLiveThread(
       // Rotation has not changed native policy. Keep the idle owner available
       // if background work prevents the caller from releasing this subscription.
       preserveSubscription = true;
-      return { kind: "rotate" };
+      return { kind: "rotate", reason: "plugin app config" };
     }
     // Engine identity, projection epoch, and policy were checked by the owner
     // before this call; compatible bootstrap threads must keep their session.
@@ -502,7 +504,7 @@ export async function tryReuseCodexLiveThread(
       if (incognito) {
         throw new CodexIncognitoPolicyChangeError("creation policy");
       }
-      return { kind: "rotate" };
+      return { kind: "rotate", reason: "restricted resume configuration" };
     }
     const liveThreadConfigFingerprint = incognito
       ? retainedThread.configFingerprint
@@ -568,6 +570,7 @@ export async function tryReuseCodexLiveThread(
       ? nativeThread?.modelProvider?.trim() || binding.modelProvider
       : binding.modelProvider;
     const bindingPatch = {
+      ...codexWorkerBindingProvenance(params.nativeWorkerPlacement, binding),
       cwd: params.cwd,
       model,
       modelProvider,

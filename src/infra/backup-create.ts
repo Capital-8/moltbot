@@ -12,7 +12,6 @@ import {
   type BackupSqliteSnapshotFact,
 } from "../commands/backup-resource-inventory.js";
 import {
-  buildBackupArchiveBasename,
   buildBackupArchivePath,
   buildBackupArchiveRoot,
   canonicalizePathForContainment,
@@ -24,7 +23,6 @@ import { resolveGatewayLockDir } from "../config/paths.js";
 import { withCommandProcessScope } from "../process/exec-spawn.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { runOfflineDatabaseBackup } from "../snapshot/database-backup.js";
-import { resolveHomeDir, resolveUserPath } from "../utils.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import {
   recordArchiveSymbolicLink,
@@ -34,6 +32,7 @@ import {
   cleanupBackupArchivePublication,
   createBackupArchivePublication,
   publishPreparedBackupArchive,
+  resolveBackupArchiveOutputPath,
   type BackupArchivePublication,
 } from "./backup-archive-publication.js";
 import {
@@ -58,7 +57,6 @@ import {
 import { writeTarArchiveWithRetry } from "./backup-tar-retry.js";
 import { walkBackupTar } from "./backup-tar-walk.js";
 import { isErrno } from "./errors.js";
-import { safeStat } from "./path-existence.js";
 import {
   createLegacyAuditBackupCapture,
   legacyAuditBackupCapturesMatch,
@@ -76,6 +74,8 @@ export type BackupCreateOptions = {
   output?: string;
   dryRun?: boolean;
   includeWorkspace?: boolean;
+  /** Omit regenerable managed worktree templates; checkouts remain included. */
+  excludeWorktreeTemplates?: boolean;
   onlyConfig?: boolean;
   verify?: boolean;
   json?: boolean;
@@ -98,6 +98,7 @@ export type BackupCreateResult = {
   archivePath: string;
   dryRun: boolean;
   includeWorkspace: boolean;
+  excludeWorktreeTemplates?: boolean;
   onlyConfig: boolean;
   verified: boolean;
   assets: BackupAsset[];
@@ -118,36 +119,6 @@ export type BackupCreateResult = {
   externalSymbolicLinks?: BackupSymbolicLink[];
   warnings?: string[];
 };
-
-async function resolveOutputPath(params: {
-  output?: string;
-  nowMs: number;
-  includedAssets: BackupAsset[];
-  stateDir: string;
-}): Promise<string> {
-  const basename = buildBackupArchiveBasename(params.nowMs);
-  const rawOutput = params.output?.trim();
-  if (!rawOutput) {
-    const cwd = path.resolve(process.cwd());
-    const canonicalCwd = await fs.realpath(cwd).catch(() => cwd);
-    const cwdInsideSource = params.includedAssets.some((asset) =>
-      isPathInside(asset.sourcePath, canonicalCwd),
-    );
-    const defaultDir = cwdInsideSource ? (resolveHomeDir() ?? path.dirname(params.stateDir)) : cwd;
-    return path.resolve(defaultDir, basename);
-  }
-
-  const resolved = resolveUserPath(rawOutput);
-  if (rawOutput.endsWith("/") || rawOutput.endsWith("\\")) {
-    return path.join(resolved, basename);
-  }
-
-  if ((await safeStat(resolved))?.isDirectory()) {
-    return path.join(resolved, basename);
-  }
-
-  return resolved;
-}
 
 type BackupOutputFailurePhase = "parent" | "publication" | "write";
 
@@ -271,6 +242,7 @@ function buildManifest(
     options: {
       includeWorkspace: result.includeWorkspace,
       onlyConfig: result.onlyConfig,
+      ...(result.excludeWorktreeTemplates ? { excludeWorktreeTemplates: true } : {}),
     },
     paths: {
       stateDir: plan.resources.stateDir,
@@ -390,8 +362,15 @@ async function createBackupArchiveInScope(
   const archiveRoot = buildBackupArchiveRoot(nowMs);
   const onlyConfig = Boolean(opts.onlyConfig);
   const includeWorkspace = onlyConfig ? false : (opts.includeWorkspace ?? true);
+  const excludeWorktreeTemplates = !onlyConfig && Boolean(opts.excludeWorktreeTemplates);
   const plan =
-    preparedPlan ?? (await resolveBackupPlanFromDisk({ includeWorkspace, onlyConfig, nowMs }));
+    preparedPlan ??
+    (await resolveBackupPlanFromDisk({
+      includeWorkspace,
+      excludeWorktreeTemplates,
+      onlyConfig,
+      nowMs,
+    }));
   const selection = plan.databaseSelection;
   if (!preparedPlan && !opts.dryRun && selection?.postgres && plan.databaseConfig) {
     return runOfflineDatabaseBackup(
@@ -400,7 +379,7 @@ async function createBackupArchiveInScope(
       { config: plan.databaseConfig, selection },
     );
   }
-  const outputPath = await resolveOutputPath({
+  const outputPath = await resolveBackupArchiveOutputPath({
     output: opts.output,
     nowMs,
     includedAssets: plan.included,
@@ -438,6 +417,7 @@ async function createBackupArchiveInScope(
     archivePath: outputPath,
     dryRun: Boolean(opts.dryRun),
     includeWorkspace,
+    ...(excludeWorktreeTemplates ? { excludeWorktreeTemplates: true } : {}),
     onlyConfig,
     verified: false,
     assets: plan.included,

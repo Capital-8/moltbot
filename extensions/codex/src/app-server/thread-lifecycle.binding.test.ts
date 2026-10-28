@@ -592,6 +592,145 @@ async function createLeasedLifecycleWireClient(
 }
 
 describe("Codex app-server thread lifecycle bindings", () => {
+  it.each([
+    "recover",
+    "seed failure",
+    "legacy",
+    "wrong owner",
+    "missing budget",
+    "restricted policy",
+  ] as const)("handles confirmed worker loss with %s", async (scenario) => {
+    const { sessionFile, workspaceDir } = createPaths();
+    const params = createParams(sessionFile, workspaceDir);
+    let starts = 0;
+    const fixture = await createLeasedCodexLifecycleHarness({
+      agentDir: path.join(tempDir, "agent"),
+      respond: async (method) => {
+        if (method === "config/read") {
+          return { config: {}, origins: {}, layers: [] };
+        }
+        if (method === "configRequirements/read") {
+          return { requirements: null };
+        }
+        if (method === "thread/start") {
+          return threadStartResult(++starts === 1 ? "old-worker-thread" : "hydrated-thread");
+        }
+        if (method === "thread/delete") {
+          return {};
+        }
+        if (method === "thread/resume") {
+          if (scenario !== "recover") {
+            throw new CodexAppServerRpcError(
+              { code: -32603, message: "Synthetic lost native home" },
+              method,
+            );
+          }
+          return threadStartResult("hydrated-thread");
+        }
+        throw new Error("unexpected request " + method);
+      },
+    });
+    const predecessor = {
+      agentId: "main",
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey!,
+      environmentId: "old-worker",
+      ownerEpoch: 7,
+      retentionOwnerBinding: "a".repeat(64),
+    };
+    const common = {
+      client: fixture.client,
+      params,
+      userMcpServersEnabled: false,
+      retainedSession: true as const,
+      nativeWorkerPlacement: { owner: predecessor },
+    };
+    const initial = await startOrResumeThread(common);
+    await fixture.endTurn(initial.threadId);
+    const before = await readCodexAppServerBinding(sessionFile);
+    expect(before?.workerPlacementOwner).toEqual(predecessor);
+    if (scenario === "restricted policy") {
+      await writeCodexAppServerBinding(sessionFile, {
+        ...before!,
+        nativeToolPolicyRestricted: true,
+      });
+    }
+    if (scenario === "legacy") {
+      await writeCodexAppServerBinding(sessionFile, {
+        ...before!,
+        workerPlacementOwner: undefined,
+      });
+    }
+    const nativeWorkerPlacement = {
+      owner: { ...predecessor, environmentId: "new-worker", ownerEpoch: 11 },
+      recovery: {
+        version: 1 as const,
+        predecessor: { ...predecessor, ...(scenario === "wrong owner" ? { ownerEpoch: 6 } : {}) },
+        predecessorGeneration: 9,
+        replacementDispatchGeneration: 10,
+      },
+    };
+    const history = [
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Quoted previous conversation, not a request" }],
+      },
+    ];
+    fixture.request.mockClear();
+    if (scenario === "seed failure") {
+      const request = CodexAppServerClient.prototype.request.bind(fixture.client);
+      fixture.request.mockImplementation(async (method, ...args) => {
+        if (method === "thread/inject_items") {
+          throw new Error("synthetic seed rejected");
+        }
+        return request(method, ...args);
+      });
+    }
+    const result = startOrResumeThread({
+      ...common,
+      nativeWorkerPlacement,
+      requireExistingThread: true,
+      ...(scenario === "missing budget" ? {} : { historyBootstrapItems: history }),
+    });
+    if (scenario === "recover") {
+      const recovered = await result;
+      expect(recovered.threadId).toBe("hydrated-thread");
+      const committed = await readCodexAppServerBinding(sessionFile);
+      expect(committed).toMatchObject({
+        workerPlacementOwner: nativeWorkerPlacement.owner,
+        recoveredFrom: { owner: predecessor, threadId: "old-worker-thread" },
+      });
+      const methods = fixture.request.mock.calls.map(([method]) => method);
+      expect(methods.indexOf("thread/start")).toBeLessThan(methods.indexOf("thread/inject_items"));
+      expect(methods).not.toContain("turn/start");
+      await fixture.endTurn(recovered.threadId);
+      fixture.notify({ method: "thread/closed", params: { threadId: recovered.threadId } });
+      fixture.request.mockClear();
+      await startOrResumeThread({
+        ...common,
+        nativeWorkerPlacement,
+        requireExistingThread: true,
+        historyBootstrapItems: history,
+      });
+      expect(fixture.request.mock.calls.map(([method]) => method)).not.toContain("thread/start");
+      const appended = fixture.request.mock.calls.filter(
+        ([method]) => method === "thread/inject_items",
+      );
+      expect(JSON.stringify(appended)).not.toContain("Quoted previous conversation, not a request");
+    } else {
+      await expect(result).rejects.toThrow(
+        scenario === "seed failure"
+          ? "synthetic seed rejected"
+          : scenario === "missing budget"
+            ? "canonical bounded available history"
+            : "no input was submitted and a fresh thread is refused",
+      );
+      expect((await readCodexAppServerBinding(sessionFile))?.threadId).toBe("old-worker-thread");
+      expect(fixture.request.mock.calls.map(([method]) => method)).not.toContain("turn/start");
+    }
+  });
+
   registerRequiredRootThreadPolicyTests({
     createParams,
     createPaths,
@@ -1456,6 +1595,127 @@ describe("Codex app-server thread lifecycle bindings", () => {
     });
   });
 
+  it.each([
+    ["runtime identity", { appServerRuntimeFingerprint: "changed-runtime" }],
+    ["configured MCP ownership", { configuredMcpOwnershipVersion: 1 as const }],
+    ["restricted resume configuration", {}],
+    ["warm restricted resume configuration", {}],
+    ["native resume failed", {}],
+  ])(
+    "reports retained refusal reason %s without replacing its native thread",
+    async (reason, change) => {
+      const { sessionFile, workspaceDir } = createPaths();
+      const params = createParams(sessionFile, workspaceDir);
+      const restricted = reason.includes("restricted resume configuration");
+      const fixture = await createLeasedCodexLifecycleHarness({
+        agentDir: path.join(tempDir, "agent"),
+        respond: async (method) => {
+          if (method === "config/read") {
+            return { config: {}, origins: {}, layers: [] };
+          }
+          if (method === "configRequirements/read") {
+            return { requirements: null };
+          }
+          if (method === "thread/start") {
+            return threadStartResult("retained-diagnostic");
+          }
+          if (method === "thread/resume" && reason === "native resume failed") {
+            throw new CodexAppServerRpcError(
+              {
+                code: -32603,
+                message: "synthetic native detail",
+                data: { privateDetail: "synthetic-private-payload" },
+              },
+              method,
+            );
+          }
+          throw new Error(`Unexpected native request: ${method}`);
+        },
+      });
+      const common = {
+        client: fixture.client,
+        params,
+        userMcpServersEnabled: false,
+        retainedSession: true as const,
+        appServerRuntimeFingerprint: "original-runtime",
+        ...(restricted ? { nativeCodeModeEnabled: false } : {}),
+      };
+      const initial = await startOrResumeThread(common);
+      if (reason === "warm restricted resume configuration") {
+        await retainThread(fixture.client, initial);
+      }
+      if (restricted) {
+        const bound = await readCodexAppServerBinding(sessionFile);
+        await writeCodexAppServerBinding(sessionFile, {
+          ...bound!,
+          restrictedThreadConfigFingerprint: "prior-restricted-config",
+        });
+      }
+      if (reason === "restricted resume configuration" || reason === "native resume failed") {
+        await fixture.endTurn(initial.threadId);
+      }
+      const before = await readCodexAppServerBinding(sessionFile);
+      fixture.request.mockClear();
+      const result = startOrResumeThread({ ...common, ...change });
+      await expect(result).rejects.toMatchObject({
+        name: "CodexRetainedThreadResumeRefusedError",
+        code: "CODEX_RETAINED_THREAD_RESUME_REFUSED",
+        reason: restricted ? "restricted resume configuration" : reason,
+        message: expect.stringContaining(
+          `reason=${restricted ? "restricted resume configuration" : reason}`,
+        ),
+      });
+      await expect(result).rejects.not.toHaveProperty("cause");
+      await expect(result).rejects.toHaveProperty(
+        "message",
+        expect.not.stringContaining("synthetic native detail"),
+      );
+      await expect(readCodexAppServerBinding(sessionFile)).resolves.toEqual(before);
+      const methods = fixture.request.mock.calls.map(([method]) => method);
+      if (reason === "runtime identity" || reason === "configured MCP ownership") {
+        expect(methods).toEqual(PREFLIGHT_METHODS);
+      } else {
+        if (reason !== "warm restricted resume configuration") {
+          expect(methods).toContain("thread/read");
+        }
+        expect(methods.includes("thread/resume")).toBe(reason === "native resume failed");
+        expect(methods).not.toContain("thread/start");
+        expect(methods).not.toContain("turn/start");
+        expect(methods).not.toContain("thread/delete");
+        expect(methods).not.toContain("thread/inject_items");
+      }
+    },
+  );
+
+  it("reports retained refusal reason missing binding without starting a thread", async () => {
+    const { sessionFile, workspaceDir } = createPaths();
+    const fixture = await createLeasedCodexLifecycleHarness({
+      agentDir: path.join(tempDir, "agent"),
+      respond: async (method) => {
+        if (method === "config/read") {
+          return { config: {}, origins: {}, layers: [] };
+        }
+        if (method === "configRequirements/read") {
+          return { requirements: null };
+        }
+        throw new Error(`Unexpected native request: ${method}`);
+      },
+    });
+    await expect(
+      startOrResumeThread({
+        client: fixture.client,
+        params: createParams(sessionFile, workspaceDir),
+        userMcpServersEnabled: false,
+        requireExistingThread: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "CODEX_RETAINED_THREAD_RESUME_REFUSED",
+      reason: "missing binding",
+    });
+    await expect(readCodexAppServerBinding(sessionFile)).resolves.toBeUndefined();
+    expect(fixture.request.mock.calls.map(([method]) => method)).toEqual(PREFLIGHT_METHODS);
+  });
+
   it("resumes a retained persistent thread with refreshed persona and skills", async () => {
     const sessionFile = path.join(tempDir, "warm-skills-session.jsonl");
     const workspaceDir = path.join(tempDir, "warm-skills-workspace");
@@ -1480,6 +1740,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
     const common = {
       client,
       params,
+      retainedSession: true as const,
       userMcpServersEnabled: false,
       developerInstructions: "generic policy",
     };

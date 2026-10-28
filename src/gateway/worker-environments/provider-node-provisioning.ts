@@ -170,6 +170,7 @@ export function createWorkerNodeProvisioning(options: WorkerNodeProvisioningOpti
     const prepareInstallation = () =>
       (pendingInstallation ??= prepareBundle(preparedInstallation, signal));
     let enrollment: WorkerNodeEnrollment | undefined;
+    let connectedOwner: { nodeDeviceId: string; nodeSetupId: string | null } | undefined;
     let pending: Promise<WorkerNodeEnrollment> | undefined;
     const close = () => {
       if (!open) {
@@ -220,6 +221,25 @@ export function createWorkerNodeProvisioning(options: WorkerNodeProvisioningOpti
       }
     };
     return {
+      current(
+        owner: WorkerEnvironmentRecord,
+        requireCurrentOwner: (owner: WorkerEnvironmentRecord) => WorkerEnvironmentRecord,
+      ) {
+        // Pairing binds the node before the provider returns its lease. Only this
+        // setup's completed device may replace the original unbound identity.
+        const current = requireCurrentOwner(
+          owner.nodeDeviceId === null && connectedOwner
+            ? { ...owner, nodeDeviceId: connectedOwner.nodeDeviceId }
+            : owner,
+        );
+        if (
+          current.provisionOperationId !== owner.provisionOperationId ||
+          (connectedOwner && current.nodeSetupId !== connectedOwner.nodeSetupId)
+        ) {
+          throw new Error("Worker provisioning operation is closed");
+        }
+        return current;
+      },
       get installation() {
         return pendingInstallation ?? preparedInstallation;
       },
@@ -262,7 +282,17 @@ export function createWorkerNodeProvisioning(options: WorkerNodeProvisioningOpti
             throw error;
           }
           enrollment = prepared;
-          return prepared;
+          const nodeSetupId = options.store.get(record.environmentId)?.nodeSetupId ?? null;
+          return {
+            ...prepared,
+            waitForDeviceId: async () => {
+              const nodeDeviceId = await prepared.waitForDeviceId();
+              assertCurrent();
+              // Carry only the device proven by this setup's completed enrollment.
+              connectedOwner = { nodeDeviceId, nodeSetupId };
+              return nodeDeviceId;
+            },
+          };
         });
         const prepared = await pending;
         assertCurrent();

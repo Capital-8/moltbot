@@ -117,6 +117,7 @@ export async function startCodexAttemptThread(params: {
   nativeProviderWebSearchSupport: CodexNativeWebSearchSupport;
   sandboxExecServerEnabled: boolean;
   sandbox: CodexSandboxContext;
+  nativeWorkerPlacement?: NonNullable<CodexSandboxContext>["nativeWorkerPlacement"];
   contextEngineProjection: CodexContextEngineThreadBootstrapProjection | undefined;
   historyBootstrapItems?: Parameters<typeof startOrResumeThread>[0]["historyBootstrapItems"];
   historyDeltaItems?: Parameters<typeof startOrResumeThread>[0]["historyDeltaItems"];

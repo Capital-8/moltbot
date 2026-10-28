@@ -20,11 +20,13 @@ import {
   setRuntimeConfigSnapshot,
 } from "../../config/runtime-snapshot.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   claimAgentRunDelegatedAuthority,
   releaseAgentRunDelegatedAuthority,
   type AgentRunDelegatedAuthority,
 } from "../../infra/agent-run-registry.js";
+import type { WorkerProfile } from "../../plugins/capability-provider.types.js";
 import { tryBeginGatewayRootWorkAdmission } from "../../process/gateway-work-admission.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
 import {
@@ -40,6 +42,7 @@ import {
   bindWorkerTurnCapabilities,
   getWorkerTurnToolSurface,
 } from "./placement-turn-claim-events.js";
+import { requireWorkerProfile } from "./service-validation.js";
 import { createWorkerGatewayToolRuntime } from "./worker-gateway-tool-runtime.js";
 import {
   createWorkerGatewayTools,
@@ -228,7 +231,17 @@ export async function createWorkerSessionToolTestFixture(
     path.join(await fs.realpath(os.tmpdir()), "openclaw-worker-tools-"),
   );
   const database = openOpenClawStateDatabase({ env: { OPENCLAW_STATE_DIR: root } });
-  const cfg = {};
+  const cfg: OpenClawConfig = {
+    cloudWorkers: {
+      profiles: {
+        "cloud-profile": {
+          provider: "latest-provider",
+          install: "bundle" as const,
+          settings: { region: "latest" },
+        },
+      },
+    },
+  };
   setRuntimeConfigSnapshot(cfg);
   const placements = createWorkerSessionPlacementStore({ database });
   await activate(source);
@@ -339,6 +352,10 @@ export async function createWorkerSessionToolTestFixture(
     }
   }
   scopedSessionAccess.mockImplementation(async (params) => await params.run());
+  const childProfiles = new Map<
+    string,
+    { profileId: string; providerId: string; profileSnapshot: WorkerProfile }
+  >();
   function configureSpawnTarget(
     owner: typeof CHILD,
     parent: { sessionKey: string; sessionId: string },
@@ -356,8 +373,20 @@ export async function createWorkerSessionToolTestFixture(
         return { ok: true, key: state.childSessionKey, sessionId: owner.sessionId };
       },
     );
-    dispatchChild.mockImplementation(async (request: { sessionKey: string }) => {
+    dispatchChild.mockImplementation(async (request: { sessionKey: string; profileId: string }) => {
       state.order.push("dispatch");
+      const profile = cfg.cloudWorkers?.profiles?.[request.profileId];
+      if (!profile) {
+        throw new Error("Fixture dispatch requires a configured profile");
+      }
+      childProfiles.set(owner.environmentId, {
+        profileId: request.profileId,
+        providerId: profile.provider,
+        profileSnapshot: {
+          install: "bundle",
+          settings: requireWorkerProfile(profile.settings ?? {}),
+        },
+      });
       expect(placements.get(owner.sessionId)).toBeUndefined();
       await activate({
         ...owner,
@@ -400,7 +429,7 @@ export async function createWorkerSessionToolTestFixture(
               state: "attached",
               ownerEpoch: owner.ownerEpoch,
               attachedSessionIds: [owner.sessionId],
-              ...structuredClone(CLOUD_PROFILE),
+              ...structuredClone(childProfiles.get(environmentId) ?? CLOUD_PROFILE),
             }
           : undefined;
       },
@@ -511,6 +540,7 @@ export async function createWorkerSessionToolTestFixture(
   return {
     root,
     database,
+    cfg,
     placements,
     identity,
     execute,

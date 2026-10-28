@@ -2077,6 +2077,8 @@ CREATE TABLE IF NOT EXISTS session_repository_workspaces (
   branch TEXT NOT NULL CHECK (length(branch) BETWEEN 1 AND 256),
   checkpoint_ref TEXT,
   manifest_hash TEXT,
+  recovery_json TEXT,
+  disk_authority_json TEXT,
   revision INTEGER NOT NULL CHECK (revision >= 0),
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,

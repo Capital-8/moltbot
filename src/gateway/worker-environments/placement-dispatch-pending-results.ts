@@ -86,8 +86,7 @@ export async function recoverPendingWorkspaceResults(
     }
     const sameGatewayInstance =
       pending.gatewayInstanceId === placements.workspaceResultInstanceId();
-    const reclaimResult =
-      pending.claimId === pending.runId && pending.claimId.startsWith("reclaim-");
+    const reclaimResult = isWorkerReclaimWorkspaceResult(pending);
     if (sameGatewayInstance && pending.recoveryRequestedAtMs === null) {
       continue;
     }
@@ -104,23 +103,23 @@ export async function recoverPendingWorkspaceResults(
     try {
       const pendingPlacement =
         placement?.state === "active" || placement?.state === "draining" ? placement : undefined;
-      const turnClaim =
-        pendingPlacement &&
-        pendingPlacement.environmentId === pending.environmentId &&
-        pendingPlacement.activeOwnerEpoch === pending.ownerEpoch
-          ? {
-              sessionId: pendingPlacement.sessionId,
-              claimId: pending.claimId,
-              runId: pending.runId,
-              placementGeneration: pending.placementGeneration,
-              owner: placementTurnOwner(pendingPlacement),
-            }
-          : undefined;
+      const turnClaim = pendingPlacement
+        ? {
+            sessionId: pendingPlacement.sessionId,
+            claimId: pending.claimId,
+            runId: pending.runId,
+            placementGeneration: pending.placementGeneration,
+            owner: placementTurnOwner(pendingPlacement),
+          }
+        : undefined;
       if (
         !pendingPlacement ||
         !turnClaim ||
         !matchesWorkspaceResultClaim(pendingPlacement, pending, turnClaim)
       ) {
+        if (pending.diskAuthority) {
+          throw new Error("Retained disk result lost its exact placement owner; recovery is held");
+        }
         if (pending.stagedResultRef && pending.workspaceAcceptedAtMs === null) {
           // A staged unaccepted result outlives stale placement ownership. Only
           // explicit operator abandonment may delete its durable Git ref.

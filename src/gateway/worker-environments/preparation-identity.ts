@@ -71,7 +71,9 @@ export function createWorkerPreparationIdentity(params: {
     // Providers own the disk fingerprint; unknown providers conservatively retain
     // their settings. Installation and execution mode belong to runtime readiness.
     profile: facts.target.profileKey ?? params.profileSnapshot.settings,
-    project: params.project ? { key: params.project.key } : { source: "empty" },
+    project: params.project
+      ? { key: params.project.key }
+      : { source: params.imageReserve ? "image" : "empty" },
     workspaceProtocol: NODE_WORKER_WORKSPACE_PREPARE_COMMAND,
   };
   const digest = (value: unknown) => sha256Hex(stableStringify(value));

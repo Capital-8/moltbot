@@ -196,6 +196,8 @@ async function resolveBackupPlanFromPaths(params: {
   pluginInventory?: ActivatedPluginBackupInventory;
   configCapture?: BackupConfigCapture;
   includeWorkspace?: boolean;
+  excludeWorktreeTemplates?: boolean;
+  worktreeRoot?: string;
   onlyConfig?: boolean;
   skillDiscoveryLimits?: ResolvedSkillDiscoveryLimits;
   nowMs?: number;
@@ -244,6 +246,18 @@ async function resolveBackupPlanFromPaths(params: {
         ),
       )
     ).flat(),
+    worktreeTemplateDirs: params.excludeWorktreeTemplates
+      ? await Promise.all(
+          [
+            ...new Set([
+              path.join(stateDir, "worktrees"),
+              ...(params.worktreeRoot ? [params.worktreeRoot] : []),
+            ]),
+          ].map(async (root) =>
+            path.join(await canonicalizePathForContainment(root), ".templates"),
+          ),
+        )
+      : [],
     agentRoots,
     pluginResources: params.pluginInventory?.resources ?? [],
     pluginRoots: params.pluginInventory?.pluginRoots ?? [],
@@ -560,6 +574,7 @@ export async function resolveBackupAgentRoots(config: OpenClawConfig): Promise<B
 export async function resolveBackupPlanFromDisk(
   params: {
     includeWorkspace?: boolean;
+    excludeWorktreeTemplates?: boolean;
     onlyConfig?: boolean;
     nowMs?: number;
   } = {},
@@ -588,6 +603,7 @@ export async function resolveBackupPlanFromDisk(
 
 async function resolveBackupPlanFromState(params: {
   includeWorkspace?: boolean;
+  excludeWorktreeTemplates?: boolean;
   onlyConfig?: boolean;
   nowMs?: number;
 }) {
@@ -662,6 +678,10 @@ async function resolveBackupPlanFromState(params: {
     pluginInventory,
     configCapture,
     includeWorkspace,
+    excludeWorktreeTemplates: params.excludeWorktreeTemplates,
+    worktreeRoot: discoverySnapshot.config.worktreeRoot
+      ? resolveUserPath(discoverySnapshot.config.worktreeRoot)
+      : undefined,
     onlyConfig,
     skillDiscoveryLimits: resolveSkillDiscoveryLimits(discoverySnapshot.config),
     nowMs: params.nowMs,

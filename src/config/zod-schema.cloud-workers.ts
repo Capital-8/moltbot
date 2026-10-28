@@ -27,7 +27,11 @@ const CloudWorkerProfileSchema = z
     }),
     install: z.enum(["bundle", "npm"]).optional().default("bundle").register(configUiMetadata, {
       label: "Cloud Worker Install Method",
-      help: 'Worker installation method: "bundle" (default) transfers the gateway\'s content-hashed installed build and supports released, development, and unreleased versions; "npm" installs the exact gateway version and is available only when that version is released.',
+      help: 'Worker installation uses the gateway\'s content-hashed preassembled bundle for released, development, and unreleased versions. The legacy "npm" preference is accepted but also uses the bundle; workers never install or resolve packages.',
+    }),
+    runSetupScript: z.boolean().optional().register(configUiMetadata, {
+      label: "Run Repository Setup",
+      help: "Set false for a prebuilt worker profile to skip repository lifecycle hooks and detected dependency installation during preparation and dispatch. Native runtime, identity, ownership, and snapshot security checks remain enabled. Unset preserves normal setup authorization and behavior.",
     }),
     suspendAfter: z
       .string()

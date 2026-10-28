@@ -84,6 +84,42 @@ describe("createWorkerPlacementRedispatch", () => {
     },
   );
 
+  it.each(["sessionId", "sessionKey", "agentId", "live-lease"] as const)(
+    "refuses retained recovery with changed %s",
+    async (change) => {
+      const source = { ...placement, state: "failed" as const, recoveryError: "lease gone" };
+      const owner = {
+        sessionId: source.sessionId,
+        sessionKey: source.sessionKey,
+        agentId: source.agentId,
+      };
+      const environment = {
+        ...ready,
+        environmentId: source.environmentId,
+        providerId: "crabbox",
+        state: "failed" as const,
+        leaseId: change === "live-lease" ? "unsettled-lease" : null,
+        retention: {
+          policy: { mode: "session-disk" as const, computeWindowSeconds: 14400 },
+          owner: change === "live-lease" ? owner : { ...owner, [change]: "foreign" },
+          ownerBinding: "a".repeat(64),
+          desiredState: "suspended" as const,
+          receipt: null,
+          operation: null,
+        },
+      };
+      const dispatch = vi.fn();
+      const redispatch = createWorkerPlacementRedispatch({
+        placements: reader(source, environment),
+        dispatch,
+      });
+      await expect(redispatch(source, dispatchOptions)).rejects.toThrow(
+        "Worker recovery is not ready",
+      );
+      expect(dispatch).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     [
       { ...environmentBase, providerId: "device", nodeDeviceId: "paired-node" },

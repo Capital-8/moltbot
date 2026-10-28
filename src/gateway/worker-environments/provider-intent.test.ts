@@ -922,20 +922,52 @@ describe("prepared worker intent admission", () => {
     expect(f.spies.resumeProvision).toHaveBeenCalledTimes(3);
   });
 
-  it("requires setup authority for reserves while preserving explicit session setup admission", async () => {
-    const f = await fixture(true);
-    const ordinary = await f.prepare();
-    expect(ordinary.profileSnapshot.project?.preparation).toBeUndefined();
-    const authorized = await f.prepare({ setupAuthorized: true });
-    const skipped = await f.prepare({ runSetupScript: false });
-    const authorizedKey = authorized.profileSnapshot.project?.preparation?.key;
-    const skippedKey = skipped.profileSnapshot.project?.preparation?.key;
-    expect(authorizedKey).toBeDefined();
-    expect(skippedKey).toBeDefined();
-    expect(skippedKey).not.toBe(authorizedKey);
-    await f.create("session-setup", { runSetupScript: true });
-    expect(
-      readWorkerProjectPreparation(support.testState.store.list()[0]!.profileSnapshot.project)?.key,
-    ).toBe(authorizedKey);
-  });
+  it.each([false, true])(
+    "preserves setup authority and configured skip policy (skip=%s)",
+    async (skip) => {
+      const f = await fixture(true);
+      if (skip) {
+        support.getDevelopmentProfile().runSetupScript = false;
+      }
+      const ordinary = await f.owner.prepareIntent("development", { projectPath: f.projectPath });
+      expect(Boolean(readWorkerPreparation(ordinary.profileSnapshot)?.key)).toBe(skip);
+      const authorized = await f.owner.prepareIntent("development", {
+        projectPath: f.projectPath,
+        setupAuthorized: true,
+      });
+      const skipped = await f.owner.prepareIntent("development", {
+        projectPath: f.projectPath,
+        runSetupScript: false,
+      });
+      expect(readWorkerPreparation(authorized.profileSnapshot)?.key).toBeDefined();
+      expect(readWorkerPreparation(skipped.profileSnapshot)?.key).toBeDefined();
+      if (skip) {
+        expect(readWorkerPreparation(skipped.profileSnapshot)?.key).toBe(
+          readWorkerPreparation(authorized.profileSnapshot)?.key,
+        );
+        expect(
+          readWorkerProjectPreparation(authorized.profileSnapshot.project)?.runSetupScript,
+        ).toBe(false);
+      } else {
+        expect(readWorkerPreparation(skipped.profileSnapshot)?.key).not.toBe(
+          readWorkerPreparation(authorized.profileSnapshot)?.key,
+        );
+      }
+      await f.owner.createWithProfile("development", "session-setup", {
+        projectPath: f.projectPath,
+        runSetupScript: true,
+      });
+      expect(
+        readWorkerProjectPreparation(support.testState.store.list()[0]!.profileSnapshot.project)
+          ?.key,
+      ).toBe(readWorkerPreparation(authorized.profileSnapshot)?.key);
+      if (skip) {
+        expect(support.testState.store.list()[0]!.profileSnapshot.runSetupScript).toBe(false);
+        expect(
+          readWorkerProjectPreparation(support.testState.store.list()[0]!.profileSnapshot.project)
+            ?.runSetupScript,
+        ).toBe(false);
+      }
+    },
+  );
 });

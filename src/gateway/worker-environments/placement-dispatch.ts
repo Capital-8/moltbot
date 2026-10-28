@@ -45,10 +45,13 @@ import type {
   WorkerPlacementRecoveryBarrier,
 } from "./placement-recovery-contract.js";
 import {
+  assertWorkerGatewayRecoverySource,
   isFailedWorkerPlacementEnvironmentGone,
   matchesWorkerPlacementTarget,
   type WorkerPlacementCancellationTarget,
 } from "./placement-target.js";
+import { prepareLostRepositoryWorkspaceSource } from "./repository-lost-worker-recovery.js";
+import { prepareRepositoryRecovery } from "./repository-workspace-startup.js";
 import type {
   WorkerPlacementDispatchRequest,
   WorkerPlacementAuthorization,
@@ -251,7 +254,7 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
                 ? { expectedPlacement: request.expectedPlacement }
                 : {}),
             },
-            { assertCurrent },
+            { assertCurrent: assertDispatchCurrent },
           );
           reportPlacementTransition(onTransition, placement);
           return placement;
@@ -501,7 +504,16 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
         },
       });
     }
+    if (
+      request.retireRetainedWorkspace &&
+      (current?.state === "active" || current?.state === "draining" || current?.state === "failed")
+    ) {
+      const retired = await abandonment.retireRetainedSession(request, authorize, beforeDrain);
+      reportPlacementTransition(onTransition, retired);
+      return retired;
+    }
     if (current?.state === "reclaimed") {
+      await finishRetainedWorkerCleanup(environments, current.environmentId);
       return current;
     }
     // Only a captured operation's successful result makes local an idempotent Stop.

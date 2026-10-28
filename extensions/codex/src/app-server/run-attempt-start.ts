@@ -143,6 +143,9 @@ export async function startCodexAttemptRuntime(resources: CodexAttemptResources)
       nativeProviderWebSearchSupport,
       sandboxExecServerEnabled,
       sandbox,
+      nativeWorkerPlacement: connection.workerHostedCloud
+        ? sandbox?.nativeWorkerPlacement
+        : undefined,
       contextEngineProjection: promptState.contextEngineProjection,
       historyBootstrapItems: promptState.historyBootstrapItems,
       historyDeltaItems: promptState.historyDeltaItems,

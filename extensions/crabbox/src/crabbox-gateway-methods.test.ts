@@ -41,7 +41,7 @@ afterEach(async () => {
 
 function record(): WarmProfileRecord {
   return {
-    version: 3,
+    version: 4,
     allocations: {},
     image: {
       checkpointId: "chk_fixture",
@@ -235,7 +235,7 @@ describe("Crabbox snapshots Gateway methods", () => {
       provider: "hetzner",
       message: "Native checkpoints are unsupported for this coordinator target.",
     };
-    store.register("older", { version: 3, allocations: {}, captureUnsupported });
+    store.register("older", { version: 4, allocations: {}, captureUnsupported });
     const respond = vi.fn();
 
     await listCrabboxImages(createApi(), { params: {}, respond });

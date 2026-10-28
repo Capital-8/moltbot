@@ -454,6 +454,25 @@ export function createWorkerProviderOwnerLifecycle(
         await destroyOptions.forceAbandon?.();
         throw serviceError("environment_not_found", `Unknown worker environment: ${environmentId}`);
       }
+      const retainedRetirement = abandonment?.retainedOwnerBinding;
+      // Terminal cleanup clears the host classification with the lease. Its exact
+      // retained binding still owns local discard; it cannot authorize host effects.
+      const settledRetirement =
+        retainedRetirement !== undefined &&
+        (record.state === "destroyed" || (record.state === "failed" && record.leaseId === null));
+      if (
+        abandonment &&
+        retainedRetirement &&
+        ((record.sharedHost !== false && !settledRetirement) ||
+          !record.retention ||
+          record.retention.ownerBinding !== retainedRetirement ||
+          record.retention.owner.sessionId !== abandonment.sessionId)
+      ) {
+        throw serviceError("invalid_state", "Retained worker owner changed before retirement");
+      }
+      const acceptedRetirement = Boolean(
+        retainedRetirement && hasForcedWorkerEnvironmentAbandonment(record),
+      );
       if (
         ["destroyed", "failed", "orphaned"].includes(record.state) &&
         (!abandonment ||
@@ -465,12 +484,14 @@ export function createWorkerProviderOwnerLifecycle(
       }
       if (
         abandonment &&
-        (record.providerId !== DEVICE_WORKER_PROVIDER_ID ||
-          record.ownerEpoch !== abandonment.ownerEpoch ||
-          !record.nodeDeviceId ||
-          record.sharedHost === false ||
-          record.attachedSessionIds.length !== 1 ||
-          record.attachedSessionIds[0] !== abandonment.sessionId)
+        ((record.ownerEpoch !== abandonment.ownerEpoch && !acceptedRetirement) ||
+          (!retainedRetirement &&
+            (record.providerId !== DEVICE_WORKER_PROVIDER_ID ||
+              !record.nodeDeviceId ||
+              record.sharedHost === false)) ||
+          (!acceptedRetirement &&
+            (record.attachedSessionIds.length !== 1 ||
+              record.attachedSessionIds[0] !== abandonment.sessionId)))
       ) {
         throw serviceError(
           "invalid_state",
@@ -506,7 +527,7 @@ export function createWorkerProviderOwnerLifecycle(
         environmentId,
         state: record.state,
         assertCurrent: assertDestroyOwner,
-        ...(abandonment ? { terminalState: "failed" } : {}),
+        ...(abandonment && !abandonment.retainedOwnerBinding ? { terminalState: "failed" } : {}),
         ...(abandonment || destroyOptions.forceAbandon
           ? { lastError: FORCED_WORKER_ABANDONMENT_ERROR }
           : {}),
@@ -522,16 +543,19 @@ export function createWorkerProviderOwnerLifecycle(
       // Persist the operator's discard decision before placement draining can survive a crash.
       await destroyOptions.forceAbandon?.();
       try {
-        const destroyed = await finishDestroy(
-          record,
-          undefined,
-          undefined,
-          destroyOptions.onCleanupAccepted,
-        );
+        // Destructive retained retirement hands physical cleanup to the existing
+        // reconciler. Waiting for provider I/O here would block session deletion.
+        const destroyed = retainedRetirement
+          ? await stopOwner(record, "provider-destroying")
+          : await finishDestroy(record, undefined, undefined, destroyOptions.onCleanupAccepted);
         abandonment?.authorize?.();
         return destroyed;
       } catch (error) {
-        if (!abandonment || !(error instanceof WorkerTunnelOwnerDisconnectedError)) {
+        if (
+          !abandonment ||
+          (!abandonment.retainedOwnerBinding &&
+            !(error instanceof WorkerTunnelOwnerDisconnectedError))
+        ) {
           throw error;
         }
         abandonment.authorize?.();
@@ -539,8 +563,8 @@ export function createWorkerProviderOwnerLifecycle(
         if (current.destroyRequestedAtMs === null || store.getCredential(environmentId)) {
           throw serviceError("invalid_state", "Abandoned device worker authority is not fenced");
         }
-        // Local cleanup has joined. Keep the exact old attachment for a physical stop on
-        // reconnect; explicit abandonment releases only the session's local owner.
+        // Accepted retirement keeps exact resource cleanup in this durable environment.
+        // Session visibility does not wait for the provider or require an online worker.
         return saveError(current, error);
       }
     });

@@ -574,3 +574,101 @@ docker compose exec openclaw-gateway sh -lc 'node dist/index.js gateway health -
 - [Cloudflare Containers](/install/cloudflare) — experimental Worker plus container deployment with Litestream backups to R2
 - [Updating](/install/updating) — keeping OpenClaw up to date
 - [Configuration](/gateway/configuration) — Gateway configuration after install
+
+## Build from a qualified installed runtime
+
+Release tooling can reuse an offline installed-runtime composition instead of
+compiling OpenClaw again. The native build-tool checkout and runtime package have
+separate identities: pin both. Never use the installed app as the tooling root.
+The default Docker source build remains unchanged.
+
+From the pinned native tooling root, use the same composition owner for
+verification and recipe discovery:
+
+```bash
+node --import ./scripts/tsx.mjs scripts/compose-installed-runtime.mts \
+  --operation image-recipe \
+  --composition-root /path/to/composition \
+  --receipt-sha256 "$RECEIPT_SHA256" \
+  --portable-package-sha256 "$PACKAGE_SHA256" \
+  --runtime-version "$RUNTIME_VERSION" \
+  --runtime-commit "$RUNTIME_COMMIT" \
+  --runtime-build-id "$RUNTIME_BUILD_ID"
+```
+
+All six identity/location flags are required. `--operation verify` uses the same
+flags. Success writes one JSON object to stdout and exits zero; failure exits
+one with diagnostics on stderr and no success object. The callable APIs are
+`verifyInstalledRuntimeComposition(options)` and
+`resolveInstalledRuntimeImageRecipe(options)` in
+`scripts/compose-installed-runtime.mts`. Both accept `compositionRoot`,
+`receiptSha256`, `portablePackageSha256`, and
+`expectedRuntime: { version, commit, buildId }`.
+
+Verification returns `openclaw.installed-runtime.verification.v1`, including
+absolute app/receipt/archive/manifest paths, their recorded identities, runtime,
+target, helpers, lifecycle, and required target checks. It checks the complete
+installed inventory, modes, links, relative import closure, package identity, and
+pending lifecycle. Recipe discovery returns
+`openclaw.installed-runtime.image-recipe.v1` with that verification under
+`composition`, the native `dockerfile: { path, sha256 }`, target
+`openclaw-runtime`, build argument
+`OPENCLAW_RUNTIME_ASSETS=installed-runtime-assets`, and named context
+`openclaw_installed_runtime` pointing to the composition root.
+
+Pass the returned Dockerfile, target, build arguments, and named context to
+Buildx from the pinned native tooling root. Downstream builds may append their
+existing image fragment to this final target; they must not reproduce the native
+runtime stage. Verify the composition before and after consumption. Preserve the
+composition unchanged: Linux finalization runs on the image's copy with network
+disabled, checks the native prebuild before package lifecycle, and never installs
+missing app dependencies or falls back to a source build.
+
+Dependency input verification keeps the original manifest digest and checks every
+path, entry kind, file byte/hash, link target, containment, and regular-file and
+directory mode. Physical symlink permission bits are not access permissions on
+the Linux target and may differ across source filesystems. The existing receipt
+records their actual count as
+`inputs.dependencyManifest.physicalSymlinkModeDifferences`; the source manifest
+is never rewritten to conceal that difference.
+
+For an immutable donor already qualified by a successful strict composition, the
+release owner may supply all four optional composition flags:
+`--qualified-dependency-operation`, `--qualified-dependency-operation-sha256`,
+`--qualified-dependency-receipt`, and `--qualified-dependency-receipt-sha256`.
+These identify the retained terminal-zero `canonical-linux-installed-composition`
+operation record and its original output receipt. The owner must retain exclusive
+no-writer custody of the donor from that qualification through consumption.
+The callable option is `qualifiedDependencyInput: { operation: { path, sha256 },
+receipt: { path, sha256 } }`.
+
+The composer binds that evidence to the exact donor realpath, manifest, target,
+and package/lock hashes. It reuses the admitted manifest without inventorying the
+whole donor again; selected dependencies must still belong to that manifest.
+The new receipt records `inputs.dependencyManifest.inputVerification.mode` as
+`qualified-reuse` with both evidence identities and the donor root. Default
+`full-inventory` mode remains strict. Neither mode skips portable package checks,
+new-output inventory/import checks, or required Linux lifecycle acceptance.
+Tooling commit/script identity remains separate from the supplied runtime.
+
+When transporting a Mac dependency input to Linux, use a tar producer that does
+not synthesize AppleDouble metadata, such as Python's `tarfile` or BSD tar with
+`COPYFILE_DISABLE=1`. Authored `._` files remain ordinary manifest entries. The
+verifier still rejects every unexpected entry; it does not filter metadata-like
+names or relax file contents, paths, targets, or regular permission checks.
+
+Composition is **not** target acceptance. Both outputs retain
+`compositionOnly: true` and lifecycle `target-required`; Linux ABI/native load,
+entrypoint, provider identity, and runtime export checks still belong to target
+qualification. Record the actual native tool and Dockerfile hashes separately
+from the immutable runtime package and its build identity.
+
+The installed-assets Docker adapter supplies two Docker-only files that npm
+packages omit: `pnpm-lock.yaml` and `docker-entrypoint.mjs`. Native verification
+checks the tooling root's lock against the composition's qualified source lock,
+and the entrypoint against its original runtime commit's Git blob. The verified
+`imageAssets` record carries both hashes. The same owner checks that the composed
+app plus these inputs and the adapter-created `qa/` cover the maintained final
+runtime COPY declarations. This does not modify the sealed composition or require
+repackaging/recompiling the runtime. Preserve the original package build identity
+and pin the separate tooling/Dockerfile successor.

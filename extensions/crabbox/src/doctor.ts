@@ -336,10 +336,11 @@ export function registerCrabboxWorkerProviderDoctorChecks(
                 : CRABBOX_WARM_IMAGE_WAIT_HINT,
             });
           }
-          if (image.retirement) {
+          for (const retirement of image.retirements) {
             findings.push({
               ...details,
-              message: `Warm-image checkpoint ${image.retirement.checkpointId}${display} is still awaiting deletion.`,
+              severity: retirement.held ? "info" : "warning",
+              message: `Warm-image checkpoint ${retirement.checkpointId}${display} is ${retirement.held ? "deferred while allocations retain it" : "still awaiting deletion"}.`,
               fixHint:
                 "Cleanup retries during the next warm-image capture or worker teardown. Inspect `openclaw crabbox warm-images --json` and resolve provider deletion errors if it remains pending.",
             });

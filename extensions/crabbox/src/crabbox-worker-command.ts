@@ -12,7 +12,21 @@ export function sanitizeCrabboxNotice(text: string): string {
   return sliceUtf16Safe(redactToolPayloadText(text).replace(/\s+/gu, " ").trim(), 0, 512);
 }
 
-export type LeaseCommandContext = { binary: string; id: string; provider: string };
+export type CrabboxProviderEnvironment = {
+  CRABBOX_CONFIG?: string;
+  CRABBOX_AZURE_SANDBOX_CLIENT_ID?: string;
+  CRABBOX_AZURE_SANDBOX_REGION?: string;
+  CRABBOX_AZURE_SANDBOX_SUBSCRIPTION_ID?: string;
+  CRABBOX_AZURE_SANDBOX_RESOURCE_GROUP?: string;
+  CRABBOX_AZURE_SANDBOX_GROUP?: string;
+};
+
+export type LeaseCommandContext = {
+  binary: string;
+  id: string;
+  provider: string;
+  providerEnv?: CrabboxProviderEnvironment;
+};
 
 export function leaseRunArgs(
   context: LeaseCommandContext,
@@ -58,7 +72,11 @@ export async function runCrabboxCommand(params: {
       timeoutMs: params.timeoutMs,
       maxOutputBytes: MAX_OUTPUT_BYTES,
       killProcessTree: true,
-      ...(params.env === undefined ? {} : { env: params.env }),
+      ...(params.providerEnv
+        ? { env: { ...(params.env ?? process.env), ...params.providerEnv } }
+        : params.env === undefined
+          ? {}
+          : { env: params.env }),
       ...(params.input === undefined ? {} : { input: params.input }),
       ...(params.signal ? { signal: params.signal } : {}),
     });
@@ -279,6 +297,7 @@ export async function stopCrabboxLease(params: {
   binary: string;
   id: string;
   provider: string;
+  providerEnv?: CrabboxProviderEnvironment;
   warn: (message: string) => void;
   onCleanupAccepted?: () => void;
 }): Promise<void> {
@@ -299,6 +318,7 @@ export async function stopCrabboxLease(params: {
         ...(!wait ? ["--wait=false"] : []),
       ],
       binary: params.binary,
+      providerEnv: params.providerEnv,
       timeoutMs,
     });
     if (
