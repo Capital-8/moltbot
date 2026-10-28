@@ -60,6 +60,7 @@ const CODEX_APP_SERVER_CONTEXT_ENGINE_HOST_CAPABILITIES = [
 ] as const satisfies readonly ContextEngineHostCapability[];
 
 type CodexAppServerAgentHarnessOptions = {
+  pluginProvenance?: import("./src/app-server/run-attempt-types.js").CodexPluginProvenance;
   id?: string;
   label?: string;
   providerIds?: Iterable<string>;
@@ -385,6 +386,7 @@ export function createCodexAppServerAgentHarness(
             bindingStore: options.bindingStore,
             pluginConfig,
             runtime: sessionRuntime,
+            pluginProvenance: options.pluginProvenance,
             runtimeModelId: model,
             nativeHookRelay: { enabled: true },
           },

@@ -166,6 +166,37 @@ beforeEach(() => {
 });
 
 describe("createFollowupRunner", () => {
+  it("retains fresh worker source across admission preflight and execution", async () => {
+    const turn = createTurn();
+    const workerDispatch = await withRepositoryChatDispatch(
+      {
+        client: null,
+        agentId: "agent",
+        sessionKey: "main",
+        getSessionId: () => "session",
+        runId: "initial",
+        assertCurrent() {},
+      },
+      async () => captureRepositoryGoalDispatch(() => {}),
+    );
+    turn.queued.goalContinuation = { sessionId: "session", goalId: "goal", workerDispatch };
+    state.admit.mockImplementation(async () => {
+      expect(captureRepositoryGoalDispatch(() => {})).toBeDefined();
+      return { kind: "admitted", turn };
+    });
+    state.execute.mockImplementation(async () => {
+      expect(captureRepositoryGoalDispatch(() => {})).toBeDefined();
+      return createRejectedExecution();
+    });
+    await createFollowupRunner({
+      typing: createMockTypingController(),
+      typingMode: "never",
+      defaultModel: "claude",
+    })(turn.queued);
+    expect(state.execute).toHaveBeenCalledOnce();
+    expect(captureRepositoryGoalDispatch(() => {})).toBeUndefined();
+  });
+
   it.each([
     { kind: "pending", failed: false },
     { kind: "pending", failed: true },

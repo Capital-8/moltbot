@@ -221,6 +221,37 @@ export async function startCodexAttemptRuntime(resources: CodexAttemptResources)
         threadId: state.thread.threadId,
         action: state.thread.lifecycle.action,
         clientId: state.client.getInstanceId(),
+        ...(state.thread.recoveredFrom
+          ? {
+              recovery: {
+                kind: "available-history",
+                predecessorThreadId: state.thread.recoveredFrom.threadId,
+              },
+            }
+          : {}),
+        // Loader provenance, not this shared chunk's import.meta.url. Runtime
+        // identity comes from this client's handshake, never a Gateway sibling.
+        plugin: connection.options.pluginProvenance,
+        runtime: {
+          serverVersion: state.client.getRuntimeIdentity()?.serverVersion,
+          configuredTransport: appServer.start.transport,
+          connectionClass: appServer.connectionClass,
+          workerHostedCloud: connection.workerHostedCloud,
+          usesSupervisionConnection,
+          nativeToolSurfaceEnabled,
+        },
+        dynamicToolsLoading: attemptTools.dynamicToolsLoading,
+        goalControls: toolBridge.specs.flatMap((spec) => {
+          const namespace = spec.type === "namespace" ? spec.name : null;
+          const functions = spec.type === "namespace" ? spec.tools : [spec];
+          return functions
+            .filter((tool) => ["get_goal", "create_goal", "update_goal"].includes(tool.name))
+            .map((tool) => ({
+              name: tool.name,
+              namespace,
+              deferLoading: tool.deferLoading === true,
+            }));
+        }),
       },
     });
     if (

@@ -161,6 +161,7 @@ export function registerWorkerGoalChatCases(
         placements,
         environments: {
           get: () => environment,
+          inspectTurnLease: async ({ assertCurrent }) => assertCurrent(),
           acquireTurnCredential: unexpectedTransport,
           acknowledgeCredentialDelivery: unexpectedTransport,
           destroy: unexpectedTransport,
@@ -184,7 +185,13 @@ export function registerWorkerGoalChatCases(
           path: "/worker/goal-workspace",
         }),
         workspaceOperations: createWorkerWorkspaceOperationCoordinator(),
-        waitForAdmissionNode: unexpectedTransport,
+        waitForAdmissionNode: async ({ placement, signal, assertCurrent }) => {
+          signal.throwIfAborted();
+          assertCurrent();
+          expect(placement.environmentId).toBe(environment.environmentId);
+          expect(placement.activeOwnerEpoch).toBe(environment.ownerEpoch);
+          expect(environment.nodeDeviceId).toBe("worker-goal-node");
+        },
         reconcileActivePlacement: unexpectedTransport,
         redispatchPlacement: unexpectedTransport,
       });
