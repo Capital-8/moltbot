@@ -1469,6 +1469,38 @@ button.chat-reply-attribution__target:disabled {
   );
 }
 
+/* Every message bubble keeps the ink prepared for its actual text surface. */
+.chat-bubble:not(.chat-bubble--tool-shell) {
+  --chat-content-link: var(--chat-text-link, var(--chat-canvas-link, var(--link)));
+  --chat-content-link-hover: var(
+    --chat-text-link-hover,
+    var(--chat-canvas-link-hover, var(--link-hover))
+  );
+}
+
+/* Nested content uses one participant-local surface; the outer bubble keeps its palette. */
+:is(.chat-group:is(.user, .chat-group--forwarded), .chat-session-activity__message)
+  .chat-bubble:not(.chat-bubble--tool-shell) {
+  --chat-content-surface: oklch(
+    from var(--chat-bubble-background) calc(l - 0.035) calc(c * 0.55) h
+  );
+  --chat-content-border: var(--border);
+  --chat-content-hover: color-mix(
+    in srgb,
+    var(--chat-content-surface) 50%,
+    var(--chat-bubble-background)
+  );
+}
+
+:where(:root[data-theme-mode="light"])
+  :is(.chat-group:is(.user, .chat-group--forwarded), .chat-session-activity__message)
+  .chat-bubble:not(.chat-bubble--tool-shell) {
+  /* Leave chroma room in sRGB on near-white participant surfaces. */
+  --chat-content-surface: oklch(
+    from var(--chat-bubble-background) min(calc(l + 0.035), 0.97) calc(c * 0.55) h
+  );
+}
+
 /* User bubbles have different styling */
 .chat-group.user .chat-bubble {
   --chat-bubble-background: var(--chat-participant-surface);

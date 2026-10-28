@@ -8,6 +8,14 @@ openclaw-tooltip-provider {
 }
 
 .tooltip-surface {
+  --chat-content-surface: initial;
+  --chat-content-border: initial;
+  --chat-content-hover: initial;
+  --chat-content-link: initial;
+  --chat-content-link-hover: initial;
+  --chat-bubble-background: initial;
+  --chat-text-link: var(--link);
+  --chat-text-link-hover: var(--link-hover);
   position: fixed;
   inset: auto;
   --oc-overlay-distance: 8px;

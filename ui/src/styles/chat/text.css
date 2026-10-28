@@ -674,11 +674,28 @@
   --chat-text-link-hover: var(--chat-canvas-link-hover, var(--link-hover));
 }
 
+/* These opaque, independently paired surfaces do not inherit bubble content roles. */
+:is(.chat-bubble--tool-shell, .markdown-table-modal, .sidebar-markdown, openclaw-mermaid) {
+  --chat-content-surface: initial;
+  --chat-content-border: initial;
+  --chat-content-hover: initial;
+  --chat-content-link: initial;
+  --chat-content-link-hover: initial;
+  --chat-bubble-background: initial;
+  --chat-text-link: var(--link);
+  --chat-text-link-hover: var(--link-hover);
+}
+
 /* Paired surfaces keep their own link contract. */
 .chat-bubble--tool-shell,
 .chat-text :is(table, pre) {
   --chat-text-link: var(--link);
   --chat-text-link-hover: var(--link-hover);
+}
+
+.chat-text .markdown-table table {
+  --chat-text-link: var(--chat-content-link, var(--link));
+  --chat-text-link-hover: var(--chat-content-link-hover, var(--link-hover));
 }
 
 .chat-text :where(a) {
@@ -691,13 +708,13 @@
   color: var(--chat-text-link-hover, var(--link-hover));
 }
 
-/* Inline code has its own fill; file links explicitly remove that chip surface. */
+/* Link labels keep the ink prepared for their actual text surface. */
 .chat-text a:not(.markdown-file-link, .markdown-github-item, .markdown-session-link) > code {
-  color: var(--link);
+  color: var(--chat-content-link, var(--link));
 }
 
 .chat-text a:not(.markdown-file-link, .markdown-github-item, .markdown-session-link):hover > code {
-  color: var(--link-hover);
+  color: var(--chat-content-link-hover, var(--link-hover));
 }
 
 .chat-text :where(.markdown-link-favicon) {
@@ -757,9 +774,8 @@
   line-break: anywhere;
 }
 
-/* Keep status in the ink, not competing fills inside tinted user/sender bubbles.
-   The opaque neutral surface stays independent of its host, while mixing the
-   ink toward strong text protects light and dark palettes. Chips stay atomic. */
+/* Keep status in the ink and preserve each theme's GitHub chip surface.
+   Mixing the ink toward strong text protects light and dark palettes. */
 .chat-text a.markdown-github-item {
   --github-item-tone: var(--muted);
 
@@ -830,8 +846,8 @@
   padding-inline-start: 1.5em;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--bg-muted);
-  color: var(--link);
+  background: var(--chat-content-surface, var(--bg-muted));
+  color: var(--chat-content-link, var(--link));
   cursor: pointer;
   font-family: var(--mono);
   font-size: 0.9em;
@@ -871,6 +887,7 @@
 
 :is(.chat-text, .sidebar-markdown, .chat-reply-attribution) a.markdown-session-link:hover,
 :is(.chat-text, .sidebar-markdown, .chat-reply-attribution) a.markdown-session-link:focus-visible {
+  color: var(--chat-content-link-hover, var(--link));
   text-decoration: underline;
 }
 
@@ -879,7 +896,10 @@
   max-width: min(28em, 100%);
   padding: 0.08em 0.45em;
   padding-inline-start: 1.5em;
-  background: color-mix(in srgb, var(--accent-subtle) 72%, var(--bg-muted));
+  background: var(
+    --chat-content-surface,
+    color-mix(in srgb, var(--accent-subtle) 72%, var(--bg-muted))
+  );
   font-family: var(--font-body);
   font-weight: 600;
   line-height: 1.25;
@@ -1125,10 +1145,10 @@
 /* Inline-code overrides let palettes separate chips from their host without
    changing the muted surfaces and strong borders of other components. */
 .chat-text :where(:not(pre, a.markdown-file-link) > code) {
-  background: var(--inline-code-bg, var(--bg-muted));
+  background: var(--chat-content-surface, var(--inline-code-bg, var(--bg-muted)));
   padding: 0.1em 0.2em;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--inline-code-border, var(--border-strong));
+  border: 1px solid var(--chat-content-border, var(--inline-code-border, var(--border-strong)));
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -1146,25 +1166,9 @@
   font-size: inherit;
 }
 
-/* Code stays inset in its actual participant surface, including forwarded
-   cards, while preserving the sender hue and the shared code layout. */
-.chat-group:is(.user, .chat-group--forwarded) .chat-bubble {
-  --chat-code-background: oklch(
-    from var(--chat-bubble-background) calc(l - 0.035) calc(c * 0.55) h
-  );
-  --chat-code-border: var(--border);
-}
-
-:where(:root[data-theme-mode="light"]) .chat-group:is(.user, .chat-group--forwarded) .chat-bubble {
-  /* Leave chroma room in sRGB on near-white participant surfaces. */
-  --chat-code-background: oklch(
-    from var(--chat-bubble-background) min(calc(l + 0.035), 0.97) calc(c * 0.55) h
-  );
-}
-
 .chat-text :where(pre) {
-  background: var(--chat-code-background, var(--bg-muted));
-  border: 1px solid var(--chat-code-border, var(--border-strong));
+  background: var(--chat-content-surface, var(--bg-muted));
+  border: 1px solid var(--chat-content-border, var(--border-strong));
   border-radius: var(--radius-md);
   margin-top: 0.75em;
   padding: 10px 12px;

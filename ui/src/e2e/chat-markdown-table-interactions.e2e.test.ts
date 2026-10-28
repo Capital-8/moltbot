@@ -3,7 +3,12 @@ import type { Locator } from "playwright";
 import { expect, it } from "vitest";
 import { waitForLayoutSettled } from "../pages/chat/chat-layout.browser.test-support.ts";
 import { recordControlUiE2eFailureFacts } from "../test-helpers/control-ui-e2e-diagnostics.ts";
-import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import {
+  controlUiSessionUrl,
+  controlUiBundledSettingsStorageKey,
+  installMockGateway,
+} from "../test-helpers/control-ui-e2e.ts";
+import { resolveRenderedColors } from "../test-helpers/rendered-colors.ts";
 import { chatMessage } from "./chat-flow.test-support.ts";
 import {
   auditMarkdownTable,
@@ -67,6 +72,76 @@ function readTableGeometry(element: Element) {
 }
 
 suite.define(() => {
+  it("keeps table and code-labeled links readable in chat bubbles", async () => {
+    const context = await suite.newBrowserContext({
+      colorScheme: "light",
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await context.newPage();
+    const prefs = { theme: "claw", themeMode: "light", accent: "#ffffff" };
+    const config = { ui: { prefs } };
+    const markdown =
+      "[\`API guide\`](https://example.com/inline)\n\n" +
+      "| Documentation |\n| --- |\n| [Guide](https://example.com/table) |";
+    try {
+      await page.addInitScript(
+        ({ key, prefs }) => localStorage.setItem(key, JSON.stringify(prefs)),
+        { key: controlUiBundledSettingsStorageKey(suite.server.baseUrl), prefs },
+      );
+      await installMockGateway(page, {
+        historyMessages: ["user", "assistant"].map((role) => chatMessage(role, markdown)),
+        methodResponses: {
+          "config.get": { config, raw: JSON.stringify(config), valid: true, hash: "link-ink" },
+        },
+      });
+      await page.goto(suite.server.baseUrl + "chat");
+      await expect.poll(() => page.locator('a[href="https://example.com/table"]').count()).toBe(2);
+      for (const button of await page
+        .getByRole("button", { name: "Show more", exact: true })
+        .all()) {
+        await button.click();
+      }
+      for (const selector of [
+        'a[href="https://example.com/inline"] > code',
+        'a[href="https://example.com/table"]',
+      ]) {
+        for (const target of await page.locator(selector).all()) {
+          const paint = await target.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const bubble = getComputedStyle(element.closest(".chat-bubble")!);
+            const root = getComputedStyle(document.documentElement);
+            return {
+              ink: style.color,
+              fill: style.backgroundColor,
+              host:
+                bubble.getPropertyValue("--chat-bubble-background").trim() ||
+                root.getPropertyValue("--bg-content").trim() ||
+                root.getPropertyValue("--bg").trim(),
+            };
+          });
+          const colors = await page.evaluate(resolveRenderedColors, paint);
+          const background = (["red", "green", "blue"] as const).map(
+            (channel) =>
+              colors.fill![channel] * colors.fill!.alpha +
+              colors.host![channel] * (1 - colors.fill!.alpha),
+          );
+          const luminance = (rgb: number[]) =>
+            rgb
+              .map((channel) => channel / 255)
+              .map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+              .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0);
+          const ink = luminance([colors.ink!.red, colors.ink!.green, colors.ink!.blue]);
+          const fill = luminance(background);
+          expect(
+            (Math.max(ink, fill) + 0.05) / (Math.min(ink, fill) + 0.05),
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    } finally {
+      await suite.closeBrowserContext(context);
+    }
+  });
+
   it("sizes desktop tables to content while preserving mobile layout and expanded headers", async () => {
     const context = await suite.newBrowserContext({ viewport: { width: 1440, height: 1000 } });
     await context.grantPermissions(["clipboard-read", "clipboard-write"], {
