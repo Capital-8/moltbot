@@ -70,6 +70,7 @@ export function createWorkerProviderLifecycle(
     lifecycleLease,
     finishDestroy,
     failBootstrap,
+    finishBootstrap,
     finishConfirmedProvisionCleanup,
     preserveIndeterminateProvisionCleanup,
     destroy,

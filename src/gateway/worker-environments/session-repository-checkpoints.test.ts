@@ -69,7 +69,7 @@ afterEach(async () => {
   }
 });
 
-async function fixture(editContent?: string) {
+async function fixture(editContent?: string, gitBase = false) {
   // openclaw-temp-dir: allow database closure and artifact cleanup share this root.
   const root = await fs.realpath(
     await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-repository-checkpoint-")),
@@ -81,7 +81,25 @@ async function fixture(editContent?: string) {
   await fs.mkdir(remote);
   await fs.writeFile(path.join(remote, "keep.txt"), "upstream\n");
   await fs.writeFile(path.join(remote, "remove.txt"), "remove me\n");
-  const base = await captureWorkspaceManifest({ root: remote, baseCommit });
+  let pinnedBaseCommit = baseCommit;
+  if (gitBase) {
+    await git(remote, ["init", "--quiet"]);
+    await git(remote, ["add", "."]);
+    await git(remote, [
+      "-c",
+      "user.name=Checkpoint Test",
+      "-c",
+      "user.email=checkpoint@example.invalid",
+      "-c",
+      "commit.gpgSign=false",
+      "commit",
+      "--quiet",
+      "-m",
+      "base",
+    ]);
+    pinnedBaseCommit = await git(remote, ["rev-parse", "HEAD"]);
+  }
+  const base = await captureWorkspaceManifest({ root: remote, baseCommit: pinnedBaseCommit });
   const initial = await store.create({
     agentId: "main",
     sessionKey: "agent:main:repository",
@@ -91,7 +109,7 @@ async function fixture(editContent?: string) {
   const workspace = await store.bindBase({
     workspaceId: initial.workspaceId,
     expectedRevision: initial.revision,
-    baseCommit,
+    baseCommit: pinnedBaseCommit,
     baseManifestHash: base.manifestRef,
     assertCurrent,
   });
@@ -104,6 +122,7 @@ async function fixture(editContent?: string) {
   return {
     root,
     remote,
+    pinnedBaseCommit,
     database,
     store,
     workspace,
@@ -111,7 +130,12 @@ async function fixture(editContent?: string) {
     current,
     edit,
     rebind: () =>
-      store.bindBase({ ...owner, expectedRevision: workspace.revision, baseCommit, assertCurrent }),
+      store.bindBase({
+        ...owner,
+        expectedRevision: workspace.revision,
+        baseCommit: pinnedBaseCommit,
+        assertCurrent,
+      }),
     read: (checkpointRef?: string) => ({ ...owner, checkpointRef }),
     preview: (selectedStore = store) =>
       readArtifacts({
@@ -121,7 +145,10 @@ async function fixture(editContent?: string) {
         assertCurrent,
       }).then(({ preview }) => preview),
     stage: async (claim: string, extra: Partial<Parameters<typeof stageCheckpoint>[0]> = {}) => {
-      const captured = await captureWorkspaceManifest({ root: remote, baseCommit });
+      const captured = await captureWorkspaceManifest({
+        root: remote,
+        baseCommit: pinnedBaseCommit,
+      });
       return await stageCheckpoint({
         ...owner,
         expectedRevision: (await current())!.revision,

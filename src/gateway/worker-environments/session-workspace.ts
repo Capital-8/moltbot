@@ -1,5 +1,7 @@
 import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
 import type { SessionRepositoryWorkspaceRecord } from "../../state/session-repository-workspaces.types.js";
+import type { WorkerDispatchPlacement } from "./placement-dispatch-failure.js";
+import type { WorkerWorkspacePendingResult } from "./placement-workspace-result.types.js";
 import {
   recoverSessionRepositoryCheckpoint,
   stageSessionRepositoryCheckpoint,
@@ -108,4 +110,34 @@ export async function recoverSessionWorkspaceCheckpoint(params: {
     throw new Error("Repository checkpoint has no accepted manifest");
   }
   await params.onAccepted(accepted.manifestHash);
+}
+
+export function createPendingWorkerSessionWorkspaceResolver(
+  resolveWorkspace: (placement: WorkerDispatchPlacement) => Promise<WorkerSessionWorkspace>,
+) {
+  return async (
+    placement: WorkerDispatchPlacement,
+    pending: WorkerWorkspacePendingResult,
+    preparedWorkspace?: WorkerSessionWorkspace,
+  ): Promise<WorkerSessionWorkspace> => {
+    const workspace = preparedWorkspace ?? (await resolveWorkspace(placement));
+    if (!pending.repositoryWorkspaceId) {
+      return workspace;
+    }
+    const repository = await getSessionRepositoryWorkspaceStore().get(
+      pending.repositoryWorkspaceId,
+    );
+    if (
+      !repository ||
+      repository.agentId !== placement.agentId ||
+      repository.sessionKey !== placement.sessionKey ||
+      (workspace.kind === "repository" &&
+        workspace.repository.workspaceId !== pending.repositoryWorkspaceId)
+    ) {
+      throw new Error("Pending repository checkpoint lost its exact session workspace owner");
+    }
+    // An explicit Gateway move may already have bound a local worktree. The
+    // result's recorded source still owns its immutable artifact until settlement.
+    return { kind: "repository", repository };
+  };
 }

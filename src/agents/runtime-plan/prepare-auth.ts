@@ -391,6 +391,10 @@ export function prepareAgentRuntimeAuth(
   const configuredProvider = resolveMergedModelProviderConfig(params.config, params.provider);
   const configuredAuthMode =
     lockedProfileId || !harnessAllowsAuthProfileForwarding ? undefined : configuredProvider?.auth;
+  const nativeCommandAuth = configuredProvider?.auth === "native-command";
+  if (nativeCommandAuth && !runtimeAuthOwner) {
+    throw new Error("Native command auth requires an explicit Codex harness runtime");
+  }
   const configuredAwsSdkAuth = configuredAuthMode === "aws-sdk";
   const providerApiKeySecretRef = harnessAllowsAuthProfileForwarding
     ? resolveProviderConfigSecretInput(params.config, params.provider).ref
@@ -415,6 +419,12 @@ export function prepareAgentRuntimeAuth(
   const providerHasDirectMaterial =
     !configuredAwsSdkAuth &&
     (providerBinding.kind === "literal" || providerHasUsableMarker || providerHasApiKeySecretRef);
+  if (
+    nativeCommandAuth &&
+    (lockedProfileId || providerHasDirectMaterial || configuredProvider?.apiKey !== undefined)
+  ) {
+    throw new Error("Native command auth cannot be combined with an OpenAI key or profile binding");
+  }
   const explicitConfigApiKeyAuth = shouldPreferExplicitConfigApiKeyAuth(
     params.config,
     params.provider,
@@ -433,6 +443,7 @@ export function prepareAgentRuntimeAuth(
     boundProfileId ??
     (params.allowAuthProfileFallback === false ? lockedProfileId : undefined);
   const resolvedAutomaticOrder =
+    nativeCommandAuth ||
     !harnessAllowsAuthProfileForwarding ||
     selectedProfileId ||
     providerBindingSuppressesProfiles ||
@@ -506,9 +517,10 @@ export function prepareAgentRuntimeAuth(
     : null;
   // A setup hint does not supply a credential for a harness-owned login.
   const directPlanningEvidence =
-    directPlanningCandidate?.kind === "setup-provider" &&
-    (params.harnessAuthBootstrap === "harness" ||
-      authProfileSelectionProvider.trim().toLowerCase() === "openai")
+    nativeCommandAuth ||
+    (directPlanningCandidate?.kind === "setup-provider" &&
+      (params.harnessAuthBootstrap === "harness" ||
+        authProfileSelectionProvider.trim().toLowerCase() === "openai"))
       ? null
       : directPlanningCandidate;
   const directPlanningMode = directPlanningEvidence
@@ -686,7 +698,7 @@ export function prepareAgentRuntimeAuth(
     sourcePlan,
     configuredAuthMode: automaticRouteAuthMode,
     ...(runtimeAuthOwner ? { runtimeAuthOwner } : {}),
-    ...(runtimeAuthOwner && configuredProvider === undefined
+    ...(runtimeAuthOwner && (configuredProvider === undefined || nativeCommandAuth)
       ? { allowNativeAuthOnSingleRoute: true }
       : {}),
   });

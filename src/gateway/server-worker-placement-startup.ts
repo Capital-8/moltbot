@@ -421,7 +421,7 @@ export function createGatewayWorkerPlacementRuntime(params: GatewayWorkerPlaceme
         scheduleDiskSpaceSweep?.();
       }
     });
-    const scope = scheduler.scope();
+    const scope = params.scheduler.scope();
     const optionalWorkSignal = AbortSignal.any([scope.signal, getGatewayRestartDrainSignal()]);
     const operations = new Map<"reconcile" | "disk-space" | "auto-suspend", Promise<void>>();
     let reconciliationPhase: string | undefined;

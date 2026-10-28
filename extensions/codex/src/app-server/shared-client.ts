@@ -377,8 +377,13 @@ export function releaseLeasedSharedCodexAppServerClient(client: CodexAppServerCl
 export async function releaseCodexProbeClient(
   client: CodexAppServerClient,
   factory: CodexAppServerClientFactory,
+  callerOwned = false,
 ): Promise<void> {
-  if (factory === createIsolatedCodexAppServerClient) {
+  if (
+    callerOwned ||
+    factory === createIsolatedCodexAppServerClient ||
+    getSharedCodexAppServerClientState().isolatedClients.has(client)
+  ) {
     await client.closeAndWait();
   } else {
     releaseLeasedSharedCodexAppServerClient(client);
@@ -648,15 +653,19 @@ export async function createIsolatedCodexAppServerClient(
       assertCurrent: options?.assertCurrent,
       assertCurrentAsync: options?.assertCurrentAsync,
       onStartedClient: (client) => {
-        const state = getSharedCodexAppServerClientState();
-        state.isolatedClients.add(client);
-        client.addTransportExitHandler((exitedClient) => {
-          state.isolatedClients.delete(exitedClient);
-        });
+        trackIsolatedCodexAppServerClient(client);
         options?.onStartedClient?.(client);
       },
     }),
   );
+}
+
+export function trackIsolatedCodexAppServerClient(client: CodexAppServerClient): void {
+  const state = getSharedCodexAppServerClientState();
+  state.isolatedClients.add(client);
+  client.addTransportExitHandler((exitedClient) => {
+    state.isolatedClients.delete(exitedClient);
+  });
 }
 
 function startInitializedCodexAppServerClient(params: CodexAppServerClientStartupOptions) {
@@ -1022,7 +1031,7 @@ export function captureCodexAppServerClientLifetime(
       "Codex manual thread adoption requires an OpenClaw-managed local stdio process, not an external socket or app-server proxy. No turn was sent; reconnect through managed local stdio before continuing.",
     );
   }
-  const isolated = requiredOwnership !== "connection" && state.isolatedClients.has(client);
+  const isolated = state.isolatedClients.has(client);
   const isCurrent = isolated
     ? () => state.isolatedClients.has(client) && !client.getCloseError()
     : captureSharedClientRegistration(client);

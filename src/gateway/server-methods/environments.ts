@@ -1,3 +1,4 @@
+import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
 import { normalizeSortedUniqueTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
 import {
   type EnvironmentSummary,
@@ -30,6 +31,8 @@ import {
   resolveRequiredNodeCommandAuthority,
 } from "../node-command-policy.js";
 import { readNodeSessionWithheldCommands, type NodeSession } from "../node-registry.js";
+import { resolveOperatorRolePolicy } from "../operator-role-policy.js";
+import { repositoryProjectCredentialReader } from "../repository-dispatch.js";
 import { summarizeWorkerEnvironment } from "../worker-environments/environment-summary.js";
 import { resolveWorkerPlacementCapabilities } from "../worker-environments/placement-capabilities.js";
 import type { WorkerEnvironmentServiceRecord } from "../worker-environments/service-contract.js";
@@ -282,6 +285,22 @@ export const environmentsHandlers: GatewayRequestHandlers = {
         );
       }
       const profiles = await listWorkerProfilesWithMachines(context);
+      const config = context.getRuntimeConfig();
+      const role = resolveOperatorRolePolicy(client ?? null, config);
+      const currentScopes = client?.connect.scopes ?? [];
+      const administrator =
+        currentScopes.includes(ADMIN_SCOPE) && (!role || role.scopes.includes(ADMIN_SCOPE));
+      const canWrite =
+        authorizeOperatorScopesForRequiredScope(WRITE_SCOPE, currentScopes).allowed &&
+        (!role || authorizeOperatorScopesForRequiredScope(WRITE_SCOPE, role.scopes).allowed);
+      const dispatchableProfileIds = config.gateway?.roles
+        ? profiles
+            .filter(
+              (profile) =>
+                canWrite && (administrator || role?.workerProfiles?.includes(profile.id)),
+            )
+            .map((profile) => profile.id)
+        : undefined;
       const suggestedProfile = await listSuggestedWorkerProfile(context);
       authority.assertCurrent();
       const includeCurrentPreparedDetails =
@@ -302,6 +321,7 @@ export const environmentsHandlers: GatewayRequestHandlers = {
         true,
         {
           environments,
+          ...(dispatchableProfileIds ? { dispatchableProfileIds } : {}),
           ...(suggestedProfile ? { suggestedProfile } : {}),
           ...(context.getRuntimeConfig().cloudWorkers?.requiredProfile
             ? { requiredProfile: context.getRuntimeConfig().cloudWorkers?.requiredProfile }

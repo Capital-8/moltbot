@@ -1,6 +1,9 @@
+import type { WorkerAdmissionHandshake } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import type { SecretRef } from "../../config/types.secrets.js";
 import { WorkerProviderError, type WorkerProvider } from "../../plugins/types.js";
+import { sameWorkerBuild } from "../../worker/worker-build-identity.js";
 import { measureGatewayRestartTrace } from "../restart-trace.js";
+import type { WorkerInstallationArtifact } from "./bundle.js";
 import { DEVICE_WORKER_PROVIDER_ID } from "./device-provider-identity.js";
 import {
   hasForcedWorkerEnvironmentAbandonment,
@@ -11,6 +14,7 @@ import type {
   WorkerEnvironmentAbandonment,
   WorkerProviderLifecycleOptions,
 } from "./provider-lifecycle.types.js";
+import type { createWorkerProvisionCancellation } from "./provider-provisioning-cancellation.js";
 import {
   requireProviderOperationTimeoutMs,
   requireWorkerAllocation,
@@ -30,6 +34,9 @@ import { boundedWorkerError } from "./worker-error.js";
 export function createWorkerProviderOwnerLifecycle(
   options: Pick<
     WorkerProviderLifecycleOptions,
+    | "callBootstrap"
+    | "bootstrapWorker"
+    | "credentialBroker"
     | "store"
     | "tunnelManager"
     | "callProvider"
@@ -44,6 +51,7 @@ export function createWorkerProviderOwnerLifecycle(
     | "warn"
   > & {
     providerFor: (providerId: string) => WorkerProvider;
+    ownerSignal: AbortSignal;
     onOwnerStopped?: (environmentId: string) => void;
   },
 ) {
@@ -544,6 +552,53 @@ export function createWorkerProviderOwnerLifecycle(
     return Promise.race([destruction, accepted.promise]);
   };
 
+  const finishBootstrap = async (
+    record: WorkerEnvironmentRecord,
+    provider: WorkerProvider,
+    installation: WorkerInstallationArtifact,
+    cancellation?: ReturnType<typeof createWorkerProvisionCancellation>,
+  ) => {
+    if (record.state !== "bootstrapping" || !record.leaseId || !record.sshEndpoint) {
+      throw serviceError("invalid_state", "Worker bootstrap requires a provisioned SSH lease");
+    }
+    const { leaseId, sshEndpoint } = record;
+    let receipt: WorkerAdmissionHandshake;
+    try {
+      receipt = await options.callBootstrap(installation, (signal) =>
+        options.bootstrapWorker({
+          operationId: record.provisionOperationId,
+          sshEndpoint,
+          installation,
+          resolveIdentity: identityResolverFor(record, provider, leaseId),
+          signal: cancellation ? AbortSignal.any([signal, cancellation.signal]) : signal,
+        }),
+      );
+      cancellation?.assertActive();
+      if (!sameWorkerBuild(receipt, installation)) {
+        throw new Error("Worker bootstrap receipt does not match the expected build identity");
+      }
+    } catch (error) {
+      await cancellation?.settleStopIntent();
+      if (options.ownerSignal.aborted) {
+        // Owner shutdown leaves this allocation for restart recovery.
+        throw error;
+      }
+      return await failBootstrap(record, leaseId, provider, error);
+    }
+    return options.credentialBroker.commitReady(
+      record,
+      { ...receipt, installKind: "bundle" },
+      {},
+      () => {
+        cancellation?.assertActive();
+        const current = requireCurrentOwner(record);
+        if (current.destroyRequestedAtMs !== null) {
+          throw serviceError("invalid_state", "Worker bootstrap owner is stopping");
+        }
+      },
+    );
+  };
+
   return {
     identityResolverFor,
     requireCurrentOwner,
@@ -553,6 +608,7 @@ export function createWorkerProviderOwnerLifecycle(
     lifecycleLease,
     finishDestroy,
     failBootstrap,
+    finishBootstrap,
     finishConfirmedProvisionCleanup,
     preserveIndeterminateProvisionCleanup,
     destroy,

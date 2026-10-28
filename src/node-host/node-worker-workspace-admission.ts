@@ -3,6 +3,65 @@ import path from "node:path";
 import { FsSafeError } from "@openclaw/fs-safe";
 import { tempWorkspace, type TempWorkspaceOptions } from "@openclaw/fs-safe/temp";
 import { isMissingPathError } from "../infra/errno.js";
+import type { OpenClawPluginNodeWorkspaceLease } from "../plugins/types.node-host.js";
+import {
+  applyNodeWorkerPlatformTrust,
+  type NodeWorkerPlatformTrust,
+} from "./node-worker-environment.js";
+
+/** Workspace custody and its admitted process environment share one release/currentness fence. */
+export function createNodeWorkerManagedWorkspaceLease(params: {
+  workspaceDir: string;
+  homeDir?: string;
+  env: NodeJS.ProcessEnv;
+  platformTrust?: NodeWorkerPlatformTrust;
+  release: () => void;
+  assertCurrent: () => void;
+  redactOutput?: (text: string) => string;
+}): OpenClawPluginNodeWorkspaceLease {
+  try {
+    params.assertCurrent();
+  } catch (error) {
+    params.release();
+    throw error;
+  }
+  let active = true;
+  const assertCurrent = () => {
+    if (!active) {
+      throw new Error("node placement workspace lease is released");
+    }
+    params.assertCurrent();
+  };
+  return {
+    workspaceDir: params.workspaceDir,
+    ...(params.homeDir ? { homeDir: params.homeDir } : {}),
+    release: () => {
+      active = false;
+      params.release();
+    },
+    processEnvironment: {
+      assertCurrent,
+      prepare: (sanitizedEnv) => {
+        assertCurrent();
+        const env = { ...sanitizedEnv };
+        if (params.platformTrust) {
+          applyNodeWorkerPlatformTrust(env, params.platformTrust);
+        }
+        delete env.IDENTITY_ENDPOINT;
+        delete env.IDENTITY_HEADER;
+        if (
+          params.env.IDENTITY_ENDPOINT !== undefined &&
+          params.env.IDENTITY_HEADER !== undefined
+        ) {
+          env.IDENTITY_ENDPOINT = params.env.IDENTITY_ENDPOINT;
+          env.IDENTITY_HEADER = params.env.IDENTITY_HEADER;
+        }
+        return env;
+      },
+      redactOutput: (text) => params.redactOutput?.(text) ?? text,
+    },
+  };
+}
 
 async function describeWritableAncestor(rootDir: string): Promise<string | undefined> {
   let canonicalRoot = path.resolve(rootDir);

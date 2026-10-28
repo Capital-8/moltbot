@@ -22,6 +22,21 @@ placement recovery flow offers Retry or Stop. There is no local fallback. The
 optional selection procedures below apply when the Gateway has no required
 profile.
 
+Durable callers can create a worker session with `creationOperationId`,
+`sessionId`, and `purpose: "investigation"` or `purpose: "coding"`, plus optional
+`agentId`, `label`, and transport `idempotencyKey`. The configured default agent
+and verified operator identity are required. Both purposes require a configured
+required worker profile; there is no Gateway fallback. Coding requires
+`repository: { url, ref? }`; investigation forbids a repository and starts in an
+empty managed workspace. The operation binds the submitted purpose and repository;
+changing either conflicts with the original receipt. Do not include an initial
+task or message. Creation hands the new session to the existing placement owner.
+A replay returns the
+original session without restarting preparation, including after a preparation
+failure; use the existing placement status and recovery flow. Creation success
+alone does not prove readiness. The purpose does not grant execution or
+provide a Gateway exception to the required-profile policy.
+
 ## Codex on a paired device
 
 Paired-device Codex placement requires the `codex` plugin to be installed and
@@ -123,7 +138,7 @@ openclaw gateway call sessions.dispatch \
 
 The bundled Crabbox provider advertises Linux, Windows (WSL2), native Windows, and macOS when the selected backend reports the matching target. Before reading the catalog or starting a worker, the plugin resolves a supported Crabbox binary, automatically installing its managed copy when the selected binary is outdated or missing. Every target uses the same supported version; an old local CLI no longer hides non-Linux targets. See [Crabbox configuration](/gateway/config-cloud-workers#crabbox-profile) for the managed installation policy. Desktop supports Linux, native Windows, and prepared macOS images; WSL2 desktops are unsupported. Warm images remain Linux only. See [desktop prerequisites](/gateway/cloud-workers/desktop). The **Operating system** section appears when the catalog includes available operating-system choices; Crabbox reports the available targets, and each Crabbox machine option identifies its `os`.
 
-Select `windows/normal` for native Windows and `windows/wsl2` for the Linux environment inside Windows. Native Windows runs `settings.setup` as PowerShell and requires supported Node.js and npm on the guest. Headless Windows workers additionally require Crabbox's detached-process launcher. Profiles with `settings.setup` only offer OS and machine choices using the configured target's interpreter: PowerShell for native Windows, POSIX for the other targets. Cross-interpreter overrides fail before allocation; configure a separate native Windows profile instead of reusing a Bash setup recipe. Profiles without setup retain all backend-supported choices. See [Worker setup and bundle installation](/gateway/cloud-workers/setup-and-bundle-installation#native-windows-prerequisites).
+Select `windows/normal` for native Windows and `windows/wsl2` for the Linux environment inside Windows. Native Windows runs `settings.setup` as PowerShell and requires supported Node.js and tar on the guest. Headless Windows workers additionally require Crabbox's detached-process launcher. Profiles with `settings.setup` only offer OS and machine choices using the configured target's interpreter: PowerShell for native Windows, POSIX for the other targets. Cross-interpreter overrides fail before allocation; configure a separate native Windows profile instead of reusing a Bash setup recipe. Profiles without setup retain all backend-supported choices. See [Worker setup and bundle installation](/gateway/cloud-workers/setup-and-bundle-installation#native-windows-prerequisites).
 
 The picker offers provider-reported classes plus the configured default, even
 when that default is absent from the catalog. It shows reported vCPU and RAM

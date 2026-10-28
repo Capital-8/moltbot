@@ -33,6 +33,9 @@ async function bindWorkerGitHubCheckout(
   baseEnv: NodeJS.ProcessEnv,
   signal?: AbortSignal,
 ) {
+  if (!binding.branch) {
+    return;
+  }
   const git = (args: string[], timeoutMs = 5_000) =>
     executeGitCommand(cwd, args, {
       baseEnv,
@@ -141,15 +144,18 @@ export async function prepareWorkerGitHubEnvironment(params: {
       cause: error,
     });
   }
-  const localIdentityEnv = managedGitHubIdentityEnvironment({
-    profileDir,
-    gitAuthor: binding.gitAuthor,
-    // Reset inherited helpers so paired-device credentials cannot override the turn identity.
-    gitConfig: [
-      ["credential.helper", ""],
-      ["credential.helper", "!gh auth git-credential"],
-    ],
-  });
+  const localIdentityEnv = {
+    ...managedGitHubIdentityEnvironment({
+      profileDir,
+      host: binding.host,
+      gitAuthor: binding.gitAuthor,
+      // Reset inherited helpers so paired-device credentials cannot override the turn identity.
+      gitConfig: [
+        ["credential.helper", ""],
+        ["credential.helper", "!gh auth git-credential"],
+      ],
+    }),
+  };
   if (os.platform() === "win32") {
     const permissions = await inspectPathPermissions(profileDir);
     if (

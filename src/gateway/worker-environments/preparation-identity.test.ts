@@ -86,6 +86,25 @@ it("separates skipped setup caches while preserving the default identity", () =>
   expect(skipped.cacheKey).not.toBe(original.cacheKey);
   expect(readWorkerProjectPreparation({ preparation: skipped })).toEqual(skipped);
 });
+it("separates runtime image capacity from empty workspaces without repository facts", () => {
+  const empty = createWorkerPreparationIdentity(runtime);
+  const image = createWorkerPreparationIdentity({ ...runtime, imageReserve: true });
+  expect(image.key).not.toBe(empty.key);
+  expect(image.cacheKey).not.toBe(empty.cacheKey);
+  expect(image).not.toHaveProperty("recipe");
+  const profile = {
+    ...runtime.profileSnapshot,
+    runtimePreparation: { source: "image", ...image },
+  };
+  expect(readWorkerPreparation(profile)).toEqual({ source: "image", ...image });
+  expect(workerPreparationSourceKey(profile)).toBe("image");
+  expect(workerPreparationSourceKey({ runtimePreparation: { source: "empty", ...empty } })).toBe(
+    "empty",
+  );
+  expect(() => readWorkerPreparation({ ...profile, project: input.project })).toThrow(
+    "runtime preparation identity is invalid",
+  );
+});
 
 it("uses the provider disk fingerprint independently of lease and runtime policy", () => {
   const target = { ...input.target, profileKey: "7".repeat(64) };

@@ -55,14 +55,70 @@ export async function syncSessionRepositoryWorkspace(params: {
     );
   }
   params.assertCurrent();
+  if (!prepared && Boolean(getRepositoryIntegration()) && !params.readNativeCredential) {
+    throw new Error("Repository worker startup requires current GitHub dispatch admission");
+  }
+  let identity: Awaited<ReturnType<typeof prepareGitHubReadIdentity>> | undefined;
+  if (!prepared && params.readNativeCredential) {
+    const config = getRuntimeConfig();
+    const remote = parseGitHubRemoteUrl(repository.url, resolveGitHubHost());
+    if (!remote) {
+      throw new Error("Repository startup requires a repository on the selected GitHub host");
+    }
+    identity = await prepareGitHubReadIdentity({
+      config,
+      sourceConfig: getActiveSecretsRuntimeConfigSnapshot()?.sourceConfig ?? config,
+      agentId: params.agentId,
+      getCurrentConfig: getRuntimeConfig,
+      assertActive: params.assertCurrent,
+      readNativeCredential: params.readNativeCredential,
+      allowAppInstallation: params.retainCredentialCleanup !== undefined,
+      requestedRepository: `${remote.owner}/${remote.repo}`,
+      refresh: () => requestCurrentGitHubOAuthRefresh(params.agentId),
+    });
+    if (identity.revoke) {
+      params.retainCredentialCleanup?.(identity.revoke);
+    }
+  }
+  const assertRepositoryCurrent = identity
+    ? () => {
+        params.assertCurrent();
+        identity.assertSelected();
+      }
+    : params.assertCurrent;
+  assertRepositoryCurrent();
   const github = prepared
     ? undefined
-    : await prepareRepositoryGitHubIdentity(params.agentId, params.assertCurrent);
-  params.assertCurrent();
+    : (identity ?? (await prepareRepositoryGitHubIdentity(params.agentId, params.assertCurrent)));
+  assertRepositoryCurrent();
+  const missingCheckpoint = repository.checkpointRef
+    ? await prepareMissingSessionRepositoryCheckpoint({
+        workspaceId: repository.workspaceId,
+        expectedRevision: repository.revision,
+        assertCurrent: assertRepositoryCurrent,
+      })
+    : undefined;
+  let assertRecoveryCurrent: (() => void) | undefined;
+  if (missingCheckpoint) {
+    if (!params.prepareCheckpointRecovery) {
+      throw new Error(
+        "Restore the missing repository checkpoint from backup or retry through an authorized worker dispatch; recovery ownership is unavailable.",
+      );
+    }
+    assertRecoveryCurrent = await params.prepareCheckpointRecovery();
+  }
+  const assertSourceCurrent = missingCheckpoint
+    ? () => {
+        assertRepositoryCurrent();
+        missingCheckpoint.assertCurrent();
+        assertRecoveryCurrent?.();
+      }
+    : assertRepositoryCurrent;
+  assertSourceCurrent();
   const source: Extract<WorkerWorkspaceSyncRequest["source"], { kind: "repository" }> = {
     kind: "repository",
     url: repository.url,
-    ref: repository.requestedRef ?? undefined,
+    ref: missingCheckpoint?.baseCommit ?? repository.requestedRef ?? undefined,
     branch: repository.branch,
     baseCommit: repository.baseCommit ?? prepared?.baseCommit,
     ...(prepared ? { prepared } : {}),

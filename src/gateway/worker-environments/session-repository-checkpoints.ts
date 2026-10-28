@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { hasErrnoCode } from "../../infra/errno.js";
 import { runGitWorkerOperation } from "../../infra/git-worker.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
@@ -221,6 +223,8 @@ export async function stageSessionRepositoryCheckpoint(
     expectedRevision: number;
     checkpointRef?: string;
     stagingRoot: string;
+    gitHistory?: WorkerWorkspaceGitHistory;
+    gitPackPath?: string;
     baseManifestRaw: string;
     currentManifestRaw: string;
     baseManifestRef: string;

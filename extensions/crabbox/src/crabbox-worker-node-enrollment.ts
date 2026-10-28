@@ -26,7 +26,11 @@ export function createCrabboxNodeEnrollmentSetup(params: {
   leaseId: string;
   target?: CrabboxOperatingSystem;
 }): { command: string; forwardedEnv: Record<string, string> } {
-  return createCrabboxNodeSetup({ ...params, nodeBootstrap: params.enrollment.nodeBootstrap });
+  return createCrabboxNodeSetup({
+    ...params,
+    nodeBootstrap: params.enrollment.nodeBootstrap,
+    workerCodex: params.enrollment.workerCodex,
+  });
 }
 
 export type CrabboxWorkerNodeRuntimePreparation = Awaited<
@@ -104,14 +108,41 @@ setPhase("preparation");
   try { tokens = JSON.parse(credentials || "{}"); }
   catch { throw new Error("Cloud worker bootstrap credential format is invalid"); }
   const home = fs.realpathSync(os.homedir());
-  const stateDir = ${createCrabboxWorkerStateDirScript(leaseId)};
+  const stateDir = ${leaseId ? createCrabboxWorkerStateDirScript(leaseId) : "undefined"};
+  const stageWorkerCodex = () => {
+    if (!workerCodexBase64) return;
+    let settings;
+    try { settings = JSON.parse(Buffer.from(workerCodexBase64, "base64").toString("utf8")); }
+    catch { throw new Error("Cloud worker Codex settings are invalid"); }
+    const { configToml, helperScript, helperPath, configVersion } = settings;
+    if (![configToml, helperScript, helperPath, configVersion].every((value) => typeof value === "string" && value.length > 0) || !/^[a-f0-9]{64}$/.test(configVersion)) throw new Error("Cloud worker Codex settings are incomplete");
+    const helperName = path.basename(helperPath);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\\.mjs$/.test(helperName) || configToml.split(helperPath).length !== 2) throw new Error("Cloud worker Codex helper path is missing or ambiguous");
+    const directory = path.join(stateDir, "codex-runtime");
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (!fs.lstatSync(directory).isDirectory() || fs.realpathSync(directory) !== directory) throw new Error("Cloud worker Codex settings directory is unsafe");
+    if (process.platform !== "win32") fs.chmodSync(directory, 0o700);
+    const versionFile = path.join(directory, "version");
+    if (fs.existsSync(versionFile) && fs.readFileSync(versionFile, "utf8") !== configVersion) throw new Error("Cloud worker Codex version changed on an existing lease; reprovision the worker");
+    const writePrivate = (name, content) => {
+      const destination = path.join(directory, name);
+      const temporary = destination + "." + crypto.randomUUID();
+      try {
+        fs.writeFileSync(temporary, content, { mode: 0o600, flag: "wx" });
+        fs.renameSync(temporary, destination);
+      } finally { fs.rmSync(temporary, { force: true }); }
+    };
+    writePrivate(helperName, helperScript);
+    writePrivate("config.toml", configToml.replace(helperPath, path.join(directory, helperName)));
+    writePrivate("version", configVersion);
+  };
   const runtimeRoot = path.join(home, ".openclaw-worker", "node-runtimes");
   const runtimeDir = path.join(runtimeRoot, bootstrap.sha256);
   const cli = path.join(runtimeDir, "node_modules", "openclaw", "openclaw.mjs");
-  const pidFile = path.join(stateDir, "node.pid");
-  const launchFile = path.join(stateDir, "node-launch.json");
-  const setupFile = path.join(stateDir, "setup-code");
-  const runtimeLink = path.join(stateDir, "runtime");
+  const pidFile = stateDir && path.join(stateDir, "node.pid");
+  const launchFile = stateDir && path.join(stateDir, "node-launch.json");
+  const setupFile = stateDir && path.join(stateDir, "setup-code");
+  const runtimeLink = stateDir && path.join(stateDir, "runtime");
   const nodeEnv = { ...process.env, ...(mode ? { OPENCLAW_STATE_DIR: stateDir } : {}) };
   // Tools travel inside the verified full-node artifact and share its preparation identity.
   if (process.platform !== "win32") {

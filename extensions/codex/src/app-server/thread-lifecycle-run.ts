@@ -535,37 +535,13 @@ export async function startOrResumeThread(
         !contextEngineBinding ||
         !isContextEngineBindingCompatible(binding.contextEngine, contextEngineBinding)
       ) {
-        // Only a projection refresh can hand the conversation forward while native
-        // background work retains its original subscription and cleanup authority.
-        retainBackgroundPredecessor =
-          initialBoundClientId === clientId &&
-          binding.contextEngine?.engineId === contextEngineBinding?.engineId &&
-          binding.contextEngine?.policyFingerprint === contextEngineBinding?.policyFingerprint &&
-          Boolean(contextEngineBinding) &&
-          (!binding.dynamicToolsFingerprint ||
-            areCodexDynamicToolFingerprintsCompatible({
-              previous: binding.dynamicToolsFingerprint,
-              next: dynamicToolsFingerprint,
-              nextLegacy: legacyDynamicToolsFingerprint,
-            })) &&
-          isCodexAppServerLiveThreadBackgroundOnly(params.client, binding.threadId);
-        if (retainBackgroundPredecessor) {
-          const currentPluginConfig = await buildLoadedPluginThreadConfig(binding);
-          if (
-            currentPluginConfig &&
-            currentPluginConfig.fingerprint !== binding.pluginAppsFingerprint
-          ) {
-            retainBackgroundPredecessor = false;
-          }
-        }
-        if (retainBackgroundPredecessor) {
-          retainBackgroundPredecessor = await canRetainCodexProjectionBackgroundWork(
-            params,
-            binding,
-            await prepareRequestContext(),
-            prebuiltPluginThreadConfig,
-          );
-        }
+        retainBackgroundPredecessor = await canRetainCodexProjectionBackgroundWork({
+          params,
+          binding,
+          preflight,
+          buildLoadedPluginThreadConfig,
+          prepareRequestContext,
+        });
         rotateStaleBinding(binding, "context-engine binding", {
           engineId: contextEngineBinding?.engineId,
           previousEngineId: binding.contextEngine?.engineId,

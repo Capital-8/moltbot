@@ -164,6 +164,7 @@ type DispatchSessionEntry = Pick<
   SessionEntry,
   | "sessionId"
   | "deviceFolder"
+  | "createdActor"
   | "worktree"
   | "agentHarnessId"
   | "agentRuntimeOverride"

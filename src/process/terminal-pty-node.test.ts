@@ -18,6 +18,26 @@ import { spawnNodeTerminalPty } from "./terminal-pty-node.js";
 import type { TerminalPtyEvent } from "./terminal-pty-protocol.js";
 import type { TerminalPtyHandle, TerminalPtySpawnParams } from "./terminal-pty.js";
 
+const ipcMessages = vi.hoisted(() => [] as unknown[]);
+// Observe the real helper transport without replacing its launch or PTY behavior.
+vi.mock("node:child_process", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...original,
+    spawn: (...args: Parameters<typeof original.spawn>) => {
+      const child = original.spawn(...args);
+      if (child.send) {
+        const send = child.send.bind(child);
+        vi.spyOn(child, "send").mockImplementation((...sendArgs) => {
+          ipcMessages.push(sendArgs[0]);
+          return send(...sendArgs);
+        });
+      }
+      return child;
+    },
+  };
+});
+
 const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: os.tmpdir(), TERM: "dumb" };
 const handles: TerminalPtyHandle[] = [];
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -46,6 +66,7 @@ function observe(handle: TerminalPtyHandle, onData?: (output: string) => void) {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   for (const handle of handles.splice(0)) {
     handle.kill();
   }
@@ -65,11 +86,13 @@ describe.runIf(process.platform !== "win32")("Node-owned terminal PTY", () => {
           throw new Error("PTY policy revoked");
         }
       };
+      const privateEnv = vi.fn(() => ({ OPENCLAW_TEST_PRIVATE: "synthetic-private-pty-token" }));
       const starting = spawnNodeTerminalPty(
         {
           ...defaults,
           args: ["-c", "touch started; IFS= read -r input; printf 'completed\\n'"],
           cwd: directory,
+          privateEnv,
         },
         assertAllowed,
         (launch, settlement) => {
@@ -93,6 +116,7 @@ describe.runIf(process.platform !== "win32")("Node-owned terminal PTY", () => {
         await expect(starting).rejects.toThrow("PTY policy revoked");
         expect(fs.existsSync(marker)).toBe(false);
         expect(launchGrants).toBe(timing === "prepared" ? 1 : 0);
+        expect(privateEnv).toHaveBeenCalledTimes(timing === "prepared" ? 1 : 0);
       } else {
         const handle = await starting;
         handles.push(handle);
@@ -108,6 +132,37 @@ describe.runIf(process.platform !== "win32")("Node-owned terminal PTY", () => {
       }
     },
   );
+
+  it("delivers private environment only to the PTY child without IPC or output exposure", async () => {
+    const token = "synthetic-private-pty-token";
+    ipcMessages.length = 0;
+    const privateEnv = vi.fn(() => ({ OPENCLAW_TEST_PRIVATE: token }));
+    const params = {
+      file: "/bin/sh",
+      args: [
+        "-c",
+        'test -t 0 && test "${#OPENCLAW_TEST_PRIVATE}" -eq 27 && printf "PRIVATE_READY\\n"',
+      ],
+      cwd: os.tmpdir(),
+      env,
+      cols: 80,
+      rows: 24,
+      privateEnv,
+    };
+    const handle = await spawnNodeTerminalPty(params);
+    handles.push(handle);
+    let output = "";
+    const done = createDeferredCore<{ exitCode: number; signal?: number }>();
+    handle.onData((data) => {
+      output += data;
+    });
+    handle.onExit((event) => done.resolve(event));
+    expect((await done.promise).exitCode).toBe(0);
+    expect(output).toBe("PRIVATE_READY\r\n");
+    expect(privateEnv).toHaveBeenCalledOnce();
+    expect(params.env).not.toHaveProperty("OPENCLAW_TEST_PRIVATE");
+    expect(ipcMessages.every((message) => !JSON.stringify(message).includes(token))).toBe(true);
+  });
 
   it("preserves terminal input, resize ordering, and final output with a non-Node shim first on PATH", async () => {
     const directory = tempDirs.make("openclaw-pty-node-shim-");

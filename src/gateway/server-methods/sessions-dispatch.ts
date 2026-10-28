@@ -1,3 +1,4 @@
+import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   ErrorCodes,
@@ -11,7 +12,10 @@ import { assertRequiredWorkerSelection } from "../../config/required-worker-prof
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { acceptGatewayDeviceSourceAuthority } from "../device-revocation.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
+import { assertOperatorCloudProfileDispatchAllowed } from "../operator-role-policy.js";
+import { repositoryDispatchCredentialReader } from "../repository-dispatch.js";
 import {
   loadWorkerPlacementSessionRuntimeModule,
   resolveWorkerPlacementSessionTarget,
@@ -232,6 +236,7 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
     context,
     client,
     signal,
+    hasCurrentClientAuthority,
     sessionMutationAuthorization,
   }) => {
     if (
@@ -256,6 +261,16 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
     return withWorkerSessionTarget("dispatch", params, context, respond, async (resolved) => {
       const { cfg, entry, session, service: dispatchService } = resolved;
       const { sessionId, sessionKey, agentId } = session;
+      const runSetupScript = client?.connect?.scopes?.includes(ADMIN_SCOPE) === true;
+      const assertCloudProfileAllowed = () =>
+        assertOperatorCloudProfileDispatchAllowed({
+          config: context.getRuntimeConfig(),
+          client,
+          target: params,
+          createdActor: entry.createdActor,
+          runSetupScript,
+        });
+      assertCloudProfileAllowed();
       let { dispatchTarget } = resolved;
       if (
         entry.deviceFolder &&
@@ -435,10 +450,27 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
         return;
       }
       const initialDispatchTarget = dispatchTarget;
+      const readNativeCredential = repositoryDispatchCredentialReader({
+        client,
+        hasCurrentClientAuthority,
+        agentId,
+        sessionId,
+        sessionKey,
+        requestDigest: sha256Hex(JSON.stringify(initialDispatchTarget)),
+        assertCurrent: () => {
+          sessionMutationAuthorization?.assertCurrent();
+          assertCloudProfileAllowed();
+          signal?.throwIfAborted();
+        },
+      });
       try {
         const result = await withWorkerPlacementAuthorization<
           { placement: WorkerSessionPlacementRecord } | { invalid: string }
         >(sessionMutationAuthorization, async (authorize) => {
+          const authorizeDispatch = Object.assign(() => {
+            authorize?.();
+            assertCloudProfileAllowed();
+          }, authorize);
           let candidateTarget = initialDispatchTarget;
           let lastEligibilityError: string | undefined;
           const candidates = autoDevice ? automaticDeviceIds : [candidateTarget.deviceId];
@@ -492,20 +524,25 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
               const request: WorkerPlacementDispatchRequest = {
                 ...session,
                 executionMode,
-                runSetupScript: client?.connect?.scopes?.includes(ADMIN_SCOPE) === true,
+                runSetupScript,
+                ...(readNativeCredential ? { readNativeCredential } : {}),
                 ...candidateTarget,
                 ...(devicePlacement ? { devicePlacement } : {}),
               };
               const placement = await dispatchService.dispatch(
                 request,
                 (observed) => {
+                  if (observed.state === "requested") {
+                    // The durable placement owns this admitted request beyond its socket.
+                    acceptGatewayDeviceSourceAuthority(hasCurrentClientAuthority);
+                  }
                   attemptedPlacement = { ...observed };
                   emitSessionsChanged(context, {
                     reason: "dispatch",
                     sessionKey,
                   });
                 },
-                authorize,
+                authorizeDispatch,
                 signal,
               );
               return { placement };

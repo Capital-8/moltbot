@@ -1374,6 +1374,32 @@ describe("processGatewayAllowlist", () => {
     });
   });
 
+  it("retains the executing App identity through detached approval with borrowed policy", async () => {
+    const approval = createDeferredCore<ExecApprovalDecision>();
+    approvalDecisionMock.mockReturnValue(approval.promise);
+    mockCompletedProcess();
+    const githubApp = {
+      profileId: "ghp_11111111111111111111111111111111",
+      agentId: "executor",
+      sessionId: "executing-session",
+      sessionKey: "agent:executor:actual",
+    };
+    const result = await runGatewayAllowlist({
+      command: "find . -maxdepth 1",
+      agentId: "policy-owner",
+      sessionKey: "agent:policy-owner:policy",
+      githubApp,
+      turnSourceChannel: "webchat",
+      approvalFollowupMode: "agent",
+    });
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+    expect(runExecProcessMock).not.toHaveBeenCalled();
+    approval.resolve("allow-once");
+    await vi.waitFor(() => expect(runExecProcessMock).toHaveBeenCalledOnce());
+    expect(runExecProcessMock).toHaveBeenCalledWith(expect.objectContaining({ githubApp }));
+    await vi.waitFor(() => expect(sendExecApprovalFollowupResultMock).toHaveBeenCalledOnce());
+  });
+
   it("re-prompts durable detached gateway script approvals and rejects changed bytes", async () => {
     const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-script-binding-"));
     const script = path.join(workdir, "script.sh");

@@ -84,3 +84,42 @@ it.each([
     expect(JSON.parse(readManifest())).toEqual(manifest);
   },
 );
+
+it("publishes a source public export as a directly importable built Node API", () => {
+  const root = tempDirs.make("openclaw-public-artifact-");
+  const source = path.join(root, "extensions", "public-fixture");
+  const built = path.join(root, "dist", "extensions", "public-fixture");
+  fs.mkdirSync(source, { recursive: true });
+  fs.mkdirSync(built, { recursive: true });
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "openclaw" }));
+  const manifest = {
+    name: "@example/public-fixture",
+    version: "1.2.3",
+    type: "module",
+    exports: { "./cli-runtime-api.js": "./cli-runtime-api.ts" },
+    openclaw: { extensions: ["./index.ts"] },
+  };
+  fs.writeFileSync(path.join(source, "package.json"), JSON.stringify(manifest));
+  fs.writeFileSync(
+    path.join(source, "openclaw.plugin.json"),
+    JSON.stringify({ id: "public-fixture", configSchema: { type: "object" } }),
+  );
+  fs.writeFileSync(path.join(source, "index.ts"), "export default {};\n");
+  fs.writeFileSync(path.join(source, "cli-runtime-api.ts"), 'export const marker = "source";\n');
+  fs.writeFileSync(path.join(built, "cli-runtime-api.js"), 'export const marker = "compiled";\n');
+  copyBundledPluginMetadata({ cwd: root, env: {} });
+  const require = createRequire(path.join(built, "package.json"));
+  const entry = require.resolve("@example/public-fixture/cli-runtime-api.js");
+  expect(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const api = await import(${JSON.stringify(entry)}); process.stdout.write(api.marker);`,
+      ],
+      { encoding: "utf8" },
+    ),
+  ).toBe("compiled");
+  expect(JSON.parse(fs.readFileSync(path.join(source, "package.json"), "utf8"))).toEqual(manifest);
+});

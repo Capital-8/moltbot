@@ -15,6 +15,7 @@ import { resolveProviderModelRoutes } from "../../plugins/provider-model-routes.
 import { hasAuthoredProviderRequestParams } from "../model-extra-params.js";
 import {
   resolveAgentRuntimePolicyAgentId,
+  resolveModelRuntimePolicy,
   resolveModelRouteIntent,
   type AgentRuntimePolicyScope,
 } from "../model-runtime-policy.js";
@@ -167,7 +168,14 @@ export function buildAgentHarnessSupportContext(
     hasConfiguredProviderRequestParams
       ? "present"
       : "none";
+  const declaredRuntime = resolveModelRuntimePolicy({
+    config: params.config,
+    provider: params.provider,
+    modelId: params.modelId,
+    agentId,
+  });
   const modelProviderFacts = {
+    auth: params.modelProvider?.auth ?? providerConfig?.auth,
     api: params.modelProvider?.api ?? configuredModelProvider?.api,
     baseUrl: params.modelProvider?.baseUrl ?? configuredModelProvider?.baseUrl,
     azureApiVersion:
@@ -208,6 +216,9 @@ export function buildAgentHarnessSupportContext(
   const modelProvider = {
     ...modelProviderFacts,
     runtimePolicy,
+    declaredRuntimeId:
+      params.modelProvider?.declaredRuntimeId ??
+      (declaredRuntime.forcedByEnvironment ? undefined : declaredRuntime.policy?.id),
   };
   return {
     provider: params.provider,

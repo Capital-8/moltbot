@@ -110,13 +110,9 @@ describe("session dispatch protocol schemas", () => {
     });
     reclaimed.accepts(
       ...["local", "reclaimed"].map((state) => result({ state, ...basePlacement })),
+      result({ state: "active", ...basePlacement, ...workerOwnedFields }),
     );
-    reclaimed.rejects(
-      ...[
-        { state: "requested", ...basePlacement },
-        { state: "active", ...basePlacement, ...workerOwnedFields },
-      ].map(result),
-    );
+    reclaimed.rejects(...[{ state: "requested", ...basePlacement }].map(result));
   });
 
   it("keeps placement states closed", () => {

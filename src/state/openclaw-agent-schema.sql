@@ -880,3 +880,15 @@ CREATE TABLE IF NOT EXISTS session_input_completions (
   FOREIGN KEY (session_key) REFERENCES session_nodes(session_key) ON DELETE CASCADE,
   FOREIGN KEY (session_id) REFERENCES session_windows(session_id) ON DELETE CASCADE
 ) STRICT;
+
+-- Caller-bound creation receipts survive session deletion, with a fixed operation lifetime.
+-- No session FK: deleting a conversation must not reopen an accepted operation.
+CREATE TABLE IF NOT EXISTS session_creation_operations (
+  operation_digest TEXT NOT NULL PRIMARY KEY,
+  request_fingerprint TEXT NOT NULL,
+  session_id TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_agent_session_creation_operations_expiry
+  ON session_creation_operations(expires_at);
+-- END SESSION CREATION OPERATIONS

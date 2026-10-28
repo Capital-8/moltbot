@@ -5,7 +5,11 @@ import {
   WorkerMachineOptionsSchema,
   WorkerOperatingSystemSchema,
 } from "../../../packages/gateway-protocol/src/schema/environments.js";
-import { validateProviderSettings } from "../../config/provider-settings.js";
+import {
+  validateProviderSettings,
+  WORKER_PROFILE_SETTINGS_JSON_LIMITS,
+} from "../../config/provider-settings.js";
+import type { OpenClawConfig } from "../../config/types.js";
 import { normalizeCapabilityProviderId } from "../../plugins/provider-registry-shared.js";
 import {
   WorkerProviderError,
@@ -25,8 +29,23 @@ import { workerEnvironmentServiceError as serviceError } from "./environment-err
 import { normalizeWorkerSshEndpoint } from "./store-validation.js";
 import type { WorkerEnvironmentRecord } from "./store.js";
 
+export function usesRepositoryRefWorkerRecovery(
+  config: OpenClawConfig,
+  environment: Pick<WorkerEnvironmentRecord, "profileId" | "providerId">,
+): boolean {
+  const profile = config.cloudWorkers?.profiles?.[environment.profileId];
+  return (
+    profile?.lostWorkerRecovery === "repository-ref" &&
+    normalizeCapabilityProviderId(profile.provider) === environment.providerId
+  );
+}
+
 export function requireWorkerProfile(value: unknown): WorkerProfile {
-  const error = validateProviderSettings(value, "Worker profile");
+  const error = validateProviderSettings(
+    value,
+    "Worker profile",
+    WORKER_PROFILE_SETTINGS_JSON_LIMITS,
+  );
   if (error) {
     throw serviceError("invalid_profile", error);
   }
@@ -241,7 +260,7 @@ export function requireWorkerLease(value: unknown): WorkerLease {
 }
 
 export function requireInstall(
-  record: WorkerEnvironmentRecord,
+  record: Pick<WorkerEnvironmentRecord, "profileSnapshot">,
 ): WorkerInstallationArtifact["install"] {
   const install = record.profileSnapshot.install;
   if (install !== undefined && install !== "bundle" && install !== "npm") {

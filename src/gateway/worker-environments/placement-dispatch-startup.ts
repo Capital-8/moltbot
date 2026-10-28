@@ -101,12 +101,7 @@ export function createWorkerPlacementDispatchStartup(options: {
     const requirement =
       request.devicePlacement ??
       (options.resolveDevicePlacementRequirement
-        ? await options.resolveDevicePlacementRequirement({
-            sessionId: request.sessionId,
-            sessionKey: request.sessionKey,
-            agentId: request.agentId,
-            executionMode: request.executionMode,
-          })
+        ? await options.resolveDevicePlacementRequirement(request)
         : undefined);
     if (!requirement) {
       throw new Error("Node-backed cloud placement has no authoritative runtime requirement");
@@ -219,6 +214,7 @@ export function createWorkerPlacementDispatchStartup(options: {
     recovery?: true;
     admittedNode?: WorkerNodePlacementAdmission;
     markPhase?: (phase: string) => void;
+    retainCredentialCleanup?: (revoke: () => Promise<void>) => void;
   }): Promise<WorkerActiveDispatchPlacement> => {
     if (params.placement.state !== "provisioning") {
       throw new Error("Worker dispatch continuation requires a provisioning placement");

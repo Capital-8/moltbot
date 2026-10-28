@@ -1,18 +1,48 @@
+import fs from "node:fs";
+import path from "node:path";
+import type { WorkerGitHubLaunchBinding } from "openclaw/plugin-sdk/github-worker-runtime";
 /** Declares the explicitly approved, lazily loaded node-backed Codex exec-server. */
 import type {
   OpenClawPluginNodeHostCommand,
   OpenClawPluginNodeInvokePolicy,
 } from "openclaw/plugin-sdk/plugin-entry";
+import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  resolveCodexWorkerAppServerCommand,
+  resolveCodexWorkerAuthHelper,
+} from "./node-app-server-command.js";
 
 const CODEX_NODE_EXEC_SERVER_COMMAND = "codex.exec-server.stdio.v1";
 
 const CODEX_NODE_EXEC_SERVER_CAPABILITY = "codex.exec-server";
+const CODEX_NODE_APP_SERVER_CAPABILITY = "codex.app-server";
+
+async function parseCodexNodeGitHubBinding(
+  value: unknown,
+): Promise<WorkerGitHubLaunchBinding | undefined> {
+  const { parseWorkerGitHubLaunchBinding } =
+    await import("openclaw/plugin-sdk/github-worker-runtime");
+  return parseWorkerGitHubLaunchBinding(value);
+}
 
 function parseCodexNodePlacementWorkspace(value: unknown) {
   if (
     !isRecord(value) ||
-    Object.keys(value).length !== 5 ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "cwd",
+          "environmentId",
+          "sessionId",
+          "sessionKey",
+          "ownerEpoch",
+          "requireExistingNativeState",
+          "retainedSession",
+        ].includes(key),
+    ) ||
+    (value.requireExistingNativeState !== undefined && value.requireExistingNativeState !== true) ||
+    (value.retainedSession !== undefined && value.retainedSession !== true) ||
     typeof value.cwd !== "string" ||
     !value.cwd.trim() ||
     value.cwd.includes("\0") ||
@@ -41,6 +71,215 @@ function parseCodexNodePlacementWorkspace(value: unknown) {
     sessionId: value.sessionId,
     ownerEpoch: value.ownerEpoch,
     sessionKey: value.sessionKey,
+  };
+}
+
+/** The node advertises model hosting only after enrollment staged private settings. */
+function hasCodexNodeAppServerConfiguration(env: NodeJS.ProcessEnv = process.env): boolean {
+  const stateDir = resolveStateDir(env);
+  const directory = path.join(stateDir, "codex-runtime");
+  try {
+    const config = fs.readFileSync(path.join(directory, "config.toml"), "utf8");
+    const helper = resolveCodexWorkerAuthHelper(config, directory);
+    return fs.statSync(path.join(directory, "version")).isFile() && fs.statSync(helper).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Runs one placement-bound native model process over the existing node duplex. */
+export function createCodexNodeAppServerCommand(): OpenClawPluginNodeHostCommand {
+  const activeProcesses = new Set<() => Promise<void>>();
+  const command = resolveCodexWorkerAppServerCommand();
+  return {
+    command,
+    cap: CODEX_NODE_APP_SERVER_CAPABILITY,
+    dangerous: true,
+    duplex: true,
+    isAvailable: ({ env }) => hasCodexNodeAppServerConfiguration(env),
+    prepare: async ({ env }) => {
+      if (!hasCodexNodeAppServerConfiguration(env)) {
+        return;
+      }
+      const { readWorkerCodexRuntime } = await import("./node-app-server.runtime.js");
+      await readWorkerCodexRuntime();
+      const {
+        resolveManagedCodexAppServerStartOptions,
+        resolveManagedCodexNativeCommand,
+        isManagedCodexDesktopCommand,
+      } = await import("./app-server/managed-binary.js");
+      const resolved = await resolveManagedCodexAppServerStartOptions({
+        transport: "stdio",
+        command: "codex",
+        commandSource: "managed",
+        managedCommandOrder: "package-first",
+        args: ["app-server", "--listen", "stdio://"],
+        headers: {},
+      });
+      if (
+        !resolveManagedCodexNativeCommand(resolved.command) ||
+        isManagedCodexDesktopCommand(resolved.command)
+      ) {
+        throw new Error("Cloud worker requires its pinned Codex binary");
+      }
+    },
+    hasActiveWork: () => activeProcesses.size > 0,
+    onDisconnect: async () => {
+      await Promise.all([...activeProcesses].map(async (stop) => await stop()));
+    },
+    handle: async (paramsJSON, io, context) => {
+      if (!io?.frames) {
+        throw new Error("Codex node app-server requires duplex frames.");
+      }
+      let request: unknown;
+      try {
+        request = JSON.parse(paramsJSON ?? "null") as unknown;
+      } catch {
+        throw new Error("Codex node app-server requires a valid workspace request.");
+      }
+      if (
+        !isRecord(request) ||
+        ![2, 3, 4].includes(Object.keys(request).length) ||
+        Object.keys(request).some(
+          (key) =>
+            !["authorization", "placement", "github", "resourcePreparationRequired"].includes(key),
+        ) ||
+        request.authorization !== "session-full"
+      ) {
+        throw new Error("Codex node app-server requires a full managed placement.");
+      }
+      if (
+        request.resourcePreparationRequired !== undefined &&
+        request.resourcePreparationRequired !== true
+      ) {
+        throw new Error("Invalid private resource preparation requirement");
+      }
+      const placement = parseCodexNodePlacementWorkspace(request.placement);
+      const github: WorkerGitHubLaunchBinding | undefined = Object.hasOwn(request, "github")
+        ? await parseCodexNodeGitHubBinding(request.github)
+        : undefined;
+      if (Object.hasOwn(request, "github") && !github) {
+        throw new Error("Codex node app-server received an invalid GitHub process binding.");
+      }
+      if (
+        !context?.acquireManagedWorkspaceAsync ||
+        !context.prepareExecAuthorization ||
+        context.sessionKey !== placement.sessionKey ||
+        io.signal.aborted
+      ) {
+        throw new Error("Codex node app-server requires active managed placement authority.");
+      }
+      const runtimeIo = context.signal
+        ? { ...io, signal: AbortSignal.any([io.signal, context.signal]) }
+        : io;
+      const assertExecAuthorized = context.prepareExecAuthorization("session-full");
+      const { runCodexNodeAppServer } = await import("./node-app-server.runtime.js");
+      runtimeIo.signal.throwIfAborted();
+      const workspace = await context.acquireManagedWorkspaceAsync({
+        workspaceDir: placement.workspaceDir,
+        environmentId: placement.environmentId,
+        sessionId: placement.sessionId,
+        ownerEpoch: placement.ownerEpoch,
+        sessionKey: placement.sessionKey,
+      });
+      return await runCodexNodeAppServer({
+        workspace,
+        io: runtimeIo,
+        activeProcesses,
+        assertExecAuthorized,
+        github,
+        resourcePreparationRequired: request.resourcePreparationRequired === true,
+        sessionId: placement.sessionId,
+        retainedSession: placement.retainedSession,
+        requireExistingNativeState: placement.requireExistingNativeState,
+        placement,
+      });
+    },
+  };
+}
+
+export function createCodexNodeAppServerInvokePolicy(): OpenClawPluginNodeInvokePolicy {
+  return {
+    commands: [resolveCodexWorkerAppServerCommand()],
+    dangerous: true,
+    standingApproval: { kind: "placement", scope: CODEX_NODE_APP_SERVER_CAPABILITY },
+    classifyRisk: () => ({ level: "high", family: CODEX_NODE_APP_SERVER_CAPABILITY }),
+    handle: async (context) => {
+      if (context.risk?.level !== "high") {
+        return {
+          ok: false,
+          code: "CODEX_NODE_APP_SERVER_APPROVAL_REQUIRED",
+          message: "Codex node model execution requires an available approval reviewer.",
+        };
+      }
+      if (
+        !isRecord(context.params) ||
+        ![2, 3, 4].includes(Object.keys(context.params).length) ||
+        Object.keys(context.params).some(
+          (key) =>
+            !["placement", "authorization", "github", "resourcePreparationRequired"].includes(key),
+        ) ||
+        (context.params.resourcePreparationRequired !== undefined &&
+          context.params.resourcePreparationRequired !== true) ||
+        context.params.authorization !== "session-full"
+      ) {
+        return {
+          ok: false,
+          code: "CODEX_NODE_APP_SERVER_WORKSPACE_INVALID",
+          message: "Codex node model execution requires an exact managed placement workspace.",
+        };
+      }
+      const resourceRequired = context.params.resourcePreparationRequired === true;
+      let placement: ReturnType<typeof parseCodexNodePlacementWorkspace>;
+      try {
+        placement = parseCodexNodePlacementWorkspace(context.params.placement);
+      } catch {
+        return {
+          ok: false,
+          code: "CODEX_NODE_APP_SERVER_WORKSPACE_INVALID",
+          message: "Codex node model execution requires an exact managed placement workspace.",
+        };
+      }
+      const github = Object.hasOwn(context.params, "github")
+        ? await parseCodexNodeGitHubBinding(context.params.github)
+        : undefined;
+      if (Object.hasOwn(context.params, "github") && !github) {
+        return {
+          ok: false,
+          code: "CODEX_NODE_APP_SERVER_GITHUB_BINDING_INVALID",
+          message: "Codex node model execution received an invalid GitHub process binding.",
+        };
+      }
+      const workspace = {
+        workspaceDir: placement.workspaceDir,
+        environmentId: placement.environmentId,
+        sessionId: placement.sessionId,
+        ownerEpoch: placement.ownerEpoch,
+        sessionKey: placement.sessionKey,
+      };
+      const launched = await context.invokeNodeWithSessionFull?.({
+        workspace,
+        createParams: () => ({
+          placement: {
+            cwd: workspace.workspaceDir,
+            environmentId: workspace.environmentId,
+            sessionId: workspace.sessionId,
+            ownerEpoch: workspace.ownerEpoch,
+            sessionKey: workspace.sessionKey,
+          },
+          authorization: "session-full",
+          ...(github ? { github } : {}),
+          ...(resourceRequired ? { resourcePreparationRequired: true } : {}),
+        }),
+      });
+      return (
+        launched ?? {
+          ok: false,
+          code: "CODEX_NODE_APP_SERVER_APPROVAL_REQUIRED",
+          message: "Codex node model execution requires an active Full placement.",
+        }
+      );
+    },
   };
 }
 

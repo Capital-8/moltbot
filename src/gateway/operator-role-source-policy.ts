@@ -16,6 +16,10 @@ export function sourceRolePolicy(role: GatewayOperatorRoleDefinition | undefined
     sessions: role.sessions,
     agents: role.agents,
     scopes: role.scopes,
+    ...(role.workerProfiles !== undefined ? { workerProfiles: role.workerProfiles } : {}),
+    ...(role.verifiedIdentityWrite !== undefined
+      ? { verifiedIdentityWrite: role.verifiedIdentityWrite }
+      : {}),
     ...(role.sandbox !== undefined ? { sandbox: role.sandbox } : {}),
     ...(role.accessPolicyPlugin !== undefined
       ? { accessPolicyPlugin: role.accessPolicyPlugin }

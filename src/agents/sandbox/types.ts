@@ -97,6 +97,13 @@ export type SandboxBrowserContext = {
 };
 
 export type SandboxContext = {
+  /** Prepared native ownership; current attempt authority still gates effects. */
+  nativeWorkerPlacement?: NativeWorkerPlacement;
+  /** Private input delivery joins native file/process effects before they run. */
+  resourceReadiness?: {
+    wait: (signal: AbortSignal) => Promise<void>;
+    assertCurrent: () => void;
+  };
   /** Creators release retained authority after last use; supplied contexts remain caller-owned. */
   [Symbol.dispose]?: () => void;
   enabled: boolean;

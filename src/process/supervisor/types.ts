@@ -168,6 +168,8 @@ type SpawnChildInput = SpawnBaseInput & {
 type SpawnPtyInput = SpawnBaseInput & {
   mode: "pty";
   argv: string[];
+  /** Materialize child-only environment through a private descriptor, never supervisor IPC. */
+  privateEnv?: () => Readonly<Record<string, string>>;
 };
 
 type SpawnAnchoredShellInput = SpawnBaseInput & {

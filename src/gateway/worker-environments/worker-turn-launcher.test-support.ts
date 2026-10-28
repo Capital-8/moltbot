@@ -3,6 +3,7 @@ import { expectDefined } from "@openclaw/normalization-core/expect";
 import { vi } from "vitest";
 import { WORKER_GATEWAY_TOOLS_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/worker-gateway-tool.js";
 import {
+  type AdmittedRunOperatorAuthority,
   createOperationalRunInstanceRef,
   prepareAgentRunAdmission,
 } from "../../agents/admitted-run-context.js";
@@ -560,7 +561,11 @@ export function unusedEnvironments(): WorkerTurnEnvironmentService {
   };
 }
 
-export function turn(runId = "run-worker-turn", executionIdentity = false) {
+export function turn(
+  runId = "run-worker-turn",
+  executionIdentity = false,
+  operatorAuthority?: AdmittedRunOperatorAuthority,
+) {
   const config = {
     ...(executionIdentity
       ? { logging: { audit: { enabled: true, executionIdentity: true } } }
@@ -586,6 +591,7 @@ export function turn(runId = "run-worker-turn", executionIdentity = false) {
   return {
     preparedRunAdmission: prepareAgentRunAdmission({
       cfg: config,
+      operatorAuthority,
       operationalRunInstance: createOperationalRunInstanceRef(runId),
       facts: {
         runId,

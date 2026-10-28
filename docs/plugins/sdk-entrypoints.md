@@ -129,6 +129,15 @@ Harness adapters publish supported entrypoints, structured settings, and mention
 
 The bundled adapter’s private `createHarnessMcpFormResourceContext` accepts `AgentHarnessMcpFormResourceParamsV1` (`version: 1`) and binds rich previews and uploads to the exact originating runtime, server, requester and pending question. Its tool preparer receives only the tool name, input, cancellation signal, and current-authority assertion; Gateway dispatch options and upload implementations remain private to the host. A runtime may expose `canReadLocalFiles(serverName)` only for a current transport that can read host-local files. The shared form adapter uses that fact to select workspace uploads; remote transports do not receive unusable host `file:` URIs. Native no-turn tool elicitations use the originating request scope, separately from model-turn elicitation routing.
 
+## Bounded subprocess framing
+
+`createBoundedLineFramer(maxBytes, overflowMessage)` from
+`openclaw/plugin-sdk/process-runtime` frames LF-delimited bytes across arbitrary
+chunks. `push(buffer)` yields complete lines lazily; `pendingByteLength` reports
+an incomplete final line. The caller owns EOF handling, CRLF normalization,
+protocol validation, and backpressure. The framer preserves bytes and enforces
+the bound per line without consuming later frames after the caller stops.
+
 ## MCP subprocess runtime
 
 **Import:** `mcpStdioRuntime` from `openclaw/plugin-sdk/agent-harness-runtime` using dynamic `import()` when opening a connection. Its frozen object lazily loads one factory:

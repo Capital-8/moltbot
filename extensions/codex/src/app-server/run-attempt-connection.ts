@@ -337,9 +337,10 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
   const appServerHomeScope = resolveCodexAppServerHomeScope({
     appServer: pluginConfig.appServer,
   });
-  const preparedAuthRoute = usesSupervisionConnection
-    ? undefined
-    : params.runtimePlan?.auth.modelRoute;
+  const preparedAuthRoute =
+    usesSupervisionConnection || workerHostedCloud
+      ? undefined
+      : params.runtimePlan?.auth.modelRoute;
   const startupAuthProfileCandidate = usesSupervisionConnection
     ? undefined
     : preparedAuthRoute
@@ -347,36 +348,38 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
       : (params.runtimePlan?.auth.forwardedAuthProfileId ??
         params.authProfileId ??
         startupBinding?.authProfileId);
-  const resolvedStartupAuthProfileId = usesSupervisionConnection
-    ? undefined
-    : preparedAuthRoute
-      ? startupAuthProfileCandidate
-      : params.authProfileStore
-        ? resolveCodexAppServerAuthProfileId({
-            authProfileId: startupAuthProfileCandidate,
-            store: params.authProfileStore,
-            config: params.config,
-          })
-        : await resolveCodexAppServerAuthProfileIdForAgent({
-            authProfileId: startupAuthProfileCandidate,
-            agentDir,
-            config: params.config,
-          });
-  const authHandoff = usesSupervisionConnection
-    ? { authProfileId: undefined, nativeAuthProfile: true, preparedAuth: undefined }
-    : await resolveCodexAppServerPreparedAuthHandoff({
-        authRequirement: preparedAuthRoute?.authRequirement,
-        resolvedApiKey: params.resolvedApiKey,
-        authProfileId: resolvedStartupAuthProfileId,
-        authProfileStore: params.authProfileStore,
-        agentDir,
-        homeScope: appServerHomeScope,
-        requirePreparedAuth: isCodexRemoteExecPlacementSandbox(sandbox),
-        config: params.config,
-        subscriptionProfileRequiredError:
-          "Prepared Codex subscription route requires a forwarded OpenAI OAuth or token profile.",
-        subscriptionProfileUnusableError: "Prepared Codex subscription auth profile is unusable.",
-      });
+  const resolvedStartupAuthProfileId =
+    usesSupervisionConnection || workerHostedCloud
+      ? undefined
+      : preparedAuthRoute
+        ? startupAuthProfileCandidate
+        : params.authProfileStore
+          ? resolveCodexAppServerAuthProfileId({
+              authProfileId: startupAuthProfileCandidate,
+              store: params.authProfileStore,
+              config: params.config,
+            })
+          : await resolveCodexAppServerAuthProfileIdForAgent({
+              authProfileId: startupAuthProfileCandidate,
+              agentDir,
+              config: params.config,
+            });
+  const authHandoff =
+    usesSupervisionConnection || workerHostedCloud
+      ? { authProfileId: undefined, nativeAuthProfile: true, preparedAuth: undefined }
+      : await resolveCodexAppServerPreparedAuthHandoff({
+          authRequirement: preparedAuthRoute?.authRequirement,
+          resolvedApiKey: params.resolvedApiKey,
+          authProfileId: resolvedStartupAuthProfileId,
+          authProfileStore: params.authProfileStore,
+          agentDir,
+          homeScope: appServerHomeScope,
+          requirePreparedAuth: isCodexRemoteExecPlacementSandbox(sandbox),
+          config: params.config,
+          subscriptionProfileRequiredError:
+            "Prepared Codex subscription route requires a forwarded OpenAI OAuth or token profile.",
+          subscriptionProfileUnusableError: "Prepared Codex subscription auth profile is unusable.",
+        });
   const {
     authProfileId: startupAuthProfileId,
     nativeAuthProfile,
@@ -404,11 +407,13 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
     startupBinding,
     reviewerPolicyContext,
   );
-  const effectiveWorkspace = sandbox?.enabled
-    ? sandbox.workspaceAccess === "rw"
-      ? resolvedWorkspace
-      : sandbox.workspaceDir
-    : resolvedWorkspace;
+  const effectiveWorkspace = workerHostedCloud
+    ? sandbox!.containerWorkdir
+    : sandbox?.enabled
+      ? sandbox.workspaceAccess === "rw"
+        ? resolvedWorkspace
+        : sandbox.workspaceDir
+      : resolvedWorkspace;
   const requestedCwd = params.cwd ? resolveUserPath(params.cwd) : undefined;
   if (sandbox?.enabled && requestedCwd && requestedCwd !== resolvedWorkspace) {
     throw new Error(
@@ -422,8 +427,9 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
     requestedCwd,
     fallbackCwd: effectiveWorkspace,
   });
-  const effectiveCwd = sandbox?.enabled ? effectiveWorkspace : sessionPermissionCwd;
-  if (effectiveWorkspace !== resolvedWorkspace) {
+  const effectiveCwd =
+    workerHostedCloud || sandbox?.enabled ? effectiveWorkspace : sessionPermissionCwd;
+  if (!workerHostedCloud && effectiveWorkspace !== resolvedWorkspace) {
     await ensureCodexWorkspaceDirOnce(effectiveWorkspace);
   }
   preDynamicStartupStages.mark("effective-workspace");
@@ -648,6 +654,10 @@ export async function prepareCodexAttemptConnection({ params, options }: CodexRu
       fastModeAutoProgressState,
       preDynamicStartupStages,
       attemptClientFactory,
+      workerHostedCloud,
+      recoveringWorkerHistory: lostWorkerBinding,
+      callerOwnedAttemptClient:
+        workerHostedCloud || attemptClientFactory === createIsolatedCodexAppServerClient,
       runtimeArtifactRequest,
       pluginConfig,
       computerUseConfig,

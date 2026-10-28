@@ -68,6 +68,62 @@ function abortAsAdmin(
 }
 
 describe("chat.abort authorization", () => {
+  it.each([undefined, "stale-session"])(
+    "physical cancellation rejects missing run or stale incarnation (%s)",
+    async (sessionId) => {
+      const context = createSingleAbortContext({
+        storeScope: "/synthetic/chat-abort/session-controller.sqlite",
+      });
+      const active = rpcSourceTesting.get("run-1")!;
+      const respond = await invokeChatAbortHandler({
+        handler: handleChatAbortRequestWithLifecycle,
+        context,
+        request: {
+          sessionKey: "main",
+          sessionId: sessionId ?? "main-session",
+          ...(sessionId ? { runId: "run-1" } : {}),
+        },
+        client: { connId: "conn-admin", connect: { scopes: ["operator.admin"] } },
+      });
+      expect(requireLastRespondCall(respond)[0]).toBe(false);
+      expect(active.input.abortSignal.aborted).toBe(false);
+      expect(rpcSourceTesting.get("run-1")).toBe(active);
+    },
+  );
+
+  it("physical cancellation retains exact-run ACL even with a matching incarnation", async () => {
+    const context = createSingleAbortContext({
+      storeScope: "/synthetic/chat-abort/session-controller.sqlite",
+    });
+    const active = rpcSourceTesting.get("run-1")!;
+    const respond = await invokeChatAbortHandler({
+      handler: handleChatAbortRequestWithLifecycle,
+      context,
+      request: { sessionKey: "main", sessionId: "main-session", runId: "run-1" },
+      client: { connId: "other", connect: { scopes: ["operator.write"] } },
+    });
+    expect(requireLastRespondCall(respond)[0]).toBe(false);
+    expect(active.input.abortSignal.aborted).toBe(false);
+  });
+
+  it("physical cancellation stops only the matching run", async () => {
+    const context = createSingleAbortContext({
+      storeScope: "/synthetic/chat-abort/session-controller.sqlite",
+    });
+    const active = rpcSourceTesting.get("run-1")!;
+    const other = createActiveRun("main", { sessionId: "main-session" });
+    rpcSourceTesting.set("run-2", other);
+    const respond = await invokeChatAbortHandler({
+      handler: handleChatAbortRequestWithLifecycle,
+      context,
+      request: { sessionKey: "main", sessionId: "main-session", runId: "run-1" },
+      client: { connId: "conn-admin", connect: { scopes: ["operator.admin"] } },
+    });
+    expect(requireLastRespondCall(respond)[0]).toBe(true);
+    expect(active.input.abortSignal.aborted).toBe(true);
+    expect(other.input.abortSignal.aborted).toBe(false);
+  });
+
   it.each([
     { sessionKey: "main", runId: undefined, message: "requires an exact runId" },
     {
@@ -132,6 +188,31 @@ describe("chat.abort authorization", () => {
       sessionId: "original-worker-session",
       runId: "worker-run",
     });
+  });
+
+  it("physical cancellation rejects a worker run from another incarnation", async () => {
+    const cancel = vi.fn(() => ["worker-run"]);
+    const context = createChatAbortContext({
+      workerEnvironmentService: createWorkerInferenceCancellationService(
+        "old-worker-session",
+        ["worker-run"],
+        cancel,
+        {
+          agentId: "main",
+          sessionId: "old-worker-session",
+          sessionKey: "main",
+          storePath: "/synthetic/sessions.json",
+        },
+      ),
+    });
+    const respond = await invokeChatAbortHandler({
+      handler: handleChatAbortRequestWithLifecycle,
+      context,
+      request: { sessionKey: "main", sessionId: "main-session", runId: "worker-run" },
+      client: { connId: "admin", connect: { scopes: ["operator.admin"] } },
+    });
+    expect(requireLastRespondCall(respond)[0]).toBe(false);
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("rejects non-admin worker-only inference aborts", async () => {

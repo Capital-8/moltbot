@@ -8,15 +8,18 @@ import type {
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { resolvePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import { resolveMergedModelProviderConfig } from "openclaw/plugin-sdk/provider-catalog-shared";
 import { asOptionalRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   CODEX_NATIVE_TOOL_REQUIREMENTS,
   CODEX_TOOL_POLICY_SAFE_DENY_NAMES,
 } from "./native-tool-policy.js";
+import { readCodexPluginConfig } from "./src/app-server/config-parsing.js";
 import { readCodexRuntimeModelId } from "./src/app-server/model-runtime.js";
 import { sessionBindingIdentity } from "./src/app-server/session-binding-record.js";
 import type { CodexAppServerBindingStore } from "./src/app-server/session-binding.js";
 import { codexBuildSymbol } from "./src/build-state.js";
+import { resolveCodexWorkerAppServerCommand } from "./src/node-app-server-command.js";
 import type { CodexSessionCatalogControlFactory } from "./src/session-catalog-types.js";
 
 // `codex` is legacy input only until Part 2 doctor migration rewrites stored refs.
@@ -127,7 +130,12 @@ export function createCodexAppServerAgentHarness(
     cloudPlacement: {
       mode: "remote-exec",
       devicePlacement: {
-        requiredNodeCommands: ["codex.exec-server.stdio.v1"],
+        requiredNodeCommands: [
+          readCodexPluginConfig(resolveAttemptPluginConfig(undefined)).appServer
+            ?.workerHostedCloud === true
+            ? resolveCodexWorkerAppServerCommand(process.env, true)
+            : "codex.exec-server.stdio.v1",
+        ],
         consumesWorkerSlot: false,
       },
     },
@@ -208,8 +216,7 @@ export function createCodexAppServerAgentHarness(
         if (!isCodexConfiguredConnectionArtifact(binding.id)) {
           return validateCodexAppServerRuntimeArtifact(binding);
         }
-        const { readCodexPluginConfig, resolveCodexAppServerRuntimeOptions } =
-          await import("./src/app-server/config.js");
+        const { resolveCodexAppServerRuntimeOptions } = await import("./src/app-server/config.js");
         return validateCodexAppServerRuntimeArtifact(
           binding,
           undefined,
@@ -275,7 +282,27 @@ export function createCodexAppServerAgentHarness(
     supports: (ctx) => {
       const unsupported = (reason: string) => ({ supported: false as const, reason });
       const provider = ctx.provider.trim().toLowerCase();
-      if (!providerIds.has(provider)) {
+      const modelProvider = ctx.modelProvider;
+      // Custom Responses routes delegate auth only to their explicitly declared runtime.
+      const customNativeCommandRoute =
+        options.providerIds === undefined &&
+        !providerIds.has(provider) &&
+        provider.length > 0 &&
+        ctx.providerOwnerStatus === "unowned" &&
+        ctx.requestedRuntime === normalizedHarnessRuntimeId &&
+        modelProvider?.declaredRuntimeId === normalizedHarnessRuntimeId &&
+        modelProvider.auth === "native-command" &&
+        modelProvider.api === "openai-responses" &&
+        modelProvider.baseUrl?.startsWith("https://") === true &&
+        modelProvider.requestTransportOverrides === "none" &&
+        modelProvider.request === undefined &&
+        modelProvider.azureApiVersion === undefined &&
+        (modelProvider.preparedAuth === undefined ||
+          modelProvider.preparedAuth.mode === "native-command" ||
+          (modelProvider.preparedAuth.source === "harness" &&
+            modelProvider.preparedAuth.mode === undefined &&
+            modelProvider.preparedAuth.requirement === undefined));
+      if (!providerIds.has(provider) && !customNativeCommandRoute) {
         return unsupported(`provider is not one of: ${[...providerIds].toSorted().join(", ")}`);
       }
       if (ctx.modelProvider?.requestTransportOverrides === "present") {
@@ -307,7 +334,12 @@ export function createCodexAppServerAgentHarness(
         if (!compatible) {
           return unsupported("Codex cannot reproduce the prepared provider route");
         }
-      } else if (ctx.modelProvider && provider !== "codex" && !nativeAccountOwnsUnobservedModel) {
+      } else if (
+        ctx.modelProvider &&
+        provider !== "codex" &&
+        !nativeAccountOwnsUnobservedModel &&
+        !customNativeCommandRoute
+      ) {
         return unsupported("provider route compatibility with Codex is not declared");
       }
       if (preparedAuth?.requirement === "subscription") {
@@ -430,13 +462,18 @@ export function createCodexAppServerAgentHarness(
         resolveIsolatedCompletionRuntime({ authorizationOwner: params.authorization.owner }) ===
         "openclaw"
       ) {
+        if (
+          resolveMergedModelProviderConfig(params.config, params.provider)?.auth ===
+          "native-command"
+        ) {
+          throw new Error("Native command auth requires harness-owned Codex isolated completion");
+        }
         const { runHostPreparedIsolatedCompletion } =
           await import("openclaw/plugin-sdk/simple-completion-runtime");
         return runHostPreparedIsolatedCompletion(params);
       }
       const { runCodexIsolatedCompletion } =
         await import("./src/app-server/isolated-completion.js");
-      const { readCodexPluginConfig } = await import("./src/app-server/config-parsing.js");
       return runCodexIsolatedCompletion(params, {
         pluginConfig: readCodexPluginConfig(
           options.resolvePluginConfig?.() ?? options.pluginConfig,
@@ -444,6 +481,11 @@ export function createCodexAppServerAgentHarness(
       });
     },
     runIsolatedCompletion: async (params) => {
+      if (
+        resolveMergedModelProviderConfig(params.config, params.provider)?.auth === "native-command"
+      ) {
+        throw new Error("Native command auth requires harness-owned Codex isolated completion");
+      }
       const { runHostPreparedIsolatedCompletion } =
         await import("openclaw/plugin-sdk/simple-completion-runtime");
       // Keep the deprecated V1 contract on its exact host-prepared transport.
@@ -461,7 +503,6 @@ export function createCodexAppServerAgentHarness(
     finalizeSettledTurn: async (params) => {
       const { runCodexSettledTurnFinalization } =
         await import("./src/app-server/settled-turn-finalizer.js");
-      const { readCodexPluginConfig } = await import("./src/app-server/config-parsing.js");
       return runCodexSettledTurnFinalization(params, {
         pluginConfig: readCodexPluginConfig(
           options.resolvePluginConfig?.() ?? options.pluginConfig,
@@ -481,7 +522,6 @@ export function createCodexAppServerAgentHarness(
     compact: async (params) => {
       const admittedParams = requireCodexCompactionCapabilities(params);
       const { maybeCompactCodexAppServerSession } = await import("./src/app-server/compact.js");
-      const { readCodexPluginConfig } = await import("./src/app-server/config-parsing.js");
       return maybeCompactCodexAppServerSession(admittedParams, {
         bindingStore: options.bindingStore,
         pluginConfig: readCodexPluginConfig(
@@ -565,7 +605,6 @@ export function createCodexAppServerNativeCompaction(
     const admittedParams: AgentHarnessNativeCompactionParams<2> =
       requireCodexCompactionCapabilities(params);
     const { maybeCompactCodexAppServerSession } = await import("./src/app-server/compact.js");
-    const { readCodexPluginConfig } = await import("./src/app-server/config-parsing.js");
     return maybeCompactCodexAppServerSession(admittedParams, {
       bindingStore: options.bindingStore,
       pluginConfig: readCodexPluginConfig(options.resolvePluginConfig?.() ?? options.pluginConfig),

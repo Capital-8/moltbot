@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { SKILL_RESOURCE_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/skill-resources.js";
-import { WORKER_LOCAL_INFERENCE_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import { WORKER_GATEWAY_TOOLS_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/worker-gateway-tool.js";
 import { WORKER_TURN_ADMISSION_PROTOCOL_FEATURE } from "../../../packages/gateway-protocol/src/schema/worker-turn-admission.js";
+import { readAdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { resolveAgentDir } from "../../agents/agent-scope.js";
 import {
   copyAgentToolMetadata,
@@ -284,7 +284,7 @@ export async function executeWorkerTurn(
   // Keep exact closure wired through transfer and launch dispatch, including awaited
   // node readiness. The workspace/tunnel lifetime alone outlives this admitted turn.
   const stopWatchingRun = registerAgentRunDelegatedAuthorityClosedHandler((closed) => {
-    if (closed === authority) {
+    if (closed === runtimeIdentity.approvalAuthority) {
       cancel();
     }
   });
@@ -546,6 +546,7 @@ export async function executeWorkerTurn(
     const { bundleHash, openclawVersion, protocolFeatures } = bootstrapReceipt;
     githubGrant = await bindWorkerGitHubTurn({
       session: placement,
+      operatorAuthority: readAdmittedRunOperatorAuthority(admittedRunContext),
       fact: readGitHubPublicationFact(placement),
       sessionTarget: transcriptTarget,
       store: params.placements,

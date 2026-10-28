@@ -1,5 +1,48 @@
+import { createReadStream } from "node:fs";
+import { mergeProcessEnv } from "../infra/process-env.js";
 import type { TerminalPtyControl, TerminalPtyEvent } from "./terminal-pty-protocol.js";
 import { prepareTerminalPty, spawnTerminalPty, type TerminalPtyHandle } from "./terminal-pty.js";
+
+// The descriptor is owned by the launching host, separate from the control IPC channel.
+const privateInput = process.argv.includes("--private-env-fd=4")
+  ? createReadStream("", { fd: 4, autoClose: true })
+  : undefined;
+const privateEnvironment = (async (): Promise<Record<string, string> | undefined> => {
+  if (!privateInput) {
+    return undefined;
+  }
+  const chunks: Buffer[] = [];
+  try {
+    for await (const chunk of privateInput) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const bytes = Buffer.concat(chunks);
+    try {
+      const value: unknown = JSON.parse(bytes.toString("utf8"));
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("Invalid private environment");
+      }
+      const env: Record<string, string> = {};
+      for (const [key, entry] of Object.entries(value)) {
+        if (typeof entry !== "string") {
+          throw new Error("Invalid private environment");
+        }
+        env[key] = entry;
+      }
+      return env;
+    } finally {
+      bytes.fill(0);
+    }
+  } catch {
+    // Parsing and I/O diagnostics must never quote private input bytes.
+    throw new Error("Terminal private environment is unavailable");
+  } finally {
+    for (const chunk of chunks) {
+      chunk.fill(0);
+    }
+  }
+})();
+void privateEnvironment.catch(() => {});
 
 let pty: TerminalPtyHandle | undefined;
 let starting = false;
@@ -32,6 +75,7 @@ function finish(message: TerminalPtyEvent): void {
 
 function close(): void {
   parentLost = true;
+  privateInput?.destroy();
   pty?.kill();
 }
 
@@ -54,9 +98,15 @@ process.on("message", (message: TerminalPtyControl) => {
       });
       return;
     }
-    const startup =
-      message.type === "prepare"
-        ? prepareTerminalPty(message.params).then(
+    const startup = privateEnvironment.then((env) => {
+      if (parentLost || finished) {
+        throw new Error("Terminal host retired before launch");
+      }
+      const params = env
+        ? { ...message.params, env: mergeProcessEnv([message.params.env ?? process.env, env]) }
+        : message.params;
+      return message.type === "prepare"
+        ? prepareTerminalPty(params).then(
             (launch) =>
               new Promise<TerminalPtyHandle>((resolve, reject) => {
                 authorizeLaunch = () => {
@@ -72,7 +122,8 @@ process.on("message", (message: TerminalPtyControl) => {
                 report({ type: "prepared" });
               }),
           )
-        : spawnTerminalPty(message.params);
+        : spawnTerminalPty(params);
+    });
     void startup.then(
       (handle) => {
         pty = handle;

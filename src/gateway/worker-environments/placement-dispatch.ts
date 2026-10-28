@@ -54,6 +54,7 @@ import type {
   WorkerPlacementReclaimSourceCheck,
 } from "./service-contract.js";
 import { deriveEnvironmentIntent } from "./service-contract.js";
+import { usesRepositoryRefWorkerRecovery } from "./service-validation.js";
 import type { WorkerEnvironmentService } from "./service.js";
 import { AcceptedWorkspacePublicationIndeterminateError } from "./workspace-accepted-publication.js";
 
@@ -97,6 +98,8 @@ type WorkerPlacementDispatchOptions = WorkerPlacementReclaimBarriers &
     isCurrentNodePlacement?: WorkerNodePlacementAuthority;
   };
 
+const log = createSubsystemLogger("gateway/worker-placement");
+
 export function createWorkerPlacementDispatchService(options: WorkerPlacementDispatchOptions) {
   const { environments, placements } = options;
   const failure = createPlacementFailureActions({ environments, placements });
@@ -139,6 +142,16 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
     });
     assertCurrent();
     let placement: WorkerDispatchPlacement | undefined;
+    const credentialCleanups = new Set<() => Promise<void>>();
+    const retainCredentialCleanup = (revoke: () => Promise<void>) => credentialCleanups.add(revoke);
+    const readNativeCredential = request.readNativeCredential
+      ? async (...args: Parameters<NonNullable<typeof request.readNativeCredential>>) => {
+          assertCurrent();
+          const token = await request.readNativeCredential!(...args);
+          assertCurrent();
+          return token;
+        }
+      : undefined;
     try {
       signal?.throwIfAborted();
       placement = await options.runLocalBarrier({
@@ -150,6 +163,75 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
         requiredProfile: request.requiredProfile,
         signal,
         startDispatch: async () => {
+          let assertDispatchCurrent = assertCurrent;
+          const previous =
+            request.expectedPlacement?.state === "failed"
+              ? await placements.getAsync(request.sessionId)
+              : undefined;
+          assertCurrent();
+          const lostEnvironment =
+            previous?.state === "failed" && previous.environmentId
+              ? environments.get(previous.environmentId)
+              : undefined;
+          if (
+            previous?.state === "failed" &&
+            request.expectedPlacement?.state === "failed" &&
+            matchesWorkerPlacementTarget(previous, request.expectedPlacement) &&
+            previous.activeOwnerEpoch !== null &&
+            !previous.turnClaim &&
+            lostEnvironment &&
+            lostEnvironment.providerId !== DEVICE_WORKER_PROVIDER_ID &&
+            (lostEnvironment.retention ||
+              (lostEnvironment.sharedHost === false &&
+                usesRepositoryRefWorkerRecovery(getRuntimeConfig(), lostEnvironment))) &&
+            isFailedWorkerPlacementEnvironmentGone({
+              placement: previous,
+              environmentService: environments,
+            })
+          ) {
+            const assertLostOwner = () => {
+              assertCurrent();
+              const live = environments.get(lostEnvironment.environmentId);
+              const owner = placements.get(request.sessionId);
+              if (
+                !matchesWorkerPlacementTarget(owner, previous) ||
+                owner?.agentId !== request.agentId ||
+                owner.sessionKey !== request.sessionKey ||
+                owner.turnClaim ||
+                live?.ownerEpoch !== lostEnvironment.ownerEpoch ||
+                (live.sharedHost !== false && !(live.retention && live.sharedHost === null)) ||
+                !(live.retention || usesRepositoryRefWorkerRecovery(getRuntimeConfig(), live)) ||
+                (lostEnvironment.retention &&
+                  (!live.retention ||
+                    live.retention.ownerBinding !== lostEnvironment.retention.ownerBinding ||
+                    live.retention.owner.sessionId !== request.sessionId ||
+                    live.retention.owner.sessionKey !== request.sessionKey ||
+                    live.retention.owner.agentId !== request.agentId)) ||
+                !isFailedWorkerPlacementEnvironmentGone({
+                  placement: previous,
+                  environmentService: environments,
+                })
+              ) {
+                throw new Error("Lost worker repository recovery changed before replacement");
+              }
+            };
+            assertDispatchCurrent = assertLostOwner;
+            const workspace = await options.resolveWorkspace(request);
+            assertLostOwner();
+            if (workspace.kind === "repository") {
+              await prepareLostRepositoryWorkspaceSource({
+                repository: workspace.repository,
+                request: { ...request, readNativeCredential },
+                retained: Boolean(lostEnvironment.retention),
+                environmentId: lostEnvironment.environmentId,
+                ownerEpoch: previous.activeOwnerEpoch,
+                placements,
+                assertCurrent: assertLostOwner,
+                signal,
+                retainCredentialCleanup,
+              });
+            }
+          }
           placement = await placements.startDispatch(
             {
               sessionId: request.sessionId,
@@ -289,7 +371,8 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
           });
       return await startup.continueProvisionedDispatch({
         markPhase: diagnostics?.mark,
-        request,
+        request: { ...request, readNativeCredential },
+        retainCredentialCleanup,
         placement,
         environment,
         expectedEnvironmentId,
@@ -335,6 +418,14 @@ export function createWorkerPlacementDispatchService(options: WorkerPlacementDis
         }
       }
       throw error;
+    } finally {
+      const cleanup = await Promise.allSettled([...credentialCleanups].map((revoke) => revoke()));
+      const failed = cleanup.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") {
+        log.warn(
+          "Repository dispatch credential cleanup failed; retry GitHub credential cleanup before reusing the worker.",
+        );
+      }
     }
   };
 

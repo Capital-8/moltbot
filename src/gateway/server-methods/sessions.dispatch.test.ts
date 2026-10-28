@@ -12,8 +12,13 @@ import {
 } from "../../plugins/runtime.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import {
+  captureGatewayDeviceRevocation,
+  readAcceptedGatewayDeviceSourceAuthority,
+} from "../device-revocation.js";
 import { handleGatewayRequest } from "../server-methods.js";
 import { resolveGatewaySessionStoreTargetInWorker } from "../session-utils-store-worker.js";
+import { createDispatchEnvironmentFixtures } from "../worker-environments/placement-dispatch-test-fixtures.js";
 import { createWorkerPlacementMoveService } from "../worker-environments/placement-move-service.js";
 import { FORCED_WORKER_ABANDONMENT_ERROR } from "../worker-environments/placement-record.js";
 import type { WorkerSessionPlacementRecord } from "../worker-environments/placement-store.js";
@@ -173,6 +178,52 @@ describe("sessions.dispatch", () => {
       setActivePluginRegistry(originalPluginRegistry, "sessions-dispatch-test-restore", "default");
     } else {
       resetPluginRuntimeStateForTest();
+    }
+  });
+
+  it("retains the native source when dispatch publishes its committed requested placement", async () => {
+    useWorktreeSession({ sessionId });
+    const connection = new AbortController();
+    let connected = true;
+    let sourceCurrent = true;
+    const source = captureGatewayDeviceRevocation({}, {}, () => connected, connection.signal, {
+      isCurrent: () => sourceCurrent,
+      subscribe: () => () => {},
+    });
+    let admitted: (() => boolean) | undefined;
+    const dispatch = vi.fn<
+      NonNullable<GatewayRequestContext["workerPlacementDispatchService"]>["dispatch"]
+    >(async (_request, publish) => {
+      expect(readAcceptedGatewayDeviceSourceAuthority(source.isCurrent)).toBeUndefined();
+      publish?.({ ...reclaimedPlacementRecord(), state: "requested" });
+      admitted = readAcceptedGatewayDeviceSourceAuthority(source.isCurrent);
+      expect(admitted?.()).toBe(true);
+      connected = false;
+      connection.abort();
+      expect(source.isCurrent()).toBe(true);
+      return activePlacementRecord();
+    });
+    const respond = vi.fn();
+    try {
+      await getSessionDispatchHandler()({
+        req: { type: "req", id: "retained-dispatch", method: "sessions.dispatch", params: {} },
+        params: { key: sessionKey, profileId: "test" },
+        client: null,
+        context: dispatchContext(dispatch),
+        respond,
+        hasCurrentClientAuthority: source.isCurrent,
+        isWebchatConnect: () => false,
+      });
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(respond).toHaveBeenCalledWith(
+        true,
+        expect.objectContaining({ placement: expect.objectContaining({ state: "active" }) }),
+        undefined,
+      );
+      sourceCurrent = false;
+      expect(admitted?.()).toBe(false);
+    } finally {
+      source.release();
     }
   });
 
@@ -581,7 +632,7 @@ describe("sessions.dispatch", () => {
           devicePlacement: { requiredNodeCommands: [], consumesWorkerSlot: true },
         }),
         expect.any(Function),
-        undefined,
+        expect.any(Function),
         undefined,
       );
       expect(changes.mock.calls).toEqual(Array.from({ length: 5 }, () => [{ sessionKey }]));

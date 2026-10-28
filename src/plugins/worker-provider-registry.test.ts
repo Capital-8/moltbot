@@ -69,6 +69,7 @@ describe("worker provider registry", () => {
 
   it.each([
     ["renew", "later", "must be a function"],
+    ["resumeNode", "later", "must be a function"],
     ["runSetupCommand", "later", "must be a function"],
     ["resolveSshIdentity", "later", "must be a function"],
     ["provisionBeforeInstallation", "sometimes", "must be a boolean"],

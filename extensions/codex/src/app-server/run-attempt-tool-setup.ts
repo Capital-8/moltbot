@@ -284,7 +284,11 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
         },
       });
     } finally {
-      await releaseCodexProbeClient(client, connection.attemptClientFactory);
+      await releaseCodexProbeClient(
+        client,
+        connection.attemptClientFactory,
+        connection.callerOwnedAttemptClient,
+      );
     }
   }
   let requireExplicitMessageTarget: boolean | undefined;
@@ -516,6 +520,12 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
         ? { turnSourceThreadId: params.currentThreadTs }
         : {}),
     };
+    const dynamicToolsLoading = isCodexResponsesOAuth(connection.startupPreparedAuth)
+      ? "direct"
+      : resolveCodexDynamicToolsLoadingForRuntime(pluginConfig, effectiveRuntimeModelId, {
+          connectionClass: connection.appServer.connectionClass,
+          nativeToolSurfaceEnabled,
+        });
     const toolBridge = createCodexDynamicToolBridge({
       assertCurrentAsync: runtime.nativeExecutionPolicy.assertCurrent,
       tools: toolsWithScopedMcp,
@@ -524,12 +534,7 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
       signal: runAbortController.signal,
       computerContextEpoch,
       functionToolsOnly: isCodexResponsesOAuth(connection.startupPreparedAuth),
-      loading: isCodexResponsesOAuth(connection.startupPreparedAuth)
-        ? "direct"
-        : resolveCodexDynamicToolsLoadingForRuntime(pluginConfig, effectiveRuntimeModelId, {
-            connectionClass: connection.appServer.connectionClass,
-            nativeToolSurfaceEnabled,
-          }),
+      loading: dynamicToolsLoading,
       directToolNames: resolveCodexDynamicToolDirectNames(
         params,
         registeredWithScopedMcp,
@@ -652,6 +657,7 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
       compactionPlanState,
       computerContextEpoch,
       toolBridge,
+      dynamicToolsLoading,
       toolState,
       toolOutcomeOrdinals,
       suppressedDynamicToolOutcomeOrdinals,

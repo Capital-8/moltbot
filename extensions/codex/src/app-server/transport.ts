@@ -26,7 +26,11 @@ export function hasCodexAppServerNaturalExit(child: CodexAppServerTransport): bo
 }
 
 export type CodexAppServerTransport = {
+  /** Duplex facades retain close origin/cause rather than pretending to observe a local process. */
+  exitError?: Error;
   startupFailure?: { error?: Error; complete(): void };
+  /** External duplex owners retain credential cleanup until physical close settlement. */
+  waitForCleanup?: () => Promise<void>;
   maxFrameBytes?: number;
   stdin: {
     write: (data: string | Uint8Array, callback?: (error?: Error | null) => void) => unknown;
@@ -168,7 +172,10 @@ export async function closeCodexAppServerTransportAndWait(
     drained,
   );
   if (settled) {
-    await waitForCodexAppServerProcessRegistrationCleanup(child);
+    await Promise.all([
+      waitForCodexAppServerProcessRegistrationCleanup(child),
+      child.waitForCleanup?.(),
+    ]);
   }
   closure.naturalExit = containment === "natural" && settled;
   if (options.drainStdio) {

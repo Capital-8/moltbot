@@ -1,5 +1,6 @@
 import { ErrorCodes, errorShape } from "../../packages/gateway-protocol/src/schema/error-codes.js";
 import type { ErrorShape } from "../../packages/gateway-protocol/src/schema/frames.js";
+import type { SessionsDispatchParams } from "../../packages/gateway-protocol/src/schema/session-placement.js";
 import { GATEWAY_OWNER_PROFILE_ID } from "../../packages/gateway-protocol/src/schema/users.js";
 import { assertAdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 import type { SessionCreatedActor } from "../config/sessions/session-entry-provenance.js";
@@ -10,7 +11,10 @@ import { notifyListeners, registerListener } from "../shared/listeners.js";
 import { roleScopesAllow } from "../shared/operator-scope-compat.js";
 import { captureResidentUserProfileAccess } from "../state/user-profile-list.js";
 import { bumpGatewayAccessRevision } from "./gateway-access-revision.js";
+import { ADMIN_SCOPE } from "./method-scopes.js";
 import type { GatewayClient, GatewayOperatorRoleActor } from "./server-methods/shared-types.js";
+import { prepareSessionCreatorProfile } from "./session-creator.js";
+import { SessionMutationAuthorizationChangedError } from "./session-mutation-authorization-error.js";
 
 const operatorRoleLog = createSubsystemLogger("gateway/operator-roles");
 const reportedUnknownAssignments = new Set<string>();
@@ -305,4 +309,44 @@ export function resolveOperatorRoleAgents(
 ): readonly string[] | undefined {
   const role = resolveOperatorRolePolicy(client, cfg);
   return role && role.agents !== "*" ? role.agents : undefined;
+}
+
+/** Named roles may dispatch only their own sessions to explicitly granted Cloud profiles. */
+export function assertOperatorCloudProfileDispatchAllowed(params: {
+  config: OpenClawConfig;
+  client: GatewayClient | null | undefined;
+  target: Pick<SessionsDispatchParams, "deviceId" | "autoDevice" | "profileId">;
+  createdActor: SessionCreatedActor | undefined;
+  runSetupScript: boolean;
+}): void {
+  const role = resolveOperatorRolePolicy(params.client ?? null, params.config);
+  const administrator =
+    (!params.config.gateway?.roles && !params.client) ||
+    (params.client?.connect?.scopes?.includes(ADMIN_SCOPE) === true &&
+      (!role || role.scopes.includes(ADMIN_SCOPE)));
+  if (
+    !params.runSetupScript &&
+    (administrator || params.target.deviceId !== undefined || params.target.autoDevice === true)
+  ) {
+    return;
+  }
+  if (administrator) {
+    return;
+  }
+  const actor = resolveGatewayOperatorRoleActor(params.client);
+  if (
+    !params.runSetupScript &&
+    actor?.kind === "operator" &&
+    params.target.profileId &&
+    role?.workerProfiles?.includes(params.target.profileId) &&
+    prepareSessionCreatorProfile(
+      actor.profileId,
+      params.client?.preparedSessionProfile?.aliases,
+    )(params.createdActor)
+  ) {
+    return;
+  }
+  throw new SessionMutationAuthorizationChangedError(
+    errorShape(ErrorCodes.FORBIDDEN, "Your operator role cannot dispatch to this Cloud profile."),
+  );
 }

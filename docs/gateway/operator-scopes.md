@@ -15,6 +15,11 @@ teams, or machines, run separate Gateways under separate OS users or hosts.
 Related: [Security](/gateway/security), [Gateway protocol](/gateway/protocol),
 [Gateway pairing](/gateway/pairing), [Devices CLI](/cli/devices).
 
+Roles may set `verifiedIdentityWrite: true` to grant requested write scopes to
+an identity verified by the configured proxy. Both the role's scope ceiling and
+the proxy's current ceiling still apply; this does not grant administrator
+access or change device pairing.
+
 ## Connection roles
 
 Every Gateway WebSocket client connects with one role:
@@ -540,9 +545,11 @@ dispatch so authorization failures have one standard structured response:
   `operator.write` when `runtimeId` requests runtime-specific command eligibility.
   Session placement methods derive
   their scope from the requested target before schema validation:
-  `sessions.dispatch` needs `operator.write` for `deviceId` and
-  `operator.admin` for `profileId` or a target-less
-  `cloudWorkers.projectProfiles` lookup. `sessions.move` needs `operator.write`
+  `sessions.dispatch` needs `operator.write` for explicit `deviceId`,
+  `autoDevice`, or `profileId`. Cloud profile dispatch additionally requires an
+  administrator or a current role's `workerProfiles` grant for the session's
+  verified creator. Setup remains administrator-only. Target-less
+  `cloudWorkers.projectProfiles` lookup requires `operator.admin`. `sessions.move` needs `operator.write`
   for Gateway or device targets and `operator.admin` for profile targets.
   `abandonSource: true` remains `operator.write` but is schema-valid only with
   a Gateway target and runtime-valid only for an exact offline device source.

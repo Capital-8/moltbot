@@ -65,31 +65,7 @@ export async function recoverPendingWorkspaceResults(
   environmentId?: string,
 ): Promise<Set<string>> {
   const { environments, failure, placements } = deps;
-  const resolveWorkspace = async (
-    placement: WorkerDispatchPlacement,
-    pending: WorkerWorkspacePendingResult,
-    preparedWorkspace?: WorkerSessionWorkspace,
-  ): Promise<WorkerSessionWorkspace> => {
-    const workspace = preparedWorkspace ?? (await deps.resolveWorkspace(placement));
-    if (!pending.repositoryWorkspaceId) {
-      return workspace;
-    }
-    const repository = await getSessionRepositoryWorkspaceStore().get(
-      pending.repositoryWorkspaceId,
-    );
-    if (
-      !repository ||
-      repository.agentId !== placement.agentId ||
-      repository.sessionKey !== placement.sessionKey ||
-      (workspace.kind === "repository" &&
-        workspace.repository.workspaceId !== pending.repositoryWorkspaceId)
-    ) {
-      throw new Error("Pending repository checkpoint lost its exact session workspace owner");
-    }
-    // An explicit Gateway move may already have bound a local worktree. The
-    // result's recorded source still owns its immutable artifact until settlement.
-    return { kind: "repository", repository };
-  };
+  const resolveWorkspace = createPendingWorkerSessionWorkspaceResolver(deps.resolveWorkspace);
   const prepareGatewayMove = createPendingGatewayMovePreparation(deps);
   const destroyPendingEnvironment = async (
     placement: WorkerOwnedPendingPlacement,

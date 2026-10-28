@@ -351,7 +351,7 @@ export function createNodeWorkerWorkspaceActions(params: {
     try {
       // Local recovery and remote upload must settle before releasing custody.
       const [local, upload] = await Promise.allSettled([
-        prepareLocalWorkspaceReconciliation({ request, hashMemo: placementHashMemo }),
+        prepareLocalWorkspaceReconciliation({ request, hashMemo }),
         transfer(
           {
             direction: "upload",

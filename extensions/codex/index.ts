@@ -53,6 +53,8 @@ import {
   resolveCodexCliSessionForBindingOnNode,
 } from "./src/node-cli-sessions.js";
 import {
+  createCodexNodeAppServerCommand,
+  createCodexNodeAppServerInvokePolicy,
   createCodexNodeExecServerCommand,
   createCodexNodeExecServerInvokePolicy,
 } from "./src/node-exec-server.js";
@@ -324,6 +326,8 @@ export default definePluginEntry({
     for (const policy of createCodexCliSessionNodeInvokePolicies()) {
       api.registerNodeInvokePolicy(policy);
     }
+    api.registerNodeHostCommand(createCodexNodeAppServerCommand());
+    api.registerNodeInvokePolicy(createCodexNodeAppServerInvokePolicy());
     api.registerNodeHostCommand(createCodexNodeExecServerCommand());
     api.registerNodeInvokePolicy(createCodexNodeExecServerInvokePolicy());
     api.registerCommand(

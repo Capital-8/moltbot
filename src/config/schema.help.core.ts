@@ -177,6 +177,10 @@ export const CORE_FIELD_HELP: Record<string, string> = {
     'Model references, source-agent aliases, or trailing prefix wildcards excluded from this role. A pattern such as "provider/family-*" excludes future members of that family too. Exclusions match resolved model identities and take precedence over allowed and source-agent models.',
   "gateway.roles.definitions.*.scopes":
     "Closed list of operator scopes granted as this role's maximum connection authority. Requested, paired, identity-granted, and upgraded scopes are intersected with this list.",
+  "gateway.roles.definitions.*.workerProfiles":
+    "Cloud worker profiles this role may explicitly dispatch its own sessions to. Omitted or empty denies cloud dispatch; administrators retain access. Profile setup remains administrator-only.",
+  "gateway.roles.definitions.*.verifiedIdentityWrite":
+    "Grant requested write scopes to a profile verified by the configured identity proxy, within this role's scope ceiling and the proxy's own ceiling. Device pairing remains independent.",
   "gateway.roles.definitions.*.accessPolicyPlugin":
     "Optional exact plugin ID whose Gateway access policy must authorize this role. Access is denied when the plugin is missing, disabled, fails to load, or supplies no current authority. Unavailable plugin IDs remain valid configuration so independent staff roles and the Gateway owner can repair access. Omitting this field adds no plugin dependency.",
   "gateway.trustedProxies":
@@ -357,6 +361,8 @@ export const CORE_FIELD_HELP: Record<string, string> = {
     "Optional per-agent default reasoning visibility (on|off|stream). Applies when no per-message or session reasoning override is set.",
   "agents.entries.*.fastModeDefault":
     'Optional per-agent default for fast mode ("auto", "ultrafast", true, or false). Applies when no per-message or session fast-mode override is set.',
+  "agents.entries.*.newSessionPermissionMode":
+    "Permission mode saved on new attended Gateway sessions when an authenticated operator whose current authority includes a user profile omits a mode. Full requires current operator.admin authority. Explicit choices, existing sessions, forks, autonomous sessions, and unprofiled ephemeral CLI/backend/probe RPC connections remain unchanged. Omit to inherit normal tool policy without saving a session mode.",
   "agents.defaults.fastModeDefault":
     'Default fast-mode policy for the agent loop ("auto", "ultrafast", true, or false). Individual agent entries override it.',
   "agents.entries.*.runtime":

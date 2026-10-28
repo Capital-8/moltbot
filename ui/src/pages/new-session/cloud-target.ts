@@ -25,7 +25,13 @@ export async function requestPlaceCatalog(
     runtimeId ? { runtimeId } : {},
   );
   return {
-    profiles: (result.profiles ?? []).toSorted((left, right) => left.id.localeCompare(right.id)),
+    profiles: (result.profiles ?? [])
+      .filter(
+        (profile) =>
+          result.dispatchableProfileIds === undefined ||
+          result.dispatchableProfileIds.includes(profile.id),
+      )
+      .toSorted((left, right) => left.id.localeCompare(right.id)),
     suggestedProfile: result.suggestedProfile,
     environments: result.environments
       .filter((environment) => ["local", "node", "worker"].includes(environment.type))

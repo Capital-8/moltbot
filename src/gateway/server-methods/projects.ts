@@ -1,4 +1,5 @@
 import path from "node:path";
+import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
 import {
   ErrorCodes,
   GatewayErrorDetailCodes,
@@ -10,11 +11,11 @@ import {
   validateProjectsRemoveParams,
   validateProjectsSearchRemoteParams,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { tryResolveAmbientOwnerAgentId } from "../../agents/agent-scope.js";
 import {
   resolveConfiguredGitHubApiBaseUrl,
   resolveConfiguredGitHubHost,
 } from "../../agents/github-host.js";
-import { readCachedNativeGitHubToken } from "../../agents/github-read-identity.js";
 import { readRegistryWorktrees } from "../../agents/worktrees/registry-read.js";
 import {
   captureWorktreeRegistryAuthority,
@@ -52,6 +53,7 @@ import {
   authorizeOperatorScopesForRequiredScope,
 } from "../method-scopes.js";
 import { authorizeGatewaySessionCreation, resolveCreatorSandbox } from "../operator-role-policy.js";
+import { captureGatewayProjectGitHubRequest } from "../project-github-identity.js";
 import { searchRemoteProjects } from "../project-github-search.js";
 import { resolveOperatorSessionCreation } from "../session-creation-provenance.js";
 import { resolveSessionCreateAgentId } from "../session-request-agent.js";
@@ -333,13 +335,34 @@ export const projectsHandlers: GatewayRequestHandlers = {
   "projects.add": defineValidatedGatewayHandler(
     "projects.add",
     validateProjectsAddParams,
-    async ({ params, respond, context, signal }) => {
-      const cfg = context.getRuntimeConfig();
+    async ({ params, respond, context, signal, client, hasCurrentClientAuthority }) => {
+      const {
+        config: cfg,
+        assertCurrent,
+        prepareIdentity,
+      } = captureGatewayProjectGitHubRequest(
+        { context, signal, hasCurrentClientAuthority },
+        "project-add",
+      );
+      const identity = await prepareIdentity({
+        agentId: tryResolveAmbientOwnerAgentId(cfg) ?? "",
+        client,
+        requestDigest: sha256Hex(
+          JSON.stringify({ gitUrl: params.gitUrl, name: params.name ?? null }),
+        ),
+      });
+      await using _ = { [Symbol.asyncDispose]: async () => identity?.revoke?.() };
+      assertCurrent();
       respond(
         true,
         await materializeProjectClone(
           { cfg, gitUrl: params.gitUrl, name: params.name },
-          { signal, token: githubApiToken(process.env, cfg) },
+          {
+            signal,
+            token: identity?.token ?? githubApiToken(process.env, cfg),
+            assertCurrent,
+            startRun: identity?.start,
+          },
         ),
         undefined,
       );
@@ -368,27 +391,23 @@ export const projectsHandlers: GatewayRequestHandlers = {
   "projects.searchRemote": defineValidatedGatewayHandler(
     "projects.searchRemote",
     validateProjectsSearchRemoteParams,
-    async ({ params, respond, context, signal, hasCurrentClientAuthority }) => {
-      const cfg = context.getRuntimeConfig();
+    async ({ params, respond, context, signal, client, hasCurrentClientAuthority }) => {
+      const {
+        config: cfg,
+        assertCurrent,
+        prepareIdentity,
+      } = captureGatewayProjectGitHubRequest(
+        { context, signal, hasCurrentClientAuthority },
+        "project-search",
+      );
       const host = resolveConfiguredGitHubHost(cfg);
       const apiBaseUrl = resolveConfiguredGitHubApiBaseUrl(cfg);
-      const assertCurrent = () => {
-        signal?.throwIfAborted();
-        if (hasCurrentClientAuthority?.() === false) {
-          throw new Error("Project requester authority changed during search");
-        }
-        if (context.getRuntimeConfig() !== cfg) {
-          throw new gitHubPublicApi.ControlUiGitHubError(
-            502,
-            "GitHub host changed during project search",
-          );
-        }
-      };
-      assertCurrent();
-      const nativeToken =
-        cfg.gateway?.projects?.nativeGitHubSearch === true
-          ? await readCachedNativeGitHubToken(process.env)
-          : undefined;
+      const identity = await prepareIdentity({
+        agentId: tryResolveAmbientOwnerAgentId(cfg) ?? "",
+        client,
+        requestDigest: sha256Hex(params.query),
+      });
+      await using _ = { [Symbol.asyncDispose]: async () => identity?.revoke?.() };
       assertCurrent();
       const result = await searchRemoteProjects(params.query, {
         assertCurrent,
@@ -396,7 +415,9 @@ export const projectsHandlers: GatewayRequestHandlers = {
         signal,
         host,
         apiBaseUrl,
-        ...(cfg.gateway?.projects?.nativeGitHubSearch === true ? { token: nativeToken ?? "" } : {}),
+        ...(identity || cfg.gateway?.projects?.nativeGitHubSearch === true
+          ? { token: identity?.token ?? "" }
+          : {}),
       });
       assertCurrent();
       respond(true, result, undefined);

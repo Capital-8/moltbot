@@ -283,6 +283,52 @@ describe("Codex agent harness supports()", () => {
     }
   });
 
+  it("supports only a declared custom Responses route with native command auth", () => {
+    const modelProvider = {
+      auth: "native-command" as const,
+      api: "openai-responses",
+      baseUrl: "https://devapi.example.test/api/autodev/llm/v1",
+      requestTransportOverrides: "none" as const,
+      declaredRuntimeId: "codex",
+    };
+    const context = {
+      provider: "autodev",
+      modelId: "gpt-test",
+      requestedRuntime: "codex" as const,
+      providerOwnerStatus: "unowned" as const,
+      modelProvider,
+    };
+    expect(harness.supports(context)).toEqual({ supported: true, priority: 100 });
+    expect(
+      harness.supports({
+        ...context,
+        modelProvider: { ...modelProvider, preparedAuth: { source: "harness" } },
+      }),
+    ).toEqual({ supported: true, priority: 100 });
+    for (const override of [
+      { providerOwnerStatus: "owned" as const },
+      { modelProvider: { ...modelProvider, auth: "api-key" as const } },
+      { modelProvider: { ...modelProvider, api: "openai-completions" } },
+      { modelProvider: { ...modelProvider, baseUrl: "http://devapi.example.test/v1" } },
+      { modelProvider: { ...modelProvider, declaredRuntimeId: "openclaw" } },
+      { modelProvider: { ...modelProvider, requestTransportOverrides: "present" as const } },
+      {
+        modelProvider: {
+          ...modelProvider,
+          preparedAuth: { source: "direct" as const, mode: "api-key" },
+        },
+      },
+      {
+        modelProvider: {
+          ...modelProvider,
+          preparedAuth: { source: "harness" as const, requirement: "subscription" as const },
+        },
+      },
+    ]) {
+      expect(harness.supports({ ...context, ...override }).supported).toBe(false);
+    }
+  });
+
   it("rejects a prepared route that does not declare Codex compatibility", () => {
     const result = supports({
       modelProvider: {

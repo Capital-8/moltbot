@@ -81,6 +81,7 @@ function makeRegistry(
 async function provision(
   startup: Awaited<ReturnType<typeof loadGatewayWorkerEnvironmentStartupState>>,
   environmentId: string,
+  install: "bundle" | "npm" = "bundle",
 ) {
   return provisionStartupWorker(
     startup,
@@ -88,7 +89,7 @@ async function provision(
       environmentId,
       providerId: "fake-provider",
       profileId: "test-profile",
-      profileSnapshot: { executionMode: "remote-exec", settings: {} },
+      profileSnapshot: { executionMode: "remote-exec", install, settings: {} },
     },
     { nodeDeviceId: `${environmentId}-node` },
   );
@@ -326,6 +327,86 @@ it("refreshes registry and metadata generations, retires old artifacts, and drai
     } finally {
       releaseAll();
       await (stopping ?? service.stop());
+    }
+  });
+});
+
+it("keeps interleaved npm and offline bootstrap preparation in separate reusable producers", async () => {
+  const stateDir = await fs.realpath(tempDirs.make("openclaw-bootstrap-install-modes-"));
+  const metadata = createPluginMetadataSnapshotFixture({
+    plugins: [
+      {
+        id: "runtime-a",
+        rootDir: "/source/extensions/runtime-a",
+        packageName: "@example/runtime-a",
+        packageVersion: "1.2.3",
+      },
+    ],
+  });
+  const registry = makeRegistry(metadata, "runtime-a");
+  vi.spyOn(metadataState, "getGatewayPluginMetadataSnapshot").mockReturnValue(metadata);
+  vi.spyOn(version, "resolveRuntimeServiceBuildId").mockReturnValue("gateway-source-build");
+  const enrollmentFactory = vi.spyOn(enrollmentModule, "createWorkerNodeEnrollmentManager");
+  const producers: {
+    install: "bundle" | "npm";
+    gate: ReturnType<typeof createDeferredCore<void>>;
+  }[] = [];
+  const factory = vi
+    .spyOn(artifactModule, "createNodeBootstrapArtifactProvider")
+    .mockImplementation(({ plugins, install = "bundle" }) => {
+      const gate = createDeferredCore();
+      const artifact = {
+        install,
+        tarballPath: path.join(stateDir, `${install}.tgz`),
+        tarballSha256: (install === "bundle" ? "a" : "b").repeat(64),
+        tarballBytes: 1,
+        openclawVersion: "2026.8.1",
+        buildId: "gateway-source-build",
+        enabledPluginIds: plugins.map(({ id }) => id),
+      };
+      producers.push({ install, gate });
+      return {
+        prepare: async () => {
+          await gate.promise;
+          await fs.writeFile(artifact.tarballPath, "x");
+          return artifact;
+        },
+        close: async () => {
+          gate.resolve();
+          await fs.rm(artifact.tarballPath, { force: true });
+        },
+      };
+    });
+  await withGatewayWorkerEnvironmentStartupState(stateDir, async () => {
+    setRuntimeConfigSnapshot({ gateway: { publicOrigin: "https://gateway.example.test" } });
+    const startup = await loadGatewayWorkerEnvironmentStartupState();
+    const runtime = await createWorkerStartupRuntime(startup, () => registry);
+    const managerResult = enrollmentFactory.mock.results.at(-1);
+    assert(managerResult?.type === "return", "enrollment manager unavailable");
+    const records = await Promise.all([
+      provision(startup, "bundle-one"),
+      provision(startup, "npm-one", "npm"),
+      provision(startup, "bundle-two"),
+    ]);
+    const pending = records.map((record) => managerResult.value.begin(record));
+    try {
+      await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(2));
+      expect(producers.map(({ install }) => install).toSorted()).toEqual(["bundle", "npm"]);
+      producers.find(({ install }) => install === "npm")!.gate.resolve();
+      const npm = await pending[1]!;
+      expect(npm.nodeBootstrap.install).toBe("npm");
+      producers.find(({ install }) => install === "bundle")!.gate.resolve();
+      const [first, second] = await Promise.all([pending[0]!, pending[2]!]);
+      expect(first.nodeBootstrap.install).toBe("bundle");
+      expect(second.nodeBootstrap.sha256).toBe(first.nodeBootstrap.sha256);
+      expect(npm.nodeBootstrap.sha256).not.toBe(first.nodeBootstrap.sha256);
+      expect(factory).toHaveBeenCalledTimes(2);
+    } finally {
+      for (const producer of producers) {
+        producer.gate.resolve();
+      }
+      await Promise.allSettled(pending);
+      await runtime.workerEnvironmentService?.stop();
     }
   });
 });

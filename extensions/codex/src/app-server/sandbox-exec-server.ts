@@ -377,7 +377,9 @@ function readCodexPlacementNodeId(sandbox: SandboxContext): string | undefined {
   return sandbox.placementNodeId;
 }
 
-function readCodexPlacementWorkspaceIdentity(sandbox: SandboxContext): {
+export function readCodexPlacementWorkspaceIdentity(sandbox: SandboxContext): {
+  retainedSession?: true;
+  requireExistingNativeState?: true;
   environmentId: string;
   sessionId: string;
   ownerEpoch: number;

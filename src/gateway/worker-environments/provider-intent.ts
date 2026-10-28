@@ -5,8 +5,10 @@ import {
   matchesAgentLifecycleBinding,
   matchesAgentLifecycleBindingAsync,
 } from "../../agents/agent-lifecycle-registry.js";
+import type { GitHubCredentialReader } from "../../agents/github-credential-reader.js";
 import { resolveConfiguredGitHubToolIdentity } from "../../agents/github-tool-identity.js";
 import { resolveGitRepositoryPaths } from "../../agents/worktrees/git.js";
+import type { CloudWorkerProfileConfig } from "../../config/types.cloud-workers.js";
 import { normalizeCapabilityProviderId } from "../../plugins/provider-registry-shared.js";
 import type { WorkerExecutionMode, WorkerProfile, WorkerProvider } from "../../plugins/types.js";
 import { workerEnvironmentServiceError as serviceError } from "./environment-errors.js";
@@ -216,8 +218,11 @@ export function createWorkerProviderIntent(options: WorkerProviderIntentOptions)
             ? { expected: createOptions.projectRepository }
             : { repository: createOptions.repository! }),
           namespace: options.projectNamespace,
+          readNativeCredential: createOptions.readNativeCredential,
+          retainCredentialCleanup: createOptions.retainCredentialCleanup,
           getConfig: options.getConfig,
           assertCurrent: () => {
+            createOptions.assertCurrent?.();
             requireProfileId(profileId, signal);
           },
           signal,

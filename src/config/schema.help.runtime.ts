@@ -93,7 +93,21 @@ export const RUNTIME_FIELD_HELP: Record<string, string> = {
   "tools.github.profileId":
     "Opaque generated profile version used to switch managed credentials atomically.",
   "tools.github.kind":
-    "Marks a managed OAuth profile whose rotating refresh credential is owned by the Gateway. Omitted profiles use a personal access token.",
+    "Selects Gateway-managed OAuth or a repository-scoped GitHub App installation. Omitted profiles use a personal access token.",
+  "tools.github.app":
+    "Gateway-owned GitHub App installation issuer. Signing keys stay on the Gateway; children receive short-lived repository-scoped tokens.",
+  "tools.github.app.appId": "Numeric GitHub App ID verified against the selected host.",
+  "tools.github.app.installationId": "Numeric installation ID bound to this App and organization.",
+  "tools.github.app.accountId":
+    "Expected numeric organization or account ID owning the installation.",
+  "tools.github.app.repositories":
+    "Exact repository IDs and owner/name pairs admitted for this installation token.",
+  "tools.github.app.permissions":
+    "Requested repository permissions, independently checked against the App, installation, and issued token.",
+  "tools.github.app.privateKey":
+    "App signing key or SecretRef resolved only by the Gateway issuer. Never sent to workers.",
+  "tools.github.app.keyVersion":
+    "Operator-managed key generation; changing it retires the previous selection.",
   "tools.github.gitAuthor.name": "Optional process-local Git author and committer name.",
   "tools.github.gitAuthor.email": "Optional process-local Git author and committer email.",
   "agents.entries.*.tools.github":

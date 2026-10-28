@@ -38,6 +38,7 @@ import {
   createExecRequestPreparation,
   type ExecToolArgs,
   resolveExecPreparedRunEnvironment,
+  prepareLocalGitHubAppExecution,
   resolveExecNotificationDefaults,
   resolvePreparedExecEnvironment,
 } from "./bash-tools.exec-request-preparation.js";
@@ -498,12 +499,18 @@ export function createExecTool(defaults?: ExecToolDefaults) {
             ? preparedRunEnvironment.localIdentityEnv.GH_CONFIG_DIR
             : undefined;
 
+        const githubApp = prepareLocalGitHubAppExecution(
+          defaults,
+          host === "gateway" ? preparedRunEnvironment.appInstallationProfileId : undefined,
+        );
+
         if (host === "gateway" && !bypassApprovals) {
           gatewayApproval = await processGatewayAllowlist({
             ...hostApprovalParams(),
             workdir,
             secretEgressBindings,
             githubProfileDir,
+            githubApp,
             pathPrepend: defaultPathPrepend,
             pty: params.pty === true && !sandbox,
             safeBins,
@@ -555,6 +562,7 @@ export function createExecTool(defaults?: ExecToolDefaults) {
           env,
           secretEgressBindings,
           githubProfileDir,
+          githubApp,
           pathPrepend: defaultPathPrepend,
           sandbox,
           containerWorkdir,

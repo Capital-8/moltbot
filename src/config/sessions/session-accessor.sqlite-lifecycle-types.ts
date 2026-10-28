@@ -36,6 +36,7 @@ import type {
   TranscriptEvent,
 } from "./session-accessor.types.js";
 import type { CanonicalSessionReaderContinuation } from "./session-canonical-key.js";
+import type { SessionCreationOperation } from "./session-creation-operation.js";
 import type { SessionOwnerAssignment } from "./session-entry-provenance.js";
 import type { SessionMaintenancePreservationSnapshot } from "./store-maintenance-preserve-snapshot.types.js";
 import type { ResolvedSessionMaintenanceConfig } from "./store-maintenance.js";
@@ -134,6 +135,7 @@ export type ProjectedLifecycleCommitInput = {
 };
 
 type SessionLifecycleCreation = {
+  creationOperation?: SessionCreationOperation;
   preparedTranscript?: {
     sessionKey: string;
     sessionId: string;

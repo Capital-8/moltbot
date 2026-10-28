@@ -9,13 +9,16 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { findCrabboxBinary } from "./crabbox-binary.js";
 import * as managedBinary from "./crabbox-managed-binary.js";
-import { CRABBOX_WORKER_PROVIDER_ID, parseCrabboxSetupSecrets } from "./crabbox-worker-profile.js";
-import { WARM_IMAGE_MAX_ENTRIES } from "./crabbox-worker-warm-image-records.js";
+import { CRABBOX_WORKER_PROVIDER_ID } from "./crabbox-worker-profile.js";
+import { parseCrabboxSetupSecrets } from "./crabbox-worker-setup-profile.js";
 import {
-  admitCrabboxWarmImageProfile,
+  WARM_IMAGE_MAX_ENTRIES,
   crabboxWarmImageRecoveryHint,
   CRABBOX_WARM_IMAGE_WAIT_HINT,
   projectCrabboxWarmImage,
+} from "./crabbox-worker-warm-image-records.js";
+import {
+  admitCrabboxWarmImageProfile,
   type WarmProfileRecord,
 } from "./crabbox-worker-warm-image-store.js";
 

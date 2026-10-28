@@ -6,7 +6,6 @@ import {
   validateSessionsCreateParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
-import { sessionEntryForkedFromParent } from "../../config/sessions/session-entry-lineage.js";
 import { resolveSessionPublicShare } from "../../config/sessions/session-public-share.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
@@ -44,16 +43,22 @@ import { prepareSkillLibrarySessionCreation } from "../skill-library-session.js"
 import { gatewayClientUploadPolicyError } from "../upload-policy.js";
 import { createAgentRuntimeAuthorityGuard } from "./agent-runtime-authority.js";
 import { scheduleCreatedDashboardSessionTitle } from "./chat-send-background.js";
+import { isSyntheticGatewayCaller } from "./gateway-personal-caller.js";
 import { respondError } from "./response.js";
 import { resolveRegisteredCatalogCreateTarget } from "./session-catalog.js";
 import { emitSessionsChanged, emitSessionTitleChanged } from "./session-change-event.js";
 import { registerCommittedSessionCategory } from "./session-create-category.js";
-import { idempotentSessionCreate } from "./session-create-idempotency.js";
+import {
+  idempotentSessionCreate,
+  prepareDurableSessionCreate,
+  durableSessionCreateAgentError,
+  sessionCreationOperationErrorShape,
+  projectSessionCreateResponse,
+} from "./session-create-idempotency.js";
 import {
   dispatchSessionCreateInitialTurn,
   resolveSessionCreateInitialTurn,
   validateSessionCreateInitialMentions,
-  isFreshChatSendStarted,
 } from "./session-create-initial-turn.js";
 import {
   normalizeSessionProjectGitUrl,
@@ -108,14 +113,12 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       context,
     });
     if (uploadError) {
-      respond(false, undefined, uploadError);
-      return;
+      return respond(false, undefined, uploadError);
     }
     const p = structuredClone(params);
     const requiredWorker = prepareRequiredWorkerSessionCreate(p, context.getRuntimeConfig());
     if (requiredWorker.error) {
-      respond(false, undefined, requiredWorker.error);
-      return;
+      return respond(false, undefined, requiredWorker.error);
     }
     const { requiredProfile, automaticEmptyWorkspace } = requiredWorker;
     const requestAuthority = readGatewayRequestMutationAuthority(options);
@@ -124,11 +127,25 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
     const operatorRoleActor = client?.internal?.operatorRoleActor
       ? { ...client.internal.operatorRoleActor }
       : undefined;
+    const preparedOperation = prepareDurableSessionCreate(
+      params,
+      requestingOperatorProfileId,
+      requiredProfile,
+      getCurrentConfig(),
+    );
+    if (!preparedOperation.ok) {
+      return respond(false, undefined, preparedOperation.error);
+    }
+    const durableCreation = preparedOperation.value;
+    if (durableCreation) {
+      // The caller-selected physical UUID is a target identifier, never authority or an alias.
+      p.key = `dashboard:${durableCreation.sessionId}`;
+    }
+    let creationReplayed = false;
     const emptyWorkspace = p.worktreeSource === "empty";
     const worktreeSelectionError = validateSessionWorktreeSelection(p);
     if (worktreeSelectionError) {
-      respond(false, undefined, worktreeSelectionError);
-      return;
+      return respond(false, undefined, worktreeSelectionError);
     }
     const parentSessionKey = normalizeOptionalString(p.parentSessionKey);
     const creation = resolveOperatorSessionCreation(client, { allowTrustedHint: true });
@@ -176,6 +193,10 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
     const { personalModelSelection, personalAccountDefaults } = personalAccounts;
     const cfg = getCurrentConfig();
     const sessionCreation = attributeAgentToolSessionCreation(preparedCreation, toolRequester);
+    const durableAgentError = durableCreation ? durableSessionCreateAgentError(p, cfg) : undefined;
+    if (durableAgentError) {
+      return respond(false, undefined, durableAgentError);
+    }
     const authority = createAgentRuntimeAuthorityGuard(client, context, respond);
     const assertSessionCreateCurrent = Object.assign(
       bindGatewayDeviceRevocation(() => {
@@ -496,6 +517,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       onPhase: diagnostics?.mark,
       operatorAuthority: operatorCapture.preparation,
       key: sessionKey,
+      creationOperation: durableCreation,
       agentId: sessionAgentId,
       label: p.label,
       displayName: preparedDisplayName,
@@ -521,6 +543,8 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       spawnDepth: p.spawnDepth,
       ...resolveSessionCreateRootParameters(p, preparedRoot?.value),
       permissionMode: p.permissionMode,
+      applyAgentPermissionDefault:
+        client?.connect.role === "operator" && !isSyntheticGatewayCaller(client),
       ...(p.toolOverrides !== undefined ? { toolOverrides: p.toolOverrides } : {}),
       ...(p.communication !== undefined ? { communication: p.communication } : {}),
       prepareLifecycle,
@@ -584,6 +608,12 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
         }
       },
       afterCreate: async (session) => {
+        if (durableCreation) {
+          creationReplayed = !session.isNew;
+          if (creationReplayed) {
+            return;
+          }
+        }
         if (!authority.hasActive()) {
           return;
         }
@@ -629,6 +659,11 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       },
     };
     const created = await createGatewaySession(createParams).catch((error: unknown) => {
+      const creationFailure = sessionCreationOperationErrorShape(error);
+      if (creationFailure) {
+        respond(false, undefined, creationFailure);
+        return undefined;
+      }
       if (error === catalogWait.unavailable) {
         respond(false, undefined, catalogWait.unavailable.error);
         return undefined;
@@ -646,43 +681,21 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       respond(false, undefined, created.error);
       return;
     }
-    if (created.postCommit.status === "failed") {
-      runError = errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(created.postCommit.error));
-    }
-    const createdWorktree = preparedWorktree?.worktree
-      ? {
-          id: preparedWorktree.worktree.id,
-          path: preparedWorktree.sessionRoot,
-          branch: preparedWorktree.worktree.branch,
-        }
-      : undefined;
-    const responseEntry = sessionEntryForkedFromParent(created.entry)
-      ? { ...created.entry, forkedFromParent: true as const }
-      : created.entry;
-    const runStarted =
-      !created.resetExisting &&
-      isFreshChatSendStarted({
-        payload: runPayload,
-        cached: runMeta?.cached === true,
-      });
-
-    diagnostics?.mark("response");
-    respond(true, {
-      ok: true,
-      key: created.key,
-      sessionId: created.entry.sessionId,
-      entry: responseEntry,
-      runStarted,
+    const response = projectSessionCreateResponse(created, {
+      lifecycle: preparedWorktree,
+      runPayload,
+      runError,
+      runMeta,
       publicRead,
-      ...(!created.resetExisting && runPayload ? runPayload : {}),
-      ...(!created.resetExisting && runError ? { runError } : {}),
-      resolved: created.resolved,
-      ...(createdWorktree ? { worktree: createdWorktree } : {}),
+      creationOperationId: durableCreation ? p.creationOperationId : undefined,
+      creationReplayed,
     });
+    diagnostics?.mark("response");
+    respond(true, response);
     diagnostics?.mark("handlerExit");
     for (const reason of [
       created.resetExisting ? "new" : "create",
-      ...(runStarted ? ["send"] : []),
+      ...(response.runStarted ? ["send"] : []),
     ]) {
       emitSessionsChanged(context, {
         sessionKey: created.key,

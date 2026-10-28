@@ -51,6 +51,8 @@ export type TerminalPtySpawnParams = {
   args: string[];
   cwd?: string;
   env?: Record<string, string>;
+  /** Resolve only in the owning host; deliver to the native child outside public spawn parameters. */
+  privateEnv?: () => Readonly<Record<string, string>>;
   name?: string;
   cols: number;
   rows: number;
@@ -78,7 +80,10 @@ export async function spawnTerminalPty(
       throw new Error("PTY construction aborted");
     }
   };
-  if (process.versions.bun && process.platform !== "win32" && !bunTerminalHasFlowControl()) {
+  if (
+    params.privateEnv ||
+    (process.versions.bun && process.platform !== "win32" && !bunTerminalHasFlowControl())
+  ) {
     const recordSpawn = prepareChildProcessSpawnRecorder(params.file, params.args);
     // Stock Bun lacks read backpressure; the fork shipping pause also fixes macOS wait4 deadlocks.
     const { spawnNodeTerminalPty } = await import("./terminal-pty-node.js");

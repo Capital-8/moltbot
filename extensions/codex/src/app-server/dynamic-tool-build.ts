@@ -27,7 +27,11 @@ import {
 } from "openclaw/plugin-sdk/time-runtime";
 import { CODEX_NATIVE_TOOL_REQUIREMENTS } from "../../native-tool-policy.js";
 import type { CodexComputerContextEpoch } from "./computer-context.js";
-import { isCodexRemoteExecPlacementSandbox, type CodexPluginConfig } from "./config.js";
+import {
+  isCodexPairedNodeRemoteExecPlacementSandbox,
+  isCodexRemoteExecPlacementSandbox,
+  type CodexPluginConfig,
+} from "./config.js";
 import {
   createCodexHostToolSurface,
   resolveCodexToolConstructionPlan,
@@ -495,9 +499,16 @@ export function shouldEnableCodexAppServerNativeToolSurface(
     agentId?: string;
     runtimeSessionKey?: string;
     sandboxExecServerEnabled?: boolean;
+    workerHostedCloud?: boolean;
     nativeExecutionPolicy: PreparedCodexNativeExecutionPolicy;
   },
 ): boolean {
+  // This adapter starts Codex on the exact worker with its session-bound GitHub
+  // grant; it never consumes the Gateway's local identity overlay.
+  const workerOwnsExecution =
+    options.workerHostedCloud === true &&
+    sandbox?.backendId === "node" &&
+    isCodexPairedNodeRemoteExecPlacementSandbox(sandbox);
   if (
     isCodexResponsesOAuthRun(params) ||
     params.requireWorkspaceOnly === true ||
@@ -509,7 +520,8 @@ export function shouldEnableCodexAppServerNativeToolSurface(
     params.oneShotCliRun === true ||
     // Codex's environment policy is a serialized overlay, not a launch binding.
     // Let the common host tools own credentials, approvals, and process lifetime.
-    params.hostCapabilities.preparedEnvironment?.().hostExecutionRequired === true
+    (params.hostCapabilities.preparedEnvironment?.().hostExecutionRequired === true &&
+      !workerOwnsExecution)
   ) {
     return false;
   }
@@ -553,7 +565,14 @@ export function shouldRequireCodexSandboxExecServerEnvironment(params: {
   sandbox?: OpenClawSandboxContext;
   nativeToolSurfaceEnabled: boolean;
   sandboxExecServerEnabled: boolean;
+  pluginConfig?: { appServer?: { workerHostedCloud?: boolean } };
 }): boolean {
+  if (
+    params.pluginConfig?.appServer?.workerHostedCloud === true &&
+    isCodexPairedNodeRemoteExecPlacementSandbox(params.sandbox)
+  ) {
+    return false;
+  }
   return Boolean(
     isCodexRemoteExecPlacementSandbox(params.sandbox) ||
     (params.sandbox?.enabled && params.nativeToolSurfaceEnabled && params.sandboxExecServerEnabled),

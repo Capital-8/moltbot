@@ -24,14 +24,25 @@ import type {
 import { isWorkspaceInspectionCommand } from "../worker/workspace-inspection-protocol.js";
 import { inspectSessionWorkspace } from "../worker/workspace-inspection.js";
 import { NodeWorkerDeviceFolders } from "./node-worker-device-folder.js";
-import { snapshotNodeWorkerEnv } from "./node-worker-environment.js";
+import {
+  snapshotNodeWorkerExecutionEnv,
+  type NodeWorkerManagedIdentityTransport,
+  type NodeWorkerPlatformTrust,
+} from "./node-worker-environment.js";
+import {
+  createNodeWorkerCredentialScrubber,
+  type NodeWorkerCredentialScrubber,
+} from "./node-worker-output.js";
 import { NodeWorkerPreparedWorkspaceRuntime } from "./node-worker-prepared-workspace.js";
 import {
   type NodeWorkerTransferGateway,
   runNodeWorkerWorkspaceTransfer,
   serializeNodeWorkerWorkspace,
 } from "./node-worker-transfer-client.js";
-import { createNodeWorkerTempWorkspace } from "./node-worker-workspace-admission.js";
+import {
+  createNodeWorkerManagedWorkspaceLease,
+  createNodeWorkerTempWorkspace,
+} from "./node-worker-workspace-admission.js";
 import {
   nodeWorkspaceManifestCapture,
   projectWorkspaceOperationResult,
@@ -60,6 +71,7 @@ import {
 import { NodeWorkerWorkspaceProcesses } from "./node-worker-workspace-processes.js";
 import { NodeWorkerWorkspaceQuiescence } from "./node-worker-workspace-quiescence.js";
 import {
+  NodeWorkerWorkspaceRetainProtection,
   listOwnedEntries,
   listNodeWorkerWorkspaceSessions,
   removeIfEmpty,
@@ -76,15 +88,16 @@ export class NodeWorkerWorkspaceRuntime {
   private readonly seedsRoot: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly deviceFolders: NodeWorkerDeviceFolders;
+  private readonly platformTrust?: NodeWorkerPlatformTrust;
+  private readonly credentialScrubber?: NodeWorkerCredentialScrubber;
   private readonly prepared: NodeWorkerPreparedWorkspaceRuntime;
   private readonly retainQueue = new KeyedAsyncQueue();
   private readonly acceptedSnapshots = new Map<string, NodeWorkerWorkspaceRetainSnapshot>();
-  private readonly activeWorkspaceOperations = new Map<string, number>();
+  private readonly retention = new NodeWorkerWorkspaceRetainProtection();
   private readonly latestTransferredManifest = new Map<string, string>();
   // Per-generation capture hash memo; lets upload captures skip re-hashing unchanged trees.
   private readonly workspaceHashMemos = new Map<string, Map<string, string>>();
   private readonly deletingWorkspaceGenerations = new Set<string>();
-  private readonly activeRetainProtections = new Map<string, Set<string>>();
   readonly processes = new NodeWorkerWorkspaceProcesses();
   readonly quiescence = new NodeWorkerWorkspaceQuiescence();
 
@@ -94,6 +107,8 @@ export class NodeWorkerWorkspaceRuntime {
       env?: NodeJS.ProcessEnv;
       ephemeral?: boolean;
       folders?: readonly string[];
+      managedIdentityTransport?: NodeWorkerManagedIdentityTransport;
+      platformTrust?: NodeWorkerPlatformTrust;
     } = {},
   ) {
     const env = options.env ?? process.env;
@@ -112,7 +127,15 @@ export class NodeWorkerWorkspaceRuntime {
       this.workspaceHashMemos,
       options.ephemeral === true,
     );
-    this.env = snapshotNodeWorkerEnv(env);
+    this.platformTrust = options.platformTrust;
+    this.env = snapshotNodeWorkerExecutionEnv(
+      env,
+      options.managedIdentityTransport,
+      this.platformTrust,
+    );
+    this.credentialScrubber = options.managedIdentityTransport
+      ? createNodeWorkerCredentialScrubber(options.managedIdentityTransport.header)
+      : undefined;
     this.deviceFolders = new NodeWorkerDeviceFolders({
       privateRoots: [this.root, path.dirname(this.seedsRoot)],
       folders: options.folders,
@@ -193,7 +216,7 @@ export class NodeWorkerWorkspaceRuntime {
     if (this.deletingWorkspaceGenerations.has(generationKey)) {
       throw new Error("INVALID_REQUEST: node placement workspace is being removed");
     }
-    const release = this.beginWorkspaceOperation(gatewayNamespace, generationKey);
+    const release = this.retention.beginOperation(gatewayNamespace, generationKey);
     try {
       // The existing generation retention owner collects only this private HOME, never cwd.
       const homeDir = ensureContainedDirectory(
@@ -222,55 +245,19 @@ export class NodeWorkerWorkspaceRuntime {
     if (this.deletingWorkspaceGenerations.has(identity.generationKey)) {
       throw new Error("INVALID_REQUEST: node placement workspace is being removed");
     }
-    const finishOperation = this.beginWorkspaceOperation(
-      identity.gatewayNamespace,
-      identity.generationKey,
+    const assertCurrent = this.processes.captureAdmission(
+      { ...identity, environmentId: request.environmentId },
+      request.ownerEpoch,
     );
-    return {
+    return createNodeWorkerManagedWorkspaceLease({
       workspaceDir: identity.workspaceDir,
       ...(prepared ? { homeDir: prepared.home_dir } : {}),
-      release: finishOperation,
-    };
-  }
-
-  private beginWorkspaceOperation(gatewayNamespace: string, generationKey: string): () => void {
-    this.activeWorkspaceOperations.set(
-      generationKey,
-      (this.activeWorkspaceOperations.get(generationKey) ?? 0) + 1,
-    );
-    this.activeRetainProtections.get(gatewayNamespace)?.add(generationKey);
-    let released = false;
-    return () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      const count = this.activeWorkspaceOperations.get(generationKey) ?? 0;
-      if (count <= 1) {
-        this.activeWorkspaceOperations.delete(generationKey);
-      } else {
-        this.activeWorkspaceOperations.set(generationKey, count - 1);
-      }
-    };
-  }
-
-  private currentLocalProtection(
-    gatewayNamespace: string,
-    retainedDuringPass?: ReadonlySet<string>,
-    launches: readonly NodeWorkerWorkspaceLaunchReference[] = [],
-  ): Set<string> {
-    const protectedGenerations = new Set(retainedDuringPass);
-    for (const generationKey of this.activeWorkspaceOperations.keys()) {
-      if (generationKey.startsWith(`${gatewayNamespace}/`)) {
-        protectedGenerations.add(generationKey);
-      }
-    }
-    for (const launch of launches) {
-      if (launch.gatewayNamespace === gatewayNamespace) {
-        protectedGenerations.add(launchGenerationKey(launch));
-      }
-    }
-    return protectedGenerations;
+      env: this.env,
+      platformTrust: this.platformTrust,
+      release: this.retention.beginOperation(identity.gatewayNamespace, identity.generationKey),
+      assertCurrent,
+      redactOutput: this.credentialScrubber?.scrub,
+    });
   }
 
   async applyRetainSnapshot(
@@ -291,8 +278,7 @@ export class NodeWorkerWorkspaceRuntime {
         }
       }
       this.acceptedSnapshots.set(input.gatewayNamespace, next);
-      const retainedDuringPass = this.currentLocalProtection(input.gatewayNamespace);
-      this.activeRetainProtections.set(input.gatewayNamespace, retainedDuringPass);
+      const retainedDuringPass = this.retention.beginPass(input.gatewayNamespace);
       try {
         const result = await this.collectRetainedWorkspaceSnapshot({
           gatewayNamespace: input.gatewayNamespace,
@@ -304,7 +290,7 @@ export class NodeWorkerWorkspaceRuntime {
         signal?.throwIfAborted();
         return { applied: true, ...result };
       } finally {
-        this.activeRetainProtections.delete(input.gatewayNamespace);
+        this.retention.endPass(input.gatewayNamespace);
       }
     });
   }
@@ -321,7 +307,11 @@ export class NodeWorkerWorkspaceRuntime {
       launches = await params.listNonterminal();
     };
     const currentProtection = () =>
-      this.currentLocalProtection(params.gatewayNamespace, params.retainedDuringPass, launches);
+      this.retention.currentProtection(
+        params.gatewayNamespace,
+        params.retainedDuringPass,
+        launches,
+      );
     const retired = await this.prepared.collect(
       params.gatewayNamespace,
       (generationKey) =>
@@ -538,9 +528,9 @@ export class NodeWorkerWorkspaceRuntime {
     if (this.deletingWorkspaceGenerations.has(generationKey)) {
       throw new Error("INVALID_REQUEST: node placement workspace is being removed");
     }
-    const finishOperation = this.beginWorkspaceOperation(input.gatewayNamespace, generationKey);
+    const finishOperation = this.retention.beginOperation(input.gatewayNamespace, generationKey);
     try {
-      return await serializeNodeWorkerWorkspace(sessionRootCandidate, async () => {
+      const result = await serializeNodeWorkerWorkspace(sessionRootCandidate, async () => {
         signal?.throwIfAborted();
         const prepared = deviceFolder
           ? undefined
@@ -692,7 +682,7 @@ export class NodeWorkerWorkspaceRuntime {
               workspaceDir,
               env: commandEnv,
               retainWorkspace: () =>
-                this.beginWorkspaceOperation(input.gatewayNamespace, generationKey),
+                this.retention.beginOperation(input.gatewayNamespace, generationKey),
             },
             signal,
           );
@@ -715,7 +705,7 @@ export class NodeWorkerWorkspaceRuntime {
           });
           return projectWorkspaceOperationResult(workspaceDir, stdout, input.argv);
         }
-        const result = await this.processes.execute({
+        const output = await this.processes.execute({
           input,
           assertCurrent: assertProcessCurrent,
           workspaceDir,
@@ -723,10 +713,17 @@ export class NodeWorkerWorkspaceRuntime {
           signal,
           timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           retainWorkspace: () =>
-            this.beginWorkspaceOperation(input.gatewayNamespace, generationKey),
+            this.retention.beginOperation(input.gatewayNamespace, generationKey),
         });
-        return input.process ? result : projectNodeWorkerWorkspaceExecResult(workspaceDir, result);
+        return input.process ? output : projectNodeWorkerWorkspaceExecResult(workspaceDir, output);
       });
+      return this.credentialScrubber
+        ? {
+            ...result,
+            stdout: this.credentialScrubber.scrub(result.stdout),
+            stderr: this.credentialScrubber.scrub(result.stderr),
+          }
+        : result;
     } finally {
       finishOperation();
     }

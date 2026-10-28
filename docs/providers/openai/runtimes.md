@@ -19,6 +19,15 @@ sidebarTitle: "Runtimes and Codex auth"
 | `/codex ...`                            | Chat command set  | Bind/control Codex app-server threads from a conversation.                               |
 | `runtime: "acp", agentId: "codex"`      | ACP session route | Explicit fallback path that runs Codex through ACP/acpx.                                 |
 
+## Command-backed custom providers
+
+A declared custom HTTPS Responses provider can set `auth: "native-command"`
+when its model explicitly selects `agentRuntime.id: "codex"`. Codex owns the
+provider's command-backed authentication in its private native configuration.
+OpenClaw does not execute the token helper or borrow an ambient API key or
+stored profile. Explicit key/profile bindings, request transport overrides,
+and the OpenClaw runtime are rejected for this route.
+
 ## Implicit agent runtime
 
 When provider/model `agentRuntime` policy is unset or `auto`, OpenAI's

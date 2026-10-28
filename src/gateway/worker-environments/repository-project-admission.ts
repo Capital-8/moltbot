@@ -7,6 +7,8 @@ import {
   matchesAgentLifecycleBinding,
   matchesAgentLifecycleBindingAsync,
 } from "../../agents/agent-lifecycle-registry.js";
+import type { GitHubCredentialReader } from "../../agents/github-credential-reader.js";
+import { getGitHubIdentityErrorOrigin } from "../../agents/github-read-identity.js";
 import {
   GitHubIdentityError,
   prepareGitHubReadIdentity,

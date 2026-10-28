@@ -435,6 +435,10 @@ block turn startup. Reconnect or change GitHub Identity in Settings to recover.
 With no managed identity selected, native Code Mode and shell defaults are unchanged.
 Ordinary paired-node exec keeps node-local authentication: a Gateway GitHub
 selection and command approval never export that credential to the node.
+The managed cloud-worker app-server adapter retains native tools because it
+starts Codex on the exact worker with an independently authorized, session-bound
+GitHub grant. It does not forward the Gateway's local identity overlay; existing
+tool restrictions and grant lifetime checks still apply.
 
 `openclaw agent exec` also uses host-owned tools so its one-shot cleanup can
 join every command it starts. The generic `--code-mode` setting does not enable

@@ -5,7 +5,7 @@ import type { WorkerProfile } from "../../plugins/types.js";
 import type { EnvironmentRecipe } from "./environment-recipe.js";
 import {
   WorkerPreparationTargetSchema,
-  type WorkerEmptyPreparationIdentity,
+  type WorkerRuntimePreparationIdentity,
   type WorkerPreparationArtifacts,
   type WorkerProjectPreparationIdentity,
 } from "./preparation-identity.schema.js";
@@ -19,7 +19,7 @@ export type WorkerProviderPreparedIntent = {
           project?: WorkerProjectSnapshot & { preparation?: WorkerProjectPreparationIdentity };
           runtimePreparation?: never;
         }
-      | { project?: never; runtimePreparation: WorkerEmptyPreparationIdentity }
+      | { project?: never; runtimePreparation: WorkerRuntimePreparationIdentity }
     );
 };
 

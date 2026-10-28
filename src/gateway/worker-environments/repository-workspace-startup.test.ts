@@ -2,7 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { prepareGitHubAppInstallation } from "../../agents/github-app-installation.js";
+import type { GitHubCredentialReader } from "../../agents/github-credential-reader.js";
 import { createGitHubReadIdentity } from "../../agents/github-read-identity.js";
+import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
 import { NodeWorkerWorkspaceRuntime } from "../../node-host/node-worker-workspace.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../../state/openclaw-state-db-cache.js";
@@ -33,6 +36,12 @@ import { requireWorkspaceResultGit } from "./workspace-result-git.js";
 // mock-isolation: Workspace startup supplies a synthetic identity without credential discovery.
 vi.mock("./repository-github-identity.js", () => ({ prepareRepositoryGitHubIdentity: vi.fn() }));
 
+// External App issuance is fixed; selected identity, repository admission, and startup stay real.
+vi.mock("../../agents/github-app-installation.js", async (original) => ({
+  ...(await original<typeof import("../../agents/github-app-installation.js")>()),
+  prepareGitHubAppInstallation: vi.fn(),
+}));
+
 const session = {
   sessionId: "repository-session",
   sessionKey: "agent:main:repository-session",
@@ -48,6 +57,7 @@ let nodeDatabasePath: string | undefined;
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  setRuntimeConfigSnapshot({});
   for (const pathname of [nodeDatabasePath, databasePath]) {
     if (pathname) {
       await closeOpenClawStateDatabaseByPathAsync(pathname);

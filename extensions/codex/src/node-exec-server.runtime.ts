@@ -7,7 +7,7 @@ import { StringDecoder } from "node:string_decoder";
 import { stripVTControlCharacters } from "node:util";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import type { OpenClawPluginNodeHostCommandIo } from "openclaw/plugin-sdk/node-host";
-import { killProcessTree } from "openclaw/plugin-sdk/process-runtime";
+import { createBoundedLineFramer, killProcessTree } from "openclaw/plugin-sdk/process-runtime";
 import { sanitizeEnvVars } from "openclaw/plugin-sdk/sandbox";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
@@ -33,6 +33,23 @@ const CODEX_EXEC_SERVER_TERMINATION_GRACE_MS = 1_000;
 const CODEX_EXEC_SERVER_REAP_TIMEOUT_MS = 5_000;
 const NODE_EXEC_SERVER_PLATFORM_ENVIRONMENT =
   /^(?:SYSTEMROOT|WINDIR|COMSPEC|PATHEXT|TEMP|TMP|TMPDIR)$/iu;
+
+/** Decode only valid UTF-8 runs; binary bytes outside credential text stay exact. */
+function redactNodeExecOutput(chunk: Buffer, redact: (text: string) => string): Buffer {
+  const utf8 =
+    // eslint-disable-next-line no-control-regex -- Classify all UTF-8 bytes, including binary output controls.
+    /(?:[\x00-\x7f]|[\xc2-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee-\xef][\x80-\xbf]{2}|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf]{2}|[\xf1-\xf3][\x80-\xbf]{3}|\xf4[\x80-\x8f][\x80-\xbf]{2})+/g;
+  const parts: Buffer[] = [];
+  let offset = 0;
+  for (const match of chunk.toString("latin1").matchAll(utf8)) {
+    parts.push(chunk.subarray(offset, match.index));
+    const end = match.index + match[0].length;
+    parts.push(Buffer.from(redact(chunk.subarray(match.index, end).toString("utf8"))));
+    offset = end;
+  }
+  parts.push(chunk.subarray(offset));
+  return Buffer.concat(parts);
+}
 
 function validateNodeExecServerMessage(message: Uint8Array): Buffer {
   if (message.byteLength === 0 || message.byteLength > MAX_CODEX_EXEC_SERVER_MESSAGE_BYTES) {
@@ -84,50 +101,20 @@ async function relayNodeExecServerOutput(
   child: ChildProcessWithoutNullStreams,
   send: (message: Uint8Array) => Promise<void>,
 ): Promise<void> {
-  let fragments: Buffer[] = [];
-  let pendingBytes = 0;
+  const overflow = "Codex exec-server stdout message exceeds its 64 MiB limit.";
+  const framer = createBoundedLineFramer(MAX_CODEX_EXEC_SERVER_MESSAGE_BYTES + 1, overflow);
   for await (const rawChunk of child.stdout) {
     const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
-    let offset = 0;
-    while (offset < chunk.byteLength) {
-      const newline = chunk.indexOf(0x0a, offset);
-      const fragment = chunk.subarray(offset, newline === -1 ? chunk.byteLength : newline);
-      const nextLength = pendingBytes + fragment.byteLength;
-      if (nextLength > MAX_CODEX_EXEC_SERVER_MESSAGE_BYTES + 1) {
-        throw new Error("Codex exec-server stdout message exceeds its 64 MiB limit.");
-      }
-      if (fragment.byteLength > 0) {
-        fragments.push(fragment);
-      }
-      pendingBytes = nextLength;
-      if (newline === -1) {
-        if (
-          pendingBytes > MAX_CODEX_EXEC_SERVER_MESSAGE_BYTES &&
-          fragment[fragment.byteLength - 1] !== 0x0d
-        ) {
-          throw new Error("Codex exec-server stdout message exceeds its 64 MiB limit.");
-        }
-        break;
-      }
-      const trailing = fragments.at(-1);
-      if (trailing?.[trailing.byteLength - 1] === 0x0d) {
-        pendingBytes -= 1;
-        if (trailing.byteLength === 1) {
-          fragments.pop();
-        } else {
-          fragments[fragments.length - 1] = trailing.subarray(0, trailing.byteLength - 1);
-        }
-      }
-      const pending =
-        fragments.length === 1 ? fragments[0]! : Buffer.concat(fragments, pendingBytes);
-      const message = validateNodeExecServerMessage(pending);
-      fragments = [];
-      pendingBytes = 0;
-      await send(message);
-      offset = newline + 1;
+    for (const line of framer.push(chunk)) {
+      // Exec-server accepts CRLF; the shared byte framer preserves CR for its caller.
+      const message = line.at(-1) === 0x0d ? line.subarray(0, -1) : line;
+      await send(validateNodeExecServerMessage(message));
+    }
+    if (framer.pendingByteLength > MAX_CODEX_EXEC_SERVER_MESSAGE_BYTES && chunk.at(-1) !== 0x0d) {
+      throw new Error(overflow);
     }
   }
-  if (pendingBytes > 0) {
+  if (framer.pendingByteLength > 0) {
     throw new Error("Codex exec-server stdout ended with an unterminated JSON-RPC message.");
   }
 }
@@ -174,9 +161,16 @@ function createNodeExecServerProcessOwner(
 /** Runs the one-connection paired-node exec-server after lightweight command admission. */
 export async function runCodexNodeExecServer(params: {
   assertExecAuthorized: () => void;
-  workspace: { workspaceDir: string; homeDir?: string; release: () => void };
+  workspace: import("openclaw/plugin-sdk/node-host").OpenClawPluginNodeWorkspaceLease & {
+    repositoryReadiness?: { wait(signal: AbortSignal): Promise<void>; assertCurrent(): void };
+  };
   io: OpenClawPluginNodeHostCommandIo;
   activeProcesses: Set<() => Promise<void>>;
+  /** The caller owns credential selection, rotation, and launch-time authority. */
+  commandEnvironment?: {
+    environment: Readonly<Record<string, string>>;
+    launchEnvironment(): Readonly<Record<string, string>>;
+  };
 }): Promise<string> {
   const { io, workspace } = params;
   const frames = io.frames;
@@ -241,8 +235,11 @@ export async function runCodexNodeExecServer(params: {
     if (io.signal.aborted) {
       throw nodeExecServerAbortError(io.signal);
     }
+    // The workspace lease owns admitted provider transport and trust after sanitization.
+    const processEnv = workspace.processEnvironment?.prepare(baseEnv) ?? baseEnv;
     // Awaited setup is complete; policy and invocation closure win at spawn.
     params.assertExecAuthorized();
+    workspace.processEnvironment?.assertCurrent();
     const nativeReady = createDeferred<void>();
     const exit = createDeferred<{ code: number | null; signal: NodeJS.Signals | null }>();
     let stderr = Buffer.alloc(0);
@@ -259,18 +256,20 @@ export async function runCodexNodeExecServer(params: {
         env: {
           HOME: workspace.homeDir ?? dir,
           CODEX_HOME: codexHome,
+          ...params.commandEnvironment?.environment,
           RUST_LOG:
             "error,opentelemetry_sdk=off,opentelemetry_otlp=off,codex_exec_server::server::transport=info",
           ...(process.platform === "win32" ? { USERPROFILE: workspace.homeDir ?? dir } : {}),
         },
         clearEnv: ["NODE_OPTIONS"],
       },
-      baseEnv,
+      processEnv,
       () => {
         if (io.signal.aborted) {
           throw nodeExecServerAbortError(io.signal);
         }
         params.assertExecAuthorized();
+        workspace.processEnvironment?.assertCurrent();
       },
       (spawned) => {
         // Observe before process registration yields: a fast child can emit
@@ -282,7 +281,16 @@ export async function runCodexNodeExecServer(params: {
           releaseResources,
           params.activeProcesses,
         );
-        output = relayNodeExecServerOutput(spawned, frames.send.bind(frames));
+        output = relayNodeExecServerOutput(spawned, async (message) => {
+          await frames.send(
+            workspace.processEnvironment
+              ? redactNodeExecOutput(
+                  Buffer.from(message),
+                  workspace.processEnvironment.redactOutput,
+                )
+              : message,
+          );
+        });
         void output.catch((error: unknown) => {
           rejectDisconnected(error instanceof Error ? error : new Error(String(error)));
         });
@@ -334,11 +342,66 @@ export async function runCodexNodeExecServer(params: {
     params.assertExecAuthorized();
     // Framed readiness starts Codex's initialize budget. Native startup
     // belongs to this cancellable launch, before that handshake begins.
-    unsubscribe = frames.onMessage((message) => {
-      const encoded = validateNodeExecServerMessage(message);
-      const operation = writes
-        ? writes.then(() => writeNodeExecServerMessage(child, encoded, io.signal))
-        : writeNodeExecServerMessage(child, encoded, io.signal);
+    unsubscribe = frames.onMessage(async (message) => {
+      let encoded = validateNodeExecServerMessage(message);
+      const request: unknown = JSON.parse(encoded.toString("utf8"));
+      const needsResources =
+        isRecord(request) &&
+        typeof request.method === "string" &&
+        (request.method === "process/start" || request.method.startsWith("fs/"));
+      if (needsResources && workspace.repositoryReadiness) {
+        try {
+          // Native instruction discovery must receive pending metadata promptly;
+          // waiting here blocks thread/start before conversational inference.
+          if (request.method === "fs/getMetadata" || request.method === "fs/canonicalize") {
+            workspace.repositoryReadiness.assertCurrent();
+          }
+          await workspace.repositoryReadiness.wait(io.signal);
+          workspace.repositoryReadiness.assertCurrent();
+        } catch {
+          io.signal.throwIfAborted();
+          params.assertExecAuthorized();
+          workspace.processEnvironment?.assertCurrent();
+          await frames.send(
+            Buffer.from(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: {
+                  code: -32001,
+                  message:
+                    "Private resource preparation is unavailable; this operation did not run.",
+                },
+              }),
+            ),
+          );
+          return;
+        }
+      }
+      io.signal.throwIfAborted();
+      params.assertExecAuthorized();
+      workspace.processEnvironment?.assertCurrent();
+      const write = () => {
+        io.signal.throwIfAborted();
+        params.assertExecAuthorized();
+        workspace.processEnvironment?.assertCurrent();
+        if (
+          params.commandEnvironment &&
+          isRecord(request) &&
+          request.method === "process/start" &&
+          isRecord(request.params)
+        ) {
+          // Codex exec-server overlays params.env at each process launch (local_process.rs).
+          // Running commands retain their launch token; later commands use the installed one.
+          request.params.env = {
+            ...(isRecord(request.params.env) ? request.params.env : {}),
+            ...params.commandEnvironment.launchEnvironment(),
+          };
+          encoded = Buffer.from(JSON.stringify(request));
+        }
+        return writeNodeExecServerMessage(child, encoded, io.signal);
+      };
+      const operation = writes ? writes.then(write) : write();
       if (!operation) {
         return undefined;
       }

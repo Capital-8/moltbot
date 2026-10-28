@@ -3,6 +3,7 @@ import path from "node:path";
 import { formatErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import type { SessionSourceAssertion } from "../config/sessions/session-source-authority.js";
+import type { prepareWorkerGitHubBindingGrant } from "../gateway/worker-environments/worker-github-binding.js";
 import { recordDiagnosticToolExecutionDeadline } from "../infra/diagnostic-tool-execution-liveness.js";
 import type { EventSessionRoutingPolicy } from "../infra/event-session-routing.js";
 import {
@@ -68,6 +69,9 @@ import { settleExecProcessExit } from "./bash-tools.exec-settlement.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
 import type { BashSandboxConfig } from "./bash-tools.shared.js";
 import { chunkString, clampWithDefault, readEnvInt } from "./bash-tools.shared.js";
+import { prepareGitHubExecCredentialTransport } from "./github-exec-launch.js";
+import { GITHUB_PUBLIC_HOST } from "./github-host.js";
+import type { LocalGitHubAppExecution } from "./github-tool-identity.types.js";
 import { recordAgentCleanupFailure } from "./run-cleanup-timeout.js";
 import type { AgentToolResult } from "./runtime/index.js";
 import { createSessionSlug } from "./session-slug.js";
@@ -155,7 +159,6 @@ export function buildApprovalPendingMessage(params: {
   const commandBlock = formatFencedCodeBlock(params.command, "sh");
   const lines: string[] = [];
   const allowedDecisions = params.allowedDecisions ?? resolveExecApprovalAllowedDecisions();
-  const decisionText = allowedDecisions.join("|");
   const warningText = params.warningText?.trim();
   if (warningText) {
     lines.push(warningText, "");
@@ -166,9 +169,7 @@ export function buildApprovalPendingMessage(params: {
     lines.push(`Node: ${params.nodeId}`);
   }
   lines.push(`CWD: ${params.cwd ?? "(node default)"}`);
-  lines.push("Command:");
-  lines.push(commandBlock);
-  lines.push("Mode: foreground (interactive approvals available).");
+  lines.push("Command:", commandBlock, "Mode: foreground (interactive approvals available).");
   if (params.processContinuationAvailable !== false) {
     lines.push(
       allowedDecisions.includes("allow-always")
@@ -176,7 +177,7 @@ export function buildApprovalPendingMessage(params: {
         : "Background mode requires an effective policy that allows pre-approval (for example ask=off).",
     );
   }
-  lines.push(`Reply with: /approve ${params.approvalSlug} ${decisionText}`);
+  lines.push(`Reply with: /approve ${params.approvalSlug} ${allowedDecisions.join("|")}`);
   if (!allowedDecisions.includes("allow-always")) {
     lines.push("Allow Always is unavailable for this command.");
   }
@@ -214,6 +215,7 @@ export async function runExecProcess({
   secretEgressBindings?: readonly SecretEgressSentinelBinding[];
   /** Host-selected managed profile; never inferred from the requested environment. */
   githubProfileDir?: string;
+  githubApp?: LocalGitHubAppExecution;
   pathPrepend?: string[];
   sandbox?: BashSandboxConfig;
   containerWorkdir?: string | null;
@@ -255,7 +257,8 @@ export async function runExecProcess({
       : (requestSignal ?? initialStartupSignal);
   let assertSourceActive: SessionSourceAssertion | undefined =
     captureAgentToolSourceExecutionGuard(startupSignal);
-  let operatorAuthority = getGatewayToolCallerIdentity()?.operatorAuthority;
+  let operatorAuthority =
+    opts.githubApp?.operatorAuthority ?? getGatewayToolCallerIdentity()?.operatorAuthority;
   const operatorSignal = operatorAuthority?.signal;
   let releaseOperatorAuthority: (() => void) | undefined;
   const startedAt = Date.now();
@@ -366,6 +369,16 @@ export async function runExecProcess({
   let terminateSandboxProcess: (() => Promise<void>) | undefined;
   let sandboxTermination: Promise<{ error: unknown } | undefined> | undefined;
   let secretEgressGrant: SecretEgressProcessGrant | undefined;
+  let githubGrant: Awaited<ReturnType<typeof prepareWorkerGitHubBindingGrant>>;
+  const githubStartup = new AbortController();
+  const cancelGitHubStartup = () => githubStartup.abort(startupSignal?.reason);
+  const onGitHubRevoked = () => {
+    if (managedRun) {
+      managedRun.cancel("manual-cancel");
+    } else {
+      supervisor.cancel(sessionId, "manual-cancel");
+    }
+  };
   const beginSandboxTermination = () => {
     const terminate = terminateSandboxProcess;
     if (!terminate || sandboxTermination || session.exited) {
@@ -451,6 +464,16 @@ export async function runExecProcess({
       appendOutput(session, "stderr", `\n${detail}\n`);
       finalOutcome.aggregated = session.aggregated.trim();
     } finally {
+      if (githubGrant) {
+        githubGrant.signal.removeEventListener("abort", onGitHubRevoked);
+        try {
+          await githubGrant.revoke();
+        } catch (error) {
+          recordAgentCleanupFailure();
+          finalOutcome = runtimeErrorOutcome(redactToolPayloadText(formatErrorMessage(error)));
+        }
+        githubGrant = undefined;
+      }
       finalOutcome = await settleExecProcessExit({
         session,
         outcome: finalOutcome,
@@ -489,7 +512,11 @@ export async function runExecProcess({
         stdinMode: backendExecSpec.stdinMode,
       };
     }
-    return prepareHostExecSpawn({ ...opts, env: shellRuntimeEnv });
+    return prepareHostExecSpawn({
+      ...opts,
+      env: shellRuntimeEnv,
+      githubAppCredential: Boolean(githubGrant),
+    });
   };
 
   let managedRun: ManagedRun | null = null;
@@ -538,6 +565,7 @@ export async function runExecProcess({
         assertSourceCurrent?.();
         assertOperatorCurrent?.();
         assertRuntimeCurrent?.();
+        githubGrant?.assertCurrent();
       };
       // Source authority covers construction; approval policy ends at native launch.
       assertCurrent();
@@ -572,6 +600,36 @@ export async function runExecProcess({
     assertSourceActive?.();
     operatorAuthority?.assertCurrent();
     releaseOperatorAuthority = operatorAuthority?.retain?.();
+    if (opts.githubApp) {
+      if (process.platform === "win32" && !opts.usePty) {
+        throw new Error("GitHub App execution on Windows requires a PTY; retry with pty enabled.");
+      }
+      await assertPreSpawnAuthorized();
+      startupSignal?.addEventListener("abort", cancelGitHubStartup, { once: true });
+      if (startupSignal?.aborted) {
+        cancelGitHubStartup();
+      }
+      const { prepareWorkerGitHubBindingGrant } =
+        await import("../gateway/worker-environments/worker-github-binding.js");
+      githubGrant = await prepareWorkerGitHubBindingGrant({
+        ...opts.githubApp,
+        expectedProfileId: opts.githubApp.profileId,
+        signal: githubStartup.signal,
+        assertCurrent: () => {
+          assertSourceActive?.();
+          operatorAuthority?.assertCurrent();
+          assertPolicyCurrent?.();
+          return true;
+        },
+      });
+      if (!githubGrant) {
+        throw new Error("Selected GitHub App credential is unavailable.");
+      }
+      githubGrant.signal.addEventListener("abort", onGitHubRevoked, { once: true });
+      githubGrant.assertCurrent();
+      shellRuntimeEnv.GH_HOST = githubGrant.binding.host ?? GITHUB_PUBLIC_HOST;
+    }
+    const githubTransport = githubGrant && prepareGitHubExecCredentialTransport(() => githubGrant);
     const spawnSpec = await prepareSpawnSpec();
     usingPty = spawnSpec.mode === "pty";
     const spawnBase = {
@@ -593,6 +651,7 @@ export async function runExecProcess({
           ...spawnBase,
           mode: "pty",
           argv: spawnSpec.argv,
+          ...(githubTransport ? { privateEnv: githubTransport.privateEnv } : {}),
         });
       } catch (err) {
         if (launchLifecycle.initiated) {
@@ -614,7 +673,18 @@ export async function runExecProcess({
       managedRun = await spawn({
         ...spawnBase,
         mode: "child",
-        argv: spawnSpec.argv,
+        argv:
+          githubGrant && spawnSpec.mode === "pty"
+            ? (
+                await prepareHostExecSpawn({
+                  ...opts,
+                  env: shellRuntimeEnv,
+                  usePty: false,
+                  githubAppCredential: true,
+                })
+              ).argv
+            : spawnSpec.argv,
+        ...(githubTransport ? { secretInput: githubTransport.secretInput } : {}),
         stdinMode: spawnSpec.stdinMode,
       });
     }
@@ -632,6 +702,7 @@ export async function runExecProcess({
     emitCompleted(outcome);
     throw error;
   } finally {
+    startupSignal?.removeEventListener("abort", cancelGitHubStartup);
     launchLifecycle.dispose();
     beforeSpawn = undefined;
     assertPolicyCurrent = undefined;

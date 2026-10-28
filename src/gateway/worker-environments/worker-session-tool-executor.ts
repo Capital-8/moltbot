@@ -42,6 +42,7 @@ import {
   type WorkerPortalToolExecutorDependencies,
 } from "./worker-portal-tool-executor.js";
 import {
+  createWorkerWorkshopCallRetention,
   serializeWorkerSessionToolError as serializeError,
   executeWorkerSessionToolWithReplay,
   serializeWorkerSessionToolResult as serializeResult,

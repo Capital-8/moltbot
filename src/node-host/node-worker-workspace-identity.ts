@@ -6,6 +6,7 @@ import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
 import { resolveRuntimeScriptPosition } from "../daemon/runtime-binary.js";
 import { hasNodeErrorCode, isPathInside } from "../infra/path-guards.js";
 import { tightenPrivateDirRootSync } from "../infra/private-dir-mode.js";
+import type { OpenClawPluginNodeWorkspaceLease } from "../plugins/types.node-host.js";
 import type { NodeWorkerWorkspaceRetainInput } from "../worker/node-workspace-retain-protocol.js";
 import type { NodeWorkerPreparedWorkspaceRow } from "./node-worker-prepared-workspace-store.js";
 
@@ -362,7 +363,7 @@ export function buildNodeWorkerWorkspaceRetainSnapshot(input: NodeWorkerWorkspac
   };
 }
 
-export type NodeWorkerWorkspaceAcquisition = {
+export type NodeWorkerWorkspaceAcquisition = OpenClawPluginNodeWorkspaceLease & {
   workspaceDir: string;
   homeDir?: string;
   assertCurrent?: () => void;

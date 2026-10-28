@@ -333,6 +333,7 @@ export async function stopCrabboxLease(params: {
           ...(!wait ? ["--wait=false"] : []),
         ],
         binary: params.binary,
+        providerEnv: params.providerEnv,
         timeoutMs: remainingMs,
       });
     }

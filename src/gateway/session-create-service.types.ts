@@ -9,6 +9,7 @@ import type {
   SessionToolOverrides,
 } from "../config/sessions.js";
 import type { SessionEntryCreateWithTranscriptOptions } from "../config/sessions/session-accessor.types.js";
+import type { SessionCreationOperation } from "../config/sessions/session-creation-operation.js";
 import type {
   SessionCreatedActor,
   SessionCreatedVia,
@@ -153,6 +154,8 @@ export type CreateGatewaySessionParams = {
   /** Canonical agent default prepared by the RPC adapter, used only without a selected root. */
   defaultSessionRoot?: string;
   permissionMode?: SessionEntry["permissionMode"];
+  /** Direct operator ingress may request defaults; live operator authority still authorizes them. */
+  applyAgentPermissionDefault?: boolean;
   toolOverrides?: SessionToolOverrides;
   communication?: SessionEntry["communication"];
   /** Prepares session-owned resources while the target lifecycle fence is held. */
@@ -191,6 +194,8 @@ export type CreateGatewaySessionParams = {
   initialEntry?: TrustedInitialSessionEntry;
   /** Trusted prepared assistant reply committed with a new ordinary session, never a wire input. */
   initialAssistantMessage?: { message: SessionTranscriptAssistantMessage; idempotencyKey?: string };
+  /** Verified native-only durable creation binding, never caller-provided digests. */
+  creationOperation?: SessionCreationOperation;
   /** Keep a new ordinary session unusable until afterCreate succeeds, or roll it back. */
   atomicInitialization?: true;
   /** Public callers need admin before reconfiguring an adopted keyed session. */

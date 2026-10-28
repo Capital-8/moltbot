@@ -77,8 +77,8 @@ it("scopes sessions.patchMany from the shared patch only", () => {
   expect(scope("sessions.patchMany")).toBe("operator.write");
   expect(scope("sessions.patchMany", {})).toBe("operator.write");
 });
-
 it.each([
+  { ...target, profileId: "development" },
   { ...target, autoDevice: true },
   { ...target, profileId: "development", deviceId: "device-1" },
 ] as const)("classifies dispatch target %j as write-scoped", (params) => {

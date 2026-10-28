@@ -93,6 +93,10 @@ export const GatewayOperatorRoleDefinitionSchema = z.strictObject({
       .array(z.string().trim().min(1).refine(isValidAgentId, "Invalid agent id"))
       .transform((agents) => uniqueValues(agents.map(normalizeAgentId))),
   ]),
+  /** Worker profiles a non-admin role may dispatch its own sessions to. */
+  workerProfiles: z.array(z.string().trim().min(1)).transform(uniqueValues).optional(),
+  /** Grant write to a currently verified identity with this assigned role. */
+  verifiedIdentityWrite: z.boolean().optional(),
   /** Optional model ceiling for this role; defaults to the source agent's primary and fallbacks. */
   modelPolicy: z
     .strictObject({

@@ -9,7 +9,7 @@ import {
 } from "../../packages/gateway-protocol/src/index.js";
 import type { AdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 import { normalizeOptionalAgentRuntimeId } from "../agents/agent-runtime-id.js";
-import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
+import { resolveAgentConfig, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import type { ModelCatalogSnapshot } from "../agents/model-catalog.types.js";
 import {
   resolveDefaultModelForAgent,
@@ -32,6 +32,7 @@ import {
   captureSessionActorStorageOwner,
   withSessionActorStorage,
 } from "../config/sessions/session-actor-storage-binding.js";
+import { readSessionCreationOperationInWorker } from "../config/sessions/session-creation-operation-read.js";
 import { createSessionDiffBaselineCaptureClaim } from "../config/sessions/session-diff-baseline-capture.js";
 import { buildSessionParentLink } from "../config/sessions/session-entry-lineage.js";
 import { projectPublicSessionEntry } from "../config/sessions/session-entry-projection.js";
@@ -191,6 +192,7 @@ async function createGatewaySessionInScope(
   const { personalAccountDefaults, onPhase } = params;
   let operatorAuthority: AdmittedRunOperatorAuthority | undefined;
   let assertPreparedTargetCurrent: (() => void) | undefined;
+  let assertPermissionDefaultCurrent: (() => void) | undefined;
   let creationOperation: SessionEntryCreationOperation | undefined;
   let createdTargetCommitted = false;
   let bindPreparedCreation: SessionEntryCreateWithTranscriptOptions["bindCreation"];
@@ -204,7 +206,10 @@ async function createGatewaySessionInScope(
   let releaseRuntimeSelection: (() => void) | undefined;
   const commitGuard = resolveSessionCreationCommitGuard(params, {
     readOperatorAuthority: () => operatorAuthority,
-    assertPreparedTargetCurrent: () => assertPreparedTargetCurrent?.(),
+    assertPreparedTargetCurrent: () => {
+      assertPreparedTargetCurrent?.();
+      assertPermissionDefaultCurrent?.();
+    },
     validateSelection: () => validateRuntimeSelection?.(),
   });
   commitGuard?.();
@@ -559,6 +564,54 @@ async function createGatewaySessionInScope(
       return targetRead;
     }
     const currentTargetEntry = targetRead.value;
+    const creationReplay = params.creationOperation
+      ? await readSessionCreationOperationInWorker(
+          { agentId: target.agentId, storePath: target.storePath, sessionKey: target.canonicalKey },
+          params.creationOperation,
+        )
+      : false;
+    commitGuard?.();
+    let permissionMode = params.permissionMode;
+    if (
+      !currentTargetEntry &&
+      permissionMode === undefined &&
+      params.applyAgentPermissionDefault &&
+      creation?.via === "operator" &&
+      params.fork !== true &&
+      !params.initialEntry &&
+      !params.catalogTarget &&
+      !params.authorizedPluginId &&
+      operatorAuthority
+    ) {
+      const configuredMode = resolveAgentConfig(
+        params.cfg,
+        target.agentId,
+      )?.newSessionPermissionMode;
+      if (configuredMode) {
+        const authority = operatorAuthority;
+        authority.assertCurrent();
+        if (configuredMode === "full" && !authority.scopes.includes(ADMIN_SCOPE)) {
+          return {
+            ok: false,
+            error: missingScopeErrorShape({
+              missingScope: ADMIN_SCOPE,
+              requiredScopes: [ADMIN_SCOPE],
+            }),
+          };
+        }
+        permissionMode = configuredMode;
+        assertPermissionDefaultCurrent = () => {
+          authority.assertCurrent();
+          const cfg = params.getCurrentConfig?.() ?? params.cfg;
+          if (
+            resolveAgentConfig(cfg, target.agentId)?.newSessionPermissionMode !== configuredMode
+          ) {
+            throw new Error("New-session permission default changed; retry creation.");
+          }
+        };
+        assertPermissionDefaultCurrent();
+      }
+    }
     // Delegated isolation survives changes to the creator's current role.
     const creationSandbox =
       creation?.sandbox ?? (creation ? resolveCreatorSandbox(params.cfg, creation) : undefined);
@@ -622,17 +675,18 @@ async function createGatewaySessionInScope(
     validateRuntimeSelection = modelSelection.validate;
     commitGuard?.();
     onPhase?.("worktree");
-    const preparationResult = params.prepareLifecycle
-      ? await params.prepareLifecycle({
-          agentId: target.agentId,
-          entry: currentTargetEntry,
-          key: target.canonicalKey,
-          storePath: target.storePath,
-          titleModelSelection: modelSelection.selection,
-          projectId,
-          sandboxRequired,
-        })
-      : undefined;
+    const preparationResult =
+      params.prepareLifecycle && !creationReplay
+        ? await params.prepareLifecycle({
+            agentId: target.agentId,
+            entry: currentTargetEntry,
+            key: target.canonicalKey,
+            storePath: target.storePath,
+            titleModelSelection: modelSelection.selection,
+            projectId,
+            sandboxRequired,
+          })
+        : undefined;
     if (preparationResult && !preparationResult.ok) {
       return { ok: false, error: preparationResult.error };
     }
@@ -679,6 +733,16 @@ async function createGatewaySessionInScope(
           (!existingEntry || existingEntry.modelSelectionLocked === true)
         ) {
           return invalidSessionRequest(AGENT_HARNESS_SESSION_KEY_RESERVED_MESSAGE);
+        }
+        if (params.creationOperation && existingEntry) {
+          // Receipt validation in the final native transaction decides whether
+          // this is our original incarnation. Never repatch a replayed row.
+          if (existingEntry.sessionId !== params.creationOperation.sessionId) {
+            return invalidSessionRequest(
+              "The original creation incarnation is no longer available.",
+            );
+          }
+          return { ok: true, entry: existingEntry };
         }
         const freshSessionError = validateFreshSessionConstraints({
           params,
@@ -760,7 +824,7 @@ async function createGatewaySessionInScope(
             ...(requestedFastMode !== undefined ? { fastMode: requestedFastMode } : {}),
             ...(requestedToolOverrides ? { toolOverrides: params.toolOverrides } : {}),
             ...(params.communication !== undefined ? { communication: params.communication } : {}),
-            ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
+            ...(permissionMode ? { permissionMode } : {}),
           },
           loadGatewayModelCatalogSnapshot: loadModelCatalog
             ? async () => {
@@ -807,6 +871,7 @@ async function createGatewaySessionInScope(
           : undefined;
         const initializedEntry: InternalSessionEntry = {
           ...patched.entry,
+          ...(params.creationOperation ? { sessionId: params.creationOperation.sessionId } : {}),
           ...inheritedWorkspace,
           ...(createdNewEntry && displayName ? { displayName } : {}),
           ...projectSessionCreateSpawnModelSelection({
@@ -1040,6 +1105,7 @@ async function createGatewaySessionInScope(
       },
       {
         onPhase,
+        creationOperation: params.creationOperation,
         label,
         ...(params.initialEntry
           ? {

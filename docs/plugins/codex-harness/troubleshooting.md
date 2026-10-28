@@ -12,6 +12,28 @@ Symptoms, causes, and fixes for the Codex app-server harness. Part of the [Codex
 
 ## Troubleshooting
 
+### Managed worker diagnostics
+
+Managed worker app-server diagnostics appear in the Gateway log as
+`OPENCLAW_WORKER_DIAGNOSTIC_V1` followed by a JSON record. A Gateway-generated
+`transportId` correlates records for one worker connection. Existing host log
+collection can forward these records; workers need no telemetry credentials.
+
+`native_stderr` records contain only severity, component and failure-category
+classifications, plus the original line's byte count. Native messages, spans,
+paths, prompts, tool output and credentials are excluded. Parsing retains at most
+8 KiB per line and admits at most 20 records per minute per connection, with eight
+queued records and one send in flight. Oversized, unstructured, excess and
+undeliverable records contribute to a `dropped` count. A blocked diagnostic sink
+does not stop the model process or stdout delivery. Shutdown allows 250 ms for
+best-effort diagnostic delivery, so an abrupt disconnect can lose final records.
+
+`native_exit` reports an observed worker process exit code or signal.
+`duplex_close` separately reports the channel's close origin and whether its exit
+status came from a native observation or a synthetic facade. A synthetic status
+does not prove that the remote process exited. The original close cause remains
+attached to the in-process error; exported records contain only its category.
+
 **Codex does not appear as a normal `/model` provider:** expected for new
 configs. Select an `openai/gpt-*` model, enable
 `plugins.entries.codex.enabled`, and check whether `plugins.allow` excludes

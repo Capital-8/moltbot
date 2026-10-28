@@ -17,6 +17,7 @@ import {
 } from "./dynamic-tool-build.test-support.js";
 import { createCodexDynamicToolBridge } from "./dynamic-tools.js";
 import { prepareTestNativeExecutionPolicy } from "./native-execution-policy.test-support.js";
+import { createSandboxContext } from "./sandbox-exec-server.test-helpers.js";
 import { buildCodexRuntimeThreadConfig } from "./thread-requests.js";
 
 let root: string;
@@ -100,6 +101,61 @@ async function fixture(
 }
 
 describe.skipIf(process.platform === "win32")("Codex host-owned credential execution", () => {
+  it("constructs native worker tools with a managed GitHub identity", async () => {
+    const f = await fixture();
+    const sandbox = {
+      ...createSandboxContext({}),
+      backendId: "node",
+      placementExecutionMode: "remote-exec" as const,
+      placementNodeId: "worker-1",
+    };
+    const nativeExecutionPolicy = await prepareTestNativeExecutionPolicy(f.params, { sandbox });
+    const native = shouldEnableCodexAppServerNativeToolSurface(f.params, sandbox, {
+      nativeExecutionPolicy,
+      sandboxExecServerEnabled: true,
+      workerHostedCloud: true,
+    });
+    const tools = await buildDynamicToolsForTest(f.params, root, {
+      sandbox,
+      nativeToolSurfaceEnabled: native,
+      nativeExecutionPolicy,
+    });
+    expect(native).toBe(true);
+    expect(tools.some((tool) => tool.name === "exec" || tool.name === "read")).toBe(false);
+    expect(f.host.capabilities.preparedEnvironment!().hostExecutionRequired).toBe(true);
+    for (const options of [
+      { sandbox, workerHostedCloud: false, toolsAllow: undefined },
+      {
+        sandbox: { ...sandbox, placementNodeId: "" },
+        workerHostedCloud: true,
+        toolsAllow: undefined,
+      },
+      {
+        sandbox: { ...sandbox, backendId: "docker" },
+        workerHostedCloud: true,
+        toolsAllow: undefined,
+      },
+      { sandbox, workerHostedCloud: true, toolsAllow: ["message"] },
+      {
+        sandbox: { ...sandbox, tools: { deny: ["exec"] } },
+        workerHostedCloud: true,
+        toolsAllow: undefined,
+      },
+    ]) {
+      expect(
+        shouldEnableCodexAppServerNativeToolSurface(
+          { ...f.params, toolsAllow: options.toolsAllow },
+          options.sandbox,
+          {
+            nativeExecutionPolicy,
+            sandboxExecServerEnabled: true,
+            workerHostedCloud: options.workerHostedCloud,
+          },
+        ),
+      ).toBe(false);
+    }
+  });
+
   it("executes with the selected identity and never falls back when its profile disappears", async () => {
     const f = await fixture({ mutateSelection: true });
     expect(f.native).toBe(false);

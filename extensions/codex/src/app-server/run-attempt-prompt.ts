@@ -80,6 +80,7 @@ export async function prepareCodexAttemptPrompt(context: CodexAttemptContext) {
   const { toolBridge } = attemptTools;
   const usesSelectedHistory = Boolean(
     activeContextEngine ||
+    connection.recoveringWorkerHistory ||
     (!usesSupervisionConnection && params.hostCapabilities.prepareBoundedSeed),
   );
   // An authored exact-model cap is operator policy, not native capacity discovery.
@@ -87,7 +88,9 @@ export async function prepareCodexAttemptPrompt(context: CodexAttemptContext) {
   const configuredContextBudget =
     usesSelectedHistory &&
     !usesSupervisionConnection &&
-    (params.authoredContextTokenCap || params.hostCapabilities.prepareBoundedSeed) &&
+    (params.authoredContextTokenCap ||
+      params.hostCapabilities.prepareBoundedSeed ||
+      connection.recoveringWorkerHistory) &&
     effectiveContextTokenBudget
       ? effectiveContextTokenBudget
       : undefined;

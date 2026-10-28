@@ -36,6 +36,9 @@ export type AgentHarnessSupportContext = {
   provider: string;
   modelId?: string;
   modelProvider?: {
+    auth?: import("../../config/types.models.js").ModelProviderAuthMode;
+    /** Authored model runtime; environment overrides do not declare native auth ownership. */
+    declaredRuntimeId?: string;
     api?: string;
     baseUrl?: string;
     azureApiVersion?: string;
