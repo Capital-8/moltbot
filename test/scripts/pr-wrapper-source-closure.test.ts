@@ -93,3 +93,39 @@ it("closes the extracted default Node runner and rejects a missing pinned depend
   expect(selected.status, selected.stderr).toBe(0);
   expect(selected.stdout.trim()).toBe("12345");
 });
+
+it("loads the inventory-only sqlite worker and owner and rejects the missing native-loss dependency", () => {
+  const root = tempDirs.make("openclaw-pr-sqlite-closure-");
+  copyPrWrapperSources(root);
+  linkPrWrapperDependencies(root);
+  const dependency = join(root, "src/state/openclaw-state-worker-native-loss.ts");
+  const original = readFileSync(dependency);
+  const invoke = () =>
+    spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "./scripts/tsx.mjs",
+        "--input-type=module",
+        "-e",
+        'await import("./src/infra/sqlite-readonly-location.worker.ts"); await import("./src/state/openclaw-state-worker-owner.ts"); console.log("sqlite worker and owner loaded");',
+      ],
+      { cwd: root, env: process.env, encoding: "utf8" },
+    );
+  const first = invoke();
+  expect(first.status, first.stderr).toBe(0);
+  expect(first.stdout.trim()).toBe("sqlite worker and owner loaded");
+  rmSync(dependency);
+  try {
+    const missing = invoke();
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toContain("openclaw-state-worker-native-loss");
+    expect(missing.stderr).toContain("ERR_MODULE_NOT_FOUND");
+  } finally {
+    writeFileSync(dependency, original);
+  }
+  expect(readFileSync(dependency)).toEqual(original);
+  const restored = invoke();
+  expect(restored.status, restored.stderr).toBe(0);
+  expect(restored.stdout.trim()).toBe("sqlite worker and owner loaded");
+});
