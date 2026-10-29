@@ -37,6 +37,16 @@ import { executePluginStateCommand } from "./plugin-state.worker.js";
 
 type PluginStateChange = Parameters<Parameters<typeof pluginStatePublication.subscribeFacts>[0]>[0];
 
+function authorityBytes() {
+  const classes = getWorkerMessageMetrics().find(
+    (metric) => metric.kind === "authority" && metric.direction === "from_worker",
+  )?.payloadBytesByRequestClass;
+  return Object.entries(classes ?? {}).reduce(
+    (total, [requestClass, bytes]) => total + (requestClass.startsWith("pluginState.") ? bytes : 0),
+    0,
+  );
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   await closeOpenClawStateDatabaseAsync();
@@ -73,11 +83,7 @@ describe("plugin state committed facts", () => {
       });
       await store.replace(new Map([["old", "before"]]));
       await store.entries();
-      const bytes = () =>
-        getWorkerMessageMetrics().find(
-          (metric) => metric.kind === "authority" && metric.direction === "from_worker",
-        )?.payloadBytesByRequestClass?.plugin_state ?? 0;
-      const before = bytes();
+      const before = authorityBytes();
       const dispatch = sqliteWorkerOwnerProbe.command(stateWriter, async (command, args, scope) => {
         const result = await scope.execute(command, args);
         if (command.type === "pluginState.replace") {
@@ -99,7 +105,7 @@ describe("plugin state committed facts", () => {
         cause: { message: "acknowledgement lost" },
       });
       expect(dispatch).toHaveBeenCalledOnce();
-      expect(bytes() - before).toBeLessThan(2048);
+      expect(authorityBytes() - before).toBeLessThan(2048);
       dispatch.mockRestore();
       expect((await store.entries()).map((entry) => [entry.key, entry.value])).toEqual([
         ["key-\ufffd", value],
@@ -115,21 +121,17 @@ describe("plugin state committed facts", () => {
         maxEntries: 1,
         env,
       });
-      const bytes = () =>
-        getWorkerMessageMetrics().find(
-          (metric) => metric.kind === "authority" && metric.direction === "from_worker",
-        )?.payloadBytesByRequestClass?.plugin_state ?? 0;
       await store.register("warm", { text: "warm" });
       await store.entries();
       const seen = observe();
       try {
         for (const size of [1024, 64 * 1024]) {
           const value = { text: "x".repeat(size) };
-          const before = bytes();
+          const before = authorityBytes();
           const write = store.register("key-\ud800", value, { ttlMs: 60_000 });
           value.text = "mutated after submission";
           await write;
-          expect(bytes() - before).toBeLessThan(2048);
+          expect(authorityBytes() - before).toBeLessThan(2048);
           expect(await store.lookup("key-\ufffd")).toEqual({ text: "x".repeat(size) });
           expect(await store.lookup("warm")).toBeUndefined();
           expect(seen.fact("key-\ufffd")).toMatchObject({
@@ -140,7 +142,7 @@ describe("plugin state committed facts", () => {
           expect(entries).toHaveLength(1);
           expect(entries[0]!.expiresAt! - entries[0]!.createdAt).toBe(60_000);
           const observation = await store.observe("key-\ufffd");
-          const casBefore = bytes();
+          const casBefore = authorityBytes();
           expect(
             await store.compareAndApply("key-\ufffd", observation.comparison, {
               operation: "update",
@@ -148,7 +150,7 @@ describe("plugin state committed facts", () => {
               value: { text: "y".repeat(size) },
             }),
           ).toEqual({ status: "applied" });
-          expect(bytes() - casBefore).toBeLessThan(2048);
+          expect(authorityBytes() - casBefore).toBeLessThan(2048);
           expect(await store.lookup("key-\ufffd")).toEqual({ text: "y".repeat(size) });
         }
       } finally {
@@ -226,10 +228,6 @@ describe("plugin state committed facts", () => {
           ...options,
           namespace: "sibling",
         });
-        const authorityBytes = () =>
-          getWorkerMessageMetrics().find(
-            (metric) => metric.kind === "authority" && metric.direction === "from_worker",
-          )?.payloadBytesByRequestClass?.plugin_state ?? 0;
         const before = authorityBytes();
         await store.register("first", { count: 1 });
         expect(authorityBytes()).toBeGreaterThan(before);
