@@ -55,6 +55,18 @@ describe("applyMistralModelCompat", () => {
     },
   );
 
+  it("keeps reasoning effort for a configured row that omits the bundled map", () => {
+    // A proxy route lists the bundled model without its thinkingLevelMap.
+    const normalized = applyMistralModelCompat({
+      id: MISTRAL_SMALL_LATEST_ID,
+      compat: { supportsReasoningEffort: true },
+    });
+    expect(normalized.compat).toMatchObject({
+      supportsReasoningEffort: true,
+      reasoningEffortMap: expect.objectContaining({ high: "high", off: "none" }),
+    });
+  });
+
   it("overrides explicit compat values that would trigger 422s", () => {
     const normalized = applyMistralModelCompat({
       id: "mistral-large-latest",
