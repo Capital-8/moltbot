@@ -315,13 +315,13 @@ describe("Mistral provider", () => {
       await runSimpleMistralFixture(
         context,
         { reasoning },
-        {
-          ...makeMistralModel(),
+        // Catalog rows that accept reasoning_effort say so; others use promptMode. The
+        // Mistral model type has no compat slot, but resolved catalog models carry one.
+        Object.assign(makeMistralModel(), {
           id: modelId,
           reasoning: true,
-          // Catalog rows that accept reasoning_effort say so; others use promptMode.
           compat: { supportsReasoningEffort: key === "reasoningEffort" },
-        },
+        }),
       );
       expect(payload()[key]).toBe(value);
       expect(payload()).not.toHaveProperty(absentKey);
