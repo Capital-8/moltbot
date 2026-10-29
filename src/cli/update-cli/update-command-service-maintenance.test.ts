@@ -699,6 +699,11 @@ it.each(["respawning", "unloaded", "disabled"] as const)(
   "candidate Doctor preserves native stop/recovery ownership with no Gateway lease: %s",
   (state) =>
     withServiceHome(async (home) => {
+      // Create private persistent fixtures using the real host filesystem policy.
+      const env = { ...process.env };
+      const run = createUpdateRun({ trigger: "cli" }, { env });
+      // Clean shutdown removed the predecessor lease, not the KeepAlive job.
+      expect(readGatewayOwnerLease({ env, current: true })).toBeUndefined();
       mockProcessPlatform("darwin");
       let loaded = state !== "unloaded";
       const service = mockMaintenanceService(home, {
@@ -709,10 +714,6 @@ it.each(["respawning", "unloaded", "disabled"] as const)(
           loaded = false;
         }),
       });
-      const env = { ...process.env };
-      const run = createUpdateRun({ trigger: "cli" }, { env });
-      // Clean shutdown removed the predecessor lease, not the KeepAlive job.
-      expect(readGatewayOwnerLease({ env, current: true })).toBeUndefined();
       const stopped = await stopSupervisedPredecessorGateway(
         { runId: run.runId, repair: true },
         { root: process.cwd(), assertCurrent: () => {}, warn: vi.fn() },
