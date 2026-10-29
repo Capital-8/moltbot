@@ -58,12 +58,12 @@ FOUNDATION_SOURCE = r'''import CryptoKit
 import Darwin
 import Foundation
 
-func darwinTemporaryDirectory() -> URL? {
+func darwinTemporaryDirectory() -> (state: String, url: URL?) {
     let count = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
-    guard count > 1, count <= 4096 else { return nil }
+    guard count > 1, count <= 4096 else { return ("query-invalid", nil) }
     var buffer = [CChar](repeating: 0, count: count)
-    guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, count) == count else { return nil }
-    return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+    guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, count) == count else { return ("copy-length-mismatch", nil) }
+    return ("available", URL(fileURLWithPath: String(cString: buffer), isDirectory: true))
 }
 
 // Keep Foundation's default auth/cache configuration and HF's delegate/task/move shape.
@@ -232,11 +232,38 @@ final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
     }
 
     func run(_ url: URL) -> Int32 {
-        guard let nativeTemporary = darwinTemporaryDirectory(),
-              nativeTemporary.resolvingSymlinksInPath() == platformTemporary,
-              FileManager.default.temporaryDirectory.resolvingSymlinksInPath() == platformTemporary,
-              destination.deletingLastPathComponent() == platformTemporary else {
-            emit(["mode": mode, "pid": Int(getpid()), "ok": false, "failure": "platform-temp-preflight"])
+        let native = darwinTemporaryDirectory()
+        let nativeResolved = native.url?.resolvingSymlinksInPath()
+        let foundationResolved = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        let destinationParent = destination.deletingLastPathComponent()
+        let nativeURLMatches = nativeResolved.map { $0 == platformTemporary }
+        let foundationURLMatches = foundationResolved == platformTemporary
+        let destinationParentURLMatches = destinationParent == platformTemporary
+        let firstFailed: String? = nativeResolved == nil ? "native-lookup" :
+            nativeURLMatches != true ? "native-url" :
+            !foundationURLMatches ? "foundation-url" :
+            !destinationParentURLMatches ? "destination-parent-url" : nil
+        // Record the guard's own operands without exporting private path representations.
+        result["preflight"] = [
+            "nativeLookup": native.state,
+            "nativeURLMatches": nativeURLMatches.map { $0 as Any } ?? NSNull(),
+            "foundationURLMatches": foundationURLMatches,
+            "destinationParentURLMatches": destinationParentURLMatches,
+            "nativePathMatches": nativeResolved.map { ($0.path == platformTemporary.path) as Any } ?? NSNull(),
+            "foundationPathMatches": foundationResolved.path == platformTemporary.path,
+            "destinationParentPathMatches": destinationParent.path == platformTemporary.path,
+            "nativeHasDirectoryPath": nativeResolved.map { $0.hasDirectoryPath as Any } ?? NSNull(),
+            "foundationHasDirectoryPath": foundationResolved.hasDirectoryPath,
+            "platformHasDirectoryPath": platformTemporary.hasDirectoryPath,
+            "destinationParentHasDirectoryPath": destinationParent.hasDirectoryPath,
+            "firstFailed": firstFailed.map { $0 as Any } ?? NSNull(),
+        ]
+        guard let nativeTemporary = nativeResolved,
+              nativeTemporary == platformTemporary,
+              foundationResolved == platformTemporary,
+              destinationParent == platformTemporary else {
+            result["failure"] = "platform-temp-preflight"
+            emit(result)
             return 1
         }
         result["platformTemporaryAgreement"] = true
@@ -267,7 +294,7 @@ func emit(_ value: [String: Any]) {
 
 let arguments = CommandLine.arguments
 if arguments.count == 4, arguments[1] == "platform-temp" {
-    guard let temporary = darwinTemporaryDirectory(),
+    guard let temporary = darwinTemporaryDirectory().url,
           temporary.resolvingSymlinksInPath() == FileManager.default.temporaryDirectory.resolvingSymlinksInPath() else {
         emit(["mode": "platform-temp", "pid": Int(getpid()), "ok": false])
         exit(1)
@@ -568,13 +595,31 @@ def foundation_record(raw, pid, mode):
     require(0 < len(raw) <= 4096, "invalid Foundation receipt size")
     value = json.loads(raw)
     require(isinstance(value, dict) and value.get("pid") == pid and value.get("mode") == mode and type(value.get("ok")) is bool, "invalid Foundation receipt identity")
-    allowed = {"mode", "pid", "ok", "moved", "homeRelation", "temporaryRelation", "callbackRelation", "platformTemporaryAgreement", "status", "url", "acceptedBytes", "gitBlob", "failure", "redirects", "errors"}
+    allowed = {"mode", "pid", "ok", "moved", "homeRelation", "temporaryRelation", "callbackRelation", "platformTemporaryAgreement", "status", "url", "acceptedBytes", "gitBlob", "failure", "redirects", "errors", "preflight"}
     require(value.keys() <= allowed, "unexpected Foundation receipt field")
     for key in ["homeRelation", "temporaryRelation", "callbackRelation"]:
         require(key not in value or value[key] in ["owned", "platform-temp", "outside-owned"], "invalid Foundation path relation")
     require("platformTemporaryAgreement" not in value or type(value["platformTemporaryAgreement"]) is bool, "invalid platform temp agreement")
     failures = {"response-identity", "response-status-or-length", "accepted-length", "accepted-identity", "redirect-identity-or-limit", "retained-byte-limit", "download-progress-limit", "callback-file-size-or-type", "callback-outside-admitted-staging", "platform-temp-preflight", "unowned-hf-destination", "callback-move-or-read", "native-task", "missing-download-callback", "task-deadline"}
     require(value.get("failure") is None or value["failure"] in failures, "invalid Foundation failure class")
+    preflight = value.get("preflight")
+    require(value.get("failure") != "platform-temp-preflight" or preflight is not None, "missing Foundation preflight facts")
+    if preflight is not None:
+        native_fields = {"nativeURLMatches", "nativePathMatches", "nativeHasDirectoryPath"}
+        bool_fields = {"foundationURLMatches", "destinationParentURLMatches", "foundationPathMatches", "destinationParentPathMatches", "foundationHasDirectoryPath", "platformHasDirectoryPath", "destinationParentHasDirectoryPath"}
+        require(isinstance(preflight, dict) and preflight.keys() == native_fields | bool_fields | {"nativeLookup", "firstFailed"}, "invalid Foundation preflight fields")
+        require(preflight["nativeLookup"] in ["query-invalid", "copy-length-mismatch", "available"], "invalid Foundation native lookup state")
+        available = preflight["nativeLookup"] == "available"
+        require(all(type(preflight[key]) is bool for key in bool_fields) and
+                all(type(preflight[key]) is bool if available else preflight[key] is None for key in native_fields), "invalid Foundation preflight types")
+        for owner in ["native", "foundation", "destinationParent"]:
+            require(preflight[owner + "URLMatches"] is not True or preflight[owner + "PathMatches"] is True, "inconsistent Foundation preflight equality")
+        first_failed = ("native-lookup" if not available else "native-url" if not preflight["nativeURLMatches"] else
+                        "foundation-url" if not preflight["foundationURLMatches"] else
+                        "destination-parent-url" if not preflight["destinationParentURLMatches"] else None)
+        require(preflight["firstFailed"] == first_failed, "invalid Foundation first failed predicate")
+        require((value.get("failure") == "platform-temp-preflight") == (first_failed is not None), "inconsistent Foundation preflight failure")
+        require(first_failed is None or (not value["ok"] and value.get("moved") is False and value.get("platformTemporaryAgreement") is not True), "false Foundation preflight success")
     for key in ["status", "acceptedBytes", "redirects"]:
         require(key not in value or (type(value[key]) is int and 0 <= value[key] <= (599 if key == "status" else 680 if key == "acceptedBytes" else 3)), "invalid Foundation numeric field")
     require("moved" not in value or type(value["moved"]) is bool, "invalid callback move receipt")

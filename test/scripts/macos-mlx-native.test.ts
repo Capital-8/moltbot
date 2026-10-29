@@ -304,6 +304,48 @@ class DriverTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 m.foundation_record(json.dumps({**receipt,**update}).encode(),99,"download")
 
+    def test_preflight_facts_preserve_each_failed_guard_without_private_paths(self):
+        facts={"nativeLookup":"available","nativeURLMatches":True,"foundationURLMatches":True,"destinationParentURLMatches":True,
+               "nativePathMatches":True,"foundationPathMatches":True,"destinationParentPathMatches":True,
+               "nativeHasDirectoryPath":True,"foundationHasDirectoryPath":True,"platformHasDirectoryPath":True,
+               "destinationParentHasDirectoryPath":True,"firstFailed":None}
+        cases=[({"nativeLookup":state,"nativeURLMatches":None,"nativePathMatches":None,"nativeHasDirectoryPath":None,"firstFailed":"native-lookup"})
+               for state in ["query-invalid","copy-length-mismatch"]]
+        for owner,predicate in [("native","native-url"),("foundation","foundation-url"),("destinationParent","destination-parent-url")]:
+            cases.append({owner+"URLMatches":False,owner+"PathMatches":False,"firstFailed":predicate})
+        # Equal canonical paths need not mean equal URL representations/directory hints.
+        cases.append({"destinationParentURLMatches":False,"destinationParentHasDirectoryPath":False,"firstFailed":"destination-parent-url"})
+        for update in cases:
+            value={"pid":99,"mode":"download","ok":False,"moved":False,"failure":"platform-temp-preflight","preflight":{**facts,**update}}
+            self.assertEqual(m.foundation_record(json.dumps(value).encode(),99,"download"),value)
+            self.assertNotIn("/",json.dumps(value["preflight"]))
+
+    def test_preflight_schema_rejects_omission_raw_fields_and_false_success(self):
+        facts={"nativeLookup":"available","nativeURLMatches":False,"foundationURLMatches":True,"destinationParentURLMatches":True,
+               "nativePathMatches":True,"foundationPathMatches":True,"destinationParentPathMatches":True,
+               "nativeHasDirectoryPath":False,"foundationHasDirectoryPath":True,"platformHasDirectoryPath":True,
+               "destinationParentHasDirectoryPath":True,"firstFailed":"native-url"}
+        value={"pid":99,"mode":"download","ok":False,"moved":False,"failure":"platform-temp-preflight","preflight":facts}
+        for update in [{"preflight":None},{"preflight":{}},{"ok":True},{"moved":True},{"platformTemporaryAgreement":True},
+                       {"preflight":{**facts,"path":"/private/example"}}, {"preflight":{**facts,"nativeLookup":"unknown"}},
+                       {"preflight":{**facts,"nativeURLMatches":"false"}}, {"preflight":{**facts,"firstFailed":"foundation-url"}},
+                       {"preflight":{**facts,"nativeURLMatches":True,"firstFailed":None}},
+                       {"preflight":{**facts,"nativeLookup":"query-invalid","firstFailed":"native-lookup"}},
+                       {"preflight":{**facts,"foundationPathMatches":False}}]:
+            with self.assertRaises(RuntimeError):
+                m.foundation_record(json.dumps({**value,**update}).encode(),99,"download")
+
+    def test_swift_preflight_uses_same_captured_operands_before_session_creation(self):
+        source=m.FOUNDATION_SOURCE
+        run=source[source.index("    func run(_ url: URL)"):source.index("func emit(")]
+        self.assertEqual(run.count("darwinTemporaryDirectory()"),1)
+        self.assertEqual(run.count("FileManager.default.temporaryDirectory"),1)
+        self.assertEqual(run.count("destination.deletingLastPathComponent()"),1)
+        self.assertLess(run.index('result["preflight"]'),run.index("guard let nativeTemporary = nativeResolved"))
+        self.assertLess(run.index('result["failure"] = "platform-temp-preflight"'),run.index("URLSession(configuration: .default)"))
+        for predicate in ["nativeTemporary == platformTemporary","foundationResolved == platformTemporary","destinationParent == platformTemporary"]:
+            self.assertIn(predicate,run)
+
     def test_native_download_precedes_control_and_secondary_cannot_override_failure(self):
         self.proof.quiet_capture = lambda *args, **kwargs: {"code":0,"failure":None,"child":SimpleNamespace(capture_overflow=False)}
         calls=[]
