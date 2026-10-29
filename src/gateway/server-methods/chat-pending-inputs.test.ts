@@ -426,30 +426,34 @@ describe("pending input read boundary", () => {
       expect(await lookup()).toEqual({ ok: false, unavailableReason: "not_found" });
     }));
 
-  it("keeps pending input custody when its unavailable display has no native sequence", () =>
+  it("keeps pending input custody when its oversized display has no native sequence", () =>
     withOpenClawTestState({ scenario: "minimal" }, async () => {
-      const scope = await createScope("unavailable-input");
+      const scope = await createScope("oversized-input");
       await using inputs = pendingInputs(scope);
-      const receipt = await inputs.stage("unavailable-run", {
-        content: "Pending input",
-        toolName: "z".repeat(128 * 1024),
+      const receipt = await inputs.stage("oversized-run", {
+        content: "Pending input ".repeat(20_000),
       });
-      const page = await readChatPendingInputs(scope, { limit: 1, maxChars: 50 });
+      const page = await readChatPendingInputs(scope, { limit: 1, maxChars: 300_000 });
       expect(page).toMatchObject({
         total: 1,
         items: [
           {
             id: receipt.inputId,
-            runId: "unavailable-run",
+            runId: "oversized-run",
             state: "queued",
             message: {
-              role: "assistant",
-              content: [{ text: expect.stringContaining("chat.history unavailable") }],
+              role: "user",
+              content: [{ text: "[chat.history omitted: message too large]" }],
+              __openclaw: {
+                id: `pending:${receipt.inputId}`,
+                truncated: true,
+                reason: "oversized",
+              },
             },
           },
         ],
       });
-      expect(page.items[0]?.message).not.toHaveProperty("__openclaw");
+      expect(page.items[0]?.message).not.toHaveProperty("__openclaw.seq");
       expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(128 * 1024);
       expect(await loadTranscriptEvents(scope)).toEqual([]);
     }));
