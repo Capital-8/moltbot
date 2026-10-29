@@ -72,14 +72,22 @@ internal data class GatewayTlsTestFixture(
 }
 
 /** Public upstream fixture adapted for owned loopback servers, BC/JCA and JUnit 4. */
-internal fun gatewayTlsTestFixture(blocklisted: Boolean = false): GatewayTlsTestFixture {
+internal fun gatewayTlsTestFixture(
+  blocklisted: Boolean = false,
+  platformTrusted: Boolean = false,
+): GatewayTlsTestFixture {
   val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
   val subject = X500Name("CN=localhost")
-  val intermediate = if (blocklisted) decodeTlsTestCertificate(COMPROMISED_INTERMEDIATE) else null
+  val intermediate =
+    when {
+      blocklisted -> decodeTlsTestCertificate(COMPROMISED_INTERMEDIATE)
+      platformTrusted -> decodeTlsTestCertificate(NATIVE_TEST_ROOT)
+      else -> null
+    }
   val issuer = intermediate?.let { X500Name.getInstance(it.subjectX500Principal.encoded) } ?: subject
-  val signingKey = if (blocklisted) publicFixtureIntermediateKey() else keyPair.private
+  val signingKey = if (intermediate != null) publicFixtureIntermediateKey(if (blocklisted) "4" else "8") else keyPair.private
   val algorithm =
-    if (blocklisted) {
+    if (intermediate != null) {
       AlgorithmIdentifier(X9ObjectIdentifiers.ecdsa_with_SHA384)
     } else {
       AlgorithmIdentifier(PKCSObjectIdentifiers.sha256WithRSAEncryption, DERNull.INSTANCE)
@@ -101,7 +109,7 @@ internal fun gatewayTlsTestFixture(blocklisted: Boolean = false): GatewayTlsTest
         setExtensions(extensions.generate())
       }.generateTBSCertificate()
   val signature =
-    Signature.getInstance(if (blocklisted) "SHA384withECDSA" else "SHA256withRSA").apply {
+    Signature.getInstance(if (intermediate != null) "SHA384withECDSA" else "SHA256withRSA").apply {
       initSign(signingKey)
       update(tbs.encoded)
     }
@@ -110,7 +118,16 @@ internal fun gatewayTlsTestFixture(blocklisted: Boolean = false): GatewayTlsTest
       .Certificate(tbs, algorithm, DERBitString(signature.sign()))
       .encoded
   val leaf = CertificateFactory.getInstance("X.509").generateCertificate(encoded.inputStream()) as X509Certificate
-  val chain = listOfNotNull(leaf, intermediate, if (blocklisted) decodeTlsTestCertificate(COMPROMISED_ROOT) else null)
+  val root = if (blocklisted) decodeTlsTestCertificate(COMPROMISED_ROOT) else null
+  leaf.checkValidity()
+  leaf.verify(intermediate?.publicKey ?: keyPair.public)
+  if (intermediate != null && root != null) {
+    // Bind the public regression fixture to independently verified incident identities.
+    assertEquals("cb6e15165ac802e9b3f993f16c25d41f4e81c21ebde71ae1b012ac00bf9c7c3f", tlsTestSha256(intermediate.encoded))
+    assertEquals("63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8", tlsTestSha256(intermediate.publicKey.encoded))
+    intermediate.verify(root.publicKey)
+  }
+  val chain = listOfNotNull(leaf, intermediate, root)
   val password = charArrayOf()
   val keyStore =
     KeyStore.getInstance("PKCS12").apply {
@@ -119,7 +136,7 @@ internal fun gatewayTlsTestFixture(blocklisted: Boolean = false): GatewayTlsTest
     }
   val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, password) }
   val context = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, null) }
-  return GatewayTlsTestFixture(context.socketFactory, leaf, intermediate?.let { tlsTestSha256(it.publicKey.encoded) })
+  return GatewayTlsTestFixture(context.socketFactory, leaf, if (blocklisted) intermediate?.let { tlsTestSha256(it.publicKey.encoded) } else null)
 }
 
 /** Observes the production client's raw chain without replacing its trust or hostname policy. */
@@ -224,16 +241,17 @@ private fun tlsTestSha256(bytes: ByteArray): String = MessageDigest.getInstance(
 
 private fun decodeTlsTestCertificate(pem: String): X509Certificate = CertificateFactory.getInstance("X.509").generateCertificate(pem.byteInputStream()) as X509Certificate
 
-// Published upstream regression material, never a production trust anchor or external target:
+// Public regression material, never production trust or an external target. Scalar four
+// is the disclosed incident key below; scalar eight is the synthetic native test root.
 // https://github.com/lysine-dev/okhttp/blob/parent-5.5.1/okhttp/src/commonTest/kotlin/okhttp3/CompromisedIntermediateTest.kt
-private fun publicFixtureIntermediateKey(): PrivateKey =
+private fun publicFixtureIntermediateKey(scalar: String): PrivateKey =
   KeyFactory.getInstance("EC").run {
     val secp384r1 =
       AlgorithmParameters.getInstance("EC").run {
         init(ECGenParameterSpec("secp384r1"))
         getParameterSpec(ECParameterSpec::class.java)
       }
-    generatePrivate(ECPrivateKeySpec(java.math.BigInteger("4"), secp384r1))
+    generatePrivate(ECPrivateKeySpec(java.math.BigInteger(scalar), secp384r1))
   }
 
 private val COMPROMISED_ROOT =
@@ -275,5 +293,23 @@ private val COMPROMISED_INTERMEDIATE =
   AwMDaAAwZQIxAMSZt2xsPeumRdeSMSQ3CbzIZeQ/q7GDCWfeE1Pq+mhgA6gRM44c
   NVF3xJ+wsxJk+wIwFJbaDMokD8Ei6eNOiA8yUMYvfzQyngmrhZQMdPCK1SewrR79
   4rSb9vGqxZzelQth
+  -----END CERTIFICATE-----
+  """.trimIndent()
+
+// Synthetic native-emulator root; its public test key is EC scalar eight.
+private val NATIVE_TEST_ROOT =
+  """
+  -----BEGIN CERTIFICATE-----
+  MIIB4jCCAWegAwIBAgIUKqR70SrRmPOj4S3fmb/3pMgTPbwwCgYIKoZIzj0EAwMw
+  MDEuMCwGA1UEAwwlT3BlbkNsYXcgQW5kcm9pZCBuYXRpdmUgVExTIHRlc3Qgcm9v
+  dDAeFw0yNjEwMjkwMjE4NDJaFw00NjEwMjQwMjE4NDJaMDAxLjAsBgNVBAMMJU9w
+  ZW5DbGF3IEFuZHJvaWQgbmF0aXZlIFRMUyB0ZXN0IHJvb3QwdjAQBgcqhkjOPQIB
+  BgUrgQQAIgNiAAQWkneOpZbgvnURQpem+jg0Rb8if75YGQqQDDxzJW8R+1oyWNb0
+  A9Xs5umyadgiyH3c0jZXANQQaoNTiLo9uP0OIlVK3G1SHNS9HDDC7A7sGWut4enN
+  0XCNb2q/pAIrCtKjQjBAMB0GA1UdDgQWBBSThGBAeS4OlJMbM21+ljbiYDkSZjAP
+  BgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQDAwNpADBm
+  AjEAivq+qKceyW7zpkxp3g01Lm6JLlreZiIUrKHBTyd8dAtInXxxcrXDjLeWxnJY
+  U7eEAjEAsxqF5FDh26tM1aHNbPhm/uUXxT3+sX81YftNPbvpLIGUXcL0YXcx2T8z
+  0CyfAuBh
   -----END CERTIFICATE-----
   """.trimIndent()
