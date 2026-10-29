@@ -406,6 +406,16 @@ export async function createNativeDependencies(options: {
       options.proof.nativeBuildReused = build.reused;
       options.proof.nativeBuildMs = performance.now() - nativeStarted;
     }
+    if (!options.buildOnly && !options.gatewayOnly) {
+      const cacheStarted = performance.now();
+      await command(
+        "simulator-runtime",
+        "xcrun",
+        ["simctl", "runtime", "dyld_shared_cache", "update", runtime.identifier],
+        { timeoutMs: 600_000 },
+      );
+      options.proof.runtimeCacheReadinessMs = Math.round(performance.now() - cacheStarted);
+    }
     return {
       assertCurrentSource,
       cleanup,
