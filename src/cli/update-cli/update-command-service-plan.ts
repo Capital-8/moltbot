@@ -155,23 +155,23 @@ export function isGatewayServiceManagementAllowedForUpdate(
 export const GATEWAY_SERVICE_INSPECTION_WARNING =
   "Gateway service inspection is unavailable; automatic service restart was skipped. Any recorded service definition was left unchanged; inspect it with `openclaw gateway status --deep`.";
 
-function serviceInspectionWarningMessage(state: GatewayServiceState): string {
+export function serviceInspectionWarningMessage(state?: GatewayServiceState): string {
   const warning = [
     GATEWAY_SERVICE_INSPECTION_WARNING,
-    state.installed || state.command?.sourcePath
+    state?.installed || state?.command?.sourcePath
       ? "A service definition is present and was left unchanged."
       : "",
     "Stop the Gateway through its owner (openclaw gateway stop for the managed service), then run openclaw update repair.",
   ]
     .filter(Boolean)
     .join(" ");
-  if (state.inspectionReason) {
+  if (state?.inspectionReason) {
     return `${state.runtime?.inspectionFailure?.detail ?? formatServiceInspectionReason(state.inspectionReason)} ${warning}`;
   }
   if (process.platform === "freebsd") {
     return `${warning} On FreeBSD, use the Gateway's rc.d or foreground process owner for service management.`;
   }
-  const runtime = state.runtime;
+  const runtime = state?.runtime;
   const tasksCurrent = runtime?.systemd?.tasksCurrent;
   if (
     process.platform === "linux" &&

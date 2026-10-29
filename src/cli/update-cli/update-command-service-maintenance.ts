@@ -44,12 +44,12 @@ import type {
 } from "./update-command-service-context-types.js";
 import {
   assertGatewayServiceAdmissionUnchanged,
-  GATEWAY_SERVICE_INSPECTION_WARNING,
   GatewayServiceUpdateOwnershipError,
   isUpdateServiceManagerAvailable,
   observedSystemdManagerUid,
   readGatewayServiceStateForUpdate,
   resolveGatewayServiceManagementBlockMessageForUpdate,
+  serviceInspectionWarningMessage,
 } from "./update-command-service-plan.js";
 import { isManagedGatewayServiceOffline } from "./update-command-service-publication.js";
 import { revalidateManagedGatewayServiceAfterUpdate } from "./update-command-service-revalidation.js";
@@ -373,16 +373,15 @@ async function stopManagedServiceBeforeMutableUpdate(
         };
       }
     }
+    const warning = serviceInspectionWarningMessage();
     return unavailableServiceState({
       kind: "unavailable",
       message:
-        err instanceof ServiceInspectionError && err.reason === "windows-task-inspection-failed"
-          ? `${err.message} ${GATEWAY_SERVICE_INSPECTION_WARNING}`
-          : err instanceof ServiceInspectionError ||
-              err instanceof ServiceInspectionDeadlineError ||
-              err instanceof GatewayServiceUpdateOwnershipError
-            ? `${GATEWAY_SERVICE_INSPECTION_WARNING} ${err.message}`
-            : GATEWAY_SERVICE_INSPECTION_WARNING,
+        err instanceof ServiceInspectionError ||
+        err instanceof ServiceInspectionDeadlineError ||
+        err instanceof GatewayServiceUpdateOwnershipError
+          ? `${err.message} ${warning}`
+          : warning,
       ...(err instanceof ServiceInspectionError ? { inspectionReason: err.reason } : {}),
     });
   }
