@@ -11,7 +11,7 @@ const SNAPSHOT_RETRY_MAX_MS = 80;
 type SnapshotOperation = "online-backup" | "raw-copy";
 type SnapshotOutcome = "changed" | "error" | "success";
 
-function sourceFileSize(pathname: string): number {
+export function sqliteSnapshotSourceFileSize(pathname: string): number {
   try {
     const stat = fs.statSync(pathname);
     return stat.isFile() ? stat.size : 0;
@@ -56,8 +56,8 @@ export function createSnapshotAttemptReporter(
           durationMs: Math.max(0, performance.now() - started),
           operation,
           outcome,
-          sourceMainBytes: sourceFileSize(pathname),
-          sourceWalBytes: sourceFileSize(`${pathname}-wal`),
+          sourceMainBytes: sqliteSnapshotSourceFileSize(pathname),
+          sourceWalBytes: sqliteSnapshotSourceFileSize(`${pathname}-wal`),
           owner: "path-reader",
           errorCode:
             error && typeof error === "object" && "code" in error ? String(error.code) : undefined,

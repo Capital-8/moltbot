@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, beforeEach, expect, vi } from "vitest";
+import chokidar from "chokidar";
+import { afterEach, beforeEach, expect, onTestFinished, vi } from "vitest";
 import { getGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-state.js";
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import { getActivePluginRegistry } from "../plugins/runtime.js";
@@ -243,4 +244,19 @@ export async function reloadInstanceBindingAfterServiceDeadline({
   } finally {
     await fs.writeFile(sourcePath, originalSource);
   }
+}
+
+export function controlRpcOwnedConfigWatcher(configPath: string) {
+  const watch = chokidar.watch;
+  const configWatcher = vi.spyOn(chokidar, "watch").mockImplementation((paths, options) => {
+    const watchedPaths = typeof paths === "string" ? [paths] : paths;
+    if (!watchedPaths.includes(configPath)) {
+      return watch(paths, options);
+    }
+    // Explicit config writes own these cases; filesystem echoes can race the next RPC.
+    const watcher = new chokidar.FSWatcher(options);
+    queueMicrotask(() => watcher.emit("ready"));
+    return watcher;
+  });
+  onTestFinished(() => configWatcher.mockRestore());
 }

@@ -9,6 +9,7 @@ import {
 import type { PackageActivationOptions } from "../../infra/package-update-swap-contract.js";
 import { PackageUpdateActivationError } from "../../infra/package-update-swap-contract.js";
 import {
+  deferPackageStateVerification,
   failedPackageVerificationStep,
   markPackagePostInstallDoctorAdvisory,
 } from "../../infra/package-update-verification-step.js";
@@ -124,9 +125,26 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
     total: 0,
   };
   params.progress?.onStepStart?.(doctorProgressInfo);
-  const configSnapshot = params.onConfigSnapshot
-    ? await captureUpdateConfigSnapshot(resolveConfigPath(doctorEnv), doctorEnv)
-    : undefined;
+  let configSnapshot: UpdateConfigSnapshot | undefined;
+  try {
+    configSnapshot = params.onConfigSnapshot
+      ? await captureUpdateConfigSnapshot(resolveConfigPath(doctorEnv), doctorEnv)
+      : undefined;
+  } catch (error) {
+    assertCurrent?.();
+    context?.assertCurrent();
+    return await deferPackageStateVerification(
+      {
+        ...params,
+        assertCurrent: () => {
+          assertCurrent?.();
+          context?.assertCurrent();
+        },
+        migrationRecorded: Boolean(context?.databaseBackup?.migration),
+      },
+      error,
+    );
+  }
   const completeDoctorStep = async (
     doctorStep: UpdateStepResult,
     doctorResult: UpdatePostInstallDoctorResult | null,

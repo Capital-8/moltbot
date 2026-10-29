@@ -349,10 +349,13 @@ function createStableReadOnlyCopyInTempDirectory(
     }
     return publishPreparedCopy(tempDir);
   } catch (error) {
+    const stagingError = tempDir
+      ? sqliteSnapshotStagingError(tempDir, error, false, pathname)
+      : error;
     if (tempDir && existingTempDir === undefined) {
       removeTempDirectory(tempDir);
     }
-    throw tempDir ? sqliteSnapshotStagingError(tempDir, error) : error;
+    throw stagingError;
   }
 }
 
@@ -413,8 +416,9 @@ export async function createOnlineReadOnlyBackup(
     }
     return publishPreparedCopy(tempDir);
   } catch (error) {
+    const stagingError = sqliteSnapshotStagingError(tempDir, error, false, pathname);
     await removeTempDirectoryAsync(tempDir);
-    throw sqliteSnapshotStagingError(tempDir, error);
+    throw stagingError;
   }
 }
 
