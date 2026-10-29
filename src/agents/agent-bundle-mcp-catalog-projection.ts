@@ -3,12 +3,8 @@ import type { Client, Tool } from "@modelcontextprotocol/client";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import type { SessionToolOverrides } from "../config/sessions/types.js";
 import type { McpServerConfig } from "../config/types.mcp.js";
-import type {
-  McpCatalogTool,
-  McpServerCatalog,
-  McpToolCatalog,
-  McpToolCatalogDiagnostic,
-} from "./agent-bundle-mcp-types.js";
+import { logWarn } from "../logger.js";
+import type { McpCatalogTool, McpServerCatalog, McpToolCatalog } from "./agent-bundle-mcp-types.js";
 import {
   readMcpAppIcons,
   readMcpAppSettingsCapability,
@@ -23,19 +19,8 @@ import {
   sanitizeMcpMetadataText,
   summarizeServerCapabilities,
 } from "./mcp-metadata.js";
-import { isMcpToolAllowed, normalizeMcpToolFilter } from "./mcp-tool-filter.js";
+import { createMcpToolFilter, normalizeMcpToolFilter } from "./mcp-tool-filter.js";
 import { normalizeMcpToolCatalog } from "./mcp-tool-metadata.js";
-
-export function projectBundleMcpCatalogFailure(
-  catalog: McpToolCatalog | undefined,
-  diagnostic: McpToolCatalogDiagnostic,
-): McpToolCatalog {
-  return {
-    ...(catalog ?? { version: 1, servers: {}, tools: [] }),
-    generatedAt: Date.now(),
-    diagnostics: [diagnostic],
-  };
-}
 
 export function projectBundleMcpServerCatalog({
   serverName,
@@ -48,6 +33,7 @@ export function projectBundleMcpServerCatalog({
   capabilities,
   serverVersion,
   serverCapabilities,
+  instructions,
   pluginId,
   connection,
 }: {
@@ -61,6 +47,7 @@ export function projectBundleMcpServerCatalog({
   capabilities: ReturnType<typeof summarizeServerCapabilities>;
   serverVersion: ReturnType<Client["getServerVersion"]>;
   serverCapabilities: ReturnType<Client["getServerCapabilities"]>;
+  instructions?: string;
   pluginId?: string;
   connection: { requestTimeoutMs: number; supportsParallelToolCalls: boolean };
 }): { catalog: McpToolCatalog; metadata: ReturnType<typeof normalizeMcpToolCatalog>["metadata"] } {
@@ -68,13 +55,34 @@ export function projectBundleMcpServerCatalog({
   const deniedToolNames = new Set(
     denialMap && Object.hasOwn(denialMap, serverName) ? denialMap[serverName] : [],
   );
+  const isToolAllowed = createMcpToolFilter(toolFilter, {
+    ...capabilities,
+    safeServerName,
+    toolNames: listedTools.map((tool) => tool.name.trim()),
+  });
   const normalizedTools = normalizeMcpToolCatalog(listedTools, schemaValidator, (toolName) => {
-    if (!isMcpToolAllowed(toolFilter, toolName)) {
+    if (!isToolAllowed(toolName)) {
       return "exclude";
     }
     return deniedToolNames.has(toolName) ? "denied" : "include";
   });
   const exposedTools = normalizedTools.tools;
+  // Empty includes often mean a mistyped name. Session denials and selected
+  // resource/prompt utilities are intentional selections, not filter mistakes.
+  const selectsUtility = [
+    ...(capabilities.resources ? ["resources_list", "resources_read"] : []),
+    ...(capabilities.prompts ? ["prompts_list", "prompts_get"] : []),
+  ].some((operation) => isToolAllowed(operation) && !deniedToolNames.has(operation));
+  if (
+    toolFilter?.include &&
+    listedTools.length > 0 &&
+    exposedTools.length + normalizedTools.deniedTools.length === 0 &&
+    !selectsUtility
+  ) {
+    logWarn(
+      `bundle-mcp: server "${serverName}" toolFilter selected none of its ${listedTools.length} advertised tools; check include/exclude entries and use raw MCP tool names or unambiguous names from "openclaw mcp probe".`,
+    );
+  }
   const serverEntry: McpServerCatalog = {
     serverName,
     safeServerName,
@@ -82,6 +90,7 @@ export function projectBundleMcpServerCatalog({
     pluginId,
     title: serverVersion?.title,
     icons: readMcpAppIcons(serverVersion?.icons),
+    ...(instructions ? { instructions } : {}),
     settings: readMcpAppSettingsCapability(serverCapabilities),
     toolCount: exposedTools.length,
     requestTimeoutMs: connection.requestTimeoutMs,

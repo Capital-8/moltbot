@@ -12,6 +12,7 @@ import {
   GatewayDrainingError,
   isGatewaySubordinateWorkAdmissionClosed,
 } from "../process/gateway-work-admission.js";
+import { runWithAsyncStore } from "../shared/async-store.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { readAgentDeletionJournalStatusInWorker } from "../state/agent-deletion-journal.read.js";
 import {
@@ -272,7 +273,7 @@ export async function runSessionMutation<T>(
     effects: current?.effects ?? new Set(),
     mutations: new Set([...(current?.mutations ?? []), mutation]),
   };
-  return await ownerContext.run(context, async () => {
+  return await runWithAsyncStore(ownerContext, context, async () => {
     let stopCompetitionWait: (() => void) | undefined;
     let pendingEffects: Set<Effect> | undefined;
     const runObserved = () => {
@@ -486,6 +487,7 @@ export async function beginSessionEffect(
       const wasAcquired = effect.phase === "acquired";
       effect.phase = "released";
       effect.handoffs.clear();
+      effect.admissionTransitions?.clear();
       state.effects.delete(effect);
       releaseTarget(entry, target);
       effect.validated.resolve();
@@ -514,7 +516,8 @@ export async function beginSessionEffect(
       }
       running++;
       try {
-        return await ownerContext.run(
+        return await runWithAsyncStore(
+          ownerContext,
           {
             sourceInput: caller?.sourceInput ?? current?.sourceInput ?? effect.sourceInput,
             operation,
@@ -657,6 +660,17 @@ export async function beginSessionEffect(
     ref.release();
     throw error;
   }
+}
+
+/** Ingress consumes this before reserving a receipt, before asynchronous preparation can yield. */
+export function readSessionControllerAdmissionError(params: TargetInput): Error | undefined {
+  for (const entry of matchingEntries(targetFrom(params))) {
+    const closure = entry.lifecycle?.closures.values().next().value;
+    if (closure) {
+      return closure.reason;
+    }
+  }
+  return undefined;
 }
 
 export function closeSessionControllerAdmission(

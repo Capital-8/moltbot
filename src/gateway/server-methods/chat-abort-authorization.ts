@@ -1,6 +1,7 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { SubagentRequestSessionOrigin } from "../../agents/subagents/registry/subagent-exec-request-ownership.js";
 import { composeSessionSourceAssertion } from "../../config/sessions/session-source-authority.js";
+import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { isCurrentSessionControllerTurnInput } from "../../sessions/session-controller.context.js";
 import {
   getRpcSourceIdentity,
@@ -14,7 +15,11 @@ import { setGatewayDedupeEntry } from "../agent-turn/agent-job.js";
 import { chatRunBelongsToAgent, resolveChatRunOwnerAgentId } from "../chat-run-owner.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
 import { createChatAbortMarker } from "../server-chat-state.js";
-import { pendingChatSendDedupeKey, type DedupeEntry } from "../server-shared.js";
+import {
+  PENDING_CHAT_SEND_DEDUPE_PREFIX,
+  pendingChatSendDedupeKey,
+  type DedupeEntry,
+} from "../server-shared.js";
 import type { ChatAbortSessionSnapshot } from "./chat-aborted-partial.js";
 import type {
   GatewayRequestContext,
@@ -150,6 +155,47 @@ export function canRequesterAbortChatRun(
   );
 }
 
+/** Bind explicit physical targets and scoped callers before cancellation selects work. */
+export function resolveChatAbortSessionRestriction(params: {
+  requestedSessionId?: string;
+  runId?: string;
+  discardPendingInput?: boolean;
+  narrow: boolean;
+  admittedTarget: SessionMutationAuthorization["admittedTarget"];
+  sessionKey: string;
+  agentId: string;
+}): { ok: false; message: string } | { ok: true; requiredSessionId?: string } {
+  const { requestedSessionId, admittedTarget, narrow } = params;
+  if (requestedSessionId && !params.runId) {
+    return { ok: false, message: "sessionId requires an exact runId" };
+  }
+  if (params.discardPendingInput && !params.runId) {
+    return { ok: false, message: "discardPendingInput requires an exact runId" };
+  }
+  if (params.discardPendingInput && isIncognitoSessionKey(params.sessionKey)) {
+    return {
+      ok: false,
+      message:
+        "Removing accepted queued input is unavailable in incognito sessions. Use Stop to cancel it.",
+    };
+  }
+  if (
+    narrow &&
+    (!admittedTarget?.sessionId.trim() ||
+      admittedTarget.sessionKey !== params.sessionKey ||
+      admittedTarget.agentId !== params.agentId)
+  ) {
+    return { ok: false, message: "session target is unavailable" };
+  }
+  if (narrow && requestedSessionId && requestedSessionId !== admittedTarget?.sessionId) {
+    return { ok: false, message: "session incarnation changed" };
+  }
+  return {
+    ok: true,
+    requiredSessionId: requestedSessionId ?? (narrow ? admittedTarget?.sessionId : undefined),
+  };
+}
+
 /** Returns the protocol-facing rejection for one exact run target, if any. */
 export function resolveChatAbortTargetRejection(params: {
   target: ChatRunAbortAuthority;
@@ -169,12 +215,13 @@ export function resolveChatAbortTargetRejection(params: {
   if (params.discardPendingInput && !matchesSessionKey) {
     return "discarded input runId does not match sessionKey";
   }
-  if (params.narrow && target.sessionId !== params.requiredSessionId) {
+  if (params.requiredSessionId !== undefined && target.sessionId !== params.requiredSessionId) {
     return "runId does not match session incarnation";
   }
   if (
     !matchesSessionKey &&
-    (params.narrow ||
+    (params.requiredSessionId !== undefined ||
+      params.narrow ||
       !canRequesterAbortChatRun(target, params.requester, { requireOwnerMatch: true }))
   ) {
     return "runId does not match sessionKey";
@@ -197,22 +244,20 @@ export function resolveChatAbortTargetRejection(params: {
 export function readPreRegisteredRun(params: {
   key: string;
   entry: DedupeEntry | undefined;
-  keyPrefix: string;
-  includeHidden?: boolean;
 }): PreRegisteredAgentRun | undefined {
-  if (!params.key.startsWith(params.keyPrefix) || !params.entry?.ok) {
+  if (!params.key.startsWith(PENDING_CHAT_SEND_DEDUPE_PREFIX) || !params.entry?.ok) {
     return undefined;
   }
   const payload = params.entry.payload as PreRegisteredAgentDedupePayload | undefined;
   if (payload?.status !== "accepted") {
     return undefined;
   }
-  if (!params.includeHidden && payload.controlUiVisible === false) {
+  if (payload.controlUiVisible === false) {
     return undefined;
   }
   const runId =
     (typeof payload.runId === "string" ? payload.runId : undefined) ??
-    params.key.slice(params.keyPrefix.length);
+    params.key.slice(PENDING_CHAT_SEND_DEDUPE_PREFIX.length);
   const sessionKey = normalizeOptionalString(payload.sessionKey);
   if (!runId || !sessionKey) {
     return undefined;
@@ -224,23 +269,18 @@ export function writePreRegisteredChatAbort(params: {
   context: GatewayRequestContext;
   runId: string;
   stopReason: string;
-  endedAt?: number;
   attemptId?: string;
   requestIdentity?: string;
-  expectedPayload?: PreRegisteredAgentDedupePayload;
 }) {
   const pendingKey = pendingChatSendDedupeKey(params.runId);
   const pendingEntry = params.context.dedupe.get(pendingKey);
   const pendingAttemptId = normalizeOptionalString(
     (pendingEntry?.payload as PreRegisteredAgentDedupePayload | undefined)?.attemptId,
   );
-  if (
-    (params.expectedPayload && pendingEntry?.payload !== params.expectedPayload) ||
-    (pendingEntry && params.attemptId && pendingAttemptId !== params.attemptId)
-  ) {
+  if (pendingEntry && params.attemptId && pendingAttemptId !== params.attemptId) {
     return false;
   }
-  const endedAt = params.endedAt ?? Date.now();
+  const endedAt = Date.now();
   const payload = buildAbortedChatSendPayload({
     runId: params.runId,
     stopReason: params.stopReason,

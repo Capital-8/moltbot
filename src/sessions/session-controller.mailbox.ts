@@ -19,7 +19,6 @@ import {
   type SessionControllerSourceAdapter,
 } from "./session-controller.contracts.js";
 import { logSessionControllerSourceClaim } from "./session-controller.diagnostics.js";
-import { bindSessionControllerMailboxRestartDrain } from "./session-controller.mailbox-cleanup.js";
 import { pumpSessionControllerMailbox } from "./session-controller.mailbox-dispatch.js";
 import {
   bindSessionControllerSource,
@@ -235,8 +234,6 @@ type SessionControllerSourceReservation = {
   policy: QueueSettings;
   adapter?: SessionControllerSourceAdapter;
   target?: SessionTarget;
-  /** Runs when the mailbox claims a newly created input; it owns and must release that claim. */
-  start?: (claim: SessionControllerMailboxClaim) => void;
 };
 
 /** Reserves identity/custody before attachment or prompt preparation, without owning a turn. */
@@ -286,7 +283,6 @@ export function reserveOrJoinSessionControllerSource(
       retireSessionControllerInput(existing);
     }
   }
-  bindSessionControllerMailboxRestartDrain();
   const mailbox = getSessionControllerMailbox(key, target);
   const cancellation = new AbortController();
   const injectionOrder = createDeferredCore<boolean>();
@@ -346,10 +342,6 @@ export function reserveOrJoinSessionControllerSource(
     abort();
   } else {
     signal.addEventListener("abort", abort, { once: true });
-  }
-  if (params.start) {
-    // Retirement before the claim settles custody; the rejected claim request has no other observer.
-    void claimSessionControllerTask(input, params.start).catch(() => {});
   }
   return { input, created: true };
 }
