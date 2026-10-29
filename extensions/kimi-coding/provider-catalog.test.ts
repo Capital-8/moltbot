@@ -13,6 +13,7 @@ it.each(catalog.models.filter((model) => ["k3", "k3-256k"].includes(model.id)))(
     const model: Model<"anthropic-messages"> = {
       ...row,
       api: "anthropic-messages",
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       compat: undefined,
       provider: "kimi",
       baseUrl: catalog.baseUrl,
