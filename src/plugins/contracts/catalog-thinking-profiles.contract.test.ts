@@ -60,7 +60,7 @@ function readRowsOwningThinking(): ThinkingCatalogEntry[] {
       return Object.entries(manifest.modelCatalog?.providers ?? {}).flatMap(([provider, catalog]) =>
         (catalog.models ?? [])
           .filter((row) => row.compat?.defaultThinkingLevel)
-          .map((row) => ({ ...row, provider, api: row.api ?? catalog.api })),
+          .map((row) => Object.assign({}, row, { provider, api: row.api ?? catalog.api })),
       );
     });
 }
