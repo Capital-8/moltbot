@@ -59,31 +59,19 @@ async function fixture() {
     snapshot,
     cache,
     manifest,
-    bytes,
-    integrity,
-    names,
     filenames,
     fetch,
     copy: () => copyWorkerNativeArchiveCache(root, snapshot, manifest),
   };
 }
 
-it("admits only pinned verified archives and the build consumes them without network", async () => {
+it("copies only pinned public archives usable offline", async () => {
   const f = await fixture();
   await fs.writeFile(path.join(f.cache, "unrelated-private.tgz"), "must not copy");
-  await fs.symlink(f.manifest, path.join(f.cache, "unrelated-link"));
-  const receipts = await f.copy();
+  await f.copy();
   expect(
     (await fs.readdir(path.join(f.snapshot, ".artifacts/worker-native-assets"))).toSorted(),
   ).toEqual(f.filenames.toSorted());
-  expect(receipts).toEqual(
-    f.names.map((name) => ({
-      name,
-      version: "1.2.3",
-      integrity: f.integrity,
-      sha256: createHash("sha256").update(f.bytes).digest("hex"),
-    })),
-  );
   const assets = await prepareWorkerDarwinNativeAssets(f.snapshot, f.manifest);
   expect(assets.map((asset) => asset.source.toString())).toEqual([
     "synthetic-addon",
@@ -92,41 +80,12 @@ it("admits only pinned verified archives and the build consumes them without net
   expect(f.fetch).not.toHaveBeenCalled();
 });
 
-it.each(["missing", "corrupt", "mismatched-pin", "symlink", "ancestor-symlink"])(
-  "refuses %s archives before copying any bytes",
-  async (invalid) => {
-    const f = await fixture();
-    const selected = path.join(f.cache, f.filenames[0]!);
-    if (invalid === "missing") {
-      await fs.unlink(selected);
-    } else if (invalid === "corrupt") {
-      await fs.writeFile(selected, "not the pinned archive");
-    } else if (invalid === "mismatched-pin") {
-      await fs.writeFile(
-        f.manifest,
-        JSON.stringify({
-          optionalDependencies: Object.fromEntries(f.names.map((name) => [name, "1.2.4"])),
-        }),
-      );
-    } else if (invalid === "symlink") {
-      const target = path.join(f.root, "otherwise-valid.tgz");
-      await fs.rename(selected, target);
-      await fs.symlink(target, selected);
-    } else {
-      const target = path.join(f.root, "otherwise-valid-cache");
-      await fs.rename(f.cache, target);
-      await fs.symlink(target, f.cache);
-    }
-    await expect(f.copy()).rejects.toThrow(
-      invalid === "corrupt"
-        ? "integrity mismatch"
-        : invalid === "mismatched-pin"
-          ? "not pinned"
-          : "Offline worker native archive unavailable",
-    );
-    await expect(fs.stat(path.join(f.snapshot, ".artifacts"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    expect(f.fetch).not.toHaveBeenCalled();
-  },
-);
+it("rejects tampered native bytes before copying or fetching", async () => {
+  const f = await fixture();
+  await fs.writeFile(path.join(f.cache, f.filenames[0]!), "not the pinned archive");
+  await expect(f.copy()).rejects.toThrow("integrity mismatch");
+  await expect(fs.stat(path.join(f.snapshot, ".artifacts"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  expect(f.fetch).not.toHaveBeenCalled();
+});

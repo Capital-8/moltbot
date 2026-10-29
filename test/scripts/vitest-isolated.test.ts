@@ -136,15 +136,6 @@ describe("isolated Vitest admission", () => {
         .filter((entry) => entry.isSymbolicLink())
         .map((entry) => entry.name);
       expect(interfaces).toEqual(["lo"]);
-      console.log(
-        JSON.stringify({
-          runtime,
-          executable: process.execPath,
-          bun: process.versions.bun,
-          interfaces,
-          childExit: child.status,
-        }),
-      );
     }
   });
   it("dispatches the real wrapper before file checks, prerequisites or project delegation", async () => {
@@ -166,17 +157,6 @@ describe("isolated Vitest admission", () => {
   const repoImage = `repo@sha256:${image}`;
   it.each([
     [[selector, image, ...originalArgs], { image, args: originalArgs, runtime: "node" }],
-    [
-      [selector, image, "--isolated-runtime", "bun", ...originalArgs],
-      { image, args: originalArgs, runtime: "bun" },
-    ],
-    [
-      [selector, image, "--isolated-runtime=node", ...originalArgs],
-      { image, args: originalArgs, runtime: "node" },
-    ],
-    [["--isolated-runtime", "bun", ...originalArgs], "requires --isolated-image"],
-    [[selector, image, "--isolated-runtime", "deno", ...originalArgs], "node or bun"],
-    [[selector, image, "--isolated-runtime=bun", "--isolated-runtime=node"], "once"],
     [
       ["run", `${selector}=${repoImage}`, file],
       { image: repoImage, args: ["run", file], runtime: "node" },

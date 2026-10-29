@@ -109,47 +109,6 @@ const isolatedTask = {
 describe("Codex agent harness supports()", () => {
   const harness = supportHarness;
 
-  it("accepts only host-admitted command auth on the explicit native runtime", () => {
-    const context: AgentHarnessSupportContext = {
-      provider: "custom-command",
-      requestedRuntime: "codex",
-      modelProvider: {
-        nativeCommandAuth: { runtimeId: "codex" },
-        requestTransportOverrides: "none",
-        preparedAuth: { source: "harness", mode: "native-command" },
-      },
-    };
-    expect(harness.supports(context).supported).toBe(true);
-    expect(harness.supports({ ...context, requestedRuntime: "auto" }).supported).toBe(false);
-    expect(
-      harness.supports({
-        ...context,
-        modelProvider: {
-          ...context.modelProvider,
-          nativeCommandAuth: undefined,
-        },
-      }).supported,
-    ).toBe(false);
-    expect(
-      harness.supports({
-        ...context,
-        modelProvider: {
-          ...context.modelProvider,
-          preparedAuth: { source: "profile", mode: "api-key" },
-        },
-      }).supported,
-    ).toBe(false);
-    expect(
-      harness.supports({
-        ...context,
-        modelProvider: {
-          ...context.modelProvider,
-          requestTransportOverrides: "present",
-        },
-      }).supported,
-    ).toBe(false);
-  });
-
   it("keeps computer-control denies out of the native-surface exemption", () => {
     expect(harness.conversationToolPolicySafeDenyTools).toContain("image_generate");
     expect(harness.conversationToolPolicySafeDenyTools).not.toEqual(

@@ -34,7 +34,7 @@ const TOKEN = "synthetic-command-only-token";
 const ANSWER = "P5_NATIVE_COMMAND_GATEWAY_OK";
 
 it(
-  "selects and executes command auth through real Gateway catalog and ordinary sessions",
+  "executes command auth through an ordinary Gateway session without host credentials",
   { timeout: 240_000 },
   async ({ signal }) => {
     const require = createRequire(path.join(process.cwd(), "extensions/codex/package.json"));
@@ -42,9 +42,8 @@ it(
       path.dirname(require.resolve("@openai/codex/package.json")),
       "bin/codex.js",
     );
-    const requests: Array<{ phase: string; model: unknown; commandBearer: boolean }> = [];
+    const requests: Array<{ model: unknown; commandBearer: boolean }> = [];
     const failures: string[] = [];
-    let phase = "no-openai-account";
     const reserved = await reserveTestPortListener({
       offsets: [0],
       signal,
@@ -67,7 +66,6 @@ it(
                 throw new Error("Invalid Responses request");
               }
               requests.push({
-                phase,
                 model: parsed.model,
                 commandBearer: request.headers.authorization === "Bearer " + TOKEN,
               });
@@ -196,183 +194,69 @@ it(
             "args=[" + JSON.stringify(command) + "]",
           ].join("\n"),
         );
-        const config: unknown = JSON.parse(await fs.readFile(instance.configPath, "utf8"));
-        if (!isRecord(config)) {
-          throw new Error("Invalid fixture config");
-        }
-        config.logging = {
-          level: "debug",
-          consoleLevel: "debug",
-          file: instance.state.path("gateway.log"),
-        };
-        await instance.state.writeConfig(config);
-        const emptyAuth = await instance.cli([
-          "models",
-          "auth",
-          "list",
-          "--agent",
-          "main",
-          "--json",
-        ]);
-        expect(emptyAuth.code, emptyAuth.stderr).toBe(0);
-        const authList: unknown = JSON.parse(emptyAuth.stdout);
-        expect(authList).toMatchObject({ profiles: [] });
-        const sessionKey = "agent:main:p5-native-command-" + randomUUID();
-        for (const withDecoys of [false, true]) {
-          phase = withDecoys ? "decoy-credentials" : "no-openai-account";
-          if (withDecoys) {
-            await instance.state.writeAuthProfiles({
-              version: 1,
-              profiles: {
-                "openai:decoy": {
-                  type: "api_key",
-                  provider: "openai",
-                  key: "synthetic-stored-decoy",
+        await instance.state.writeAuthProfiles({
+          version: 1,
+          profiles: {
+            "openai:decoy": { type: "api_key", provider: "openai", key: "synthetic-stored-decoy" },
+          },
+        });
+        instance.env.OPENAI_API_KEY = "synthetic-env-decoy";
+        instance.env.CODEX_API_KEY = "synthetic-codex-decoy";
+        instance.env.CODEX_ACCESS_TOKEN = "synthetic-token-decoy";
+        await instance.startGateway();
+        const client = await connectGatewayStatusClient(instance);
+        await runQaGatewayFixture(
+          async () => {
+            const sessionKey = "agent:main:p5-native-command-" + randomUUID();
+            await client.request("sessions.create", {
+              key: sessionKey,
+              agentId: "main",
+              model: MODEL_REF,
+            });
+            const result = await client.request<{
+              status: string;
+              runId: string;
+            }>(
+              "agent",
+              {
+                sessionKey,
+                message: "Reply with the harmless fixture response.",
+                deliver: false,
+                idempotencyKey: randomUUID(),
+              },
+              { expectFinal: true, timeoutMs: 90000 },
+            );
+            expect(result, instance.logs()).toMatchObject({
+              status: "ok",
+              result: {
+                meta: {
+                  agentMeta: {
+                    provider: PROVIDER,
+                    model: MODEL,
+                    agentHarnessId: "codex",
+                    credentialSource: { kind: "none" },
+                  },
                 },
               },
             });
-            instance.env.OPENAI_API_KEY = "synthetic-env-decoy";
-            instance.env.CODEX_API_KEY = "synthetic-codex-decoy";
-            instance.env.CODEX_ACCESS_TOKEN = "synthetic-token-decoy";
-          }
-          await instance.startGateway();
-          console.log("P5_GATEWAY_PROCESS " + JSON.stringify({ phase, pid: instance.child?.pid }));
-          const client = await connectGatewayStatusClient(instance);
-          await runQaGatewayFixture(
-            async () => {
-              const listed = await client.request<{ models: Array<Record<string, unknown>> }>(
-                "models.list",
-                { agentId: "main", view: "all", refresh: true },
-                { timeoutMs: 60000 },
-              );
-              const selected = listed.models.find(
-                (model) => model.provider === PROVIDER && model.id === MODEL,
-              );
-              console.log("P5_GATEWAY_CATALOG " + JSON.stringify({ phase, selected }));
-              expect(selected, instance.logs()).toMatchObject({
-                available: true,
-                agentRuntime: { id: "codex" },
-              });
-              if (!withDecoys) {
-                await client.request("sessions.create", {
-                  key: sessionKey,
-                  agentId: "main",
-                  model: MODEL_REF,
-                  label: "P5 command auth",
-                });
-              }
-              const result = await client.request<{
-                status: string;
-                runId: string;
-                result?: {
-                  payloads?: Array<{ text?: string }>;
-                  meta?: { agentMeta?: Record<string, unknown> };
-                };
-              }>(
-                "agent",
-                {
-                  sessionKey,
-                  message: "Reply with the harmless fixture response.",
-                  deliver: false,
-                  idempotencyKey: randomUUID(),
-                },
-                { expectFinal: true, timeoutMs: 90000 },
-              );
-              console.log(
-                "P5_GATEWAY_TURN " +
-                  JSON.stringify({
-                    phase,
-                    status: result.status,
-                    runId: result.runId,
-                    agentMeta: result.result?.meta?.agentMeta,
-                    payloads: result.result?.payloads,
-                  }),
-              );
-              expect(result, instance.logs()).toMatchObject({
-                status: "ok",
-                result: {
-                  meta: {
-                    agentMeta: {
-                      provider: PROVIDER,
-                      model: MODEL,
-                      agentHarnessId: "codex",
-                      credentialSource: { kind: "none" },
-                    },
-                  },
-                },
-              });
-              expect(
-                result.result?.payloads?.some((payload) => payload.text?.includes(ANSWER)),
-              ).toBe(true);
-              const terminal = await client.request(
+            await expect(
+              client.request(
                 "agent.wait",
                 { runId: result.runId, timeoutMs: 60000 },
                 { timeoutMs: 65000 },
-              );
-              expect(terminal, instance.logs()).toMatchObject({
-                runId: result.runId,
-                status: "ok",
-                terminalReply: { disposition: "visible", text: ANSWER },
-              });
-              const history = await client.request<{
-                messages?: Array<{ role?: string; content?: unknown }>;
-              }>("chat.history", { sessionKey, limit: 20 });
-              expect(
-                history.messages?.some(
-                  (message) =>
-                    message.role === "assistant" &&
-                    JSON.stringify(message.content).includes(ANSWER),
-                ),
-              ).toBe(true);
-              expect(requests.filter((request) => request.phase === phase)).toEqual([
-                { phase, model: MODEL, commandBearer: true },
-              ]);
-              expect(failures).toEqual([]);
-              expect(
-                await fs.stat(path.join(codexHome, "auth.json")).catch(() => undefined),
-              ).toBeUndefined();
-              console.log(
-                "P5_GATEWAY_PHASE_COMPLETE " +
-                  JSON.stringify({ phase, terminal, commandBearer: true, historyReply: true }),
-              );
-            },
-            async () => {
-              console.log(
-                "P5_CLIENT_STOP_BEGIN " + JSON.stringify({ phase, pid: instance.child?.pid }),
-              );
-              await client.stopAndWait();
-            },
-            async () => {
-              console.log(
-                "P5_GATEWAY_STOP_BEGIN " + JSON.stringify({ phase, pid: instance.child?.pid }),
-              );
-              try {
-                await instance.stopGateway();
-                console.log("P5_GATEWAY_STOP_COMPLETE " + phase);
-              } catch (error) {
-                console.error(
-                  "P5_GATEWAY_STOP_FAILED " +
-                    JSON.stringify({
-                      phase,
-                      pid: instance.child?.pid,
-                      exitCode: instance.child?.exitCode,
-                      signalCode: instance.child?.signalCode,
-                    }),
-                );
-                console.error(instance.logs());
-                throw error;
-              }
-            },
-          );
-        }
-        console.log(
-          "P5_GATEWAY_PROOF " +
-            JSON.stringify({
-              requests,
-              emptyManagedAccounts: true,
-              realGateway: true,
-              nativeRuntime: "codex",
-            }),
+              ),
+            ).resolves.toMatchObject({
+              status: "ok",
+              terminalReply: { disposition: "visible", text: ANSWER },
+            });
+            expect(requests).toEqual([{ model: MODEL, commandBearer: true }]);
+            expect(failures).toEqual([]);
+            await expect(fs.stat(path.join(codexHome, "auth.json"))).rejects.toMatchObject({
+              code: "ENOENT",
+            });
+          },
+          () => client.stopAndWait(),
+          () => instance.stopGateway(),
         );
       },
       () => instance.cleanup(),

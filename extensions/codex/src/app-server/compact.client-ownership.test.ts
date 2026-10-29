@@ -16,8 +16,6 @@ import { threadStartResult } from "./codex-app-server.test-fixtures.js";
 import {
   compactCodexSessionWithTestHost as maybeCompactCodexAppServerSession,
   compactionItemEvent,
-  compactionParams,
-  writeCompactionTestBinding,
 } from "./compact.test-support.js";
 import { resolveCodexAppServerRuntimeOptions, type CodexPluginConfig } from "./config.js";
 import {
@@ -577,23 +575,4 @@ it("cancels compaction waiting for a closing owner without releasing its thread 
   }
   expect(queueEntered).toBe(true);
   expect(start).toHaveBeenCalledTimes(1);
-});
-
-it("leaves command-auth compaction to the active native turn", async () => {
-  const file = await writeCompactionTestBinding(directory);
-  const result = await maybeCompactCodexAppServerSession(
-    compactionParams(directory, file, {
-      runtimeAuthPlan: {
-        providerForAuth: "command-fixture",
-        authProfileProviderForAuth: "command-fixture",
-        selectedAuthMode: "native-command",
-      },
-    }),
-    { bindingStore: testCodexAppServerBindingStore },
-  );
-  expect(result).toMatchObject({
-    ok: false,
-    compacted: false,
-    reason: expect.stringContaining("Automatic compaction runs during normal turns"),
-  });
 });

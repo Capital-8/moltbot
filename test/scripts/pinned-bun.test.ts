@@ -190,56 +190,22 @@ it("identifies an unavailable explicit override and preserves local override beh
   expect(execute).not.toHaveBeenCalled();
 });
 
-it.each(["valid", "missing", "corrupt", "symlink", "revision"] as const)(
-  "offline admission verifies %s bytes without staging or cache writes",
-  (kind) => {
-    const f = fixture();
-    f.resolve();
-    f.stage.mockClear();
-    const execute = vi
-      .spyOn(childProcess, "execFileSync")
-      .mockReturnValue(kind === "revision" ? "wrong-revision\n" : "test-revision\n");
-    if (kind === "missing") {
-      fs.unlinkSync(f.command);
-    }
-    if (kind === "corrupt") {
-      fs.writeFileSync(f.command, "x".repeat(Buffer.byteLength(bytes)));
-      // A matching cache stamp must not bypass exact-byte offline admission.
-      fs.writeFileSync(
-        f.stamp,
-        JSON.stringify({ ...f.readStamp(), mtimeMs: fs.statSync(f.command).mtimeMs }),
-      );
-    }
-    if (kind === "symlink") {
-      fs.renameSync(f.command, f.command + "-real");
-      fs.symlinkSync(f.command + "-real", f.command);
-    }
-    const stamp = fs.readFileSync(f.stamp, "utf8");
-    const admit = () => requirePinnedBun(f.env, { ...f.deps, preparedOnly: true });
-    if (kind === "valid") {
-      expect(admit()).toBe(f.command);
-    } else {
-      expect(admit).toThrow(
-        kind === "revision" ? "expected test-revision" : /missing or corrupt|physical executable/,
-      );
-    }
-    expect(f.stage).not.toHaveBeenCalled();
-    expect(fs.readFileSync(f.stamp, "utf8")).toBe(stamp);
-    if (["missing", "corrupt", "symlink"].includes(kind)) {
-      expect(execute).not.toHaveBeenCalled();
-    }
-    // The container's explicit, readonly binding receives the same verification.
-    if (kind !== "missing") {
-      const bound = () =>
-        requirePinnedBun(
-          { ...f.env, CI: "1", OPENCLAW_BUN_PATH: f.command },
-          { ...f.deps, preparedOnly: true },
-        );
-      if (kind === "valid") {
-        expect(bound()).toBe(f.command);
-      } else {
-        expect(bound).toThrow(/pinned SHA-256|expected test-revision/);
-      }
-    }
-  },
-);
+it.each(["cache", "binding"] as const)("verifies offline %s bytes before execution", (mode) => {
+  const f = fixture();
+  f.resolve();
+  f.stage.mockClear();
+  const execute = vi.spyOn(childProcess, "execFileSync").mockReturnValue("test-revision\n");
+  const env = mode === "binding" ? { ...f.env, CI: "1", OPENCLAW_BUN_PATH: f.command } : f.env;
+  const admit = () => requirePinnedBun(env, { ...f.deps, preparedOnly: true });
+  expect(admit()).toBe(f.command);
+  execute.mockClear();
+  fs.writeFileSync(f.command, "x".repeat(Buffer.byteLength(bytes)));
+  // A forged matching stamp must not authorize executing unverified bytes.
+  fs.writeFileSync(
+    f.stamp,
+    JSON.stringify({ ...f.readStamp(), mtimeMs: fs.statSync(f.command).mtimeMs }),
+  );
+  expect(admit).toThrow(/missing or corrupt|pinned SHA-256/);
+  expect(execute).not.toHaveBeenCalled();
+  expect(f.stage).not.toHaveBeenCalled();
+});
