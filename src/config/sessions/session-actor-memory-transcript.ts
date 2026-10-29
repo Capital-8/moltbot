@@ -155,7 +155,10 @@ export function createSessionActorMemoryTranscript(options: {
           ? undefined
           : input.options.expectedMutationAt,
         message: preparedMessage,
-        messageJson: JSON.stringify(preparedMessage),
+        messageJson:
+          preparedMessage === event.message
+            ? input.message.messageJson
+            : JSON.stringify(preparedMessage),
         eventId: event.id,
         parentId: event.parentId,
         now: Date.parse(event.timestamp),
@@ -266,9 +269,13 @@ export function createSessionActorMemoryTranscript(options: {
           throw new Error("Invalid serialized session transcript message");
         }
         const before = version();
+        const strippedMessage = stripTranscriptNativeInvocation(message);
         const appended = appendMessage({
-          message,
-          messageJson: JSON.stringify(stripTranscriptNativeInvocation(message)),
+          message: strippedMessage,
+          messageJson:
+            strippedMessage === message
+              ? append.input.messageJson
+              : JSON.stringify(strippedMessage),
           cwd: append.input.cwd,
           custody: append.input.pendingInput,
           fresh: append.input.freshMessageCheck

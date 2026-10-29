@@ -130,16 +130,20 @@ export function createSessionActorWithExecutor(params: {
       if (isRecord(message)) {
         copyInternalNativeInvocationStorage(input.append.input.message, message);
       }
-      captured.append.input.message.messageJson = JSON.stringify(
-        prepareTranscriptNativeInvocation(message),
-      );
+      const preparedMessage = prepareTranscriptNativeInvocation(message);
+      if (preparedMessage !== message) {
+        captured.append.input.message.messageJson = JSON.stringify(preparedMessage);
+      }
       copyInternalNativeInvocationStorage(
         input.append.input.message,
         captured.append.input.message,
       );
     } else if ("append" in captured && captured.append?.kind === "message") {
       const message: unknown = JSON.parse(captured.append.input.messageJson);
-      captured.append.input.messageJson = JSON.stringify(stripTranscriptNativeInvocation(message));
+      const strippedMessage = stripTranscriptNativeInvocation(message);
+      if (strippedMessage !== message) {
+        captured.append.input.messageJson = JSON.stringify(strippedMessage);
+      }
     }
     if (phase && captured.phaseId !== phase.id) {
       throw new Error("Session actor command belongs to another phase");

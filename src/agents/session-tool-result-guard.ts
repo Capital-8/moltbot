@@ -523,9 +523,10 @@ export function installSessionToolResultGuard(
   ): Generator<AppendRequest, string | undefined, AppendReceipt> {
     const captured = getInternalNativeInvocation(message);
     const origin =
+      captured !== undefined &&
       message.role === "toolResult" &&
       !message.isError &&
-      message.toolCallId === captured?.fact.toolCallId &&
+      message.toolCallId === captured.fact.toolCallId &&
       message.toolName === captured.fact.toolName
         ? captured
         : undefined;

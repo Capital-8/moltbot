@@ -223,7 +223,12 @@ export function prepareHydrationCancellation(input: {
       expect.soft(close).toHaveBeenCalledOnce();
       expect.soft(release).toHaveBeenCalledOnce();
       expect
-        .soft(await loadSqliteTrajectoryRuntimeEvents(input))
+        .soft(
+          await loadSqliteTrajectoryRuntimeEvents({
+            sessionId: input.sessionId,
+            storePath: input.storePath,
+          }),
+        )
         .toEqual([expect.objectContaining({ type: "hydration.accepted", source: "runtime" })]);
     },
     [Symbol.dispose]() {
