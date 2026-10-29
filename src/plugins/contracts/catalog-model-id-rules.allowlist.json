@@ -398,6 +398,11 @@
     "packages/ai/src/providers/google-shared.ts": [
       "gemini-2.5-pro"
     ],
+    "packages/ai/src/providers/mistral.ts": [
+      "mistral-medium-3-5",
+      "mistral-small-2603",
+      "mistral-small-latest"
+    ],
     "packages/ai/src/providers/openai-prompt-cache.ts": [
       "gpt-4.1",
       "gpt-5.4",

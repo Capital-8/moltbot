@@ -54,6 +54,12 @@ import {
 } from "./tool-result-text.js";
 import { getPublishedRuntimeToolInputSchema } from "./tool-schema-json-projection.js";
 
+const STANDALONE_REASONING_EFFORT_MODEL_IDS = new Set([
+  "mistral-small-2603",
+  "mistral-small-latest",
+  "mistral-medium-3-5",
+]);
+
 const MISTRAL_TOOL_CALL_ID_LENGTH = 9;
 
 // Bound compatible endpoints as well as the first-party streaming API.
@@ -568,11 +574,13 @@ export const streamSimpleMistral: StreamFunction<"mistral-conversations", Simple
   const reasoning = clampedReasoning === "off" ? undefined : clampedReasoning;
   const shouldUseReasoning = model.reasoning && reasoning !== undefined;
   const compat: unknown = model.compat;
-  const supportsReasoningEffort =
-    typeof compat === "object" &&
-    compat !== null &&
-    "supportsReasoningEffort" in compat &&
-    compat.supportsReasoningEffort === true;
+  const declared =
+    typeof compat === "object" && compat !== null && "supportsReasoningEffort" in compat
+      ? compat.supportsReasoningEffort === true
+      : undefined;
+  // Catalog rows declare effort support. Standalone package callers pass bare models with no
+  // row, so these released model IDs keep their shipped behavior there.
+  const supportsReasoningEffort = declared ?? STANDALONE_REASONING_EFFORT_MODEL_IDS.has(model.id);
 
   return streamMistral(model, context, {
     ...base,
