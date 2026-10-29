@@ -143,6 +143,7 @@
       "levanto-sage"
     ],
     "extensions/liquid-ai/decision-provider.ts": [
+      "d1",
       "d1-ultra"
     ],
     "extensions/longcat/doctor-contract-api.ts": [
@@ -314,6 +315,9 @@
     ],
     "extensions/team-reports/src/reports.fixtures.ts": [
       "gpt-5.6-luna"
+    ],
+    "extensions/tencent/index.ts": [
+      "hy3"
     ],
     "extensions/typesafe/src/client.ts": [
       "kev-latest"

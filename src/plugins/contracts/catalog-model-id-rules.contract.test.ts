@@ -12,7 +12,7 @@ import allowlist from "./catalog-model-id-rules.allowlist.json" with { type: "js
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const SKIPPED =
   /\.(?:test|spec|e2e|live)\.|test-(?:support|helpers?|harness|utils)|harness\.|\.d\.ts$|\.generated\.|\/fixtures\/|\/probes\//;
-const STRING_LITERAL = /["'`]([\w.:/[\]-]{4,})["'`]/g;
+const STRING_LITERAL = /["'`]([\w.:/[\]-]+)["'`]/g;
 
 function listFiles(pathspecs: string): string[] {
   const files = listGitTrackedFiles({ repoRoot, pathspecs });
