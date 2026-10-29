@@ -14,7 +14,7 @@ if (!output || process.platform !== "darwin" || process.arch !== "arm64") {
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-27-0";
 const deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
 const proof = {
-  kind: "stock-boot-default-stream-experiment-not-qualification",
+  kind: "stock-boot-normal-logging-experiment-not-qualification",
   targetSha: process.env.GITHUB_SHA,
   imageVersion: process.env.ImageVersion,
   nodeVersion: process.version,
@@ -66,10 +66,10 @@ async function command(bin, args, timeoutMs = 120_000, cleanup = false) {
     },
   });
   if (code !== 0) {
-    if (stage === "stream-policy") {
+    if (stage === "logging-policy") {
       // Fixed categories only; native errors may include private paths or device identities.
       const text = `${stdout}\n${stderr}`;
-      proof.streamPolicyFailure = {
+      proof.loggingPolicyFailure = {
         code,
         permissionDenied:
           /must be (?:run )?as root|must be root|requires root|not permitted|permission denied/iu.test(
@@ -167,10 +167,8 @@ try {
     }
     udid = created;
   });
+  await phase("logging-policy", () => command("xcrun", ["simctl", "logverbose", udid, "disable"]));
   await phase("boot", () => command("xcrun", ["simctl", "boot", udid]));
-  await phase("stream-policy", () =>
-    command("xcrun", ["simctl", "spawn", udid, "log", "config", "--mode", "stream:default"]),
-  );
   await phase("ready", () => command("xcrun", ["simctl", "bootstatus", udid, "-b"], 600_000));
   await phase("headroom", async () => {
     proof.headroom = await waitForIOSSimulatorHeadroom(controller.signal);
