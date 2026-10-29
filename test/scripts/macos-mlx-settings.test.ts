@@ -43,26 +43,106 @@ it.skipIf(process.platform === "win32")(
   "retains the original job clock across fresh Node owners",
   () => {
     const budgetURL = new URL("../../scripts/lib/native-ci-budget.mts", import.meta.url).href;
+    const original = execFileSync(
+      "python3",
+      ["-I", "-S", "-c", "import time; print(time.monotonic())"],
+      { encoding: "utf8", timeout: 5_000 },
+    ).trim();
+    expect(Number(original)).toBeGreaterThan(0);
     const program = `
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
 const {NativeCiBudget}=await import(${JSON.stringify(budgetURL)});
-const original=execFileSync('python3',['-I','-S','-c','import time; print(time.monotonic()-26*60)'],{encoding:'utf8'}).trim();
-const first=new NativeCiBudget(original);
-assert(first.timeout(120000)<61000);
-const second=new NativeCiBudget(original);
-assert(second.timeout(120000)<=first.timeout(120000)+100);
-assert(second.timeout(300000,true)<241000);
-assert.throws(()=>new NativeCiBudget('NaN'));
-assert.throws(()=>new NativeCiBudget(String(Number(original)-120)),/Invalid or exhausted/);
-console.log('original-clock-bounded');
+const budget=new NativeCiBudget(process.argv[1]);
+assert(budget.timeout(27*60*1000)<=27*60*1000);
+assert(budget.timeout(30*60*1000,true)<=30*60*1000);
+console.log(JSON.stringify({pid:process.pid,started:budget.started}));
 `;
-    expect(
-      execFileSync(process.execPath, ["--input-type=module", "-e", program], {
-        encoding: "utf8",
+    const launch = () =>
+      JSON.parse(
+        execFileSync(process.execPath, ["--input-type=module", "-e", program, original], {
+          encoding: "utf8",
+          timeout: 15_000,
+        }),
+      );
+    const first = launch();
+    const second = launch();
+    expect(first.started).toBe(original);
+    expect(second.started).toBe(original);
+    expect(second.pid).not.toBe(first.pid);
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "keeps the original clock when fresh owners approach exhaustion",
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-budget-"));
+    try {
+      const python = execFileSync(
+        "python3",
+        ["-I", "-S", "-c", "import sys; print(sys.executable)"],
+        {
+          encoding: "utf8",
+          timeout: 5_000,
+        },
+      ).trim();
+      const clock = path.join(root, "now");
+      const observed = path.join(root, "started");
+      // Execute the owner's actual sampler; only its clock reading is controlled.
+      fs.writeFileSync(
+        path.join(root, "python3"),
+        `#!${python}\nimport json,pathlib,sys,time\nassert sys.argv[1:4]==['-I','-S','-c']\nprogram=sys.argv[4]\nsys.argv=[sys.argv[0],*sys.argv[5:]]\nwith open(${JSON.stringify(observed)},'a') as output: output.write(json.dumps(sys.argv[1:])+'\\n')\ntime.monotonic=lambda:float(pathlib.Path(${JSON.stringify(clock)}).read_text())\nexec(compile(program,'<native-budget-sampler>','exec'))\n`,
+        { mode: 0o700 },
+      );
+      const budgetURL = new URL("../../scripts/lib/native-ci-budget.mts", import.meta.url).href;
+      const program = `
+import assert from 'node:assert/strict';
+import {performance} from 'node:perf_hooks';
+const {NativeCiBudget}=await import(${JSON.stringify(budgetURL)});
+const before=performance.now();
+const budget=new NativeCiBudget('2300');
+const work=budget.timeout(120000),cleanup=budget.timeout(300000,true);
+assert(budget.workEnd>=before+Number(process.argv[1])*1000);
+assert(budget.cleanupEnd>=before+Number(process.argv[2])*1000);
+assert(work>0&&work<=Number(process.argv[1])*1000);
+assert(cleanup>0&&cleanup<=Number(process.argv[2])*1000);
+console.log(JSON.stringify({pid:process.pid,started:budget.started,work,cleanup}));
+`;
+      const options = {
+        encoding: "utf8" as const,
+        env: { ...process.env, PATH: root + path.delimiter + process.env.PATH },
         timeout: 15_000,
-      }),
-    ).toContain("original-clock-bounded");
+      };
+      fs.writeFileSync(clock, "3860");
+      const first = JSON.parse(
+        execFileSync(
+          process.execPath,
+          ["--input-type=module", "-e", program, "60", "240"],
+          options,
+        ),
+      );
+      fs.writeFileSync(clock, "3861");
+      const second = JSON.parse(
+        execFileSync(
+          process.execPath,
+          ["--input-type=module", "-e", program, "59", "239"],
+          options,
+        ),
+      );
+      expect(first.started).toBe("2300");
+      expect(second.started).toBe(first.started);
+      expect(second.pid).not.toBe(first.pid);
+      const rejected = `import assert from 'node:assert/strict'; const {NativeCiBudget}=await import(${JSON.stringify(budgetURL)}); assert.throws(()=>new NativeCiBudget('NaN'),/Missing native job monotonic start/); assert.throws(()=>new NativeCiBudget('2180'),/Invalid or exhausted/);`;
+      execFileSync(process.execPath, ["--input-type=module", "-e", rejected], options);
+      expect(
+        fs
+          .readFileSync(observed, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line)),
+      ).toEqual([["2300"], ["2300"], ["2180"]]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   },
 );
 
