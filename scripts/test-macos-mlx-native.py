@@ -13,12 +13,14 @@ import selectors
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+import uuid
 
 
 STABLE = "8b18b5578f66eab1501cba4cef2310d88bfb9a41"  # v2026.10.9, not a moving release.
@@ -56,10 +58,20 @@ FOUNDATION_SOURCE = r'''import CryptoKit
 import Darwin
 import Foundation
 
+func darwinTemporaryDirectory() -> URL? {
+    let count = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
+    guard count > 1, count <= 4096 else { return nil }
+    var buffer = [CChar](repeating: 0, count: count)
+    guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, count) == count else { return nil }
+    return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+}
+
 // Keep Foundation's default auth/cache configuration and HF's delegate/task/move shape.
 final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate, @unchecked Sendable {
     let mode: String
     let root: URL
+    let platformTemporary: URL
+    let destination: URL
     let done = DispatchSemaphore(value: 0)
     var bytes = Data()
     var failure: String?
@@ -67,9 +79,11 @@ final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
     var redirects = 0
     var session: URLSession!
 
-    init(mode: String, root: URL) {
+    init(mode: String, root: URL, platformTemporary: URL, destination: URL) {
         self.mode = mode
         self.root = root.resolvingSymlinksInPath()
+        self.platformTemporary = platformTemporary.resolvingSymlinksInPath()
+        self.destination = destination
         self.result = ["mode": mode, "pid": Int(getpid()), "ok": false, "moved": false]
         super.init()
         result["homeRelation"] = relation(URL(fileURLWithPath: NSHomeDirectory()))
@@ -78,7 +92,9 @@ final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
 
     func relation(_ url: URL) -> String {
         let path = url.resolvingSymlinksInPath().path
-        return path == root.path || path.hasPrefix(root.path + "/") ? "owned" : "outside-owned"
+        if path == root.path || path.hasPrefix(root.path + "/") { return "owned" }
+        if path == platformTemporary.path || path.hasPrefix(platformTemporary.path + "/") { return "platform-temp" }
+        return "outside-owned"
     }
 
     func allowed(_ url: URL) -> Bool {
@@ -164,17 +180,27 @@ final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
         result["callbackRelation"] = relation(location)
         guard failure == nil, responseOK(downloadTask.response) else { return }
         do {
+            guard ["owned", "platform-temp"].contains(relation(location)) else {
+                failure = "callback-outside-admitted-staging"
+                return
+            }
             let attributes = try FileManager.default.attributesOfItem(atPath: location.path)
             guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == geteuid(),
                   (attributes[.size] as? NSNumber)?.intValue == 680 else {
                 failure = "callback-file-size-or-type"
                 return
             }
             guard identity(try Data(contentsOf: location)) else { return }
-            // HF moves the framework location inside this callback. Refuse an unowned destination.
-            let temporary = FileManager.default.temporaryDirectory
-            guard relation(temporary) == "owned" else { failure = "unowned-hf-destination"; return }
-            let destination = temporary.appendingPathComponent("hf-download-\(UUID().uuidString).tmp")
+            // HF moves the framework location into Foundation TEMP; TMPDIR may not redirect it.
+            // The parent knows this one destination before spawn and retires only it.
+            let temporary = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            guard temporary == platformTemporary,
+                  destination.deletingLastPathComponent() == temporary,
+                  !FileManager.default.fileExists(atPath: destination.path) else {
+                failure = "unowned-hf-destination"
+                return
+            }
             try FileManager.default.moveItem(at: location, to: destination)
             result["moved"] = true
         } catch {
@@ -206,6 +232,14 @@ final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
     }
 
     func run(_ url: URL) -> Int32 {
+        guard let nativeTemporary = darwinTemporaryDirectory(),
+              nativeTemporary.resolvingSymlinksInPath() == platformTemporary,
+              FileManager.default.temporaryDirectory.resolvingSymlinksInPath() == platformTemporary,
+              destination.deletingLastPathComponent() == platformTemporary else {
+            emit(["mode": mode, "pid": Int(getpid()), "ok": false, "failure": "platform-temp-preflight"])
+            return 1
+        }
+        result["platformTemporaryAgreement"] = true
         let original = URLSession(configuration: .default)
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -232,9 +266,21 @@ func emit(_ value: [String: Any]) {
 }
 
 let arguments = CommandLine.arguments
-guard arguments.count == 4, ["download", "data"].contains(arguments[1]),
+if arguments.count == 4, arguments[1] == "platform-temp" {
+    guard let temporary = darwinTemporaryDirectory(),
+          temporary.resolvingSymlinksInPath() == FileManager.default.temporaryDirectory.resolvingSymlinksInPath() else {
+        emit(["mode": "platform-temp", "pid": Int(getpid()), "ok": false])
+        exit(1)
+    }
+    // Quiet internal receipt only; the parent must never publish this private path.
+    emit(["mode": "platform-temp", "pid": Int(getpid()), "ok": true, "temporary": temporary.path])
+    exit(0)
+}
+guard arguments.count == 6, ["download", "data"].contains(arguments[1]),
       let url = URL(string: arguments[3]) else { exit(2) }
-let probe = Probe(mode: arguments[1], root: URL(fileURLWithPath: arguments[2]))
+let probe = Probe(mode: arguments[1], root: URL(fileURLWithPath: arguments[2]),
+                  platformTemporary: URL(fileURLWithPath: arguments[4], isDirectory: true),
+                  destination: URL(fileURLWithPath: arguments[5]))
 guard probe.allowed(url) else { exit(2) }
 exit(probe.run(url))
 '''
@@ -259,6 +305,31 @@ do {
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def require_hosted_ci():
+    require(sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true" and
+            os.environ.get("GITHUB_REPOSITORY") == "openclaw/openclaw" and
+            os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and
+            os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
+            "platform staging requires admitted canonical manual github-hosted macOS CI")
+
+
+def validate_platform_temp(path):
+    try:
+        path = Path(path)
+        info = path.lstat()
+        require(stat.S_ISDIR(info.st_mode), "platform temp is not a regular directory")
+        canonical = path.resolve(strict=True)
+        current = canonical.lstat()
+        require((current.st_dev, current.st_ino) == (info.st_dev, info.st_ino), "platform temp changed during validation")
+        info = current
+    except (OSError, ValueError, RuntimeError):
+        raise RuntimeError("platform temp directory metadata unavailable or invalid") from None
+    require(re.fullmatch(r"/private/var/folders/[^/]+/[^/]+/T", str(canonical)), "platform temp is not an exact Darwin user T directory")
+    require(os.geteuid() != 0 and info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o700,
+            "platform temp ownership or mode is not admitted")
+    return canonical
 
 
 def digest(path):
@@ -309,24 +380,16 @@ class Budget:
 
 
 class CaptureCustodyError(RuntimeError):
-    """Diagnostic availability must never hide an unretired owned process."""
+    """Diagnostic availability must never hide uncertain process or file custody."""
 
 
 class Child:
     """Own one process group and all three pipes, including on deadline failure."""
 
-    def __init__(self, argv, cwd, env, framed=False, quiet_limit=None):
+    def __init__(self, argv, cwd, env, framed=False, quiet_limit=None, owner=None):
         require(quiet_limit is None or (not framed and 0 < quiet_limit <= CAPTURE_LIMIT), "invalid quiet capture bound")
-        self.process = subprocess.Popen(
-            [str(x) for x in argv], cwd=cwd, env=env, stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, start_new_session=True,
-        )
-        self.group = self.process.pid
         self.selector = selectors.DefaultSelector()
-        for pipe, name in [(self.process.stdout, "stdout"), (self.process.stderr, "stderr")]:
-            os.set_blocking(pipe.fileno(), False)
-            self.selector.register(pipe, selectors.EVENT_READ, name)
-        os.set_blocking(self.process.stdin.fileno(), False)
+        self.ready = False
         self.framed = framed
         self.buffer = bytearray()
         self.events = []
@@ -337,6 +400,22 @@ class Child:
         self.quiet_limit = quiet_limit
         self.capture_overflow = False
         self.captured_bytes = 0
+        try:
+            self.process = subprocess.Popen(
+                [str(x) for x in argv], cwd=cwd, env=env, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, start_new_session=True,
+            )
+        except BaseException:
+            self.selector.close()
+            raise
+        self.group = self.process.pid
+        if owner is not None:
+            owner.append(self)  # Record actual spawn before fallible descriptor setup.
+        for pipe, name in [(self.process.stdout, "stdout"), (self.process.stderr, "stderr")]:
+            os.set_blocking(pipe.fileno(), False)
+            self.selector.register(pipe, selectors.EVENT_READ, name)
+        os.set_blocking(self.process.stdin.fileno(), False)
+        self.ready = True
 
     def pump(self, deadline):
         require(time.monotonic() < deadline, "child phase deadline exhausted")
@@ -394,7 +473,7 @@ class Child:
             return False
 
     def joined(self):
-        return self.process.poll() is not None and not self.selector.get_map() and not self.group_exists()
+        return self.process.poll() is not None and not self.selector.get_map() and not self.group_exists() and (self.ready or all(pipe.closed for pipe in [self.process.stdout, self.process.stderr]))
 
     def join(self, deadline):
         while not self.joined():
@@ -407,6 +486,20 @@ class Child:
         self.on_tick = None
         self.discard = True
         self.process.stdin.close()
+        if not self.ready:
+            # A failed constructor may have registered only some pipes. Retire the
+            # known group first, then close every owned endpoint without decoding.
+            for sig, seconds in [(signal.SIGTERM, 10), (signal.SIGKILL, 5)]:
+                if self.group_exists():
+                    os.killpg(self.group, sig)
+                deadline = min(cleanup_end, time.monotonic() + seconds)
+                while time.monotonic() < deadline and (self.process.poll() is None or self.group_exists()):
+                    time.sleep(0.01)
+            require(self.process.poll() is not None and not self.group_exists(), "partially initialized child group could not retire")
+            for pipe in [self.process.stdout, self.process.stderr]:
+                pipe.close()
+            self.selector.close()
+            return
         for sig, seconds in [(None, 15), (signal.SIGTERM, 10), (signal.SIGKILL, 5)]:
             if self.joined():
                 break
@@ -475,11 +568,12 @@ def foundation_record(raw, pid, mode):
     require(0 < len(raw) <= 4096, "invalid Foundation receipt size")
     value = json.loads(raw)
     require(isinstance(value, dict) and value.get("pid") == pid and value.get("mode") == mode and type(value.get("ok")) is bool, "invalid Foundation receipt identity")
-    allowed = {"mode", "pid", "ok", "moved", "homeRelation", "temporaryRelation", "callbackRelation", "status", "url", "acceptedBytes", "gitBlob", "failure", "redirects", "errors"}
+    allowed = {"mode", "pid", "ok", "moved", "homeRelation", "temporaryRelation", "callbackRelation", "platformTemporaryAgreement", "status", "url", "acceptedBytes", "gitBlob", "failure", "redirects", "errors"}
     require(value.keys() <= allowed, "unexpected Foundation receipt field")
     for key in ["homeRelation", "temporaryRelation", "callbackRelation"]:
-        require(key not in value or value[key] in ["owned", "outside-owned"], "invalid Foundation path relation")
-    failures = {"response-identity", "response-status-or-length", "accepted-length", "accepted-identity", "redirect-identity-or-limit", "retained-byte-limit", "download-progress-limit", "callback-file-size-or-type", "unowned-hf-destination", "callback-move-or-read", "native-task", "missing-download-callback", "task-deadline"}
+        require(key not in value or value[key] in ["owned", "platform-temp", "outside-owned"], "invalid Foundation path relation")
+    require("platformTemporaryAgreement" not in value or type(value["platformTemporaryAgreement"]) is bool, "invalid platform temp agreement")
+    failures = {"response-identity", "response-status-or-length", "accepted-length", "accepted-identity", "redirect-identity-or-limit", "retained-byte-limit", "download-progress-limit", "callback-file-size-or-type", "callback-outside-admitted-staging", "platform-temp-preflight", "unowned-hf-destination", "callback-move-or-read", "native-task", "missing-download-callback", "task-deadline"}
     require(value.get("failure") is None or value["failure"] in failures, "invalid Foundation failure class")
     for key in ["status", "acceptedBytes", "redirects"]:
         require(key not in value or (type(value[key]) is int and 0 <= value[key] <= (599 if key == "status" else 680 if key == "acceptedBytes" else 3)), "invalid Foundation numeric field")
@@ -492,6 +586,7 @@ def foundation_record(raw, pid, mode):
     for error in errors:
         require(isinstance(error, dict) and error.keys() == {"domain", "code"} and isinstance(error["domain"], str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", error["domain"]) and type(error["code"]) is int, "invalid Foundation error metadata")
     if value["ok"]:
+        require(value.get("platformTemporaryAgreement") is True, "Foundation temp was not admitted before request")
         require(value.get("status") == 200 and value.get("acceptedBytes") == 680 and value.get("gitBlob") == FILES["config.json"][1] and value.get("failure") is None and value.get("url") in urls, "incomplete Foundation success")
         require(mode != "download" or value.get("moved") is True, "missing Foundation callback move")
     return value
@@ -501,6 +596,8 @@ class Proof:
     def __init__(self, checkout, scratch, proof_dir, budget):
         self.checkout, self.scratch, self.proof_dir, self.budget = checkout, scratch, proof_dir, budget
         self.children = []
+        self.platform_temp = None
+        self.platform_destinations = []
         self.result = {
             "version": 1, "phases": [], "variants": {}, "requests": [], "complete": False,
             "generation": {"text": TEXT, "activeText": ACTIVE_TEXT, "defaultMaxTokensPerSentence": 1200, "parameterOverrides": False},
@@ -517,8 +614,7 @@ class Proof:
         print(f"[mlx-native] {name}", flush=True)
 
     def command(self, argv, seconds, cwd=None, env=None):
-        child = Child(argv, cwd or self.checkout, env or self.env)
-        self.children.append(child)
+        child = Child(argv, cwd or self.checkout, env or self.env, owner=self.children)
         try:
             code = child.join(self.budget.deadline(seconds))
             require(code == 0, f"{self.phase}: command failed (exit {code}): {child.stderr.decode(errors='replace')}")
@@ -528,8 +624,16 @@ class Proof:
 
     def quiet_capture(self, argv, seconds, env=None):
         started = time.time()
-        child = Child(argv, self.checkout, env or self.env, quiet_limit=CAPTURE_LIMIT)
-        self.children.append(child)
+        previous = len(self.children)
+        try:
+            child = Child(argv, self.checkout, env or self.env, quiet_limit=CAPTURE_LIMIT, owner=self.children)
+        except BaseException:
+            for spawned in self.children[previous:]:
+                try:
+                    spawned.retire(self.budget.cleanup_end)
+                except (RuntimeError, OSError):
+                    self.result["captureCustodyFailed"] = True
+            raise
         code, failure = None, None
         try:
             code = child.join(self.budget.deadline(seconds))
@@ -563,10 +667,84 @@ class Proof:
         except (RuntimeError, ValueError, TypeError, KeyError, OSError):
             return {"state": "unavailable", "records": []}
 
+    def admit_platform_temp(self, binary):
+        require_hosted_ci()  # Protected runner receipt precedes directory discovery and any grant.
+        home = self.scratch / "foundation-directory-home"
+        capture = self.quiet_capture([binary, "platform-temp", self.scratch, CONFIG_URL], 10,
+                                     env=self.isolated_env(home, home / "hf-hub"))
+        child = capture["child"]
+        require(capture["code"] == 0 and not capture["failure"] and not child.capture_overflow and child.joined(),
+                "native platform temp discovery unavailable")
+        value = json.loads(bytes(child.stdout))
+        require(isinstance(value, dict) and value.keys() == {"mode", "pid", "ok", "temporary"} and value["mode"] == "platform-temp" and
+                value["pid"] == child.process.pid and value["ok"] is True and isinstance(value["temporary"], str),
+                "native platform temp discovery identity mismatch")
+        self.platform_temp = validate_platform_temp(value["temporary"])
+        self.result["platformStaging"] = {
+            "runnerEnvironment": os.environ["RUNNER_ENVIRONMENT"], "event": "workflow_dispatch",
+            "repository": "openclaw/openclaw", "category": "platform-temp", "ownerMode": "0700",
+            "hostBasis": "protected github-hosted receipt; disposable per-job VM/account",
+            "ownerMatchesRunner": True, "exclusiveTaskDirectory": False, "aclIsolationProven": False,
+            "frameworkResiduals": "not enumerated or removed; retired with the documented job VM",
+        }
+
+    def cleanup_foundation_destination(self, pending, child, expected_created):
+        try:
+            require(child.joined(), "platform destination cleanup requires retired child")
+            path = pending["path"]
+            try:
+                before = path.lstat()
+            except FileNotFoundError:
+                require(not expected_created, "created platform destination disappeared")
+                pending["retired"] = True
+                return "not-created"
+            require(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid() and before.st_size == 680 and before.st_nlink == 1,
+                    "platform destination type, ownership or size mismatch")
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
+                opened = os.fstat(source.fileno())
+                require((opened.st_dev, opened.st_ino) == (before.st_dev, before.st_ino), "platform destination changed before verification")
+                data = source.read(681)
+            require(len(data) == 680 and hashlib.sha1(b"blob 680\0" + data).hexdigest() == FILES["config.json"][1], "platform destination identity mismatch")
+            current = path.lstat()
+            require((current.st_dev, current.st_ino) == (before.st_dev, before.st_ino), "platform destination changed before unlink")
+            path.unlink()  # Only the one parent-selected, identity-verified callback destination.
+            pending["retired"] = True
+            return "removed-verified-file"
+        except (RuntimeError, OSError):
+            self.result["platformCleanupFailed"] = True
+            raise CaptureCustodyError("platform destination custody unverified; retaining scratch") from None
+
     def foundation_attempt(self, binary, mode):
+        require_hosted_ci()
         home = self.scratch / ("foundation-" + mode + "-home")
         env = self.isolated_env(home, home / "hf-hub")
-        capture = self.quiet_capture(self.sandbox([binary, mode, self.scratch, CONFIG_URL], online=True), 30, env=env)
+        require(self.platform_temp is not None, "platform temp has not been admitted")
+        destination = self.platform_temp / ("hf-download-" + str(uuid.uuid4()) + ".tmp")
+        require(not destination.exists() and not destination.is_symlink(), "intended platform destination already exists")
+        argv = self.sandbox([binary, mode, self.scratch, CONFIG_URL, self.platform_temp, destination], online=True)
+        pending = {"path": destination, "retired": False}
+        self.platform_destinations.append(pending)
+        previous = len(self.children)
+        try:
+            capture = self.quiet_capture(argv, 30, env=env)
+        except BaseException as error:
+            record = {"mode": mode, "ok": False, "failure": "receipt-unavailable", "initialCaptureFailure": type(error).__name__, "destinationCleanup": "unverified"}
+            self.result.setdefault("foundationAdmission", {})["primary" if mode == "download" else "secondary"] = record
+            try:
+                spawned = self.children[previous:]
+                if spawned:
+                    require(all(child.joined() for child in spawned), "capture child custody unverified")
+                    record["destinationCleanup"] = self.cleanup_foundation_destination(pending, spawned[-1], False)
+                else:
+                    try:
+                        destination.lstat()
+                    except FileNotFoundError:
+                        pending["retired"] = True
+                        record["destinationCleanup"] = "no-child-no-file"
+                    require(pending["retired"], "unexpected destination without recorded child")
+            except (RuntimeError, OSError):
+                self.result["platformCleanupFailed"] = True
+            raise  # Keep the initial capture failure; unresolved custody remains explicit.
         capture["roots"] = {"probe-tmp": Path(env["TMPDIR"]), "probe-hf-cache": Path(env["HF_HUB_CACHE"]), "probe-hf-home": Path(env["HF_HOME"]), "probe-home": home}
         child = capture["child"]
         try:
@@ -579,6 +757,8 @@ class Proof:
         record["stderrPresent"] = bool(child.stderr)
         # Persist the native error before a diagnostic collector can fail custody.
         self.result.setdefault("foundationAdmission", {})["primary" if mode == "download" else "secondary"] = record
+        record["destinationCleanup"] = "unverified"
+        record["destinationCleanup"] = self.cleanup_foundation_destination(pending, child, record.get("moved") is True)
         if not record["ok"]:
             try:
                 record["sandboxDenials"] = self.denial_receipt(capture)
@@ -587,19 +767,27 @@ class Proof:
                 raise
         return record
 
-    def foundation_admission(self):
-        self.begin("Foundation-only native download admission; no helper/model proof")
+    def prepare_platform_staging(self):
+        require_hosted_ci()
         source, binary = self.scratch / "foundation-admission.swift", self.scratch / "foundation-admission"
         source.write_text(FOUNDATION_SOURCE)
+        compiled = self.quiet_capture(["swiftc", source, "-o", binary], 45)
+        require(compiled["code"] == 0 and not compiled["child"].capture_overflow and not compiled["failure"], "Foundation probe compilation unavailable or failed")
+        # Directory-only discovery is shared with full proof; it must not warm HTTP caches.
+        self.admit_platform_temp(binary)
+        return binary
+
+    def foundation_admission(self):
+        require_hosted_ci()
+        self.begin("Foundation-only native download admission; no helper/model proof")
         receipt = {
-            "probeSourceSHA256": digest(source), "url": CONFIG_URL,
+            "probeSourceSHA256": hashlib.sha256(FOUNDATION_SOURCE.encode()).hexdigest(), "url": CONFIG_URL,
             "acceptedBytes": 680, "expectedGitBlob": FILES["config.json"][1],
             "byteLimitClaim": "application retained/accepted bytes; cancellation does not cap in-flight transfer or Foundation internal buffers",
             "credit": "Foundation-only admission; no helper, inference, offline cache or settings compatibility proof",
         }
         self.result["foundationAdmission"] = receipt
-        compiled = self.quiet_capture(["swiftc", source, "-o", binary], 45)
-        require(compiled["code"] == 0 and not compiled["child"].capture_overflow and not compiled["failure"], "Foundation probe compilation unavailable or failed")
+        binary = self.prepare_platform_staging()
         # The primary target must not be warmed by a same-URL dataTask control.
         primary = self.foundation_attempt(binary, "download")
         receipt["primary"] = primary
@@ -709,20 +897,24 @@ class Proof:
     def sandbox(self, argv, online=False):
         profile = self.checkout / "scripts/macos-health-render.sb"
         if online:
+            require_hosted_ci()
+            require(self.platform_temp is not None and validate_platform_temp(self.platform_temp) == self.platform_temp,
+                    "online profile requires admitted platform temp")
             # Permit cold download without dropping the existing home/Keychain policy.
             source = profile.read_bytes()
             network_deny = b"(deny network*)\n"
             require(source.count(network_deny) == 1, "online profile requires exactly one network denial")
             profile = self.scratch / "online.sb"
-            profile.write_bytes(source.replace(network_deny, b"", 1))
+            profile.write_bytes(source.replace(network_deny, b"", 1) + b'\n(allow file-write* (subpath (param "PLATFORM_TEMP")))\n')
             self.result["coldIsolation"] = {
                 "profileSHA256": digest(profile),
                 "baseProfileSHA256": hashlib.sha256(source).hexdigest(),
                 "policy": "owned HF cache and narrow environment; original-home and named Keychain/IPC restrictions retained",
-                "hostAssumption": "disposable canonical org-CI account",
+                "hostAssumption": "protected github-hosted receipt; disposable canonical job VM/account",
                 "sharedOSStoreIsolationProven": False,
             }
-        return ["/usr/bin/sandbox-exec", "-D", "ORIGINAL_HOME=" + os.environ["HOME"], "-D", "REPO=" + str(self.checkout), "-D", "ISOLATED_ROOT=" + str(self.scratch), "-f", profile, *argv]
+        parameters = ["-D", "PLATFORM_TEMP=" + str(self.platform_temp)] if online else []
+        return ["/usr/bin/sandbox-exec", "-D", "ORIGINAL_HOME=" + os.environ["HOME"], "-D", "REPO=" + str(self.checkout), "-D", "ISOLATED_ROOT=" + str(self.scratch), *parameters, "-f", profile, *argv]
 
     def controls(self, variant):
         self.begin("offline sandbox network and Metal controls")
@@ -767,9 +959,8 @@ class Proof:
     def helper(self, name, variant, hub, offline=True):
         env = self.isolated_env(self.scratch / (name + "-home"), hub)
         argv = self.sandbox([variant[0]], online=not offline)
-        child = Child(argv, self.checkout, env, framed=True)
+        child = Child(argv, self.checkout, env, framed=True, owner=self.children)
         child.on_tick = self.cache_size
-        self.children.append(child)
         require(child.event(self.budget.deadline(30)) == {"type": "ready"}, "helper did not become ready")
         return child
 
@@ -898,6 +1089,7 @@ class Proof:
             return  # Deliberately do not mark the full native compatibility proof complete.
         fixed = self.build("fixed", self.checkout)
         if extended:
+            self.prepare_platform_staging()
             self.extended(fixed)
         self.result["complete"] = True
 
@@ -910,7 +1102,8 @@ class Proof:
                 joined = False
                 self.result.setdefault("cleanupErrors", []).append(str(error))
         self.result["processesAndPipesRetired"] = joined
-        removable = joined and not self.result.get("captureCustodyFailed", False)
+        self.result["platformDestinationsRetired"] = all(pending["retired"] for pending in self.platform_destinations)
+        removable = joined and self.result["platformDestinationsRetired"] and not self.result.get("captureCustodyFailed", False) and not self.result.get("platformCleanupFailed", False)
         if removable:
             shutil.rmtree(self.scratch)
         self.result["scratchRemoved"] = removable
@@ -919,7 +1112,7 @@ class Proof:
         payload = json.dumps(self.result, indent=2, sort_keys=True).replace(str(self.scratch), "<owned-scratch>").replace(str(self.checkout), "<checkout>").replace(os.environ["HOME"], "<runner-home>")
         require(len(payload.encode()) <= 128 * 1024, "native proof metadata exceeded artifact bound")
         (self.proof_dir / "native-proof.json").write_text(payload + "\n")
-        require(joined, "native proof cleanup is incomplete")
+        require(joined and self.result["platformDestinationsRetired"], "native proof cleanup is incomplete")
 
 
 def main():
@@ -931,7 +1124,8 @@ def main():
     args = parser.parse_args()
     require(not args.foundation_admission_only or args.extended, "Foundation admission-only requires extended admission")
     require(sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GITHUB_REPOSITORY") == "openclaw/openclaw", "native MLX proof requires disposable canonical macOS CI")
-    require(not args.extended or os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "extended model proof requires admitted manual CI")
+    if args.extended:
+        require_hosted_ci()
     runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
     proof_dir = args.proof_dir.resolve(strict=True)
     require(proof_dir.is_relative_to(runner_temp) and proof_dir != runner_temp and not args.proof_dir.is_symlink(), "proof directory is not owned runner scratch")

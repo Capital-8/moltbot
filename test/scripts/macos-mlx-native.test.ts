@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 // Exercise the stdlib driver with fake tools/frames, never models, Swift, or network.
 const program = String.raw`
-import base64, hashlib, importlib.util, io, json, os, signal, struct, sys, tempfile, time, unittest
+import base64, hashlib, importlib.util, io, json, os, signal, stat, struct, sys, tempfile, time, unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +22,17 @@ class DriverTests(unittest.TestCase):
         self.artifacts = self.root / "proof"
         self.artifacts.mkdir()
         self.proof = m.Proof(self.root, self.scratch, self.artifacts, m.Budget(time.monotonic()))
+        self.platform = self.root / "platform-T"
+        self.platform.mkdir()
+        self.proof.platform_temp = self.platform
+        self.real_hosted, self.real_platform = m.require_hosted_ci, m.validate_platform_temp
+        self.hosted_patch = patch.object(m,"require_hosted_ci")
+        self.platform_patch = patch.object(m,"validate_platform_temp",return_value=self.platform)
+        self.hosted_patch.start()
+        self.platform_patch.start()
+        self.addCleanup(self.hosted_patch.stop)
+        self.addCleanup(self.platform_patch.stop)
+        self.proof.admit_platform_temp = lambda binary: None
 
     def tearDown(self):
         self.proof.close()
@@ -39,6 +50,130 @@ class DriverTests(unittest.TestCase):
         for length in [0, m.FRAME_LIMIT + 1]:
             with self.assertRaisesRegex(RuntimeError, "frame length"):
                 m.decode_frames(bytearray(struct.pack(">I", length)))
+
+    def test_hosted_guard_refuses_before_discovery_compilation_or_profile_io(self):
+        admitted={"GITHUB_ACTIONS":"true","GITHUB_REPOSITORY":"openclaw/openclaw","GITHUB_EVENT_NAME":"workflow_dispatch","RUNNER_ENVIRONMENT":"github-hosted"}
+        with patch.object(m.sys,"platform","darwin"),patch.object(m,"require_hosted_ci",self.real_hosted):
+            for update in [{"RUNNER_ENVIRONMENT":""},{"RUNNER_ENVIRONMENT":"self-hosted"},{"GITHUB_REPOSITORY":"foreign/repo"},{"GITHUB_EVENT_NAME":"pull_request"}]:
+                with patch.dict(os.environ,{**admitted,**update}),patch.object(Path,"write_text",side_effect=AssertionError("unexpected IO")),patch.object(Path,"read_bytes",side_effect=AssertionError("unexpected profile IO")):
+                    with self.assertRaisesRegex(RuntimeError,"github-hosted"):
+                        self.proof.foundation_admission()
+                    with self.assertRaisesRegex(RuntimeError,"github-hosted"):
+                        self.proof.sandbox(["fixture"],online=True)
+            with patch.dict(os.environ,admitted):
+                self.real_hosted()
+
+    def test_platform_directory_validation_rejects_parent_cache_uid_mode_and_symlink(self):
+        good="/private/var/folders/ab/test-owned-user/T"
+        def validate(path,mode=stat.S_IFDIR|0o700,uid=501):
+            info=SimpleNamespace(st_mode=mode,st_uid=uid,st_dev=1,st_ino=2)
+            with patch.object(Path,"lstat",return_value=info),patch.object(Path,"resolve",return_value=Path(path)),patch.object(m.os,"geteuid",return_value=501):
+                return self.real_platform(path)
+        self.assertEqual(validate(good),Path(good))
+        for path in ["/tmp","/private/tmp","/private/var/folders/ab/test-owned-user","/private/var/folders/ab/test-owned-user/C","/private/var/folders/ab/test-owned-user/0"]:
+            with self.assertRaises(RuntimeError):validate(path)
+        for mode,uid in [(stat.S_IFLNK|0o700,501),(stat.S_IFREG|0o700,501),(stat.S_IFDIR|0o755,501),(stat.S_IFDIR|0o1700,501),(stat.S_IFDIR|0o700,502)]:
+            with self.assertRaises(RuntimeError):validate(good,mode,uid)
+        info=SimpleNamespace(st_mode=stat.S_IFDIR|0o700,st_uid=0,st_dev=1,st_ino=2)
+        with patch.object(Path,"lstat",return_value=info),patch.object(Path,"resolve",return_value=Path(good)),patch.object(m.os,"geteuid",return_value=0):
+            with self.assertRaises(RuntimeError):self.real_platform(good)
+
+    def test_platform_discovery_is_quiet_identity_bound_and_honestly_not_task_owned(self):
+        raw={"mode":"platform-temp","pid":99,"ok":True,"temporary":"/private/var/folders/ab/private-user/T"}
+        child=SimpleNamespace(process=SimpleNamespace(pid=99),joined=lambda:True,capture_overflow=False,stdout=json.dumps(raw).encode())
+        calls=[]
+        self.proof.quiet_capture=lambda argv,seconds,env: calls.append((argv,seconds,env)) or {"code":0,"failure":None,"child":child}
+        with patch.dict(os.environ,{"RUNNER_ENVIRONMENT":"github-hosted"}):
+            m.Proof.admit_platform_temp(self.proof,Path("fixture"))
+        self.assertEqual(calls[0][0][1],"platform-temp")
+        self.assertEqual(calls[0][1],10)
+        metadata=self.proof.result["platformStaging"]
+        self.assertEqual(metadata["runnerEnvironment"],"github-hosted")
+        self.assertFalse(metadata["exclusiveTaskDirectory"])
+        self.assertFalse(metadata["aclIsolationProven"])
+        self.assertNotIn("private-user",json.dumps(self.proof.result))
+
+    def test_destination_cleanup_verifies_only_exact_created_file_and_keeps_siblings(self):
+        target=self.platform/"hf-download-test.tmp"
+        sibling=self.platform/"framework-owned-other.tmp"
+        data=b"x"*680
+        target.write_bytes(data)
+        sibling.write_bytes(b"preserve")
+        pending={"path":target,"retired":False}
+        child=SimpleNamespace(joined=lambda:True)
+        expected=(680,hashlib.sha1(b"blob 680\0"+data).hexdigest())
+        with patch.dict(m.FILES,{"config.json":expected}):
+            self.assertEqual(self.proof.cleanup_foundation_destination(pending,child,True),"removed-verified-file")
+        self.assertTrue(pending["retired"])
+        self.assertFalse(target.exists())
+        self.assertEqual(sibling.read_bytes(),b"preserve")
+        self.assertEqual(self.proof.cleanup_foundation_destination({"path":target,"retired":False},child,False),"not-created")
+
+    def test_destination_unknown_identity_symlink_or_custody_retains_file(self):
+        target=self.platform/"hf-download-test.tmp"
+        target.write_bytes(b"wrong")
+        for child in [SimpleNamespace(joined=lambda:False),SimpleNamespace(joined=lambda:True)]:
+            pending={"path":target,"retired":False}
+            with self.assertRaises(m.CaptureCustodyError):
+                self.proof.cleanup_foundation_destination(pending,child,True)
+            self.assertFalse(pending["retired"])
+            self.assertTrue(target.exists())
+        target.unlink()
+        sibling=self.platform/"other"
+        sibling.write_bytes(b"preserve")
+        target.symlink_to(sibling)
+        with self.assertRaises(m.CaptureCustodyError):
+            self.proof.cleanup_foundation_destination({"path":target,"retired":False},SimpleNamespace(joined=lambda:True),True)
+        self.assertTrue(target.is_symlink())
+        self.assertEqual(sibling.read_bytes(),b"preserve")
+
+    def test_uncertain_platform_destination_blocks_secondary_and_scratch_removal(self):
+        self.proof.quiet_capture=lambda *args,**kwargs:{"code":0,"failure":None,"child":SimpleNamespace(capture_overflow=False)}
+        calls=[]
+        def attempt(binary,mode):
+            calls.append(mode)
+            self.proof.platform_destinations.append({"path":self.platform/"intended.tmp","retired":False})
+            raise m.CaptureCustodyError("fixture uncertain destination")
+        self.proof.foundation_attempt=attempt
+        with self.assertRaises(m.CaptureCustodyError):self.proof.foundation_admission()
+        self.assertEqual(calls,["download"])
+        with self.assertRaisesRegex(RuntimeError,"cleanup is incomplete"):self.proof.close()
+        self.assertFalse(self.proof.result["scratchRemoved"])
+        self.assertTrue(self.scratch.exists())
+        self.proof.platform_destinations[0]["retired"]=True
+
+    def test_sandbox_failure_has_no_phantom_child_or_destination_intent(self):
+        self.proof.sandbox=lambda *args,**kwargs: (_ for _ in ()).throw(RuntimeError("fixture sandbox failure"))
+        with self.assertRaisesRegex(RuntimeError,"fixture sandbox failure"):
+            self.proof.foundation_attempt(Path("fixture"),"download")
+        self.assertEqual(self.proof.children,[])
+        self.assertEqual(self.proof.platform_destinations,[])
+
+    def test_constructor_failure_before_spawn_preserves_initial_error_without_phantom_custody(self):
+        self.proof.sandbox=lambda argv,online:argv
+        with patch.object(m.subprocess,"Popen",side_effect=OSError("fixture no spawn")):
+            with self.assertRaisesRegex(OSError,"fixture no spawn"):
+                self.proof.foundation_attempt(Path("fixture"),"download")
+        self.assertEqual(self.proof.children,[])
+        self.assertTrue(all(p["retired"] for p in self.proof.platform_destinations))
+        self.assertEqual(self.proof.result["foundationAdmission"]["primary"]["destinationCleanup"],"no-child-no-file")
+
+    def test_postspawn_constructor_and_capture_failures_retire_actual_group_and_preserve_error(self):
+        self.proof.sandbox=lambda argv,online:[sys.executable,"-I","-S","-c","import time; time.sleep(30)"]
+        with patch.object(m.os,"set_blocking",side_effect=OSError("fixture descriptor failure")):
+            with self.assertRaisesRegex(OSError,"fixture descriptor failure"):
+                self.proof.foundation_attempt(Path("fixture"),"download")
+        self.assertTrue(self.proof.children[-1].joined())
+        self.assertFalse(self.proof.children[-1].ready)
+        def fail_join(child,deadline):
+            os.killpg(child.group,signal.SIGTERM)
+            raise OSError("fixture capture failure")
+        with patch.object(m.Child,"join",fail_join):
+            with self.assertRaisesRegex(OSError,"fixture capture failure"):
+                self.proof.foundation_attempt(Path("fixture"),"download")
+        self.assertTrue(all(child.joined() for child in self.proof.children))
+        self.assertTrue(all(p["retired"] for p in self.proof.platform_destinations))
+        self.assertEqual(self.proof.result["foundationAdmission"]["primary"]["initialCaptureFailure"],"OSError")
 
     def test_real_child_pipes_and_group_are_joined(self):
         source = "import sys; sys.stdout.buffer.write(bytes.fromhex('00000010')+b'{\"type\":\"ready\"}'); sys.stdout.flush()"
@@ -134,6 +269,7 @@ class DriverTests(unittest.TestCase):
         class FakeChild:
             failing=True
             def __init__(self,argv,*args,**kwargs):
+                kwargs["owner"].append(self)
                 args=[str(x) for x in argv]
                 self.log=args[0]=="/usr/bin/log"
                 mode="download" if "download" in args else "data" if "data" in args else None
@@ -162,9 +298,9 @@ class DriverTests(unittest.TestCase):
         FakeChild.failing=False
 
     def test_probe_receipt_rejects_foreign_pid_raw_fields_and_false_success(self):
-        receipt = {"pid":99,"mode":"download","ok":True,"moved":True,"status":200,"acceptedBytes":680,"gitBlob":m.FILES["config.json"][1],"url":m.CONFIG_URL}
+        receipt = {"pid":99,"mode":"download","ok":True,"moved":True,"platformTemporaryAgreement":True,"status":200,"acceptedBytes":680,"gitBlob":m.FILES["config.json"][1],"url":m.CONFIG_URL}
         self.assertEqual(m.foundation_record(json.dumps(receipt).encode(),99,"download"),receipt)
-        for update in [{"pid":98},{"headers":"private"},{"acceptedBytes":681},{"moved":False},{"url":m.CONFIG_URL+"?private=true"}]:
+        for update in [{"pid":98},{"headers":"private"},{"acceptedBytes":681},{"moved":False},{"platformTemporaryAgreement":False},{"url":m.CONFIG_URL+"?private=true"}]:
             with self.assertRaises(RuntimeError):
                 m.foundation_record(json.dumps({**receipt,**update}).encode(),99,"download")
 
@@ -191,7 +327,8 @@ class DriverTests(unittest.TestCase):
         self.assertIn("URLSession(configuration: original.configuration, delegate: self",source)
         self.assertIn("session.downloadTask(with: url)",source)
         self.assertIn("didFinishDownloadingTo location: URL",source)
-        self.assertLess(source.index('relation(temporary) == "owned"'),source.index("moveItem(at: location"))
+        self.assertLess(source.index("temporary == platformTemporary"),source.index("moveItem(at: location"))
+        self.assertLess(source.index('result["platformTemporaryAgreement"] = true'),source.index("URLSession(configuration: .default)"))
         self.assertLess(source.index("data.count <= 680 - bytes.count"),source.index("bytes.append(data)"))
         self.assertIn("totalBytesWritten <= 680",source)
         self.assertIn("callback-move-or-read",source)
@@ -200,7 +337,7 @@ class DriverTests(unittest.TestCase):
 
     def test_callback_failure_receipt_is_preserved_and_quiet(self):
         value={"pid":99,"mode":"download","ok":False,"failure":"callback-move-or-read","callbackRelation":"outside-owned","errors":[{"domain":"NSCocoaErrorDomain","code":513}]}
-        child=SimpleNamespace(process=SimpleNamespace(pid=99),capture_overflow=False,stdout=json.dumps(value).encode(),stderr=bytearray(b"private unsolicited Foundation stderr"))
+        child=SimpleNamespace(process=SimpleNamespace(pid=99),joined=lambda:True,capture_overflow=False,stdout=json.dumps(value).encode(),stderr=bytearray(b"private unsolicited Foundation stderr"))
         self.proof.quiet_capture=lambda *args,**kwargs: {"child":child,"code":1,"failure":None,"started":1,"ended":2}
         self.proof.denial_receipt=lambda capture: {"state":"unavailable","records":[]}
         profile=self.root/"scripts/macos-health-render.sb"
@@ -233,6 +370,29 @@ class DriverTests(unittest.TestCase):
         result=m.subprocess.run([sys.executable,"-I","-S",sys.argv[1],"--proof-dir",str(self.artifacts),"--started",str(time.monotonic()),"--foundation-admission-only"],capture_output=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn(b"requires extended",result.stderr)
+
+    def test_full_extended_admits_directory_before_online_controls_without_http_warmup(self):
+        calls=[]
+        self.proof.platform_temp=None
+        self.proof.verify_source=lambda *args: {"sha":"a"*40}
+        self.proof.build=lambda *args: calls.append("build") or {"fixture":"fixed"}
+        self.proof.quiet_capture=lambda *args,**kwargs: calls.append("compiler") or {"code":0,"failure":None,"child":SimpleNamespace(capture_overflow=False)}
+        def admit(binary):
+            calls.append("directory")
+            self.proof.platform_temp=self.platform
+        def controls(fixed):
+            self.assertEqual(self.proof.platform_temp,self.platform)
+            calls.append("controls")
+            raise RuntimeError("fixture reached admitted controls")
+        self.proof.admit_platform_temp=admit
+        self.proof.controls=controls
+        self.proof.foundation_attempt=lambda *args: self.fail("unexpected diagnostic HTTP warmup")
+        with patch.dict(os.environ,{"CHECKOUT_SHA":"a"*40,"GITHUB_RUN_ID":"1","GITHUB_RUN_ATTEMPT":"1","GITHUB_JOB":"fixture"}),patch.object(m.urllib.request,"urlopen",side_effect=AssertionError("unexpected model request")):
+            with self.assertRaisesRegex(RuntimeError,"reached admitted controls"):
+                self.proof.execute(True)
+        self.assertEqual(calls,["build","compiler","directory","controls"])
+        self.assertNotIn("foundationAdmission",self.proof.result)
+        self.assertFalse(self.proof.result["complete"])
 
     def test_decoder_failure_does_not_block_child_retirement(self):
         child = m.Child([sys.executable, "-I", "-S", "-c", "import time; time.sleep(30)"], self.root, dict(os.environ), framed=True)
@@ -277,14 +437,16 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(fetch[-2:], ["https://github.com/openclaw/openclaw.git", m.STABLE])
         self.assertTrue(all((snapshot / p).read_bytes() == data for p in m.INPUTS))
 
-    def test_online_profile_removes_only_network_denial(self):
+    def test_online_profile_grants_only_exact_admitted_platform_temp_and_offline_is_unchanged(self):
         profile = self.root / "scripts/macos-health-render.sb"
         profile.parent.mkdir()
         original = (Path(sys.argv[1]).parent / "macos-health-render.sb").read_bytes()
         profile.write_bytes(original)
         argv = self.proof.sandbox(["fixture-helper"], online=True)
         generated = Path(argv[argv.index("-f") + 1])
-        self.assertEqual(generated.read_bytes(), original.replace(b"(deny network*)\n", b"", 1))
+        self.assertEqual(generated.read_bytes(), original.replace(b"(deny network*)\n", b"", 1)+b'\n(allow file-write* (subpath (param "PLATFORM_TEMP")))\n')
+        self.assertIn("PLATFORM_TEMP="+str(self.platform),argv)
+        self.assertNotIn("PLATFORM_TEMP="+str(self.platform),self.proof.sandbox(["fixture-helper"]))
         self.assertEqual(profile.read_bytes(), original)
         self.assertFalse(self.proof.result["coldIsolation"]["sharedOSStoreIsolationProven"])
         self.assertEqual(self.proof.sandbox(["fixture-helper"])[-2], profile)
