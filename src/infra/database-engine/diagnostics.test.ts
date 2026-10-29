@@ -290,13 +290,13 @@ describe("physical store diagnostics", () => {
 
   it("admits current state content while its published header still fences an older updater", async () => {
     const input = await stateStore(15, OPENCLAW_STATE_SCHEMA_VERSION);
-    const descriptor = input.descriptor;
-    if (!descriptor) {
+    const stateDescriptor = input.descriptor;
+    if (!stateDescriptor) {
       throw new Error("State port descriptor is required");
     }
     {
       using db = openNodeSqliteDatabase(input.path!, { readOnly: true });
-      expect(() => descriptor.inspectSqliteSource!(db)).toThrow(
+      expect(() => stateDescriptor.inspectSqliteSource!(db)).toThrow(
         "Shared-state port requires the current schema",
       );
     }
