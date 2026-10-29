@@ -33,6 +33,10 @@ function observeReceipt(result: SessionGitHubPublicationResult) {
       return { ...base, status: result.status, code: result.code };
     case "needs_confirmation":
       throw new Error("Personal confirmation is not a shared observation.");
+    default: {
+      const unexpected: never = result;
+      throw new Error("Unknown publication receipt status", { cause: unexpected });
+    }
   }
 }
 
@@ -127,23 +131,26 @@ export async function readGitHubPublicationReadiness(
         observation = unavailable(source.cause);
       }
       const remedies: SessionGitHubReadinessResult["remedies"] = [];
-      if (observation.custody.kind === "unbound_workspace")
+      if (observation.custody.kind === "unbound_workspace") {
         remedies.push({ kind: "select_bound_session" });
-      else if (
+      } else if (
         observation.custody.kind === "changed" ||
         observation.custody.kind === "archived" ||
         observation.target.kind === "unsupported"
-      )
+      ) {
         remedies.push({ kind: "inspect_source" });
+      }
       if (
         request.kind === "observed" &&
         (request.receipt.status === "requested" || request.receipt.status === "publishing")
-      )
+      ) {
         remedies.push({ kind: "observe_request", requestId: request.receipt.requestId });
-      else if (request.kind === "unknown" && request.selectedRequestId)
+      } else if (request.kind === "unknown" && request.selectedRequestId) {
         remedies.push({ kind: "observe_request", requestId: request.selectedRequestId });
-      if (observation.custody.kind === "unknown" || request.kind === "unknown")
+      }
+      if (observation.custody.kind === "unknown" || request.kind === "unknown") {
         remedies.push({ kind: "retry_read" });
+      }
       assertAuthority();
       return { policy: { read: "admitted", write: "unknown" }, ...observation, request, remedies };
     },

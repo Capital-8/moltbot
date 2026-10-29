@@ -132,6 +132,7 @@ export type SessionExactEntriesWorkerRequest = (
   includeAuthorization?: boolean;
   /** Inspect authority facts without opening the original SQLite family. */
   preserveSourceArtifacts?: true;
+  inspectionSourcePath?: string;
   replacementSelection?: SessionEntryReplacementSelection;
   creationLabel?: string;
   continuation?: CanonicalSessionReaderContinuation;

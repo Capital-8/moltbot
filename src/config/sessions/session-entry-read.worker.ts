@@ -141,7 +141,15 @@ export function readExactSessionEntriesWithLifecycle(
   capturedDatabase?: OpenClawAgentReadOnlyDatabase,
 ): SessionExactEntriesWorkerResult {
   if (request.preserveSourceArtifacts) {
-    const { preserveSourceArtifacts: _, expectedIdentity, ...selection } = request;
+    const {
+      preserveSourceArtifacts: _,
+      expectedIdentity: admittedIdentity,
+      inspectionSourcePath,
+      ...selection
+    } = request;
+    // Cold sources are identified here, without opening or initializing the original database.
+    const expectedIdentity =
+      admittedIdentity ?? readDatabasePathIdentitySync(request.database.path);
     if (
       capturedDatabase ||
       !expectedIdentity?.key.startsWith("file:") ||
@@ -155,14 +163,27 @@ export function readExactSessionEntriesWithLifecycle(
     ) {
       throw new Error("Session authority inspection requires its admitted physical source");
     }
-    const assertOriginal = () =>
+    const assertOriginal = () => {
       assertExistingDatabaseIdentity(
         request.database.path,
         expectedIdentity.key,
         expectedIdentity.birthtime,
       );
+      if (inspectionSourcePath) {
+        const current = readDatabasePathIdentitySync(inspectionSourcePath);
+        if (
+          current.canonicalPath !== request.database.path ||
+          current.key !== expectedIdentity.key ||
+          current.birthtime !== expectedIdentity.birthtime
+        ) {
+          throw new Error("Session inspection locator changed after physical preparation");
+        }
+      }
+    };
     assertOriginal();
     const snapshot = prepareSqliteReadOnlyLocationSync(request.database.path, expectedIdentity);
+    let result: SessionExactEntriesWorkerResult;
+    let cleaned: boolean;
     try {
       const read = withArtifactPreservingStateReads(() =>
         withFreshOpenClawAgentDatabaseReadOnly(
@@ -182,11 +203,14 @@ export function readExactSessionEntriesWithLifecycle(
       );
       assertOriginal();
       if (!read.found) {
+        if (read.reason === "database-missing") {
+          throw new Error("Session entry read lost its captured physical owner");
+        }
         throw new SessionMetadataUnavailableError(read.reason);
       }
       // Keep the private reader's identity intact. The host binds this copy provenance
       // to its pre-dispatch source and retained writer publications before disclosure.
-      return {
+      result = {
         ...read.value,
         snapshotSource: {
           agentId: request.database.agentId,
@@ -196,10 +220,12 @@ export function readExactSessionEntriesWithLifecycle(
         },
       };
     } finally {
-      if (!snapshot.cleanup()) {
-        throw new Error("Session authority snapshot cleanup failed");
-      }
+      cleaned = snapshot.cleanup();
     }
+    if (!cleaned) {
+      throw new Error("Session authority snapshot cleanup failed");
+    }
+    return result;
   }
   if (request.sourceChecks) {
     return readSessionSourceChecks(request, capturedDatabase);
@@ -357,9 +383,7 @@ export function readExactSessionEntriesWithLifecycle(
       request.projection === "list"
         ? {
             kind: "session-exact-entries" as const,
-            ...(request.expectedIdentity
-              ? { source: captureSessionEntryReadSource(database, request.expectedIdentity) }
-              : {}),
+            source: captureSessionEntryReadSource(database, request.expectedIdentity),
             entries: readSelectedSessionEntriesInDatabase(database, request.sessionKeys ?? [], {
               continuation: request.continuation,
               ...(request.selection?.kind === "label" ? { label: request.selection.label } : {}),

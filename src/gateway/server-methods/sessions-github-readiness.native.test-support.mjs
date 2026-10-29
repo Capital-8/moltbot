@@ -1,4 +1,5 @@
-import { createRequire } from "node:module";
+import fs from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { getEnvironmentData, setEnvironmentData } from "node:worker_threads";
 
 const key = "openclaw.test.readinessNativeReads";
@@ -15,8 +16,25 @@ sqlite.DatabaseSync = new Proxy(sqlite.DatabaseSync, {
   construct(target, args, newTarget) {
     const database = Reflect.construct(target, args, newTarget);
     Atomics.add(counts, 0, 1);
-    if (database.location() === source) Atomics.add(counts, 1, 1);
+    if (database.location() === source) {
+      Atomics.add(counts, 1, 1);
+    }
     return database;
   },
 });
+const stat = fs.statSync;
+fs.statSync = function (...args) {
+  if (args[0] === source) {
+    Atomics.add(counts, 2, 1);
+  }
+  return Reflect.apply(stat, fs, args);
+};
+const realpath = fs.realpathSync.native;
+fs.realpathSync.native = function (...args) {
+  if (args[0] === source) {
+    Atomics.add(counts, 3, 1);
+  }
+  return Reflect.apply(realpath, fs.realpathSync, args);
+};
+syncBuiltinESMExports();
 await import(entry);

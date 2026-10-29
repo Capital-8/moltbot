@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getEnvironmentData, setEnvironmentData } from "node:worker_threads";
@@ -18,13 +20,36 @@ import { managedWorktrees } from "../../agents/worktrees/service.js";
 import { makeWorktreeRecord } from "../../agents/worktrees/service.test-support.js";
 import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
+import {
+  addSessionMember,
+  removeSessionMember,
+} from "../../config/sessions/session-sharing-store.js";
+import {
+  historyLane,
+  projectionLane,
+  targetDiscoveryLane,
+  rotateDatabaseWorkers,
+} from "../../config/sessions/session-transcript-worker-resources.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { OpenClawSchema } from "../../config/zod-schema.js";
+import { inspectDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
 import * as workerCpu from "../../infra/worker-cpu.js";
 import { withPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
 import { holdStateRead } from "../../state/github-publication-fixtures.test-support.js";
 import { repositoryRow } from "../../state/github-publication.worker.test-support.js";
-import { unregisterOpenClawAgentDatabase } from "../../state/openclaw-agent-db-registry.js";
+import {
+  registerOpenClawAgentDatabase,
+  unregisterOpenClawAgentDatabase,
+  readOpenClawAgentDatabaseRegistryToken,
+  listOpenClawRegisteredAgentDatabases,
+} from "../../state/openclaw-agent-db-registry.js";
+import * as agentResources from "../../state/openclaw-agent-db-resources.js";
 import { closeOpenClawAgentDatabasesAsync } from "../../state/openclaw-agent-db.js";
 import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
+import {
+  closeOpenClawStateDatabaseByPathAsync,
+  isOpenClawStateDatabaseOpen,
+} from "../../state/openclaw-state-db-cache.js";
 import { ensureGitHubPublicationSchema } from "../../state/openclaw-state-db-schema-additive.js";
 import {
   openOpenClawStateDatabase,
@@ -32,6 +57,7 @@ import {
 } from "../../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
 import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
+import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { closeStateDatabaseForTest } from "../../test-utils/database-cleanup.js";
 import * as oauth from "../github-oauth-lifecycle.js";
 import { digestGitHubPublicationRequest } from "../github-publication-receipt.js";
@@ -44,6 +70,7 @@ import { insertGitHubPublicationRequest } from "../github-publication-store.work
 import * as publicationTarget from "../github-publication-target.js";
 import { createGitHubPublicationCoordinator } from "../github-publication.js";
 import { repositoryGitHubPublicationDigest } from "../github-repository-publication.kernel.js";
+import { operatorSessionCap } from "../operator-role-policy.js";
 import { handleGatewayRequest } from "../server-methods.js";
 import { createContext } from "../server-plugin-in-process-dispatch.test-support.js";
 import { createWorkerSessionPlacementStore } from "../worker-environments/placement-store.js";
@@ -149,7 +176,9 @@ async function bind(origin = githubOrigin) {
   await git(root, "config", "user.email", "publication@example.invalid");
   await git(root, "config", "commit.gpgsign", "false");
   await git(root, "commit", "--allow-empty", "-m", "fixture");
-  if (origin) await git(root, "remote", "add", "origin", origin);
+  if (origin) {
+    await git(root, "remote", "add", "origin", origin);
+  }
   const repository = await managedWorktrees.resolveRepositoryIdentity(root);
   const worktree = makeWorktreeRecord(repository.repoRoot, randomUUID(), {
     path: root,
@@ -189,20 +218,20 @@ function seed(worktree: Awaited<ReturnType<typeof bind>>, key = sessionKey) {
     }),
   );
 }
-async function databaseArtifacts(additionalPaths: string[] = []) {
+async function databaseArtifacts(
+  paths = [resolveOpenClawStateSqlitePath(), resolveOpenClawAgentSqlitePath({ agentId: "main" })],
+) {
   const values: Record<string, string> = {};
-  for (const pathname of [
-    resolveOpenClawStateSqlitePath(),
-    resolveOpenClawAgentSqlitePath({ agentId: "main" }),
-    ...additionalPaths,
-  ]) {
+  for (const pathname of paths) {
     for (const suffix of ["", "-wal", "-shm", "-journal"]) {
       try {
         values[pathname + suffix] = createHash("sha256")
           .update(await fs.readFile(pathname + suffix))
           .digest("hex");
       } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+          throw error;
+        }
       }
     }
   }
@@ -220,8 +249,9 @@ it("observes an unbound source through the validated publisher and registered Ga
 });
 it("registers a separate source-qualified read for broad and internal operators", async () => {
   await fixture(async (f) => {
-    for (const internal of [false, true])
+    for (const internal of [false, true]) {
       expect(await observe(f, {}, internal)).toMatchObject(unbound);
+    }
   });
 });
 it("qualifies real managed Git, retains cached freshness, and never stages files", async () => {
@@ -404,8 +434,9 @@ it("keeps an absent shared database absent and does not manufacture an exact rec
   await fixture(async (f) => {
     await cold();
     const shared = resolveOpenClawStateSqlitePath();
-    for (const suffix of ["", "-wal", "-shm", "-journal"])
+    for (const suffix of ["", "-wal", "-shm", "-journal"]) {
       await fs.rm(shared + suffix, { force: true });
+    }
     const before = await databaseArtifacts();
     const requestId = randomUUID();
     expect((await observe(f, { requestId })).request).toEqual({
@@ -416,56 +447,120 @@ it("keeps an absent shared database absent and does not manufacture an exact rec
     expect(await databaseArtifacts()).toEqual(before);
   });
 });
-it.each(["connection", "grant", "session", "visibility", "source"] as const)(
-  "rejects post-await %s revocation instead of returning unknown",
-  async (kind) => {
-    await fixture(
-      async (f) => {
-        const grant = new AbortController();
-        f.client.internal = {
-          operatorAccessAuthority: {
-            signal: grant.signal,
-            assertCurrent: () => grant.signal.throwIfAborted(),
-          },
-        };
-        // Reacquire agent authority from a private snapshot. The live profile catalog
-        // keeps its existing shared-store admission for method-policy checks.
-        await closeOpenClawAgentDatabasesAsync();
-        const held = holdStateRead("githubPublications.sharedObservation");
-        const pending = call(f);
-        try {
-          await awaitGateBeforeSettlement(
-            held.ready,
-            pending,
-            "readiness returned before real receipt read",
+it.each([
+  "connection",
+  "profile",
+  "grant",
+  "session",
+  "visibility",
+  "source",
+  "registry-remove",
+  "published-replacement",
+  "registry-same",
+  "session-metadata",
+] as const)("checks post-await %s custody before observation", async (kind) => {
+  await fixture(
+    async (f) => {
+      const grant = new AbortController();
+      f.client.internal = {
+        operatorAccessAuthority: {
+          signal: grant.signal,
+          assertCurrent: () => grant.signal.throwIfAborted(),
+        },
+      };
+      // Reacquire agent authority from a private snapshot. The live profile catalog
+      // keeps its existing shared-store admission for method-policy checks.
+      await closeOpenClawAgentDatabasesAsync();
+      const original = resolveOpenClawAgentSqlitePath({ agentId: "main" });
+      const replacement = original + ".replacement";
+      if (kind === "published-replacement") {
+        await fs.copyFile(original, replacement);
+      }
+      const sourceWitness = vi.spyOn(
+        agentResources,
+        "registerOpenClawAgentDatabaseReadCandidateResource",
+      );
+      const registryToken = readOpenClawAgentDatabaseRegistryToken({ env: process.env });
+      const physicalSource = inspectDatabasePathIdentitySync(original);
+      const held = holdStateRead("githubPublications.sharedObservation");
+      const pending = call(f);
+      try {
+        await awaitGateBeforeSettlement(
+          held.ready,
+          pending,
+          "readiness returned before real receipt read",
+        );
+        if (kind === "connection") {
+          f.disconnect();
+        } else if (kind === "profile") {
+          f.client.authenticatedUserProfile = undefined;
+        } else if (kind === "grant") {
+          grant.abort();
+        } else if (kind === "source") {
+          await closeOpenClawAgentDatabasesAsync();
+        } else if (
+          kind === "registry-remove" ||
+          kind === "published-replacement" ||
+          kind === "registry-same"
+        ) {
+          expect(sourceWitness.mock.calls.some(([source]) => source.path === original)).toBe(true);
+          if (kind === "registry-same") {
+            registerOpenClawAgentDatabase({ agentId: "main", path: original });
+          } else if (kind === "registry-remove") {
+            unregisterOpenClawAgentDatabase({ agentId: "main", path: original });
+          } else {
+            await fs.rename(original, original + ".retired");
+            await fs.rename(replacement, original);
+            registerOpenClawAgentDatabase({ agentId: "main", path: original });
+          }
+        } else if (kind === "session-metadata") {
+          await upsertSessionEntryCore({ agentId: "main", sessionKey }, { label: "Changed title" });
+        } else if (kind === "visibility") {
+          await upsertSessionEntryCore({ agentId: "main", sessionKey }, { visibility: "draft" });
+        } else {
+          await upsertSessionEntryCore(
+            { agentId: "main", sessionKey },
+            { lifecycleRevision: randomUUID() },
           );
-          if (kind === "connection") f.disconnect();
-          else if (kind === "grant") grant.abort();
-          else if (kind === "source") await closeOpenClawAgentDatabasesAsync();
-          else if (kind === "visibility")
-            await upsertSessionEntryCore({ agentId: "main", sessionKey }, { visibility: "draft" });
-          else
-            await upsertSessionEntryCore(
-              { agentId: "main", sessionKey },
-              { lifecycleRevision: randomUUID() },
-            );
-          held.release();
-          expect((await pending)[0]).toBe(false);
-        } finally {
-          held.release();
-          await pending;
-          held.restore();
         }
-      },
-      {
-        personal: true,
-        scopes: ["operator.sessions.read"],
-        others: "view",
-        foreign: kind === "visibility",
-      },
-    );
-  },
-);
+        held.release();
+        const [ok, payload, error] = await pending;
+        if (kind.startsWith("registry-") || kind === "published-replacement") {
+          const registered = listOpenClawRegisteredAgentDatabases({ env: process.env }).some(
+            (row) => row.agentId === "main" && row.path === original,
+          );
+          const physicalUnchanged =
+            inspectDatabasePathIdentitySync(original)?.key === physicalSource?.key;
+          const registryAdvanced =
+            readOpenClawAgentDatabaseRegistryToken({ env: process.env }) !== registryToken;
+          expect(registryAdvanced).toBe(true);
+          expect(registered).toBe(kind !== "registry-remove");
+          expect(physicalUnchanged).toBe(kind !== "published-replacement");
+        }
+        if (kind === "registry-same" || kind === "session-metadata") {
+          expect(ok).toBe(true);
+          expect(payload).toMatchObject(unbound);
+          expect(error).toBeUndefined();
+        } else {
+          expect(ok).toBe(false);
+          expect(payload).toBeUndefined();
+          expect(error).toBeDefined();
+        }
+      } finally {
+        held.release();
+        await pending;
+        held.restore();
+        sourceWitness.mockRestore();
+      }
+    },
+    {
+      personal: true,
+      scopes: ["operator.sessions.read"],
+      others: "view",
+      foreign: kind === "visibility",
+    },
+  );
+});
 it("rejects incompatible fields and pending authentication without starting refresh", async () => {
   await fixture(async (f) => {
     for (const params of [
@@ -585,65 +680,249 @@ it("keeps native read denial ahead of source or receipt observation", async () =
   );
 });
 
-it.each(["custom.json", "shared.sqlite"])(
-  "preserves cold configured locator %s without registry ownership",
-  async (name) => {
-    await fixture(async (f) => {
-      const root = await fs.realpath(temporary.make("readiness-locator-"));
-      const storePath = path.join(root, name);
-      const databasePath = path.join(root, name.replace(/\.json$/, ".sqlite"));
-      const config = f.context.getRuntimeConfig();
-      setRuntimeConfigSnapshot({ ...config, session: { ...config.session, store: storePath } });
-      await upsertSessionEntryCore(
-        { agentId: "main", sessionKey, storePath },
-        { sessionId, updatedAt: 1 },
-      );
-      // A registered control proves the configured source reaches the real read surface.
-      expect(await observe(f)).toMatchObject(unbound);
-      await cold();
-      unregisterOpenClawAgentDatabase({ agentId: "main", path: databasePath });
-      await cold();
-      const before = await databaseArtifacts([databasePath]);
-      expect(before).toHaveProperty(databasePath);
-      expect(before[databasePath + "-wal"]).toBeUndefined();
-      expect(before[databasePath + "-shm"]).toBeUndefined();
-      const counts = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2));
-      const create = workerCpu.createCpuTrackedWorker;
-      const observer = vi
-        .spyOn(workerCpu, "createCpuTrackedWorker")
-        .mockImplementation((filename, options) => {
-          if (options?.eval) return create(filename, options);
-          const entry = typeof filename === "string" ? pathToFileURL(filename) : filename;
-          const key = "openclaw.test.readinessNativeReads";
-          const previous = getEnvironmentData(key);
-          setEnvironmentData(key, {
-            entry: entry.href,
-            source: databasePath,
-            counts: counts.buffer,
-          });
-          try {
-            return create(
-              new URL("./sessions-github-readiness.native.test-support.mjs", import.meta.url),
-              options,
-            );
-          } finally {
-            setEnvironmentData(key, previous);
-          }
-        });
-      try {
-        expect(await observe(f)).toMatchObject(unbound);
-        expect(await databaseArtifacts([databasePath])).toEqual(before);
-        expect(
-          Atomics.load(counts, 0),
-          "real worker SQLite opens must be observed",
-        ).toBeGreaterThan(0);
-        expect(Atomics.load(counts, 1), "readiness must open private images, not the source").toBe(
-          0,
+it.each([
+  ["custom.json", false],
+  ["shared.sqlite", false],
+  ["shared.sqlite", true],
+] as const)(
+  "preserves cold configured locator %s without registry ownership (roleReader=%s)",
+  async (name, roleReader) => {
+    await fixture(
+      async (f) => {
+        const root = await fs.realpath(temporary.make("readiness-locator-"));
+        const storePath = path.join(root, name);
+        const databasePath = path.join(root, name.replace(/\.json$/, ".sqlite"));
+        const config = f.context.getRuntimeConfig();
+        const readConfig = {
+          ...config,
+          session: { ...config.session, store: storePath },
+        };
+        OpenClawSchema.parse(readConfig);
+        setRuntimeConfigSnapshot(readConfig);
+        expect(operatorSessionCap(f.client, f.context.getRuntimeConfig())).toBe(
+          roleReader ? "view" : undefined,
         );
-      } finally {
-        observer.mockRestore();
-      }
-    });
+        const creator = roleReader
+          ? ensureProfileForEmail("other-publication-reader@example.test")
+          : undefined;
+        await upsertSessionEntryCore(
+          { agentId: "main", sessionKey, storePath },
+          {
+            sessionId,
+            updatedAt: 1,
+            ...(creator
+              ? {
+                  visibility: "read-only",
+                  createdActor: { type: "human", source: "profile", id: creator.id },
+                }
+              : {}),
+          },
+        );
+        if (roleReader) {
+          await addSessionMember(
+            { agentId: "main", sessionKey, storePath },
+            { identityId: f.client.authenticatedUserProfile!.profileId, addedBy: creator!.id },
+          );
+        }
+        // A registered control proves the configured source reaches the real read surface.
+        expect(await observe(f)).toMatchObject(unbound);
+        await closeOpenClawAgentDatabasesAsync();
+        // Cold database custody is not a whole-Gateway shutdown. Exact close drains
+        // shared handles/snapshots while preserving the already-booted reader pool.
+        if (!roleReader) {
+          await closeOpenClawStateDatabaseByPathAsync(resolveOpenClawStateSqlitePath());
+          expect(isOpenClawStateDatabaseOpen(resolveOpenClawStateSqlitePath())).toBe(false);
+        }
+        unregisterOpenClawAgentDatabase({ agentId: "main", path: databasePath });
+        await closeOpenClawAgentDatabasesAsync();
+        // Agent close releases database handles but may retain qualified idle Workers.
+        // Rotate the read lanes too: instrumentation must precede their next real imports.
+        for (const lane of [historyLane, projectionLane, targetDiscoveryLane]) {
+          await rotateDatabaseWorkers(lane);
+          expect(lane.native).toBe(false);
+          expect(lane.pending).toBe(0);
+        }
+        // The role-based profile catalog stays live; its shared-memory lock bytes are not a cold source.
+        const sourcePaths = roleReader
+          ? [databasePath]
+          : [
+              resolveOpenClawStateSqlitePath(),
+              resolveOpenClawAgentSqlitePath({ agentId: "main" }),
+              databasePath,
+            ];
+        expect(
+          listOpenClawRegisteredAgentDatabases({ env: process.env }).some(
+            (row) => row.path === databasePath,
+          ),
+        ).toBe(false);
+        const before = await databaseArtifacts(sourcePaths);
+        expect(before).toHaveProperty(databasePath);
+        expect(before[databasePath + "-wal"]).toBeUndefined();
+        expect(before[databasePath + "-shm"]).toBeUndefined();
+        const counts = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 4));
+        const create = workerCpu.createCpuTrackedWorker;
+        const observer = vi
+          .spyOn(workerCpu, "createCpuTrackedWorker")
+          .mockImplementation((filename, options) => {
+            if (options?.eval) {
+              return create(filename, options);
+            }
+            const entry = typeof filename === "string" ? pathToFileURL(filename) : filename;
+            const key = "openclaw.test.readinessNativeReads";
+            const previous = getEnvironmentData(key);
+            setEnvironmentData(key, {
+              entry: entry.href,
+              source: databasePath,
+              counts: counts.buffer,
+            });
+            try {
+              return create(
+                new URL("./sessions-github-readiness.native.test-support.mjs", import.meta.url),
+                options,
+              );
+            } finally {
+              setEnvironmentData(key, previous);
+            }
+          });
+        const hostReads: Record<string, string[]> = { cold: [], warm: [] };
+        let observation: "cold" | "warm" = "cold";
+        const stat = fsSync.statSync;
+        const realpath = fsSync.realpathSync.native;
+        const hostStat = vi.spyOn(fsSync, "statSync").mockImplementation((...args) => {
+          if (args[0] === databasePath) {
+            hostReads[observation]!.push(new Error("statSync").stack ?? "statSync");
+          }
+          return Reflect.apply(stat, fsSync, args);
+        });
+        const hostRealpath = vi
+          .spyOn(fsSync.realpathSync, "native")
+          .mockImplementation((...args) => {
+            if (args[0] === databasePath) {
+              hostReads[observation]!.push(new Error("realpathSync").stack ?? "realpathSync");
+            }
+            return Reflect.apply(realpath, fsSync.realpathSync, args);
+          });
+        const asyncStat = fs.stat;
+        const asyncRealpath = fs.realpath;
+        const hostAsyncStat = vi.spyOn(fs, "stat").mockImplementation((...args) => {
+          if (args[0] === databasePath) {
+            hostReads[observation]!.push(new Error("stat").stack ?? "stat");
+          }
+          return Reflect.apply(asyncStat, fs, args);
+        });
+        const hostAsyncRealpath = vi.spyOn(fs, "realpath").mockImplementation((...args) => {
+          if (args[0] === databasePath) {
+            hostReads[observation]!.push(new Error("realpath").stack ?? "realpath");
+          }
+          return Reflect.apply(asyncRealpath, fs, args);
+        });
+        syncBuiltinESMExports();
+        try {
+          expect(await observe(f)).toMatchObject(unbound);
+          observation = "warm";
+          expect(await observe(f)).toMatchObject(unbound);
+          hostStat.mockRestore();
+          hostRealpath.mockRestore();
+          hostAsyncStat.mockRestore();
+          hostAsyncRealpath.mockRestore();
+          syncBuiltinESMExports();
+          expect(await databaseArtifacts(sourcePaths)).toEqual(before);
+          expect(hostReads, "Gateway must not stat or realpath the original database").toEqual({
+            cold: [],
+            warm: [],
+          });
+          const nativeReadCounts = Array.from(counts);
+          if (roleReader) {
+            const member = f.client.authenticatedUserProfile!.profileId;
+            const scope = { agentId: "main", sessionKey, storePath };
+            // Prepare the existing writer after cold/warm measurements; preserve membership.
+            expect(
+              (await addSessionMember(scope, { identityId: member, addedBy: creator!.id }))
+                .inserted,
+            ).toBe(false);
+            for (const changed of ["member", "role", "scope"] as const) {
+              const held = holdStateRead("githubPublications.sharedObservation");
+              const pending = call(f);
+              try {
+                await awaitGateBeforeSettlement(
+                  held.ready,
+                  pending,
+                  "Role-based read returned before held observation",
+                );
+                if (changed === "member") {
+                  const removed = await removeSessionMember(scope, member);
+                  expect(removed?.identityId).toBe(member);
+                } else {
+                  const current = f.context.getRuntimeConfig();
+                  const roleConfig: OpenClawConfig = {
+                    ...current,
+                    gateway: {
+                      ...current.gateway,
+                      roles: {
+                        ...current.gateway?.roles,
+                        definitions: {
+                          ...current.gateway?.roles?.definitions,
+                          guest: {
+                            scopes: changed === "scope" ? [] : ["operator.sessions.read"],
+                            agents: ["main"],
+                            sessions: { others: changed === "role" ? "none" : "view" },
+                          },
+                        },
+                      },
+                    },
+                  };
+                  OpenClawSchema.parse(roleConfig);
+                  setRuntimeConfigSnapshot(roleConfig);
+                  expect(operatorSessionCap(f.client, f.context.getRuntimeConfig())).toBe(
+                    changed === "role" ? "none" : "view",
+                  );
+                }
+                held.release();
+                const [ok, payload, error] = await pending;
+                if (changed === "member") {
+                  // View grants non-draft reads independently of explicit membership.
+                  expect(ok).toBe(true);
+                  expect(payload).toMatchObject(unbound);
+                  expect(error).toBeUndefined();
+                } else {
+                  expect(ok).toBe(false);
+                  expect(payload).toBeUndefined();
+                  expect(error?.code).toBe("FORBIDDEN");
+                }
+              } finally {
+                held.release();
+                await pending;
+                held.restore();
+              }
+              setRuntimeConfigSnapshot(readConfig);
+              expect(operatorSessionCap(f.client, f.context.getRuntimeConfig())).toBe("view");
+            }
+          }
+          expect(nativeReadCounts[0], "real worker SQLite opens must be observed").toBeGreaterThan(
+            0,
+          );
+          expect(nativeReadCounts[1], "readiness must open private images, not the source").toBe(0);
+          expect(
+            nativeReadCounts[2],
+            "worker must inspect original source identity",
+          ).toBeGreaterThan(0);
+          expect(
+            nativeReadCounts[3],
+            "worker must resolve original source identity",
+          ).toBeGreaterThan(0);
+        } finally {
+          hostStat.mockRestore();
+          hostRealpath.mockRestore();
+          hostAsyncStat.mockRestore();
+          hostAsyncRealpath.mockRestore();
+          syncBuiltinESMExports();
+          observer.mockRestore();
+        }
+      },
+      roleReader
+        ? { personal: true, scopes: ["operator.sessions.read"], others: "view", foreign: true }
+        : {},
+    );
   },
 );
 
@@ -667,7 +946,7 @@ it.each(["requested", "publishing", "published", "failed"] as const)(
       if (status !== "requested") {
         const claim = claimGitHubPublicationExecutionFixture(row.request_id, "projection-fixture");
         const store = createGitHubPublicationExecutionStoreFixture("projection-fixture");
-        if (status === "published")
+        if (status === "published") {
           store.complete(claim, {
             requestId: row.request_id,
             status,
@@ -676,7 +955,7 @@ it.each(["requested", "publishing", "published", "failed"] as const)(
             branch: worktree.branch,
             headCommit: "a".repeat(40),
           });
-        else if (status === "failed")
+        } else if (status === "failed") {
           store.complete(claim, {
             requestId: row.request_id,
             status,
@@ -684,6 +963,7 @@ it.each(["requested", "publishing", "published", "failed"] as const)(
             message: "Private failure detail",
             nextAction: "Private recovery action",
           });
+        }
       }
       expect((await observe(f, { requestId: row.request_id })).request).toEqual({
         kind: "observed",

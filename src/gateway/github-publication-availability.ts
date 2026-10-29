@@ -19,12 +19,15 @@ import {
   readCapturedSessionActorEntry,
 } from "../config/sessions/session-actor-storage-binding.js";
 import { withSessionEntryReadOnlyInWorker } from "../config/sessions/session-entry-read-runtime.js";
+import type { CapturedSessionEntryReadSource } from "../config/sessions/session-entry-read-source.types.js";
 import type { SessionEntrySnapshotField } from "../config/sessions/session-entry-snapshot-values.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createStaleWhileRevalidateCache } from "../infra/stale-while-revalidate-cache.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { isArtifactPreservingStateRead } from "../state/artifact-preserving-state-reads.js";
 import { prepareGitHubPublicationSessionLifecycle } from "../state/github-publication-session-lifecycles.js";
+import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../state/openclaw-agent-db-contract.js";
+import { prepareOpenClawAgentDatabaseRegistrySnapshotRead } from "../state/openclaw-agent-db-registry-listing.js";
 import { registerOpenClawAgentDatabaseReadCandidateResource } from "../state/openclaw-agent-db-resources.js";
 import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
 import {
@@ -175,6 +178,7 @@ export async function prepareGitHubPublicationSession(
   let retained: ReturnType<typeof retainPreparedSessionEntryPredicate> | undefined;
   let active = true;
   let releaseSource: (() => void) | undefined;
+  let assertSourcePublication: (() => void) | undefined;
   const retire = () => {
     active = false;
     retained?.release();
@@ -194,12 +198,29 @@ export async function prepareGitHubPublicationSession(
       entry: readCapturedSessionActorEntry(memory, sessionKey),
     }));
   const retain = (
-    databaseIdentity: string,
+    source: CapturedSessionEntryReadSource | undefined,
     key: string,
     entry: PublicationSessionRead["entry"],
-    sourcePath: string,
   ) => {
+    if (typeof source?.databaseIdentity !== "string") {
+      return;
+    }
+    const { path: sourcePath, agentId: sourceAgentId } = source;
+    const databaseIdentity = `file:${source.databaseIdentity}`;
     if (isArtifactPreservingStateRead("agent", sourcePath)) {
+      // Registry publications carry physical facts; unrelated registrations are not revocation.
+      assertSourcePublication = prepareOpenClawAgentDatabaseRegistrySnapshotRead({}, (mutation) =>
+        mutation.sources.every(
+          (registered) =>
+            (registered.path !== sourcePath &&
+              registered.physicalPath !== sourcePath &&
+              registered.identity !== databaseIdentity) ||
+            (mutation.kind === "upsert" &&
+              registered.agentId === sourceAgentId &&
+              registered.identity === databaseIdentity &&
+              registered.schemaVersion === OPENCLAW_AGENT_SCHEMA_VERSION),
+        ),
+      ).assertCurrent;
       // Copied readers close before receipt observation; retain the original source's
       // native retirement signal independently of the entry's writer postimages.
       releaseSource = registerOpenClawAgentDatabaseReadCandidateResource({
@@ -231,14 +252,7 @@ export async function prepareGitHubPublicationSession(
           if (!read.ok) {
             throw read.error;
           }
-          if (typeof owner.source?.databaseIdentity === "string") {
-            retain(
-              `file:${owner.source.databaseIdentity}`,
-              storedKey,
-              read.value,
-              owner.source.path,
-            );
-          }
+          retain(owner.source, storedKey, read.value);
           return { agentId, canonicalKey: sessionKey, storePath, entry: read.value };
         },
       );
@@ -250,15 +264,11 @@ export async function prepareGitHubPublicationSession(
         projection,
         assertActive: options.assertCurrent,
         onSelected(target) {
-          const source = target.capturedReadSource;
-          if (source && typeof source.databaseIdentity === "string") {
-            retain(
-              `file:${source.databaseIdentity}`,
-              target.canonicalKey,
-              findCanonicalStoreMatch(target.store, target.storeKeys)?.entry,
-              source.path,
-            );
-          }
+          retain(
+            target.capturedReadSource,
+            target.canonicalKey,
+            findCanonicalStoreMatch(target.store, target.storeKeys)?.entry,
+          );
         },
       });
     }
@@ -275,6 +285,7 @@ export async function prepareGitHubPublicationSession(
     loaded,
     readCurrent: (): PublicationSessionRead => {
       options.assertCurrent?.();
+      assertSourcePublication?.();
       if (!active || (retained && !retained.isCurrent())) {
         throw new GitHubPublicationSessionChangedError();
       }

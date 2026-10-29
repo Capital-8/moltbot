@@ -3,6 +3,7 @@ import path from "node:path";
 import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import { resolveAgentSessionDirsFromAgentsDirSync } from "../../agents/session-dirs.js";
 import {
+  readDatabasePathIdentitySync,
   assertDatabasePathIdentity,
   assertExistingDatabaseIdentity,
 } from "../../infra/sqlite-worker-identity.js";
@@ -34,6 +35,7 @@ import { resolveStateDir } from "../state-dir.js";
 import type { OpenClawConfig } from "../types.openclaw.js";
 import { resolveAgentsDirFromSessionStorePath, resolveSessionStorePathCore } from "./paths.js";
 import { resolveSqliteAgentId } from "./session-accessor.sqlite-scope-helpers.js";
+import { encodeSessionTranscriptWorkerError } from "./session-history-worker-errors.js";
 import {
   listSqliteTargetCandidatePathsForSessionStorePath,
   resolveUnsuffixedSqliteTargetFromSessionStorePath,
@@ -52,6 +54,7 @@ import {
   type CapturedSessionStorePaths,
   type SessionStoreReadCandidate,
 } from "./session-store-read-candidates.js";
+import type { SessionHistoryWorkerInput } from "./session-transcript-worker.types.js";
 import {
   dedupeSessionStoreTargetsBySqliteTarget,
   type SessionStoreTarget,
@@ -72,6 +75,32 @@ import {
   resolveAllAgentSessionStoreTargetsSync,
   resolveConfiguredSessionStoreTargets,
 } from "./targets.js";
+
+export type SessionStoreTargetPreparationRequest =
+  | { storePath: string }
+  | { config: OpenClawConfig; agentIds: string[]; env: NodeJS.ProcessEnv };
+
+/** Only filesystem qualification runs before FIFO; content discovery remains ordered. */
+export function prepareSessionStoreTargetCandidates(request: SessionStoreTargetPreparationRequest) {
+  const inventory =
+    "storePath" in request
+      ? undefined
+      : prepareSessionStoreTargetInventory(request.config, request.agentIds, request.env);
+  const candidates = (
+    inventory?.candidates ??
+    captureSessionStoreReadCandidates("storePath" in request ? request.storePath : "")
+  ).map(({ path: pathname, physicalPath, scope, identity }) => ({
+    path: pathname,
+    physicalPath,
+    scope,
+    identity: scope ? identity : readDatabasePathIdentitySync(pathname),
+  }));
+  return {
+    kind: "session-target-prepare" as const,
+    candidates,
+    inventory: inventory && { ...inventory, candidates, preserveSourceArtifacts: true as const },
+  };
+}
 
 export type SessionStoreTargetReadRequest = {
   preserveSourceArtifacts?: true;
@@ -667,4 +696,25 @@ export function readSessionStoreTargetInventory(
     }
     throw error;
   }
+}
+
+export function readSessionStoreTargetWorkerRequest(
+  request: Extract<
+    SessionHistoryWorkerInput,
+    { kind: "session-target-prepare" | "session-store-target" }
+  >,
+) {
+  if (request.kind === "session-target-prepare") {
+    return prepareSessionStoreTargetCandidates(request.request);
+  }
+  request.request.env = cloneEnvWithPlatformSemantics(request.request.env);
+  const read = readSessionStoreTargetResult(request.request);
+  if (read.ok) {
+    return read.value;
+  }
+  const readError = encodeSessionTranscriptWorkerError(read.error);
+  if (!readError) {
+    throw read.error;
+  }
+  return { kind: "session-store-target" as const, readError };
 }
