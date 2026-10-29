@@ -718,9 +718,9 @@
   background: color-mix(in srgb, var(--media-bg) 6%, transparent);
 }
 
-/* Message attachments keep the raised surface used by sent attachment chips. */
+/* Full attachment cards sit close to the chat canvas, independently of sent chips. */
 :root .chat-bubble .chat-assistant-attachment-card {
-  --chat-attachment-surface: var(--chat-composer-surface, var(--popover));
+  --chat-attachment-surface: color-mix(in srgb, var(--text) 2.5%, var(--bg-content, var(--bg)));
 
   background: var(--chat-attachment-surface);
 }
