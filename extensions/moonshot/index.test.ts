@@ -152,6 +152,32 @@ describe("moonshot provider plugin", () => {
     },
   );
 
+  it.each([{ max: "max" }, {}])(
+    "keeps the shipped K3 contract for a configured partial map %j",
+    async (thinkingLevelMap) => {
+      const ref = { provider: "moonshot", modelId: "kimi-k3" };
+      expect(
+        provider.resolveThinkingProfile?.({ ...ref, reasoning: true, thinkingLevelMap }),
+      ).toEqual({
+        levels: [{ id: "max", label: "max" }],
+        defaultLevel: "max",
+        preserveWhenCatalogReasoningFalse: true,
+      });
+      const captured = createCapturedThinkingConfigStream();
+      const wrapped = provider.wrapStreamFn?.({
+        ...ref,
+        thinkingLevel: "off",
+        streamFn: captured.streamFn,
+      } as never);
+      await wrapped?.(
+        { ...makeModel("kimi-k3"), thinkingLevelMap } as Model<"openai-completions">,
+        { messages: [] } as Context,
+        {},
+      );
+      expect(captured.getCapturedPayload()).toMatchObject({ reasoning_effort: "max" });
+    },
+  );
+
   it("reads always-max thinking from a catalog row with no bundled entry", async () => {
     const facts = {
       thinkingLevelMap: { off: null, low: null, high: null, xhigh: "max", max: "max" },

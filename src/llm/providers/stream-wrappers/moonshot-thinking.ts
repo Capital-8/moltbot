@@ -67,7 +67,9 @@ function resolveAlwaysThinking(
   directMoonshotModel: boolean,
 ): MoonshotAlwaysThinking | undefined {
   let effort: string | undefined;
-  if (model.thinkingLevelMap) {
+  // A map that states `off` decides; one that omits it (a partial configured map) keeps the
+  // shipped contract for these IDs.
+  if (model.thinkingLevelMap && "off" in model.thinkingLevelMap) {
     if (model.thinkingLevelMap.off !== null) {
       return undefined;
     }

@@ -38,7 +38,11 @@ export function withMoonshotThinkingFacts<T extends MoonshotThinkingFacts>(
   const efforts = readEfforts(facts.compat) ?? readEfforts(row.compat);
   return {
     ...facts,
-    thinkingLevelMap: facts.thinkingLevelMap ?? row.thinkingLevelMap,
+    // Missing keys keep the bundled mapping (for example `off: null`); supplied keys win.
+    thinkingLevelMap:
+      row.thinkingLevelMap || facts.thinkingLevelMap
+        ? { ...row.thinkingLevelMap, ...facts.thinkingLevelMap }
+        : undefined,
     ...(efforts ? { compat: { ...facts.compat, supportedReasoningEfforts: efforts } } : {}),
   };
 }
