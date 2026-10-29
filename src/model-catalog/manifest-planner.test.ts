@@ -66,6 +66,42 @@ describe("manifest model catalog planner", () => {
     ]);
   });
 
+  it("fills thinking and compat facts a hosted row omits from the bundled row", () => {
+    const rows = planRows({
+      registry: catalog("host", {
+        models: [
+          {
+            id: "new-fact",
+            thinkingLevelMap: { off: null },
+            compat: { supportedReasoningEfforts: ["max"], maxTokensField: "max_tokens" },
+          },
+          { id: "hosted-wins", thinkingLevelMap: { off: null }, compat: { codeMode: "capable" } },
+        ],
+      }),
+      resolveRemoteProvider: () => ({
+        models: [
+          { id: "new-fact", compat: { maxTokensField: "max_completion_tokens" } },
+          {
+            id: "hosted-wins",
+            thinkingLevelMap: { high: "high" },
+            compat: { codeMode: "preferred" },
+          },
+        ],
+      }),
+    }).rows;
+    expect(rows.map(({ id, thinkingLevelMap, compat }) => [id, thinkingLevelMap, compat])).toEqual([
+      ["hosted-wins", { high: "high" }, expect.objectContaining({ codeMode: "preferred" })],
+      [
+        "new-fact",
+        { off: null },
+        expect.objectContaining({
+          supportedReasoningEfforts: ["max"],
+          maxTokensField: "max_completion_tokens",
+        }),
+      ],
+    ]);
+  });
+
   it("keeps bundled families under a hosted overlay, which cannot declare one", () => {
     const rows = planRows({
       registry: catalog("host", { models: [{ id: "listed", family: "openai" }, { id: "kept" }] }),
