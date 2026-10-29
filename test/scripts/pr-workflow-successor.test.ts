@@ -927,7 +927,25 @@ process.exit(result.status??1);
         [...f.args(), "--for-proof"],
         gitFault(f, phase),
       );
-      expect(result.status, result.stdout + result.stderr).not.toBe(0);
+      expect(result.error).toBeUndefined();
+      expect(result.signal).toBeNull();
+      expectExit(result, 1);
+      // The injected fault must complete through the native drain owner; an
+      // unrelated nonzero exit cannot prove the intended interruption boundary.
+      expect(result.stderr).toContain(
+        "its process group and every notification-pipe holder exited.",
+      );
+      const reached = readFileSync(join(f.root, "fault-reached"), "utf8");
+      if (phase === "lock race") {
+        const trace = JSON.parse(reached);
+        expect(trace.transactionExit).toBeGreaterThan(0);
+        expect(trace.replacement).not.toBe(trace.admitted);
+        expect(f.git(f.repo, "rev-parse", lockRef)).toBe(trace.replacement);
+      } else {
+        expect(reached).toBe(phase);
+        expect(result.stderr).toContain(`fixture ${phase} interruption`);
+        expect(f.git(f.repo, "for-each-ref", "--format=%(refname)", lockRef)).toBe("");
+      }
       f.expectSnapshot(before);
       expect(f.git(f.repo, "rev-parse", "topic")).toBe(f.incoming);
       const next = f.git(f.repo, "rev-parse", bindingRef);
