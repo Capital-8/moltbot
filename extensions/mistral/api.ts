@@ -1,14 +1,5 @@
 import { asOptionalObjectRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import manifest from "./openclaw.plugin.json" with { type: "json" };
 import { resolveMistralReasoningEffortMap } from "./provider-policy-api.js";
-
-// Configured routes (for example a proxy base URL) may list a bundled model without its map;
-// the bundled row still owns that model's reasoning-effort facts.
-const BUNDLED_THINKING_MAPS: ReadonlyMap<string, Partial<Record<string, string | null>>> = new Map(
-  manifest.modelCatalog.providers.mistral.models.flatMap((row) =>
-    "thinkingLevelMap" in row && row.thinkingLevelMap ? [[row.id, row.thinkingLevelMap]] : [],
-  ),
-);
 
 export { buildMistralProvider } from "./provider-catalog.js";
 export {
@@ -35,9 +26,7 @@ export function resolveMistralCompatPatch(model: {
   id?: string;
   thinkingLevelMap?: Partial<Record<string, string | null>>;
 }) {
-  const reasoningEffortMap = resolveMistralReasoningEffortMap(
-    model.thinkingLevelMap ?? (model.id ? BUNDLED_THINKING_MAPS.get(model.id) : undefined),
-  );
+  const reasoningEffortMap = resolveMistralReasoningEffortMap(model.thinkingLevelMap, model.id);
   return {
     ...MISTRAL_MODEL_TRANSPORT_PATCH,
     supportsReasoningEffort: reasoningEffortMap !== undefined,

@@ -67,6 +67,17 @@ describe("applyMistralModelCompat", () => {
     });
   });
 
+  it("keeps the reasoning profile for a configured row that omits the bundled map", async () => {
+    const provider = await registerSingleProviderPlugin(mistralPlugin);
+    const profile = provider.resolveThinkingProfile?.({
+      provider: "mistral",
+      modelId: MISTRAL_SMALL_LATEST_ID,
+      reasoning: true,
+    });
+    expect(profile?.levels.map(({ id }) => id)).toContain("max");
+    expect(profile?.defaultLevel).toBe("off");
+  });
+
   it("overrides explicit compat values that would trigger 422s", () => {
     const normalized = applyMistralModelCompat({
       id: "mistral-large-latest",
