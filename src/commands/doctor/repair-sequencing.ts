@@ -7,6 +7,7 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { HealthFinding } from "../../flows/health-checks.js";
 import {
+  DEFERRED_UPDATE_MODEL_RETIREMENT_WARNING,
   hasDeferredUpdateModelRetirement,
   recordUpdateModelRetirement,
 } from "../../infra/update-deferred-model-retirement.js";
@@ -41,6 +42,7 @@ import {
   type DoctorConfigMutationState,
 } from "./shared/config-mutation-state.js";
 import { maybeRepairContextEngineHostCompatibility } from "./shared/context-engine-host-compat.js";
+import { maybeRepairContextEnginePluginIdSelector } from "./shared/context-engine-plugin-id-selector.js";
 import { scanEmptyAllowlistPolicyWarnings } from "./shared/empty-allowlist-scan.js";
 import { maybeRepairExecSafeBinProfiles } from "./shared/exec-safe-bins.js";
 import {
@@ -51,6 +53,7 @@ import {
 import { maybeRepairInvalidPluginConfig } from "./shared/invalid-plugin-config.js";
 import type { BlockedLegacyOpenAICodexProviderPlan } from "./shared/legacy-config-migrations.runtime.models.js";
 import { repairMissingConfiguredPluginInstalls } from "./shared/missing-configured-plugin-install.js";
+import { prepareExplicitModelReplacement } from "./shared/model-replacement-preparation.js";
 import { maybeRepairOpenPolicyAllowFrom } from "./shared/open-policy-allowfrom.js";
 import {
   resolveConfigWideDoctorPluginMetadataSnapshot,
@@ -68,6 +71,7 @@ import { isUpdatePackageSwapInProgress } from "./shared/update-phase.js";
 export async function runDoctorRepairSequence(params: {
   state: DoctorConfigMutationState;
   doctorFixCommand: string;
+  modelReplacements?: readonly import("./shared/model-replacement.js").DoctorModelReplacement[];
   installedPluginIdRecovery?: InstalledPluginIdRecovery;
   env?: NodeJS.ProcessEnv;
   blockedCodexProviderPlan?: BlockedLegacyOpenAICodexProviderPlan;
@@ -211,6 +215,12 @@ export async function runDoctorRepairSequence(params: {
       cfg: state.candidate,
       env,
     });
+  // Host compatibility must inspect the engine the selector repair resolves, not a stale plugin ID.
+  applyMutation(
+    runWithCurrentPluginMetadata(() =>
+      maybeRepairContextEnginePluginIdSelector(state.candidate, env),
+    ),
+  );
   applyMutation(
     await runWithCurrentPluginMetadata(() =>
       maybeRepairContextEngineHostCompatibility({
@@ -368,7 +378,17 @@ export async function runDoctorRepairSequence(params: {
   if (pluginInstallRepairConverged) {
     // Route retirement reads canonical credentials. Finish auth migration first,
     // and preserve model refs while configured plugin installation needs a retry.
+    if (params.modelReplacements?.length) {
+      appendRepairNotes(
+        await prepareExplicitModelReplacement({
+          cfg: state.candidate,
+          env,
+          choices: params.modelReplacements,
+        }),
+      );
+    }
     const modelRepair = repairStaleAgentModelRefs(state.candidate, {
+      modelReplacements: params.modelReplacements,
       env,
       pluginMetadataSnapshot: pluginMetadataSnapshotState.current,
     });
@@ -378,7 +398,7 @@ export async function runDoctorRepairSequence(params: {
       modelRepair.warnings.length === 0 && hasDeferredUpdateModelRetirement(env);
   } else if (packageSwapInProgress) {
     recordUpdateModelRetirement("deferred", env);
-    warningNotes.push("Model retirement deferred until configured plugin installation converges.");
+    warningNotes.push(DEFERRED_UPDATE_MODEL_RETIREMENT_WARNING);
   }
   const authProfilesRepaired =
     authFieldRepair.changes.length > 0 ||

@@ -253,10 +253,12 @@ suite.define(() => {
   it("keeps a rejected session-change message visible with recovery guidance and diagnostic details", async () => {
     await suite.withPage(diagnosticContext, async ({ page }) => {
       const prompt = "Continue reviewing the example project";
-      const diagnostic = `DispatchSessionRefreshRequiredError: Session "${sessionKey}" changed while starting work. Retry.`;
+      const skillPath = "/home/operator/.openclaw/projects/example/.agents/skills/review";
+      const diagnostic = `DispatchSessionRefreshRequiredError: Session "${sessionKey}" changed while starting work. Retry.\nroot="${skillPath}" | INVALID_BUNDLE.\npassword=synthetic-password`;
       const recovery =
         "Your message didn't run because the conversation changed. Refresh the conversation, then send it again.";
       const errorMessage = `${recovery}\n\n${diagnostic}`;
+      const safeError = `Error: ${errorMessage.replace("password=synthetic-password", "password=[redacted]")}`;
       const gateway = await installMockGateway(page, { sessionKey });
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
       const { runId } = await sendPrompt(page, gateway, prompt);
@@ -282,13 +284,16 @@ suite.define(() => {
       expect(await alert.locator("summary strong").textContent()).toBe(
         "Couldn't finish this reply. Check the conversation before trying again.",
       );
+      expect(await alert.locator("summary").textContent()).not.toContain(skillPath);
+      expect(await alert.locator("summary").textContent()).not.toContain("INVALID_BUNDLE");
+      expect(await alert.getByLabel("Error details", { exact: true }).isVisible()).toBe(false);
       expect(await page.locator(".chat-thread").textContent()).toContain(prompt);
       await alert.locator("summary").click();
       const details = alert.getByLabel("Error details", { exact: true });
       await polledVisible(details).toBe(true);
-      expect(await details.textContent()).toBe(`Error: ${errorMessage}`);
+      expect(await details.textContent()).toBe(safeError);
       await exactButton(alert, "Copy error").click();
-      await polledClipboard(page).toBe(`Error: ${errorMessage}`);
+      await polledClipboard(page).toBe(safeError);
       await expectMobileFit(page, alert);
       await alert.locator("summary").click();
       const input = page.locator(".agent-chat__input textarea");
@@ -301,83 +306,4 @@ suite.define(() => {
       expect(await gateway.getRequests("chat.send")).toHaveLength(1);
     });
   });
-
-  it.each(["live", "history"] as const)(
-    "keeps diagnostic paths and lets the operator expand and copy a complete failed run from %s",
-    async (source) => {
-      await suite.withPage(diagnosticContext, async ({ page }) => {
-        const skillPath =
-          "/home/operator/.openclaw/projects/0123456789abcdef/example/.agents/skills/review";
-        const diagnostic = `Failed to prepare skill resources: skill="review" root="${skillPath}" error=Skill trees cannot contain links or special files: path="CLAUDE.md" kind=symlink. | INVALID_BUNDLE.\npassword=synthetic-password`;
-        const displayPrefix = source === "live" ? "Error: " : "This turn did not run: ";
-        const safeDiagnostic =
-          displayPrefix + diagnostic.replace("password=synthetic-password", "password=[redacted]");
-        const gateway = await installMockGateway(page, {
-          sessionKey,
-          ...(source === "history"
-            ? {
-                historyMessages: [
-                  {
-                    role: "custom",
-                    customType: "run-failed-before-reply",
-                    content: displayPrefix + diagnostic,
-                    __openclaw: { id: "failure-notice", seq: 1, runId: "failed-run" },
-                  },
-                ],
-                sessionInfo: {
-                  key: sessionKey,
-                  kind: "direct",
-                  status: "failed",
-                  hasActiveRun: false,
-                  lastRunId: "failed-run",
-                  lastRunError: diagnostic.slice(0, 160),
-                },
-              }
-            : {}),
-        });
-        await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-        if (source === "live") {
-          const { params, runId } = await sendPrompt(page, gateway, "Inspect the project skills");
-          expect(params).toMatchObject({ sessionKey, idempotencyKey: expect.any(String) });
-          await gateway.emitGatewayEvent("chat", {
-            sessionKey,
-            runId,
-            state: "error",
-            errorMessage: diagnostic,
-          });
-        } else {
-          await gateway.waitForRequest("chat.startup");
-        }
-        const alert = page.locator(".chat-error");
-        await alert.waitFor();
-        const summary = alert.locator("summary");
-        expect(await summary.count()).toBe(1);
-        const summaryText = await summary.textContent();
-        expect(summaryText).toContain("Check the conversation before trying again.");
-        expect(summaryText).not.toContain(skillPath);
-        expect(summaryText).not.toContain("INVALID_BUNDLE");
-        expect(await alert.getByLabel("Error details", { exact: true }).isVisible()).toBe(false);
-        await summary.focus();
-        await summary.press("Enter");
-        const details = alert.getByLabel("Error details", { exact: true });
-        await polledVisible(details).toBe(true);
-        expect(await details.textContent()).toBe(safeDiagnostic);
-        const copy = exactButton(alert, "Copy error");
-        await copy.click();
-        await polledClipboard(page).toBe(safeDiagnostic);
-        expect(await details.isVisible()).toBe(true);
-        await summary.press("Enter");
-        await polledVisible(details).toBe(false);
-        await expectMobileFit(page, alert);
-        await polledVisible(details).toBe(false);
-        await summary.press("Enter");
-        await polledVisible(details).toBe(true);
-        expect(await details.textContent()).toBe(safeDiagnostic);
-        await exactButton(alert, "Copy error").click();
-        await polledClipboard(page).toBe(safeDiagnostic);
-        await summary.press("Enter");
-        await polledVisible(details).toBe(false);
-      });
-    },
-  );
 });

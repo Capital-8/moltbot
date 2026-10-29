@@ -37,14 +37,12 @@ function SummaryStat(props: {
   value: string | number;
   sub: string;
   tone?: "good" | "warn" | "bad";
-  class?: string;
   compactValue?: boolean;
 }) {
   return (
     <div
       class={[
         "stat usage-summary-card",
-        props.class,
         props.tone ? `usage-summary-card--${props.tone}` : undefined,
       ]}
     >
@@ -171,8 +169,7 @@ function windowDailyCosts(costs: Map<string, CostDailyEntry>, endDate: string, d
   const start = Date.parse(endDate) - (days - 1) * 86_400_000;
   return Array.from({ length: days }, (_, index) => {
     const date = new Date(start + index * 86_400_000).toISOString().slice(0, 10);
-    const entry = costs.get(date);
-    return { date, cost: entry?.totalCost ?? 0, usageReport: entry?.usageReport };
+    return { date, cost: costs.get(date)?.totalCost ?? 0 };
   });
 }
 
@@ -181,7 +178,7 @@ function CostColumns(props: {
   days: NonNullable<ReturnType<typeof windowDailyCosts>>;
   label: string;
 }) {
-  const max = () => Math.max(0, ...props.days.map((day) => day.cost));
+  const max = createMemo(() => Math.max(0, ...props.days.map((day) => day.cost)));
   const [hover, setHover] = createSignal<number | null>(null);
   const active = () => {
     const index = hover();
@@ -218,8 +215,7 @@ function CostColumns(props: {
       <Show when={active()}>
         {(day) => (
           <span class="usage-bars__tip">
-            {formatDayLabel(day().date)} ·{" "}
-            <b>{formatAnalysisCost(day().cost, day().usageReport)}</b>
+            {formatDayLabel(day().date)} · <b>{formatAnalysisCost(day().cost)}</b>
           </span>
         )}
       </Show>
@@ -240,6 +236,11 @@ function renderCostWindowComparison(
 
   const today = formatIsoDate(new Date(), timeZone);
   const costs = new Map(daily.map((day) => [day.date, day]));
+  const comparisons = windows.map((summary, index) => ({
+    index,
+    summary,
+    columns: windowDailyCosts(costs, summary.endDate, summary.days),
+  }));
 
   return (
     <SettingsSection
@@ -252,31 +253,29 @@ function renderCostWindowComparison(
       }
     >
       <div class="usage-summary-strip usage-summary-strip--windows">
-        <For each={Array.from(windows.entries())}>
-          {([index, summary]) => {
-            const label =
+        <For each={comparisons}>
+          {({ index, summary, columns }) => {
+            const label = createMemo(() =>
               index === 0
                 ? t("usage.costWindows.selectedRange")
                 : summary.days === 1
                   ? summary.endDate === today
                     ? t("usage.presets.today")
                     : formatDayLabel(summary.endDate)
-                  : t("usage.costWindows.lastDays", { count: String(summary.days) });
-            const columns = windowDailyCosts(costs, summary.endDate, summary.days);
+                  : t("usage.costWindows.lastDays", { count: String(summary.days) }),
+            );
             return (
               <div class={["cost-window", { "cost-window--range": index === 0 }]}>
-                <div class="cost-window__label">{label}</div>
-                <div class="cost-window__value">
-                  {formatAnalysisCost(summary.totals.totalCost, summary.totals.usageReport)}
-                </div>
+                <div class="cost-window__label">{label()}</div>
+                <div class="cost-window__value">{formatAnalysisCost(summary.totals.totalCost)}</div>
                 <div class="cost-window__meta">
-                  {formatUsageTokens(summary.totals.totalTokens, summary.totals.usageReport)}{" "}
+                  {formatUsageTokens(summary.totals.totalTokens)}{" "}
                   {normalizeLowercaseStringOrEmpty(t("usage.metrics.tokens"))}
                   {summary.days > 1
-                    ? ` · ${formatAnalysisCost(summary.totals.totalCost / summary.days, summary.totals.usageReport)} ${t("usage.costWindows.perDay")}`
+                    ? ` · ${formatAnalysisCost(summary.totals.totalCost / summary.days)} ${t("usage.costWindows.perDay")}`
                     : undefined}
                 </div>
-                {columns ? <CostColumns days={columns} label={label} /> : undefined}
+                {columns ? <CostColumns days={columns} label={label()} /> : undefined}
               </div>
             );
           }}
@@ -293,7 +292,6 @@ function renderInsightList(
   items: InsightItem[],
   emptyLabel: string,
   options?: {
-    className?: string;
     listClassName?: string;
     error?: boolean;
   },
@@ -302,7 +300,7 @@ function renderInsightList(
   const max = Math.max(0, ...items.map((item) => item.weight));
   const share = (item: InsightItem) => (max > 0 ? (item.weight / max) * 100 : 0);
   return (
-    <div class={["usage-insight-card", options?.className]}>
+    <div class="usage-insight-card">
       <div class="usage-insight-title">{title}</div>
       {items.length === 0 ? (
         <div class="muted">{emptyLabel}</div>
@@ -351,9 +349,6 @@ export function UsageInsights(props: {
       return undefined;
     }
 
-    // Ratios of partial counters are neither exact nor lower bounds.
-    const report = totals.usageReport;
-    const partial = report?.state === "unavailable";
     const empty = t("usage.common.emptyValue");
     const avgTokens = aggregates.messages.total
       ? Math.round(totals.totalTokens / aggregates.messages.total)
@@ -361,14 +356,14 @@ export function UsageInsights(props: {
     const avgCost = aggregates.messages.total ? totals.totalCost / aggregates.messages.total : 0;
     const cacheBase = totals.input + totals.cacheRead + totals.cacheWrite;
     const cacheHitRate = cacheBase > 0 ? totals.cacheRead / cacheBase : 0;
-    const cacheHitLabel = cacheBase > 0 && !partial ? `${(cacheHitRate * 100).toFixed(1)}%` : empty;
+    const cacheHitLabel = cacheBase > 0 ? `${(cacheHitRate * 100).toFixed(1)}%` : empty;
     const errorRatePct = stats.errorRate * 100;
     const throughputLabel =
-      stats.throughputTokensPerMin !== undefined && !partial
+      stats.throughputTokensPerMin !== undefined
         ? `${formatUsageTokens(Math.round(stats.throughputTokensPerMin))} ${t("usage.overview.tokensPerMinute")}`
         : t("usage.common.emptyValue");
     const throughputCostLabel =
-      stats.throughputCostPerMin !== undefined && !partial
+      stats.throughputCostPerMin !== undefined
         ? `${formatAnalysisCost(stats.throughputCostPerMin)} ${t("usage.overview.perMinute")}`
         : t("usage.common.emptyValue");
     const avgDurationLabel =
@@ -383,7 +378,7 @@ export function UsageInsights(props: {
         label: formatDayLabel(day.date),
         value: `${((day.errors / day.messages) * 100).toFixed(2)}%`,
         weight: day.errors / day.messages,
-        sub: `${day.errors.toLocaleString()} ${normalizeLowercaseStringOrEmpty(t("usage.overview.errors"))} · ${day.messages.toLocaleString()} ${t("usage.overview.messagesAbbrev")} · ${formatUsageTokens(day.tokens, day.usageReport)}`,
+        sub: `${day.errors.toLocaleString()} ${normalizeLowercaseStringOrEmpty(t("usage.overview.errors"))} · ${day.messages.toLocaleString()} ${t("usage.overview.messagesAbbrev")} · ${formatUsageTokens(day.tokens)}`,
       }));
 
     const costAttribution = (
@@ -397,12 +392,12 @@ export function UsageInsights(props: {
       value:
         entryTotals.totalCost === 0 && entryTotals.missingCostEntries > 0
           ? t("usage.overview.unpriced")
-          : formatAnalysisCost(entryTotals.totalCost, entryTotals.usageReport),
+          : formatAnalysisCost(entryTotals.totalCost),
       // Bars rank by cost, which reflects model, speed tier and cache use better than tokens.
       weight: entryTotals.totalCost || entryTotals.totalTokens / 1e9,
       sub: [
         source ?? null,
-        formatUsageTokens(entryTotals.totalTokens, entryTotals.usageReport),
+        formatUsageTokens(entryTotals.totalTokens),
         count === undefined
           ? null
           : `${count.toLocaleString()} ${t("usage.overview.messagesAbbrev")}`,
@@ -479,10 +474,8 @@ export function UsageInsights(props: {
       aggregates,
       throughputLabel,
       throughputCostLabel,
-      avgTokensLabel: partial ? empty : formatUsageTokens(avgTokens),
-      avgCostLabel: partial ? empty : formatAnalysisCost(avgCost),
-      partial,
-      report,
+      avgTokensLabel: formatUsageTokens(avgTokens),
+      avgCostLabel: formatAnalysisCost(avgCost),
       cacheHitLabel,
       totals,
       cacheBase,
@@ -532,15 +525,13 @@ export function UsageInsights(props: {
                   metric="cacheHitRate"
                   hint={t("usage.overview.cacheHint")}
                   value={insights().cacheHitLabel}
-                  sub={`${formatUsageTokens(insights().totals.cacheRead, insights().report)} ${t("usage.overview.cached")} · ${formatUsageTokens(insights().cacheBase, insights().report)} ${t("usage.overview.prompt")}`}
+                  sub={`${formatUsageTokens(insights().totals.cacheRead)} ${t("usage.overview.cached")} · ${formatUsageTokens(insights().cacheBase)} ${t("usage.overview.prompt")}`}
                   tone={
-                    insights().partial
-                      ? undefined
-                      : insights().cacheHitRate > 0.6
-                        ? "good"
-                        : insights().cacheHitRate > 0.3
-                          ? "warn"
-                          : "bad"
+                    insights().cacheHitRate > 0.6
+                      ? "good"
+                      : insights().cacheHitRate > 0.3
+                        ? "warn"
+                        : "bad"
                   }
                 />
                 <SummaryStat
@@ -566,7 +557,7 @@ export function UsageInsights(props: {
                       : "usage.overview.avgCostHint",
                   )}
                   value={insights().avgCostLabel}
-                  sub={`${formatAnalysisCost(insights().totals.totalCost, insights().report)} ${normalizeLowercaseStringOrEmpty(t("usage.breakdown.total"))}`}
+                  sub={`${formatAnalysisCost(insights().totals.totalCost)} ${normalizeLowercaseStringOrEmpty(t("usage.breakdown.total"))}`}
                 />
                 <SummaryStat
                   hintId="sessions"
