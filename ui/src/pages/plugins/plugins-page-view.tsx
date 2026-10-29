@@ -10,12 +10,16 @@ import { Icon } from "../../components/solid/icon.tsx";
 import { SettingsPage } from "../../components/solid/settings-ui.tsx";
 import { SettingsWorkspace } from "../../components/solid/settings-workspace.tsx";
 import { WizardLogin } from "../../components/wizard-login-controller.tsx";
+import { currentConfigRead } from "../../lib/config/config-state-model.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import { canCallGatewayMethod } from "../../lib/gateway-methods.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { renderPluginCatalogDetail as PluginCatalogDetail } from "./catalog-detail.tsx";
 import { renderPluginCatalogResults as PluginCatalogResults } from "./catalog-results.tsx";
-import { renderPluginConsentDialog as PluginConsentDialog } from "./consent-dialog.tsx";
+import {
+  PluginArtTile,
+  renderPluginConsentDialog as PluginConsentDialog,
+} from "./consent-dialog.tsx";
 import "./custom-elements.ts";
 import { pluginDetailLocation, type InstalledPluginDetailTab } from "./detail-tabs.ts";
 import {
@@ -32,6 +36,7 @@ import {
   pluginHostControlsSchema,
 } from "./settings-model.ts";
 import {
+  PluginRetryError,
   renderPluginSettingsDetail as PluginSettingsDetail,
   renderPluginSettingsInventory as PluginSettingsInventory,
   type PluginSettingsTab,
@@ -127,6 +132,7 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
     connected: page().gateway.connected,
     loading: page().loading,
     result: page().state.result,
+    presentedEnabled: props.page.presentedEnabled,
     error: page().state.error,
     busy: page().state.busy,
     messages: page().state.messages,
@@ -136,6 +142,8 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
     mutationBlockedReason: page().accessBlockedReason(page().state.result?.mutationAllowed),
     configBusy: configState().configLoading,
     configError: configState().lastError,
+    configRead: currentConfigRead(configState()),
+    configSchemaRead: page().context.runtimeConfig.schemaRead,
     canEditConfig: page().canEditConfig(),
     configValue: configState().configForm,
     configHints: configState().configUiHints,
@@ -205,7 +213,7 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
         onMcpLogin={(serverName) => void page().mcpLogin.start(serverName)}
         onEditMcp={() => page().context.navigate("mcp")}
         catalog={page().state.detail?.catalog}
-        inspectionError={page().state.detail?.error ?? null}
+        inspectionRead={page().inspectionRead}
         catalogLoading={page().state.detail?.catalogLoading}
         catalogIconUrls={page().state.catalogIconUrls}
         catalogIconLoading={page().icons.catalog.isLoading}
@@ -266,7 +274,11 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
       {page().surface === "discovery" && !page().state.catalogDetail && (
         <PluginsHubHeader
           active="plugins"
-          onSelect={(tab: PluginsHubTab) => page().selectHubTab(tab)}
+          onSelect={(tab: PluginsHubTab) => {
+            if (tab !== "plugins" || page().surface !== "discovery") {
+              page().context.navigate(tab);
+            }
+          }}
           secondaryAction={{
             label: t("pluginsPage.pluginSettings"),
             icon: <Icon name="settings" />,
@@ -290,7 +302,7 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
                   connected={page().gateway.connected}
                   skillsSection={catalogSkillsSection()}
                   result={page().state.catalogDetail?.result ?? null}
-                  error={page().state.catalogDetail?.error ?? null}
+                  read={page().detailRead}
                   backHref={pathForRoute("plugins", page().context.basePath)}
                   onBack={() => page().closeCatalogDetail()}
                   onRetry={() =>
@@ -358,22 +370,13 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
         ) : (
           <Errored
             fallback={(error, reset) => (
-              <div
-                class="callout danger plugins-settings-error oc-banner oc-banner-error"
-                role="alert"
-              >
-                <span>{formatUiError(error())}</span>
-                <button
-                  type="button"
-                  class="btn btn--sm oc-action oc-action-secondary"
-                  onClick={() => {
-                    void page().refreshCatalog();
-                    reset();
-                  }}
-                >
-                  {t("pluginsPage.tryAgain")}
-                </button>
-              </div>
+              <PluginRetryError
+                error={formatUiError(error())}
+                onRetry={() => {
+                  void page().refreshCatalog();
+                  reset();
+                }}
+              />
             )}
           >
             <Show when={hasInventory()} fallback={<Inventory loading={page().loading} />}>
@@ -385,7 +388,23 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
         )}
       </SettingsWorkspace>
       <PluginSkillPreview preview={page().skillPreview} state={page().skillPreview.state} />
-      <WizardLogin controller={props.page.mcpLogin.dialog} />
+      <WizardLogin
+        controller={props.page.mcpLogin.dialog}
+        signInIcon={
+          <Show when={detailPluginId()}>
+            {(pluginId) => (
+              <PluginArtTile
+                registerIcon={page().icons.register}
+                slug={pluginId()}
+                name={page().mcpLogin.dialog.state().authLabel ?? pluginId()}
+                iconUrl={page().state.iconUrls[pluginId()]}
+                loading={page().icons.installed.isLoading(pluginId())}
+                onIconError={() => page().icons.installed.handleError(pluginId())}
+              />
+            )}
+          </Show>
+        }
+      />
       <Show when={page().consent.read().consent}>
         {(consent) => {
           const icon = createMemo(() => {
@@ -400,6 +419,7 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
               registerIcon={page().icons.register}
               consent={consent()}
               inspection={page().consent.read().inspection}
+              inspectionRead={page().consent.read().inspectionRead}
               loading={page().consent.read().inspectionLoading}
               error={page().consent.read().inspectionError}
               iconUrl={icon().url}
@@ -408,7 +428,7 @@ export function PluginsPageView(props: { page: PluginsPageModel }) {
               mutationBlockedReason={page().accessBlockedReason(
                 page().state.result?.mutationAllowed,
               )}
-              busy={Object.values(page().state.busy).some(Boolean)}
+              busy={page().mutationSaving() || Object.values(page().state.busy).some(Boolean)}
               onCancel={() => page().consent.close()}
               onConfirm={() => page().consent.confirm()}
               onRetry={() => void page().consent.inspect()}

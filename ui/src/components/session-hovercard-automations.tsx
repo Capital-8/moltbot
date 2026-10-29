@@ -3,6 +3,7 @@ import { createMemo, createSignal, Errored, For, isPending, latest, Loading, Sho
 import type { CronJob } from "../api/types.ts";
 import type { ApplicationGateway } from "../app/gateway.ts";
 import { isCronJobRunning, resolveCronJobLastRunStatus } from "../lib/cron-status.ts";
+import { isCronInventoryInvalidation } from "../lib/cron/inventory-connection.ts";
 import { loadCronJobsPage } from "../lib/cron/jobs-full.ts";
 import { createInitialCronState } from "../lib/cron/state.ts";
 import { formatRelativeTimestamp } from "../lib/format.ts";
@@ -10,6 +11,7 @@ import { createGatewayConnectionLifecycle } from "../lib/gateway-connection-life
 import { shouldHandleNavigationClick } from "../lib/navigation-click.ts";
 import { formatCronPayload, formatCronSchedule } from "../lib/presenter.ts";
 import { i18nRevision, t } from "../lib/reactive/i18n.ts";
+import { listen } from "../lib/reactive/listener.ts";
 import { projectSource } from "../lib/reactive/projection.ts";
 import { createHovercardControlRef } from "./portaled-hovercard-focus.ts";
 import { Icon } from "./solid/icon.tsx";
@@ -24,6 +26,9 @@ export type SessionHovercardAutomation = {
 };
 
 function instructions(job: CronJob): string {
+  if (job.payloadSource) {
+    return formatCronPayload(job);
+  }
   switch (job.payload.kind) {
     case "agentTurn":
       return job.payload.message;
@@ -85,7 +90,8 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
           next.cronSessionFilter = { sessionKey, sessionAgentId: agentId };
           next.cronJobsLimit = 20;
           next.cronJobsSortBy = "name";
-          next.canRefresh = () => active && current === next;
+          next.canRefresh = () =>
+            active && current === next && document.visibilityState !== "hidden";
           current = next;
           notify();
         };
@@ -98,8 +104,13 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
           }
         });
         const stopEvents = gateway?.subscribeEvents((event) => {
-          if (event.event === "cron") {
-            void load(false, event.payload);
+          if (event.event === "cron" || isCronInventoryInvalidation(event, gateway.snapshot)) {
+            void load(false, event.event === "cron" ? event.payload : undefined);
+          }
+        });
+        const stopVisibility = listen(document, "visibilitychange", () => {
+          if (document.visibilityState !== "hidden") {
+            void load();
           }
         });
         void load();
@@ -109,6 +120,7 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
           notify = () => {};
           stopConnection?.();
           stopEvents?.();
+          stopVisibility();
           lifecycle?.dispose();
         };
       },
@@ -117,7 +129,10 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
   });
   const state = () => source().read();
   const load = (append = false) => source().load(append);
-  const readScope = createMemo(state);
+  const readScope = createMemo(
+    () => [state(), !state().cronJobsSnapshotRevision && state().cronJobsError] as const,
+    { equals: (before, after) => before.every((value, index) => value === after[index]) },
+  );
   // This read outlives the source it observes, so a retired request cannot hold scope replacement.
   const jobsRead = createMemo(() => {
     const owner = source();
@@ -130,7 +145,11 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
     });
   });
   const readJobs = () => {
-    latest(jobsRead);
+    if (state().cronJobsSnapshotRevision) {
+      latest(jobsRead);
+    } else {
+      jobsRead();
+    }
     return null;
   };
   const selected = createMemo(
@@ -233,38 +252,38 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
           <Icon name="chevronRight" />
         </span>
       </a>
-      <Errored
-        fallback={(_error, reset) => (
-          <Panel pending={false}>
+      <Loading
+        on={readScope()}
+        fallback={
+          <Panel pending={true}>
             <div class="session-hovercard__automation-message" role="status">
-              {t("chat.sessionDetails.automationError")}
+              {t("chat.sessionDetails.automationLoading")}
             </div>
-            <button
-              ref={createHovercardControlRef()}
-              type="button"
-              class="chip"
-              disabled={!state().connected}
-              onClick={() => {
-                void load();
-                reset();
-              }}
-            >
-              {t("common.retry")}
-            </button>
             <OpenLink />
           </Panel>
-        )}
+        }
       >
-        <Loading
-          on={readScope()}
-          fallback={
-            <Panel pending={true}>
+        <Errored
+          fallback={(_error, reset) => (
+            <Panel pending={false}>
               <div class="session-hovercard__automation-message" role="status">
-                {t("chat.sessionDetails.automationLoading")}
+                {t("chat.sessionDetails.automationError")}
               </div>
+              <button
+                ref={createHovercardControlRef()}
+                type="button"
+                class="chip"
+                disabled={!state().connected}
+                onClick={() => {
+                  void load();
+                  reset();
+                }}
+              >
+                {t("common.retry")}
+              </button>
               <OpenLink />
             </Panel>
-          }
+          )}
         >
           <Panel pending={loading()}>
             {readJobs()}
@@ -375,8 +394,8 @@ export function SessionHovercardAutomations(props: { automation: SessionHovercar
               <OpenLink />
             </Show>
           </Panel>
-        </Loading>
-      </Errored>
+        </Errored>
+      </Loading>
     </openclaw-tooltip>
   );
 }

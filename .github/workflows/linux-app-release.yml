@@ -105,7 +105,7 @@ jobs:
       - name: Setup supported Node runtime
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.1"
           package-manager-cache: false
 
       - name: Verify trusted release tooling identity
@@ -330,7 +330,7 @@ jobs:
       - name: Setup trusted Node runtime
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Checkout selected tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -642,7 +642,7 @@ jobs:
       - name: Setup trusted Node runtime
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Checkout selected tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -730,7 +730,7 @@ jobs:
       - name: Setup trusted Node runtime
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Checkout selected tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1140,7 +1140,7 @@ jobs:
       - name: Setup supported Node runtime
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.1"
           package-manager-cache: false
 
       - name: Publish immutable bundles, canonical Linux channel, and legacy mirror
@@ -1151,6 +1151,7 @@ jobs:
           LOCAL_INPUTS: ${{ needs.validate_release.outputs.already_published != 'true' }}
           TAG_SHA: ${{ needs.validate_release.outputs.tag_sha }}
           WORKFLOW_SHA: ${{ needs.validate_release.outputs.tooling_sha }}
+          BUILDER_SHA: ${{ github.workflow_sha }}
           WORKFLOW_REF: ${{ github.ref_name }}
           WORKFLOW_FULL_REF: ${{ github.ref }}
           REQUEST_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -1189,6 +1190,7 @@ jobs:
           printf '%s  %s\n' "$MINISIGN_BINARY_SHA256" "${RUNNER_TEMP}/minisign/minisign" | sha256sum --check -
           node scripts/linux-app-channel.mjs publish \
             --tag "$RELEASE_TAG" --source-sha "$TAG_SHA" --tooling-sha "$WORKFLOW_SHA" \
+            --builder-sha "$BUILDER_SHA" \
             --workflow-ref "$WORKFLOW_REF" --workflow-full-ref "$WORKFLOW_FULL_REF" \
             --request-run-id "$REQUEST_RUN_ID" --request-run-attempt "$REQUEST_RUN_ATTEMPT" \
             "${input_args[@]}" --public-key-config apps/linux/src-tauri/tauri.conf.json \
