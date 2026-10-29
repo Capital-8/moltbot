@@ -32,7 +32,11 @@ export function resolveMistralReasoningEffortMap(
   thinkingLevelMap: Partial<Record<string, string | null>> | undefined,
   modelId?: string,
 ): Record<string, string> | undefined {
-  const rowMap = thinkingLevelMap ?? (modelId ? BUNDLED_THINKING_MAPS.get(modelId) : undefined);
+  // Supplied keys win per level (null excludes one); omitted keys keep the bundled mapping.
+  const rowMap = {
+    ...(modelId ? BUNDLED_THINKING_MAPS.get(modelId) : undefined),
+    ...thinkingLevelMap,
+  };
   const map: Partial<Record<string, string | null>> = { ...rowMap, adaptive: "high" };
   const entries = LEVEL_ORDER.flatMap((level) =>
     typeof map[level] === "string" ? [[level, map[level]] as const] : [],

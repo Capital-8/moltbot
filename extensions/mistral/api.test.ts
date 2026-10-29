@@ -78,6 +78,37 @@ describe("applyMistralModelCompat", () => {
     expect(profile?.defaultLevel).toBe("off");
   });
 
+  it.each([
+    ["partial", { max: "high" }],
+    ["empty", {}],
+  ])("merges a %s configured map with the bundled one", async (_name, thinkingLevelMap) => {
+    const provider = await registerSingleProviderPlugin(mistralPlugin);
+    const profile = provider.resolveThinkingProfile?.({
+      provider: "mistral",
+      modelId: MISTRAL_SMALL_LATEST_ID,
+      reasoning: true,
+      thinkingLevelMap,
+    });
+    expect(profile?.levels.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(["off", "low", "high", "adaptive", "max"]),
+    );
+    expect(profile?.defaultLevel).toBe("off");
+    expect(
+      applyMistralModelCompat({ id: MISTRAL_SMALL_LATEST_ID, thinkingLevelMap, compat: {} }).compat,
+    ).toMatchObject({ supportsReasoningEffort: true, reasoningEffortMap: { off: "none" } });
+  });
+
+  it("keeps a configured null exclusion over the bundled map", async () => {
+    const provider = await registerSingleProviderPlugin(mistralPlugin);
+    const profile = provider.resolveThinkingProfile?.({
+      provider: "mistral",
+      modelId: MISTRAL_SMALL_LATEST_ID,
+      reasoning: true,
+      thinkingLevelMap: { minimal: null },
+    });
+    expect(profile?.levels.map(({ id }) => id)).not.toContain("minimal");
+  });
+
   it("overrides explicit compat values that would trigger 422s", () => {
     const normalized = applyMistralModelCompat({
       id: "mistral-large-latest",
