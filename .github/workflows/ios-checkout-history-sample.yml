@@ -88,6 +88,11 @@ jobs:
 
       - name: Exercise public release history and actual note evidence owners
         shell: bash
+        # Fixture-only: object-store size must not change diff index ID formatting.
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: core.abbrev
+          GIT_CONFIG_VALUE_0: "40"
         run: |
           set -euo pipefail
           python3 -c 'import time; print(time.time_ns() // 1_000_000)' > "$RUNNER_TEMP/setup-ended-ms"
@@ -178,7 +183,7 @@ jobs:
           const inventorySha256 = sha256(JSON.stringify(inventory.value));
           const evidenceSha256 = sha256(JSON.stringify(evidence.value));
           assert.equal(inventorySha256, "82606f1ca72ecfa47e588ab470b3c547fdcb6181dfa81293422f0413ba2bbb2f");
-          assert.equal(evidenceSha256, "57f984c2be26bac00ad81ed7a0652def99bd50d4c9fd36a28d8bc2bc503b1dd6");
+          assert.equal(evidenceSha256, "4837a885bb6433921bf933bf6e62bf2117f55541f2c6defca1161ed2b3296e68");
           assert.equal(git(source, ["rev-parse", "HEAD"]), sourceSha);
           assert.equal(git(source, ["status", "--porcelain", "--untracked-files=all"]), "");
           assert.equal(git(root, ["rev-parse", "HEAD"]), sourceSha);
@@ -204,6 +209,7 @@ jobs:
             schemaVersion: 1, arm: process.env.PROOF_ARM, sample: Number(process.env.PROOF_SAMPLE),
             sourceSha, baselineRef, baselineSha, workflowSha: process.env.GITHUB_SHA,
             ...verification.value, inventorySha256, evidenceSha256,
+            fixtureGitDiffAbbreviation: 40,
             files: inventory.value.files.length, commitHints: inventory.value.commits.length,
             evidenceItems: evidence.value.length,
             selectedFiles: selected.map(({ id }) => inventory.value.files.find((file) => file.id === id).file),
