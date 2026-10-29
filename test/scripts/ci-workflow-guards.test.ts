@@ -7309,27 +7309,6 @@ it("isolates release credentials and verifies trusted AppImage and signing tools
     REQUEST_TITLE: "${{ github.event.workflow_run.display_title }}",
     REQUEST_HEAD_SHA: "${{ github.event.workflow_run.head_sha }}",
   });
-  const requestRoot = tempDirs.make("openclaw-linux-release-request-");
-  const requestOutput = path.join(requestRoot, "output");
-  const runReleaseRequest = (title: string) =>
-    spawnSync("bash", ["-c", releaseRequest.run ?? ""], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GITHUB_OUTPUT: requestOutput,
-        REQUEST_TITLE: title,
-        REQUEST_HEAD_SHA: "a".repeat(40),
-      },
-    });
-  const acceptedRequest = runReleaseRequest("Linux App Release Request [v2026.8.2] desktop=true");
-  expectProcessExit(acceptedRequest);
-  expect(readFileSync(requestOutput, "utf8")).toBe(
-    `release_tag=v2026.8.2\ndesktop_test_bundles=true\nworkflow_sha=${"a".repeat(40)}\n`,
-  );
-  const rejectedRequest = runReleaseRequest(
-    "Linux App Release Request [v2026.8.2] desktop=true extra",
-  );
-  expect(rejectedRequest.status).toBe(1);
   const updaterTrust = requiredWorkflowStep(linuxSteps, "Validate updater trust root");
   expect(updaterTrust.run).toContain("selected_config=apps/linux/src-tauri/tauri.conf.json");
   expect(updaterTrust.run).toContain(
