@@ -7,7 +7,7 @@ import { configureFsSafeNative, getFsSafeNativeConfig } from "@openclaw/fs-safe/
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { parseUpdateRecoveryBackupManifest } from "../commands/backup-verify-manifest.js";
-import { OPENCLAW_AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
+import { AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
 import { createOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import { admitOpenClawMaintenanceLiveAuthorityReads } from "../state/openclaw-state-maintenance-context.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
@@ -861,7 +861,7 @@ it.each(["owned", "unowned", "shared"] as const)(
     const source = ownership === "shared" ? f.shared : f.external[0]!;
     {
       using db = new DatabaseSync(source);
-      const schema = OPENCLAW_AGENT_FTS_SCHEMAS.join("\n").match(
+      const schema = AGENT_FTS_SCHEMAS.join("\n").match(
         /CREATE VIRTUAL TABLE IF NOT EXISTS session_transcript_fts[\s\S]*?;/u,
       )?.[0];
       expect(schema).toBeDefined();

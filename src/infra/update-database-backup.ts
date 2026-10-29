@@ -304,7 +304,7 @@ export async function createUpdateDatabaseBackupInProcess(
   const { buildBackupArchivePath } = await import("../commands/backup-shared.js");
   const { createStoppedSqliteSnapshot, createVerifiedSqliteSnapshot } =
     await import("./sqlite-snapshot.js");
-  const { OPENCLAW_AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
+  const { AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
   const databases: UpdateDatabaseBackup["databases"] = [];
   const sourceGenerations: UpdateDatabaseBackup["sourceGenerations"] = Object.fromEntries(
     inventory.missing.map((file) => [file, null]),
@@ -364,7 +364,7 @@ export async function createUpdateDatabaseBackupInProcess(
           integrity: inventory.databaseOwners?.some(
             (owner) => owner.path === sourcePath && owner.role === "agent",
           )
-            ? { ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS }
+            ? { ftsSchemas: AGENT_FTS_SCHEMAS }
             : undefined,
         });
     // Native restore uses its supervisor's stopped-state fence, not live-writer generations.

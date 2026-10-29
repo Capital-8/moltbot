@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it, beforeEach, describe } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { runCommandBuffered } from "../process/exec.js";
-import { OPENCLAW_AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
+import { AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
 import { closeOpenClawStateDatabaseByPath } from "../state/openclaw-state-db-cache.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -440,9 +440,7 @@ describe("snapshot FTS integrity", () => {
     await fs.mkdir(targetStateDir);
     const db = openNodeSqliteDatabase(source);
     try {
-      for (const match of OPENCLAW_AGENT_FTS_SCHEMAS.join("\n").matchAll(
-        /CREATE VIRTUAL TABLE[^;]+;/gu,
-      )) {
+      for (const match of AGENT_FTS_SCHEMAS.join("\n").matchAll(/CREATE VIRTUAL TABLE[^;]+;/gu)) {
         if (!match[0].includes("content =")) {
           db.exec(match[0]);
         }
