@@ -14,7 +14,7 @@ if (!output || process.platform !== "darwin" || process.arch !== "arm64") {
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-27-0";
 const deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
 const proof = {
-  kind: "stock-boot-diagnostic-not-qualification",
+  kind: "stock-boot-default-stream-experiment-not-qualification",
   targetSha: process.env.GITHUB_SHA,
   imageVersion: process.env.ImageVersion,
   nodeVersion: process.version,
@@ -149,6 +149,9 @@ try {
     udid = created;
   });
   await phase("boot", () => command("xcrun", ["simctl", "boot", udid]));
+  await phase("stream-policy", () =>
+    command("xcrun", ["simctl", "spawn", udid, "log", "config", "--mode", "stream:default"]),
+  );
   await phase("ready", () => command("xcrun", ["simctl", "bootstatus", udid, "-b"], 600_000));
   await phase("headroom", async () => {
     proof.headroom = await waitForIOSSimulatorHeadroom(controller.signal);
