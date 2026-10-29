@@ -4,7 +4,16 @@ export const MISTRAL_SMALL_LATEST_ID = "mistral-small-latest";
 export const MISTRAL_SMALL_4_ID = "mistral-small-2603";
 export const MISTRAL_MEDIUM_3_5_ID = "mistral-medium-3-5";
 
-const LEVEL_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"];
+const LEVEL_ORDER = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "adaptive",
+  "max",
+] as const;
 
 /**
  * A reasoning row maps each level to its `reasoning_effort`. The catalog has no field for
@@ -24,7 +33,7 @@ export function resolveThinkingProfile({ thinkingLevelMap }: ProviderDefaultThin
   const map = resolveMistralReasoningEffortMap(thinkingLevelMap);
   return map
     ? {
-        levels: Object.keys(map).map((id) => ({ id: id as "off" })),
+        levels: LEVEL_ORDER.filter((id) => id in map).map((id) => ({ id })),
         defaultLevel: "off" as const,
       }
     : undefined;
