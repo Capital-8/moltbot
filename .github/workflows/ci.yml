@@ -6657,10 +6657,14 @@ jobs:
             # Preserve actual app/test output metadata and hashes even on native failure.
             if [[ -d apps/android/app/build/outputs/apk ]]; then
               find apps/android/app/build/outputs/apk -type f -name '*.apk' -print0 | sort -z | xargs -0 -r sha256sum > "$trust_evidence/APK.sha256" || status=1
+              while IFS= read -r -d '' apk_output; do
+                cp --parents "$apk_output" "$trust_evidence" || status=1
+              done < <(find apps/android/app/build/outputs/apk -type f -name '*.apk' -print0)
               while IFS= read -r -d '' metadata; do
                 cp --parents "$metadata" "$trust_evidence" || status=1
               done < <(find apps/android/app/build/outputs/apk -type f -name output-metadata.json -print0)
             fi
+            adb -s emulator-5554 logcat -d -v threadtime > "$trust_evidence/logcat.txt" || status=1
             if ! bash scripts/android-native-tls-trust.sh cleanup "$trust_evidence"; then
               echo 'FAILED: trust cleanup; emulator is contaminated and must not be reused.' | tee "$trust_evidence/CLEANUP-FAILED.txt"
               status=1
@@ -6690,9 +6694,9 @@ jobs:
           fi
           bash scripts/android-native-tls-trust.sh prepare "$trust_evidence"
           node --import ./scripts/tsx.mjs scripts/run-android-gradle.mts \
-            :app:connectedPlayDebugAndroidTest \
+            :app:connectedPlayDebugAndroidTest --info \
             -Pandroid.testInstrumentationRunnerArguments.expectedPageSize="$EXPECTED_PAGE_SIZE" \
-            -Pandroid.testInstrumentationRunnerArguments.class=ai.openclaw.app.gateway.CloudflareAccessNativeTest,ai.openclaw.app.gateway.GatewaySessionTlsNativeTest,ai.openclaw.app.ui.chat.ChatInlineWidgetTlsNativeTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=ai.openclaw.app.NativeTransportQualificationSuite \
             -PopenclawBuildTimestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           apk="$(python3 - <<'PY'
           from pathlib import Path
