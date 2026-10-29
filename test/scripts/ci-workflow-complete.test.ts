@@ -433,10 +433,11 @@ ${ciStep("macos-swift-packages", "Clean OpenClawKit build scratch").run}
   });
 
   it.each([
-    { staleLock: false, failBuild: false, mutateLock: false, exit: 0 },
-    { staleLock: true, failBuild: false, mutateLock: false, exit: 1 },
-    { staleLock: false, failBuild: true, mutateLock: false, exit: 1 },
-    { staleLock: false, failBuild: false, mutateLock: true, exit: 1 },
+    { staleLock: false, failBuild: false, failMetal: false, mutateLock: false, exit: 0 },
+    { staleLock: true, failBuild: false, failMetal: false, mutateLock: false, exit: 1 },
+    { staleLock: false, failBuild: true, failMetal: false, mutateLock: false, exit: 1 },
+    { staleLock: false, failBuild: false, failMetal: true, mutateLock: false, exit: 1 },
+    { staleLock: false, failBuild: false, failMetal: false, mutateLock: true, exit: 1 },
   ])("MLX helper retains resolver evidence and independent failures for %j", (row) => {
     const root = fixture();
     const packageRoot = path.join(root, "apps/macos-mlx-tts");
@@ -464,11 +465,20 @@ swift() {
       fi ;;
   esac
 }
+swiftc() {
+  printf 'swiftc %s\\n' "$*" >> "$TRACE"
+  while [[ "$1" != -o ]]; do shift; done
+  printf '%s\\n' '#!/bin/bash' \
+    'test "$1" = "$RUNNER_TEMP/bin/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib" || exit 2' \
+    'exit "$FAIL_METAL"' > "$2"
+  chmod +x "$2"
+}
 ${check.run}
 `,
       {
         STALE_LOCK: String(Number(row.staleLock)),
         FAIL_BUILD: String(Number(row.failBuild)),
+        FAIL_METAL: String(Number(row.failMetal)),
         MUTATE_LOCK: String(Number(row.mutateLock)),
         GITHUB_RUN_ID: "42",
         GITHUB_RUN_ATTEMPT: "1",
@@ -478,7 +488,12 @@ ${check.run}
     expect(result.status, result.stderr).toBe(row.exit);
     const commands = readFileSync(path.join(root, "trace"), "utf8");
     expect(commands).toContain("--product openclaw-mlx-tts");
-    expect(commands.includes("--filter MLXTTSHelperServiceTests")).toBe(!row.failBuild);
+    expect(commands.includes("swiftc -framework Metal -framework CoreGraphics")).toBe(
+      !row.failBuild,
+    );
+    expect(commands.includes("--filter MLXTTSHelperServiceTests")).toBe(
+      !row.failBuild && !row.failMetal,
+    );
     expect(result.stdout).toContain("MLX TTS immutable resolution");
     const proof = readFileSync(path.join(root, "outputs"), "utf8")
       .trim()
