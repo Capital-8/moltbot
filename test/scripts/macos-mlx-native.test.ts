@@ -127,6 +127,41 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(target.is_symlink())
         self.assertEqual(sibling.read_bytes(),b"preserve")
 
+    def test_existing_or_symlink_destination_refuses_before_profile_or_child(self):
+        target=self.platform/"hf-download-preexisting.tmp"
+        sibling=self.platform/"preserved.tmp"
+        sibling.write_bytes(b"preserve")
+        self.proof.sandbox=lambda *args,**kwargs: (_ for _ in ()).throw(AssertionError("unexpected profile IO"))
+        for kind in ["file","symlink","dangling-symlink"]:
+            if kind=="file":target.write_bytes(b"preserve existing")
+            else:target.symlink_to(sibling if kind=="symlink" else self.platform/"missing")
+            with patch.object(m.uuid,"uuid4",return_value="preexisting"):
+                with self.assertRaisesRegex(RuntimeError,"already exists"):
+                    self.proof.foundation_attempt(Path("fixture"),"download")
+            self.assertEqual(self.proof.children,[])
+            self.assertEqual(self.proof.platform_destinations,[])
+            self.assertEqual(sibling.read_bytes(),b"preserve")
+            self.assertTrue(target.exists() or target.is_symlink())
+            target.unlink()
+
+    def test_alias_written_destination_is_retired_by_exact_parent_selected_path(self):
+        alias=self.root/"platform-alias"
+        alias.symlink_to(self.platform,target_is_directory=True)
+        target=self.platform/"hf-download-selected.tmp"
+        sibling=self.platform/"preserved.tmp"
+        sibling.write_bytes(b"preserve")
+        data=b"x"*680
+        (alias/target.name).write_bytes(data)
+        pending={"path":target,"retired":False}
+        expected=(680,hashlib.sha1(b"blob 680\0"+data).hexdigest())
+        with patch.dict(m.FILES,{"config.json":expected}):
+            self.assertEqual(self.proof.cleanup_foundation_destination(pending,SimpleNamespace(joined=lambda:True),True),"removed-verified-file")
+        self.assertTrue(pending["retired"])
+        self.assertFalse(target.exists())
+        self.assertFalse((alias/target.name).exists())
+        self.assertTrue(alias.is_symlink())
+        self.assertEqual(sibling.read_bytes(),b"preserve")
+
     def test_uncertain_platform_destination_blocks_secondary_and_scratch_removal(self):
         self.proof.quiet_capture=lambda *args,**kwargs:{"code":0,"failure":None,"child":SimpleNamespace(capture_overflow=False)}
         calls=[]

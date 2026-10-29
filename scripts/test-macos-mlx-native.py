@@ -83,7 +83,10 @@ final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate,
         self.mode = mode
         self.root = root.resolvingSymlinksInPath()
         self.platformTemporary = platformTemporary.resolvingSymlinksInPath()
-        self.destination = destination
+        // Resolve only the existing parent, preserving the parent's unique, nonexistent leaf.
+        // Foundation can normalize that directory differently from the supplied path.
+        let destinationParent = destination.deletingLastPathComponent().resolvingSymlinksInPath()
+        self.destination = destinationParent.appendingPathComponent(destination.lastPathComponent, isDirectory: false)
         self.result = ["mode": mode, "pid": Int(getpid()), "ok": false, "moved": false]
         super.init()
         result["homeRelation"] = relation(URL(fileURLWithPath: NSHomeDirectory()))
