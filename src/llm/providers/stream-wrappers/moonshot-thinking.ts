@@ -13,7 +13,17 @@ const ALWAYS_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "ma
 const FIXED_SAMPLING_FIELDS = "temperature top_p n presence_penalty frequency_penalty".split(" ");
 /** Always-on thinking; `effort` is the fixed reasoning_effort, absent for a plain on switch. */
 type MoonshotAlwaysThinking = { effort?: string };
+// Published plugins still call this helper with bare models that carry no catalog facts;
+// they keep the always-thinking contract these IDs shipped with (`max` is the fixed effort).
+const LEGACY_ALWAYS_THINKING: Readonly<Record<string, string | undefined>> = {
+  "kimi-k2.7-code": undefined,
+  "kimi-k2.7-code-highspeed": undefined,
+  "kimi-k3": "max",
+  "kimi-k3.1-pro": "max",
+  "kimi-k3.1-pro-highspeed": "max",
+};
 type MoonshotThinkingFacts = {
+  id: string;
   thinkingLevelMap?: Partial<Record<string, string | null>>;
   compat?: unknown;
 };
@@ -56,12 +66,21 @@ function resolveAlwaysThinking(
   model: MoonshotThinkingFacts,
   directMoonshotModel: boolean,
 ): MoonshotAlwaysThinking | undefined {
-  if (model.thinkingLevelMap?.off !== null) {
-    return undefined;
+  let effort: string | undefined;
+  if (model.thinkingLevelMap) {
+    if (model.thinkingLevelMap.off !== null) {
+      return undefined;
+    }
+    const efforts = asPayloadRecord(model.compat)?.supportedReasoningEfforts;
+    const last: unknown = Array.isArray(efforts) ? efforts.at(-1) : undefined;
+    effort = typeof last === "string" ? last : undefined;
+  } else {
+    const id = model.id.trim().toLowerCase();
+    if (!Object.hasOwn(LEGACY_ALWAYS_THINKING, id)) {
+      return undefined;
+    }
+    effort = LEGACY_ALWAYS_THINKING[id];
   }
-  const efforts = asPayloadRecord(model.compat)?.supportedReasoningEfforts;
-  const last: unknown = Array.isArray(efforts) ? efforts.at(-1) : undefined;
-  const effort = typeof last === "string" ? last : undefined;
   // A fixed effort is the direct Moonshot API contract; proxies map effort themselves.
   return effort && !directMoonshotModel ? undefined : { effort };
 }
