@@ -43,6 +43,13 @@ const qualificationPhases = [
   "cleanup",
 ];
 const phases = new Set([
+  "stock-boot-baseline",
+  "stock-boot-create",
+  "stock-boot-boot",
+  "stock-boot-ready",
+  "stock-boot-headroom",
+  "stock-boot-headroom-passed",
+  "stock-boot-cleanup",
   ...qualificationPhases.map((phase) => `qualification-${phase}`),
   "release-prepare",
   "release-build",
@@ -106,6 +113,8 @@ const roles = new Set([
   "WindowServer",
   "kernel_task",
   "logd",
+  "log",
+  "Console",
   "mds",
   "mds_stores",
   "mdworker_shared",
@@ -466,11 +475,12 @@ function startTimeline(output) {
     // A single census after the gate can recover surviving workers' lifetime CPU
     // without adding more process scans while the simulator is saturated.
     const postHeadroomCensus =
-      processSamplingStopped &&
       !postHeadroomCensusDone &&
-      ["qualification-setup-code", "qualification-live-chat", "qualification-reader"].includes(
-        phaseAtStart,
-      );
+      (phaseAtStart === "stock-boot-headroom-passed" ||
+        (processSamplingStopped &&
+          ["qualification-setup-code", "qualification-live-chat", "qualification-reader"].includes(
+            phaseAtStart,
+          )));
     if (processSamplingStopped && !postHeadroomCensus) {
       probeStatus.ps = { wallMs: 0, outcome: "disabled-after-timeout" };
     } else if (!postHeadroomCensus && performance.now() < nextProcessAt) {
@@ -489,7 +499,7 @@ function startTimeline(output) {
       previousProcesses = new Map(rows.map((row) => [row.pid, row.cpuMs]));
       nextProcessAt = processAt + processSampleIntervalMs;
       // Under contention, ps termination can itself stall. Do not keep adding process scans.
-      processSamplingStopped ||= probeStatus.ps?.outcome === "timeout";
+      processSamplingStopped ||= postHeadroomCensus || probeStatus.ps?.outcome === "timeout";
     }
     if (!active) {
       return;

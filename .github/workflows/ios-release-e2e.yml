@@ -14,6 +14,10 @@ on:
         default: true
   workflow_dispatch:
     inputs:
+      stock_boot_only:
+        description: Temporary bare Simulator startup diagnostic; does not qualify a release
+        type: boolean
+        default: false
       mode:
         description: Stock qualification or four matched stock/SimSlim pairs
         type: choice
@@ -30,6 +34,7 @@ permissions:
 
 jobs:
   qualify:
+    if: ${{ !inputs.stock_boot_only }}
     runs-on: xcode-27-xlarge
     timeout-minutes: 240
     env:
@@ -227,6 +232,52 @@ jobs:
           name: ios-release-e2e-${{ inputs.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ios-release-e2e-proof.json
+            ${{ runner.temp }}/ios-resource-timeline.jsonl
+          if-no-files-found: error
+          retention-days: 14
+
+  observe-stock-boot:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.stock_boot_only }}
+    runs-on: xcode-27-xlarge
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Reserve host CPU as in qualification
+        timeout-minutes: 2
+        run: sudo -n /usr/bin/mdutil -i off /System/Volumes/Data
+
+      - name: Checkout exact diagnostic revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Select the qualification Node version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
+          package-manager-cache: false
+
+      - name: Select the qualification Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/lib/swift-toolchain.sh
+          select_xcode_toolchain
+
+      - name: Observe bare stock boot without build, Gateway, or XCTest
+        run: |
+          node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-resource-timeline.jsonl" -- \
+            node scripts/ios-simulator-boot-observe.mjs "$RUNNER_TEMP/ios-stock-boot-proof.json"
+
+      - name: Upload sanitized diagnostic proof
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-stock-boot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ios-stock-boot-proof.json
             ${{ runner.temp }}/ios-resource-timeline.jsonl
           if-no-files-found: error
           retention-days: 14
