@@ -6,6 +6,7 @@ export async function writeGatewayServiceUpdateCapability(): Promise<void> {
     JSON.stringify({
       updateExecutor: GATEWAY_UPDATE_EXECUTOR_CONTRACT,
       targetRootBinding: true,
+      currentCoreRecoveryRiskGuard: true,
       definitionBackup: true,
       retainedOwnerBinding: true,
       originalDefinitionBinding: true,

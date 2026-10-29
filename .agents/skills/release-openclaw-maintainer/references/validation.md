@@ -12,14 +12,19 @@ packaging or publish gate: npm preflight, prepack, `release-check`, and
 `release:prep` never consult live npm dist-tags, so another release moving
 `latest` or `beta` cannot invalidate a validated candidate. Refresh it on
 `main` (stable closeout or a normal PR) from every release in the supported
-upgrade window. Verify each downloaded npm tarball against its published
-`dist.integrity` before extraction, then run
-`pnpm update:compat:gen --release '<unpacked-dir>=<verified-integrity>'`, repeating
-`--release` for every supported version. Generation replaces the recorded set:
+upgrade window with `pnpm update:compat:gen --registry-release <version>`,
+repeating `--registry-release` for every supported version. This mode downloads
+the exact registry tarball URL, verifies its published `dist.integrity`, and
+unpacks it without npm installation or freshness policy. For an already
+downloaded and verified artifact, use
+`--release '<unpacked-dir>=<verified-integrity>'`; both input modes may be mixed.
+Generation replaces the recorded set:
 keep empty entries, drop expired versions and their historical corrections, and
 never hand-edit recorded origins. `pnpm update:compat:check` remains a manual
-maintainer report of npm `latest`/`beta` coverage. Repeat the generation
-arguments with `--check` for an offline regeneration check.
+maintainer report of npm `latest`/`beta`/`extended-stable` coverage. Repeat the generation
+arguments with `--check` for a regeneration check. It is offline only when every
+input uses local `--release`; `--registry-release` checks fetch and verify the
+registry artifact again.
 
 Run every recorded `update-first-hop-compat*` lane and the upgrade survivor lane
 from the oldest supported release. Native Windows proof must invoke the old
@@ -123,13 +128,17 @@ qualify for `npm-beta-v1`.
 FRV `normalCi` Windows Node shards and all other selected failures block. Decide
 blocker or flake for every failure,
 rerun flakes on the same Release SHA at most twice, and file a fix-in-parallel
-issue/PR on `main`. Do not re-cut, change tooling, or start another FRV solely
-to clear a flake; the selected job must still pass before publication. See the
+issue/PR on `main`. Do not re-cut, change P, or start another FRV solely to
+waive a flake. Every selected job must pass, and FRV itself must conclude success
+before publication. See the
 [CI skill](../../release-openclaw-ci/SKILL.md#publication-requirements).
 Native platform publication remains independent and follows its own gates.
 All-group cross-OS qualification requires all nine Linux/Windows/macOS
 install/upgrade pairs. Focused recovery may select individual lanes but does
-not itself qualify publication. No lane or soak waiver can bypass failures.
+not itself qualify publication. This branch's candidate-owned Release Decision
+has no trusted-P waiver support, including for live-provider/Telegram failures.
+Keep the [strict branch policy](../SKILL.md#shared-release-boundaries); a newer P
+cannot change the frozen workflow's decision rules.
 
 ## Postpublish confidence
 

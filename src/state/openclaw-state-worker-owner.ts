@@ -21,6 +21,7 @@ import {
 } from "../infra/sqlite-worker-store.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
+import { notifyListeners } from "../shared/listeners.js";
 import { isStateDatabaseReadAdmissionInvalidatedError } from "./openclaw-state-db-async-lifecycle.js";
 import {
   captureOpenClawStateDatabaseReadAdmission,
@@ -36,6 +37,7 @@ import type {
   OpenClawStateWorkerOperationOptions as OperationOptions,
 } from "./openclaw-state-worker-contract.js";
 import { createStateWorkerMemoryPressureSubscription } from "./openclaw-state-worker-memory-pressure.js";
+import { createStateWorkerOperationRetainer } from "./openclaw-state-worker-operation-retainer.js";
 import {
   assertOpenClawStateWorkerActorPath,
   assertOpenClawStateWorkerSchemaContext,
@@ -214,48 +216,16 @@ export function createSharedStateWorkerOwner() {
     }
     throw error;
   };
-  const retainOperation = (store: Store) => {
-    const entry = [...stores].find((candidate) => candidate.store === store);
-    if (!entry) {
-      throw new Error("Shared-state worker operation lost its actor owner");
-    }
-    clearIdleRetirement(entry);
-    entry.operationGeneration += 1;
-    entry.activeOperations += 1;
-    activeEntries.add(entry);
-    let released = false;
-    return () => {
-      if (released) {
-        return undefined;
-      }
-      released = true;
-      entry.activeOperations -= 1;
-      if (entry.activeOperations === 0) {
-        activeEntries.delete(entry);
-      }
-      refreshPressureSubscription();
-      if (
-        stores.has(entry) &&
-        !isSqliteWorkerStoreAvailable(store) &&
-        !hasActiveActorOperations(entry)
-      ) {
-        // Co-users may await each other's callbacks across maintenance scopes.
-        // Only their final release can join actor-wide client closure.
-        const pending = entry.actor
-          ? retireActor(entry.actor, entry.context.admission.identity)
-          : retire(entry);
-        void pending.catch((error: unknown) => {
-          log.warn("Shared-state worker retirement failed", {
-            path: entry.context.admission.databasePath,
-            error,
-          });
-        });
-        return pending;
-      }
-      scheduleIdleRetirement(entry);
-      return undefined;
-    };
-  };
+  const retainOperation = createStateWorkerOperationRetainer({
+    stores,
+    activeEntries,
+    clearIdleRetirement,
+    refreshPressureSubscription,
+    hasActiveActorOperations,
+    retireActor: (actor, identity) => retireActor(actor, identity),
+    retire,
+    scheduleIdleRetirement,
+  });
   const retainActorSettlement = (attempt: ActorRetirement, pending: Promise<void>) => {
     for (const entry of attempt.entries) {
       const closing = retiring.get(entry);
@@ -613,6 +583,7 @@ export function createSharedStateWorkerOwner() {
         const databaseAdmission = captureOpenClawStateDatabaseReadAdmission(admission.databasePath);
         assertAdmission();
         const openingGuard = captureOpenClawStateWorkerOpeningGuard(context, assertCurrent, signal);
+        const nativeLostListeners = new Set<() => void>();
         const open = () =>
           openingGuard.run(() =>
             openSharedStateSqliteWorkerStore<StoreOperations>(
@@ -631,6 +602,13 @@ export function createSharedStateWorkerOwner() {
                 retainCleanup: (cleanup) => {
                   admitted.cleanup = cleanup;
                 },
+                // Bind only the listener set so the broker does not retain the opening caller.
+                onNativeLost: notifyListeners.bind(
+                  undefined,
+                  nativeLostListeners,
+                  undefined,
+                  undefined,
+                ),
               },
             ),
           );
@@ -640,6 +618,7 @@ export function createSharedStateWorkerOwner() {
           databaseAdmission,
           openingAdmission: openingGuard.admission,
           existingOnly,
+          nativeLostListeners,
           activeOperations: 0,
           operationGeneration: 0,
           // Maintenance may already be draining an accepted callback; its native

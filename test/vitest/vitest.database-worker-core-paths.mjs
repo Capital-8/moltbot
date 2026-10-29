@@ -567,6 +567,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/state/agent-deletion-cleanup.test.ts",
   "src/state/claw-package-adoption.test.ts",
   "src/state/openclaw-database-preflight.startup-index.test.ts",
+  "src/state/openclaw-database-preflight.startup-fts.test.ts",
   "src/state/openclaw-state-lease.retention.test.ts",
   "src/system-agent/setup-lifetime.test.ts",
   "src/auto-reply/reply/agent-runner-memory.test.ts",

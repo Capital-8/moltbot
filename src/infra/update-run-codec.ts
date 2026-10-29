@@ -124,6 +124,7 @@ function boundedJson(
           item.step !== "diagnostic:database snapshot" &&
           item.step !== "diagnostic:database migration writes" &&
           item.step !== "diagnostic:database rollback" &&
+          item.step !== "finalize:data-at-risk" &&
           !(typeof item.step === "string" && item.step.startsWith("finalize:doctor-lint:"))
             ? { ...item, detail: undefined, failureFacts: undefined }
             : item,
@@ -291,6 +292,9 @@ export function encodeRun(input: UpdateRunRecord, options: UpdateRunLedgerOption
     previousDrivers,
     updateRecoveryCapture,
   });
+  if (record.verification.recovery?.serviceRestartSafe === false) {
+    delete record.verification.recovery.dataAtRisk;
+  }
   return {
     run_id: record.runId,
     created_at_ms: record.createdAtMs,

@@ -89,6 +89,7 @@ import {
 } from "./openclaw-agent-execution-operations.js";
 import { loadAgentVoiceSessionOperations } from "./openclaw-agent-execution-voice-operations.js";
 import type { AgentWorkerOperationContext } from "./openclaw-agent-operation-context.js";
+import { repairAgentDatabaseStartupFts } from "./openclaw-agent-startup-fts.js";
 import {
   requireOpenClawStateDatabaseIdentity,
   retainOpenClawStateDatabase,
@@ -271,6 +272,17 @@ function openAgentDatabaseBackend(
         };
         lease.validation = preparation.validation;
         lease.deferUnverifiedIntegrity = preparation.deferUnverifiedIntegrity;
+        lease.startupRepair = startupJournalRequested
+          ? (check, error, assertCurrent) =>
+              repairAgentDatabaseStartupFts({
+                receipt: lease.receipt,
+                check,
+                error,
+                assertCurrent,
+                assertFileIdentity,
+                env: options.env,
+              })
+          : undefined;
       } catch (error) {
         throw new SqliteWorkerOpenRefusedError(error);
       } finally {

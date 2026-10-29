@@ -5,6 +5,10 @@ import { resolveOpenClawPackageRoot } from "../../infra/openclaw-root.js";
 import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
 import { ExitError } from "../../runtime.js";
 import {
+  assertCurrentCoreRecoveryRisk,
+  currentCoreRecoveryRiskSchema,
+} from "../update-cli/update-command-current-core-recovery.js";
+import {
   withDelegatedUpdateCommandExecutor,
   type UpdateCommandChildGrant,
 } from "../update-cli/update-command-executor.js";
@@ -65,6 +69,18 @@ export async function runGatewayServiceUpdateCommand(
     }
     // SAFETY: Partial transport data is validated against live lease rows before effects.
     const grant = input.executor as UpdateCommandChildGrant;
+    const currentCoreRisk =
+      input.currentCoreRisk === undefined
+        ? undefined
+        : currentCoreRecoveryRiskSchema.parse(input.currentCoreRisk);
+    if (
+      currentCoreRisk &&
+      (action !== "restart" ||
+        currentCoreRisk.runId !== grant.runId ||
+        input.originalDefinition !== undefined)
+    ) {
+      throw new Error("Invalid current-core recovery restriction.");
+    }
     const root = await resolveOpenClawPackageRoot({ moduleUrl: import.meta.url });
     const targetRoot = input.targetRoot;
     if (
@@ -77,7 +93,12 @@ export async function runGatewayServiceUpdateCommand(
     // Destination admission never replaces the original installation's live authority.
     await withDelegatedUpdateCommandExecutor(grant, grant.runId, grant.root, async (fence) =>
       withGatewayServiceUpdateAuthority(
-        fence.assertCurrent,
+        () => {
+          fence.assertCurrent();
+          if (currentCoreRisk) {
+            assertCurrentCoreRecoveryRisk(currentCoreRisk);
+          }
+        },
         async () => {
           if (input.originalDefinition !== undefined) {
             if (action !== "install" || typeof input.originalDefinition !== "string") {

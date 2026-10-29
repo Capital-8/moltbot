@@ -10,18 +10,13 @@ import * as ports from "../../infra/ports-inspect.js";
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import { readUpdateStateSchemaVersions } from "../../infra/update-candidate-state.js";
-import { DoctorMaintenanceRefusalError } from "../../infra/update-doctor-result.js";
 import * as updateLedger from "../../infra/update-run-ledger.js";
 import { renderUpdateRunReport } from "../../infra/update-run-report.js";
 import { CommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime } from "../../runtime.js";
 import * as utils from "../../utils.js";
 import * as restartHealth from "../daemon-cli/restart-health.js";
-import { POST_PLUGIN_DOCTOR_EXECUTION_FAILED_REASON } from "./update-command-post-plugin-validation.js";
-import {
-  finishSuccessfulPackageSwitch,
-  successfulPluginUpdate,
-} from "./update-command-post-update.test-support.js";
+import { finishSuccessfulPackageSwitch } from "./update-command-post-update.test-support.js";
 import { UpdateCommandFailure as ReportedUpdateCommandFailure } from "./update-command-result.js";
 import { completeUpdateCommandRun } from "./update-command-run.js";
 import { withUpdateCommandTerminalResult } from "./update-command-terminal.js";
@@ -84,267 +79,62 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it.each(
-  (["linux", "win32"] as const).flatMap((platform) =>
-    [false, true].map((dataAtRisk) => ({ platform, dataAtRisk })),
-  ),
-)(
-  "recovers a Gateway after an exited Doctor on $platform unless data is at risk ($dataAtRisk)",
-  async ({ platform, dataAtRisk }) => {
-    const [
-      { createMockGatewayService },
-      { withUpdateCommandExecutor },
-      { createPostUpdateRepairFixture },
-      { finishUpdate },
-      serviceCommand,
-      serviceMaintenance,
-      servicePlan,
-      serviceOperations,
-      { createWindowsTaskAutoStartRecovery },
-      nodeSqlite,
-      processIdentity,
-      snapshotStaging,
-    ] = await Promise.all([
-      import("../../daemon/service.test-helpers.js"),
-      import("./update-command-executor.js"),
-      import("./update-command-post-update-repair.test-support.js"),
-      import("./update-command-post-update.js"),
-      import("./update-command-service-command.js"),
-      import("./update-command-service-maintenance.js"),
-      import("./update-command-service-plan.js"),
-      import("./update-command-service.js"),
-      import("./update-command-windows-task.js"),
-      import("../../infra/node-sqlite.js"),
-      import("../../shared/pid-alive.js"),
-      import("../../infra/sqlite-snapshot-staging.js"),
-    ]);
-    const hostPlatform = process.platform;
-    const existingUri = nodeSqlite.resolveExistingSqliteFileUri;
-    vi.spyOn(nodeSqlite, "resolveExistingSqliteFileUri").mockImplementation((pathname) =>
-      existingUri(pathname, hostPlatform),
-    );
-    const servicePlatform = vi.spyOn(process, "platform", "get").mockReturnValue(hostPlatform);
-    // Native process identity and SQLite staging still belong to the real host.
-    const onHost = <T>(read: () => T): T => {
-      const activePlatform = process.platform;
-      servicePlatform.mockReturnValue(hostPlatform);
-      try {
-        return read();
-      } finally {
-        servicePlatform.mockReturnValue(activePlatform);
-      }
-    };
-    const readStart = processIdentity.getFileLockProcessStartTime;
-    vi.spyOn(processIdentity, "getFileLockProcessStartTime").mockImplementation((...args) =>
-      onHost(() => readStart(...args)),
-    );
-    const createStaging = snapshotStaging.createSqliteSnapshotStagingDirectorySync;
-    vi.spyOn(snapshotStaging, "createSqliteSnapshotStagingDirectorySync").mockImplementation(
-      (...args) => onHost(() => createStaging(...args)),
-    );
-    const params = createPostUpdateRepairFixture(root);
-    const run = params.opts.run!;
-    params.root = root;
-    params.result = {
-      ...params.result,
-      root,
-      status: "skipped",
-      reason: "already-current",
-      before: { version: "2026.9.5" },
-      after: { version: "2026.9.5" },
-    };
-    params.coreAlreadyCurrent = true;
-    params.mutationStarted = false;
-    params.rollbackBlockedReason = undefined;
-    params.preManagedServiceStop!.stopped = false;
-    await fs.mkdir(path.join(root, "dist"));
-    await fs.writeFile(path.join(root, "dist/index.js"), "export {};\n");
-    let running = true;
-    let enabled = true;
-    mocks.task.mockImplementation(async (args) => {
-      if (args[0] === "/Query") {
-        return {
-          code: 0,
-          stdout: `<Task><Settings><Enabled>${enabled}</Enabled></Settings></Task>`,
-          stderr: "",
-        };
-      }
-      if (args[0] === "/Run") {
-        if (enabled) {
-          running = true;
-        }
-        return { code: enabled ? 0 : 1, stdout: "", stderr: "" };
-      }
-      enabled = args.at(-1) === "/ENABLE";
-      return { code: 0, stdout: "", stderr: "" };
-    });
-    const state = () => ({
-      installed: true,
-      loadState: { status: "loaded" as const },
-      running,
-      runtime: {
-        status: running ? ("running" as const) : ("stopped" as const),
-        pid: running ? 4321 : undefined,
-        ...(platform === "linux" ? { systemd: { managerUid: 2001 } } : {}),
-      },
-      env: run.env,
-      command: {
-        programArguments: [process.execPath, path.join(root, "dist/index.js"), "gateway"],
-        ...(platform === "win32" ? { sourcePath: path.join(root, "gateway.cmd") } : {}),
-      },
-    });
-    vi.spyOn(servicePlan, "readGatewayServiceStateForUpdate").mockImplementation(async () =>
-      state(),
-    );
-    vi.spyOn(gatewayService, "resolveGatewayService").mockReturnValue(
-      createMockGatewayService({
-        readRuntime: async () => state().runtime,
-      }),
-    );
-    const stop = vi
-      .spyOn(serviceOperations, "maybeStopManagedServiceBeforeMutableUpdate")
-      .mockImplementation(async ({ onStopped }) => {
-        const recovery =
-          platform === "win32"
-            ? createWindowsTaskAutoStartRecovery({ serviceEnv: run.env })
-            : undefined;
-        await recovery?.suspended;
-        running = false;
-        const stopped = {
-          ...params.preManagedServiceStop!,
-          stopped: true,
-          windowsTaskAutoStartRecovery: recovery,
-        };
-        onStopped?.(stopped);
-        return stopped;
-      });
-    const facts = Array.from({ length: 4 }, (_, index) => ({
-      check: `fixture-check-${index + 1}`,
-      code: "step-refused",
-    }));
-    if (dataAtRisk) {
-      // Baseline Doctor throws data-at-risk refusals instead of reporting a result.
-      mocks.converge.mockImplementationOnce(async ({ beforeDoctor }) => {
-        await beforeDoctor?.();
-        throw new DoctorMaintenanceRefusalError(
-          "Doctor refused maintenance.",
-          { kind: "data-at-risk", reason: "unreadable-state" },
-          { failureFacts: facts },
-        );
-      });
-    } else {
-      mocks.converge.mockImplementationOnce(async ({ beforeDoctor, result }) => {
-        await beforeDoctor?.();
-        return {
-          resultWithPostUpdate: {
-            ...result,
-            status: "error",
-            reason: "post-update-plugins",
-            postUpdate: {
-              ...result.postUpdate,
-              plugins: {
-                ...successfulPluginUpdate,
-                status: "error",
-                reason: POST_PLUGIN_DOCTOR_EXECUTION_FAILED_REASON,
-                failureFacts: facts,
-              },
-            },
-            steps: [
-              ...result.steps,
-              {
-                name: "post-update verification",
-                command: "openclaw plugins update",
-                cwd: root,
-                durationMs: 0,
-                exitCode: 1,
-                failureFacts: facts,
-              },
-            ],
-          },
-        };
-      });
-    }
-    const start = vi
-      .spyOn(serviceCommand, "runUpdatedInstallGatewayCommand")
-      .mockImplementation(async (command) => {
-        command.onGatewayStartAttempted?.();
-        if (platform === "win32") {
-          const launched = await mocks.task(["/Run", "/TN", "fixture-gateway"]);
-          if (launched.code !== 0) {
-            throw new Error("Scheduled Task remained disabled after Doctor failure");
-          }
-        } else {
-          running = true;
-        }
-        return "accepted";
-      });
-    const health = async () => ({
-      healthy: running,
-      outcome: running ? ("ready" as const) : ("failed" as const),
-      runtime: state().runtime,
-      gatewayVersion: "2026.9.5",
-      portUsage: {
-        port: 19431,
-        status: running ? ("busy" as const) : ("free" as const),
-        listeners: [],
-        hints: [],
-      },
-      staleGatewayPids: [],
-      waitOutcome: running ? ("healthy" as const) : ("stopped-free" as const),
-    });
-    vi.spyOn(restartHealth, "waitForGatewayHealthyRestart").mockImplementation(health);
-    vi.spyOn(restartHealth, "inspectGatewayRestart").mockImplementation(health);
-    vi.spyOn(restartHealth, "waitForGatewayHttpReadiness").mockImplementation(async () => ({
-      healthz: running ? 200 : 503,
-      readyz: running ? 200 : 503,
-    }));
-    const actual = await vi.importActual<typeof import("./update-command-verification.js")>(
-      "./update-command-verification.js",
-    );
-    vi.mocked(verifyUpdatedGateway).mockImplementation(actual.verifyUpdatedGateway);
-    mocks.activePort.mockResolvedValue(19431);
-    await withUpdateCommandExecutor(run.runId, async (executor) => {
-      run.executorFence = await executor.enter(root);
-      servicePlatform.mockReturnValue(platform);
-      try {
-        params.preManagedServiceStop!.serviceUpdateVerdict =
-          await serviceMaintenance.revalidateManagedGatewayServiceAfterUpdate({
-            state: state(),
-            root,
-          });
-        await expect(finishUpdate(params)).rejects.toMatchObject({
-          result: {
-            status: "error",
-            recovery: dataAtRisk
-              ? { serviceRestartSafe: false }
-              : { serviceRestartSafe: true, service: "healthy", version: "2026.9.5" },
-          },
-        });
-      } finally {
-        servicePlatform.mockReturnValue(hostPlatform);
-      }
-    });
-    expect(stop).toHaveBeenCalledOnce();
-    expect(start).toHaveBeenCalledTimes(dataAtRisk ? 0 : 1);
-    expect(running).toBe(!dataAtRisk);
-    if (platform === "win32") {
-      expect(enabled).toBe(!dataAtRisk);
-    } else {
-      expect(mocks.task).not.toHaveBeenCalled();
-    }
-    const recorded = updateLedger.getUpdateRun(run.runId, { env: run.env });
-    expect(
-      recorded?.steps.find((step) => step.step === "post-update verification")?.failureFacts,
-    ).toEqual(expect.arrayContaining(facts));
-    assert(recorded);
-    const report = renderUpdateRunReport(recorded).markdown;
-    for (const fact of facts) {
-      expect(report).toContain(fact.check);
-    }
-  },
-);
-
 describe("post-update failure recovery observation", () => {
+  it.each([
+    { untouchedFailure: true, dataAtRisk: false, serviceStopped: false },
+    { untouchedFailure: false, dataAtRisk: false, serviceStopped: false },
+    { untouchedFailure: undefined, dataAtRisk: false, serviceStopped: false },
+    { untouchedFailure: true, dataAtRisk: true, serviceStopped: false },
+    { untouchedFailure: true, dataAtRisk: false, serviceStopped: true },
+  ])(
+    "requires explicit untouched proof and no risk ($untouchedFailure, $dataAtRisk)",
+    async ({ untouchedFailure, dataAtRisk, serviceStopped }) => {
+      const { verifyUpdateFailureRecovery } = await import("./update-command-failure-recovery.js");
+      const result = await verifyUpdateFailureRecovery({
+        result: {
+          status: "error",
+          mode: "npm",
+          reason: "package-swap",
+          root,
+          before: { version: "2026.9.5" },
+          steps: [],
+          durationMs: 0,
+          ...(dataAtRisk
+            ? {
+                recovery: {
+                  serviceRestartSafe: false,
+                  reason: "runtime-verification-failed",
+                  dataAtRisk: "unreadable-state",
+                },
+              }
+            : {}),
+        },
+        root,
+        opts: { json: true },
+        untouchedFailure,
+        serviceStopped,
+      });
+      expect(result.reason).toBe("package-swap");
+      if (untouchedFailure === true && !dataAtRisk && !serviceStopped) {
+        expect(mocks.activePort).not.toHaveBeenCalled();
+        expect(mocks.managedService).not.toHaveBeenCalled();
+        expect(verifyUpdatedGateway).not.toHaveBeenCalled();
+        expect(result.verification).toEqual({});
+        expect(result.steps).toContainEqual(
+          expect.objectContaining({ name: "gateway recovery observation", exitCode: 0 }),
+        );
+      } else {
+        expect(verifyUpdatedGateway).toHaveBeenCalledOnce();
+      }
+      if (dataAtRisk) {
+        expect(result.recovery?.serviceRestartSafe).toBe(false);
+        expect(result.recovery?.serviceRestartSafe === false && result.recovery.dataAtRisk).toBe(
+          "unreadable-state",
+        );
+      }
+    },
+  );
+
   it("settles a headless package rollback without waiting for a Gateway", async () => {
     const { packageRoot, transaction } = await createRetainedPackageSwap(root);
     const configPath = path.join(process.env.OPENCLAW_STATE_DIR!, "openclaw.json");
@@ -459,7 +249,7 @@ describe("post-update failure recovery observation", () => {
     { activated: true, json: false, deferred: true },
     { activated: true, json: true, deferred: true },
   ])(
-    "defers only recorded state contention (activated=$activated, json=$json, deferred=$deferred)",
+    "observes untouched failures and defers recorded state contention (activated=$activated, json=$json, deferred=$deferred)",
     async ({ activated, json, deferred }) => {
       const env = { ...process.env };
       const run = { runId: updateLedger.createUpdateRun({ trigger: "cli" }, { env }).runId, env };
@@ -545,8 +335,8 @@ describe("post-update failure recovery observation", () => {
       if (!(failure instanceof ReportedUpdateCommandFailure)) {
         throw failure;
       }
-      expect(readRuntime).toHaveBeenCalledTimes(deferred ? 0 : 1);
-      expect(inspect).toHaveBeenCalledTimes(deferred ? 0 : 1);
+      expect(readRuntime).toHaveBeenCalledTimes(activated && !deferred ? 1 : 0);
+      expect(inspect).toHaveBeenCalledTimes(activated && !deferred ? 1 : 0);
       expect(sleep).not.toHaveBeenCalled();
       expect(waitForStartup).not.toHaveBeenCalled();
       expect(elapsedMs).toBe(0);
@@ -566,17 +356,24 @@ describe("post-update failure recovery observation", () => {
         );
       }
       expect(recorded?.verification.serviceRunning).toBeUndefined();
-      expect(recorded?.verification.readyz).toBe(deferred ? undefined : false);
+      expect(recorded?.verification.readyz).toBe(activated && !deferred ? false : undefined);
       expect(recorded?.steps).toContainEqual(
         expect.objectContaining({ step: "candidate-doctor-lint", exitCode: 2 }),
       );
       const recoveryStep = recorded?.steps.find(
         (step) => step.step === "gateway recovery verification",
       );
-      expect(recoveryStep).toMatchObject({
-        status: deferred ? "completed" : "failed",
-        exitCode: deferred ? null : 1,
-      });
+      if (activated) {
+        expect(recoveryStep).toMatchObject({
+          status: deferred ? "completed" : "failed",
+          exitCode: deferred ? null : 1,
+        });
+      } else {
+        expect(recoveryStep).toBeUndefined();
+        expect(recorded?.steps).toContainEqual(
+          expect.objectContaining({ step: "gateway recovery observation", exitCode: 0 }),
+        );
+      }
       if (deferred) {
         expect(recoveryStep?.detail).toContain("deferred");
         expect(recoveryStep?.detail).toContain("service owner");

@@ -32,7 +32,7 @@ import {
 } from "../agents/mcp-oauth.js";
 import { resolveMcpTransportConfig } from "../agents/mcp-transport-config.js";
 import { parseConfigValue } from "../auto-reply/reply/config-value.js";
-import { listConfiguredMcpServers } from "../config/mcp-config.js";
+import { listConfiguredMcpServers, redactMcpServersForDisplay } from "../config/mcp-config.js";
 import type { McpCodexToolApprovalMode } from "../config/types.mcp.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -731,7 +731,7 @@ export function registerMcpCli(program: Command) {
     .action(async (opts: { json?: boolean }) => {
       const loaded = await loadMcpConfig(opts);
       if (opts.json) {
-        defaultRuntime.writeJson(loaded.mcpServers);
+        defaultRuntime.writeJson(redactMcpServersForDisplay(loaded.mcpServers));
         return;
       }
       const entries = Object.entries(loaded.mcpServers).toSorted(([a], [b]) => a.localeCompare(b));
@@ -762,7 +762,7 @@ export function registerMcpCli(program: Command) {
     .option("--json", "Print JSON")
     .action(async (name: string | undefined, opts: { json?: boolean }) => {
       const loaded = await loadMcpConfig(opts);
-      const value = name ? requireMcpServer(loaded, name, opts) : loaded.mcpServers;
+      const value = redactMcpServersForDisplay(selectMcpServers(loaded, name, opts));
       if (!opts.json) {
         defaultRuntime.log(
           name
@@ -770,7 +770,7 @@ export function registerMcpCli(program: Command) {
             : `OpenClaw-managed MCP servers (${loaded.path}):`,
         );
       }
-      defaultRuntime.writeJson(value ?? {});
+      defaultRuntime.writeJson(name ? value[name] : value);
     });
 
   mcp

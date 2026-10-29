@@ -250,6 +250,7 @@ export function createPostUpdateFailureResult(
       },
     };
   }
+  const refusal = classifyDoctorMaintenanceRefusal(error);
   const version = params.result.after?.version?.trim();
   return {
     message,
@@ -258,8 +259,12 @@ export function createPostUpdateFailureResult(
       status: "error",
       reason: "post-update-failed",
       recovery:
-        classifyDoctorMaintenanceRefusal(error).kind === "data-at-risk"
-          ? { serviceRestartSafe: false, reason: "runtime-verification-failed" }
+        refusal.kind === "data-at-risk"
+          ? {
+              serviceRestartSafe: false,
+              reason: "runtime-verification-failed",
+              dataAtRisk: refusal.reason,
+            }
           : isUpdateStateReadContention(error) && version
             ? (params.result.recovery ?? { serviceRestartSafe: true, version })
             : params.result.recovery,

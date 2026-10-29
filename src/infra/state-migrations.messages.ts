@@ -3,6 +3,7 @@ import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text
 import { redactSensitiveText } from "../logging/redact.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { listAgentDatabaseAdmissionRefusals } from "../state/agent-database-admission.js";
+import { listAgentDatabaseStartupFtsRepairs } from "../state/agent-database-startup-fts.js";
 import type {
   LegacyStateMigrationStepPlan,
   LegacyStateMigrationStepReceipt,
@@ -65,7 +66,10 @@ export function readStartupMigrationWarning(includeSensitive = true): string | u
   const admissionWarnings = listAgentDatabaseAdmissionRefusals()
     .filter((refusal) => refusal.code !== "agent-database-inspection-pending")
     .map((refusal) => `${refusal.reason}\n${refusal.repairHint}`);
-  const details = [startupMigrationDetails, formatStartupMigrationDetails(admissionWarnings)]
+  const details = [
+    startupMigrationDetails,
+    formatStartupMigrationDetails([...admissionWarnings, ...listAgentDatabaseStartupFtsRepairs()]),
+  ]
     .filter(Boolean)
     .join("\n");
   if (!details) {

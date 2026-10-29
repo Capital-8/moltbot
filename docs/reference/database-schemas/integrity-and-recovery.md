@@ -995,6 +995,28 @@ failures remain a refusal: preserve the database and its WAL, then restore a
 verified backup or use SQLite recovery. Runtime and startup never perform this
 repair automatically.
 
+FTS5-only `malformed inverted index` findings on canonical agent search tables
+are also repairable. A Node upgrade or downgrade can change SQLite's `unicode61`
+tokenization (for example, U+FFFE in SQLite 3.54), leaving intact content with an
+incompatible derived index. Stop the Gateway and run `openclaw doctor --fix` with
+the Node version that will run the Gateway, then restart it. Doctor preserves a
+backup and rebuilds only the affected, schema-validated FTS tables in one
+transaction. It verifies integrity and foreign keys before clearing quarantine;
+session recovery uses this same repair instead of moving the database aside.
+Unknown or changed FTS definitions and findings mixed with structural damage
+are not eligible for this repair.
+
+Gateway startup can attempt a bounded automatic repair once per physical
+database generation in the current process. It requires a live startup grant,
+the exact current worker lease, exclusive database custody, and only canonical
+owned FTS findings. The worker preserves a verified backup before transactional
+rebuilding, checks authority throughout, and rechecks integrity before admission.
+Mixed or foreign-schema damage, failed backup or rebuild, lost authority, and
+repeated attempts remain quarantined with `openclaw doctor --fix` guidance.
+Offline Doctor maintenance remains available when startup repair is refused.
+Switching SQLite versions again may require another rebuild, without changing
+stored content or the database schema.
+
 <a id="downgrades-are-unsupported" />
 
 <a id="example-state-schema-13-to-12" />

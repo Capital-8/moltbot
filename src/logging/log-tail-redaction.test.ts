@@ -21,6 +21,7 @@ describe("readConfiguredLogTail redaction", () => {
     const dir = tempDirs.make("openclaw-log-tail-redaction-");
     const logFile = path.join(dir, "openclaw.log");
     const configFile = path.join(dir, "openclaw.json");
+    const googleSecret = "GOCSPX-abcdefghijklmnopqrstuvwx_y-z";
     const basicSecret = "c2VjcmV0OnBhc3M=";
     const openClawToken = "supersecretgatewaytoken1234567890";
     const pomeriumJwt = "eyJheaderabcd.eyJpayloadabcd.signatureabcd123456";
@@ -36,6 +37,8 @@ describe("readConfiguredLogTail redaction", () => {
         `Authorization: Basic ${basicSecret}`,
         `X-OpenClaw-Token: ${openClawToken}`,
         `x-pomerium-jwt-assertion: ${pomeriumJwt}`,
+        googleSecret,
+        "GOCSPX-docs",
         "normal diagnostic line",
       ].join("\n") + "\n",
       "utf8",
@@ -52,6 +55,8 @@ describe("readConfiguredLogTail redaction", () => {
     expect(text).toContain("X-OpenClaw-Token: supers…7890");
     expect(text).toContain("x-pomerium-jwt-assertion: eyJhea…3456");
     expect(text).toContain("normal diagnostic line");
+    expect(text).not.toContain(googleSecret);
+    expect(text).toContain("GOCSPX-docs");
     expect(text).not.toContain(basicSecret);
     expect(text).not.toContain(openClawToken);
     expect(text).not.toContain(pomeriumJwt);

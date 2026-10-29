@@ -7,7 +7,6 @@ import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { assertSqliteIntegrityInWorker } from "../infra/sqlite-integrity-worker.js";
 import {
   runSqliteIntegrityCheckSync,
-  runSqliteIntegrityOperationSync,
   type SqliteIntegrityCheck,
   type SqliteIntegrityOperation,
 } from "../infra/sqlite-integrity.js";
@@ -18,10 +17,7 @@ import {
 } from "../infra/sqlite-transaction.js";
 import { registerDeferredSqliteWalWriteAdmission } from "../infra/sqlite-wal-write-admission.js";
 import { readDatabasePathIdentitySync } from "../infra/sqlite-worker-identity.js";
-import {
-  createSqliteWorkerOperationAdmission,
-  requestSqliteWorkerOperationAdmission,
-} from "../infra/sqlite-worker-operation-admission.js";
+import { createSqliteWorkerOperationAdmission } from "../infra/sqlite-worker-operation-admission.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
@@ -43,6 +39,7 @@ import type {
   OpenClawAgentDatabaseRepairAdmission,
 } from "./openclaw-agent-db-contract.js";
 import { assertOpenClawAgentDatabaseIdentity } from "./openclaw-agent-db-identity.js";
+import { runPreparedAgentDatabaseIntegrity } from "./openclaw-agent-db-integrity-driver.js";
 import type { prepareOpenClawAgentDatabaseWorkerLease } from "./openclaw-agent-db-lease.js";
 import {
   agentDatabaseLifecycle as cache,
@@ -162,20 +159,11 @@ export function createOpenClawAgentDatabaseAdmissionOwner(
         registrationObserver,
         repairAdmission,
       );
-      return runSqliteIntegrityOperationSync(
+      return runPreparedAgentDatabaseIntegrity(
         steps,
-        (preparedLease && !isMainThread) || repairAdmission?.assertCurrent
-          ? () =>
-              assertAgentDatabaseOpenAuthority(steps, () => {
-                repairAdmission?.assertCurrent?.();
-                if (preparedLease && !isMainThread) {
-                  requestSqliteWorkerOperationAdmission({
-                    stage: "prepare",
-                    facts: { kind: "agent-open-resume", lease: preparedLease.receipt },
-                  });
-                }
-              })
-          : undefined,
+        preparedLease,
+        repairAdmission,
+        assertAgentDatabaseOpenAuthority,
       );
     };
     const scope = getOpenClawDatabaseMaintenanceScope();

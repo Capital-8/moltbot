@@ -1224,6 +1224,22 @@ openclaw doctor
 
 Migrates config, audits DM policies, and checks gateway health. Doctor also compares active official plugins with the OpenClaw package the managed service will load after restart. Resolve any plugin restart-readiness warning before continuing. Details: [Doctor](/gateway/doctor)
 
+Update snapshots and database backups accept a database only when every integrity
+finding names an exactly owned, schema-validated FTS index. A SQLite tokenizer
+change can make those derived indexes appear malformed while their content rows
+remain intact. Copies keep the original index bytes for rollback compatibility;
+run openclaw doctor --fix under the new runtime to rebuild them. Mixed damage,
+unowned FTS definitions, and foreign-key violations still refuse the copy.
+The candidate performs the rehearsal snapshot, so that allowance applies on the
+first update to a candidate containing it; activation-time backups require the
+installed updater to contain the fix. Snapshot acceptance itself does not repair
+the source. The new runtime separately permits one automatic startup repair per
+physical database generation, only for canonical owned FTS damage under a live
+Gateway startup grant and an exclusive matching database lease. It preserves a
+verified backup before rebuilding and rechecks integrity. Failed repair, mixed
+damage, missing authority, or a repeated attempt keeps the database quarantined
+and requires `openclaw doctor --fix`.
+
 On Windows, `openclaw doctor --fix` can also retry abandoned backup scratch
 cleanup after an older release reported `EPERM` while renaming to an
 `openclaw-backup-retired-*` directory. Active backup scratch and published

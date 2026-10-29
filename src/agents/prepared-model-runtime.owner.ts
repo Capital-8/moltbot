@@ -427,6 +427,7 @@ export async function publishPreparedModelRuntimeOwnerBatch(
     buildTimeoutMs: number | undefined;
     includeCredentialProviders?: boolean;
     isPublicationCurrent?: () => boolean;
+    reportSupersededAfterSiblingPublication?: boolean;
     isOwnerRegistered?: (key: string, owner: PreparedModelRuntimeOwner) => boolean;
     isOwnerPublished?: (key: string, owner: PreparedModelRuntimeOwner) => boolean;
     isBuildCurrent?: () => boolean;
@@ -537,6 +538,7 @@ export async function publishPreparedModelRuntimeOwnerBatch(
       }
     },
   };
+  let superseded: PreparedModelRuntimePublicationSupersededError | undefined;
   try {
     while (true) {
       const attempt = candidates.filter(
@@ -615,6 +617,7 @@ export async function publishPreparedModelRuntimeOwnerBatch(
         ) {
           throw refreshError;
         }
+        superseded = refreshError;
         // Supersession belongs to one owner generation. Retry only still-current siblings so
         // an agent-local mutation cannot discard an inherited-auth refresh built for others.
       }
@@ -663,6 +666,10 @@ export async function publishPreparedModelRuntimeOwnerBatch(
     }
     settleSingleOwner?.failed(refreshError, candidates[0]!.isCurrent);
     throw refreshError;
+  }
+  // Auth publication must join the lost owner without discarding current sibling results.
+  if (params.reportSupersededAfterSiblingPublication && superseded) {
+    throw superseded;
   }
 }
 

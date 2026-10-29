@@ -180,6 +180,41 @@ export function rebuildMemoryChunkFts(db: DatabaseSync, ftsTable: string): void 
   `);
 }
 
+function buildMemoryChunkFtsSchemaSql(ftsTable: string, tokenizeClause: string): string {
+  return (
+    `CREATE VIRTUAL TABLE IF NOT EXISTS ${ftsTable} USING fts5(\n` +
+    `  text,\n` +
+    `  id UNINDEXED,\n` +
+    `  path UNINDEXED,\n` +
+    `  source UNINDEXED,\n` +
+    `  model UNINDEXED,\n` +
+    `  start_line UNINDEXED,\n` +
+    `  end_line UNINDEXED\n` +
+    `${tokenizeClause});`
+  );
+}
+
+function buildMemoryPathFtsSchemaSql(tokenizeClause: string): string {
+  return `CREATE VIRTUAL TABLE IF NOT EXISTS ${MEMORY_INDEX_PATHS_FTS_TABLE} USING fts5(
+        path,
+        source UNINDEXED
+        ${tokenizeClause}
+      );`;
+}
+
+/** Canonical FTS definitions, including the deployed explicit unicode61 spellings. */
+export function getMemoryFtsSchemaSqlVariants(): string[] {
+  return [
+    "",
+    ", tokenize='unicode61'",
+    ', tokenize="unicode61"',
+    ", tokenize='trigram case_sensitive 0'",
+  ].flatMap((tokenizeClause) => [
+    buildMemoryChunkFtsSchemaSql(MEMORY_INDEX_FTS_TABLE, tokenizeClause),
+    buildMemoryPathFtsSchemaSql(tokenizeClause),
+  ]);
+}
+
 /** Reconcile and backfill the derived body index in one atomic savepoint. */
 export function ensureMemoryChunkFtsSchema(params: {
   db: DatabaseSync;
@@ -200,17 +235,7 @@ export function ensureMemoryChunkFtsSchema(params: {
       expectedColumns: ["text", "id", "path", "source", "model", "start_line", "end_line"],
       tokenizeClause: params.tokenizeClause,
     });
-    params.db.exec(
-      `CREATE VIRTUAL TABLE IF NOT EXISTS ${params.ftsTable} USING fts5(\n` +
-        `  text,\n` +
-        `  id UNINDEXED,\n` +
-        `  path UNINDEXED,\n` +
-        `  source UNINDEXED,\n` +
-        `  model UNINDEXED,\n` +
-        `  start_line UNINDEXED,\n` +
-        `  end_line UNINDEXED\n` +
-        `${params.tokenizeClause});`,
-    );
+    params.db.exec(buildMemoryChunkFtsSchemaSql(params.ftsTable, params.tokenizeClause));
     const rowCounts = params.db
       .prepare(
         `SELECT
@@ -290,11 +315,7 @@ export function ensureMemoryPathFtsSchema(params: {
       tokenizeClause: params.tokenizeClause,
     });
     params.db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS ${MEMORY_INDEX_PATHS_FTS_TABLE} USING fts5(
-        path,
-        source UNINDEXED
-        ${params.tokenizeClause}
-      );
+      ${buildMemoryPathFtsSchemaSql(params.tokenizeClause)}
       -- The initial copy and trigger installation share this savepoint. Once
       -- populated, the triggers own completeness; per-row FTS probes are too costly.
       INSERT INTO ${MEMORY_INDEX_PATHS_FTS_TABLE} (rowid, path, source)

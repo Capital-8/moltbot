@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import type { Worker } from "node:worker_threads";
 import { afterEach, expect, it, vi } from "vitest";
@@ -9,12 +10,17 @@ import { closeOpenClawAgentDatabasesAsync } from "./openclaw-agent-db.js";
 import type { AgentDatabaseRequestExecutionSource } from "./openclaw-agent-execution-admission-contract.js";
 import { captureOpenClawAgentDatabaseExecution } from "./openclaw-agent-execution.js";
 import { closeOpenClawStateDatabaseAsync } from "./openclaw-state-db.js";
+import { captureOpenClawStateWorkerContext } from "./openclaw-state-worker-context.js";
+import {
+  createOpenClawStateWorkerLease,
+  executeOpenClawStateWorker,
+} from "./openclaw-state-worker-store.js";
 
 // Kill the real worker mid-operation, then refuse its lease release. Recovery must
 // retain cleanup custody without permanently refusing later requests (#159438).
 const fault = vi.hoisted(() => ({
   marker: "close-wedge-kill-marker",
-  enabled: new SharedArrayBuffer(3 * Int32Array.BYTES_PER_ELEMENT),
+  enabled: new SharedArrayBuffer(4 * Int32Array.BYTES_PER_ELEMENT),
   workers: new Set<Worker>(),
 }));
 
@@ -27,7 +33,30 @@ vi.mock("../infra/worker-cpu.js", async (importOriginal) => {
     // transient SQLITE_IOERR that made the native close fail in production).
     const prepare = DatabaseSync.prototype.prepare;
     DatabaseSync.prototype.prepare = function (sql) {
+      const database = this;
       const statement = prepare.call(this, sql);
+      if (/insert(?: or \\w+)? into/i.test(sql)) {
+        const run = statement.run.bind(statement);
+        statement.run = (...args) => {
+          if ([5, 6].includes(Atomics.load(new Int32Array(workerData.closeWedgeEnabled), 0)) &&
+              (Atomics.load(new Int32Array(workerData.closeWedgeEnabled), 0) === 6 ||
+              database.location()?.endsWith("openclaw-agent.sqlite"))) {
+            const pages = prepare.call(database, "PRAGMA page_count").get().page_count;
+            database.exec("PRAGMA max_page_count=" + pages);
+          }
+          try {
+            return run(...args);
+          } catch (error) {
+            const fault = new Int32Array(workerData.closeWedgeEnabled);
+            if ([5, 6].includes(Atomics.load(fault, 0)) && error.errcode === 13) {
+              // Lose the reply after a real SQLITE_FULL, leaving its outcome unknown to the host.
+              Atomics.add(fault, 3, 1);
+              process.exit(3);
+            }
+            throw error;
+          }
+        };
+      }
       if (/insert into "?agent_database_leases"?/i.test(sql)) {
         const run = statement.run.bind(statement);
         statement.run = (...args) => {
@@ -304,4 +333,53 @@ it("surfaces the native cleanup cause while the close still fails, then recovers
   ).toMatchObject({ entries: [] });
   expect(recovered.capturePreparedGenerationClaim()).toBeDefined();
   await recovered.release();
+});
+
+const faultState = new Int32Array(fault.enabled);
+
+it("recovers after a full agent database write settles", async () => {
+  const env = { OPENCLAW_STATE_DIR: fs.realpathSync(tempDirs.make("agent-full-recovery-")) };
+  const execution = captureOpenClawAgentDatabaseExecution({ agentId: "first", env });
+  await execution.prepare(source);
+  const context = captureOpenClawStateWorkerContext({ env });
+  const idleLease = createOpenClawStateWorkerLease(context);
+  try {
+    await idleLease.ready;
+    Atomics.store(faultState, 0, 6);
+    const sharedFailure: unknown = await executeOpenClawStateWorker(context, {
+      type: "capture.persistPayload",
+      input: { data: randomBytes(1_000_000), contentType: "application/octet-stream" },
+    }).catch((error: unknown) => error);
+    expect(sharedFailure).toMatchObject({ code: "outcome-unknown" });
+    Atomics.store(faultState, 0, 5);
+    const failure: unknown = await execution
+      .runExisting(source, (scope) =>
+        scope.execute({
+          type: "session.transcript.initialize",
+          input: { sessionKey: "agent:first:full", sessionId: "full".repeat(100_000) },
+        }),
+      )
+      .catch((error: unknown) => error);
+    Atomics.store(faultState, 0, 0);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).toMatchObject({ code: "outcome-unknown" });
+    const recovered = captureOpenClawAgentDatabaseExecution({ agentId: "first", env });
+    try {
+      await expect(
+        recovered.runExisting(source, (scope) =>
+          scope.execute({
+            type: "session.transcript.initialize",
+            input: { sessionKey: "agent:first:recovered", sessionId: "recovered" },
+          }),
+        ),
+      ).resolves.toMatchObject({ kind: "session-transcript-initialized" });
+      expect(Atomics.load(faultState, 3)).toBe(2);
+    } finally {
+      await recovered.release();
+    }
+  } finally {
+    Atomics.store(faultState, 0, 0);
+    await idleLease.release();
+    await execution.release();
+  }
 });

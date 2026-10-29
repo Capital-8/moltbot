@@ -11,6 +11,7 @@ import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import * as tempRoot from "../../infra/tmp-openclaw-dir.js";
 import { captureManagedUpdateLeaseDatabaseIdentity } from "../../infra/update-managed-service-handoff-database.js";
 import { createManagedHandoffLeaseStore } from "../../infra/update-managed-service-handoff-lease.js";
+import { createUpdateRun, recordUpdateRunVerification } from "../../infra/update-run-ledger.js";
 import {
   forceKillChildProcessTree,
   isChildProcessTreeAlive,
@@ -20,6 +21,7 @@ import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import * as execCommands from "../../process/exec.js";
 import { runUtf8CommandWithTimeout } from "../../process/exec.js";
 import { isPidAlive } from "../../shared/pid-alive.js";
+import { captureRestorationRisk } from "./update-command-current-core-recovery.test-support.js";
 import { updateExecutorNativeEntrypoints } from "./update-command-executor-native-runtime.test-support.js";
 import {
   withUpdateCommandExecutorChild,
@@ -514,5 +516,94 @@ it.each([
     }
     expect(createManagedHandoffLeaseStore().read(root)).toEqual({ kind: "absent" });
     expect(createManagedHandoffLeaseStore().read(serviceRoot)).toEqual({ kind: "absent" });
+  },
+);
+
+it.skipIf(process.platform === "win32").each([false, true])(
+  "current-core restriction survives real receiver custody until native effect: risk=%s",
+  async (lateRisk) => {
+    const scratch = dirs.make("native-live-risk-");
+    const receiverRoot = await fs.realpath(process.cwd());
+    const control = path.join(scratch, "control");
+    await fs.mkdir(control);
+    vi.spyOn(tempRoot, "resolvePreferredOpenClawTmpDir").mockReturnValue(control);
+    const env = { ...process.env, OPENCLAW_STATE_DIR: path.join(scratch, "state") };
+    const row = createUpdateRun({ trigger: "cli" }, { env });
+    const restriction = await captureRestorationRisk({ ...row, env });
+    const effect = path.join(scratch, "effect");
+    const proceed = path.join(scratch, "proceed");
+    const receiver = [
+      'import fs from "node:fs";',
+      'import {setTimeout} from "node:timers/promises";',
+      "import {runGatewayServiceUpdateCommand} from " +
+        JSON.stringify(
+          resolveRuntimeWorkerUrl(updateExecutorNativeEntrypoints.nativeExecutor).href,
+        ) +
+        ";",
+      "import {execFileUtf8} from " +
+        JSON.stringify(resolveRuntimeWorkerUrl(updateExecutorNativeEntrypoints.nativeExec).href) +
+        ";",
+      'try { await runGatewayServiceUpdateCommand("run", "restart", async () => {',
+      'process.stdout.write("receiver-admitted\\n");',
+      "while(!fs.existsSync(" + JSON.stringify(proceed) + ")) await setTimeout(10);",
+      'const result = await execFileUtf8(process.execPath, ["-e", ' +
+        JSON.stringify('require("node:fs").writeFileSync(' + JSON.stringify(effect) + ',"owned")') +
+        "]);",
+      "if(result.code!==0) throw new Error(result.stderr);",
+      "}); } catch(error) { process.stderr.write(error.message); process.exitCode=1; }",
+    ].join("\n");
+    let published = false;
+    let output = "";
+    const result = await withUpdateCommandExecutor(row.runId, async (executor) => {
+      const fence = await executor.enter(receiverRoot);
+      return await withUpdateCommandExecutorChild(fence, receiverRoot, (grant, beforeInput) =>
+        runUtf8CommandWithTimeout(
+          [process.execPath, ...sourceImportArgs, "--input-type=module", "-e", receiver],
+          {
+            input: JSON.stringify({
+              action: "restart",
+              targetRoot: receiverRoot,
+              executor: grant,
+              currentCoreRisk: restriction,
+            }),
+            beforeInput,
+            cwd: receiverRoot,
+            env,
+            timeoutMs: 30_000,
+            killProcessTree: true,
+            requireProcessTreeExtinction: true,
+            onOutputChunk: (chunk) => {
+              output += chunk.toString();
+              if (!published && output.includes("receiver-admitted")) {
+                published = true;
+                if (lateRisk) {
+                  recordUpdateRunVerification(
+                    row.runId,
+                    {
+                      recovery: {
+                        serviceRestartSafe: false,
+                        reason: "runtime-verification-failed",
+                        dataAtRisk: "active-mutation",
+                      },
+                    },
+                    { env },
+                  );
+                }
+                fsSync.writeFileSync(proceed, "go");
+              }
+            },
+          },
+        ),
+      );
+    });
+    expect(published, result.stderr).toBe(true);
+    expect(result.code, result.stderr).toBe(lateRisk ? 1 : 0);
+    if (lateRisk) {
+      expect(result.stderr).toContain("UPDATE_NATIVE_AUTHORITY:");
+      await expect(fs.stat(effect)).rejects.toMatchObject({ code: "ENOENT" });
+    } else {
+      expect(await fs.readFile(effect, "utf8")).toBe("owned");
+    }
+    expect(createManagedHandoffLeaseStore().read(receiverRoot).kind).toBe("absent");
   },
 );

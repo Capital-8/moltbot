@@ -15,6 +15,7 @@ import {
 } from "./openclaw-state-db-async-lifecycle.js";
 import type { OpenClawStateWorkerContext } from "./openclaw-state-worker-context.types.js";
 import type { OpenClawStateWorkerOperations } from "./openclaw-state-worker-contract.js";
+import { retainOpenClawStateWorkerLease } from "./openclaw-state-worker-lease.js";
 import { getOpenClawStateWorkerOwner } from "./openclaw-state-worker-owner-get.js";
 import {
   createOpenClawStateWorkerLease,
@@ -32,6 +33,8 @@ const physical = vi.hoisted(() => ({
   openGate: undefined as Promise<void> | undefined,
   onOpen: undefined as (() => void) | undefined,
   databaseAdmission: undefined as OpenClawStateWorkerContext["admission"] | undefined,
+  available: true,
+  nativeLost: [] as (() => void)[],
   ownerKey: Symbol("synthetic-shared-worker-owner"),
 }));
 
@@ -83,7 +86,13 @@ vi.mock("../infra/sqlite-worker-store.js", async (importOriginal) => {
   };
   return {
     ...actual,
-    openSharedStateSqliteWorkerStore: async () => {
+    openSharedStateSqliteWorkerStore: async (
+      ...args: Parameters<typeof actual.openSharedStateSqliteWorkerStore>
+    ) => {
+      const listener = args[3]?.onNativeLost;
+      if (listener) {
+        physical.nativeLost.push(() => listener(new Error("Synthetic native loss")));
+      }
       physical.onOpen?.();
       await physical.openGate;
       return current().store;
@@ -112,7 +121,10 @@ vi.mock("../infra/sqlite-worker-store.js", async (importOriginal) => {
 });
 
 afterEach(() => {
+  physical.ownerKey = Symbol("synthetic-shared-worker-owner");
   physical.client = undefined;
+  physical.available = true;
+  physical.nativeLost = [];
   physical.events = [];
   physical.beforeDispatch = undefined;
   physical.openGate = undefined;
@@ -142,7 +154,7 @@ function createLeaseFixture() {
   physical.client = createSqliteWorkerClient<OpenClawStateWorkerOperations>({
     actor,
     isDraining: () => false,
-    isAvailable: () => true,
+    isAvailable: () => physical.available,
     dispatch: async (payload, _signal, _scope, assertCurrent) => {
       physical.beforeDispatch?.();
       assertCurrent?.();
@@ -444,3 +456,85 @@ it.each(["removed", "reassigned", "replaced", "revoked"] as const)(
     }
   },
 );
+
+it("retires idle co-users on native loss without waiting for external bodies or reviving stale leases", async ({
+  signal,
+}) => {
+  const { context, maintenance } = createLeaseFixture();
+  const first = maintenance.run(() => createOpenClawStateWorkerLease(context));
+  const second = maintenance.run(() => createOpenClawStateWorkerLease(context));
+  const body = createDeferredCore();
+  let stale: DomainScope | undefined;
+  await Promise.all([first.ready, second.ready]);
+  const external = first.runOperation(async (scope) => {
+    stale = scope;
+    await body.promise;
+  });
+  try {
+    physical.available = false;
+    for (const lost of physical.nativeLost) {
+      lost();
+    }
+    await withinTest(Promise.all([first.retire(), second.retire()]), signal);
+    await expect(
+      first.execute({ type: "capture.endSession", input: { sessionId: "stale", endedAt: 1 } }),
+    ).rejects.toMatchObject({ code: "closed" });
+    physical.available = true;
+    await expect(
+      stale!.execute({
+        type: "capture.endSession",
+        input: { sessionId: "stale-generation", endedAt: 2 },
+      }),
+    ).rejects.toMatchObject({ code: "closed" });
+    await Promise.all([first.release(), first.release(), second.release()]);
+    expect(physical.events).toEqual(["physical-close"]);
+  } finally {
+    body.resolve();
+    await external;
+    await maintenance.close();
+  }
+});
+
+it("notifies a lease registered after native loss during acquisition", async ({ signal }) => {
+  const { context, maintenance } = createLeaseFixture();
+  const owner = getOpenClawStateWorkerOwner();
+  const store = await maintenance.run(() => owner.open(context));
+  if (!store) {
+    throw new Error("Synthetic store missing");
+  }
+  // The actor can disappear between open() resolving and retainOperation().
+  physical.available = false;
+  const lease = maintenance.run(() =>
+    retainOpenClawStateWorkerLease(context, {
+      open: async () => store,
+      retainOperation: owner.retainOperation,
+    }),
+  );
+  try {
+    await withinTest(expect(lease.ready).rejects.toMatchObject({ code: "closed" }), signal);
+    await lease.release();
+    expect(physical.events).toEqual(["physical-close"]);
+  } finally {
+    await maintenance.close();
+  }
+});
+
+it("unsubscribes released leases before expected retirement and repeated release", async () => {
+  const { context, maintenance } = createLeaseFixture();
+  const owner = getOpenClawStateWorkerOwner();
+  const store = await maintenance.run(() => owner.open(context));
+  if (!store) {
+    throw new Error("Synthetic store missing");
+  }
+  const lost = vi.fn();
+  const release = owner.retainOperation(store, lost);
+  await release();
+  await release();
+  await owner.close();
+  for (const notify of physical.nativeLost) {
+    notify();
+  }
+  expect(lost).not.toHaveBeenCalled();
+  expect(physical.events).toEqual(["physical-close"]);
+  await maintenance.close();
+});

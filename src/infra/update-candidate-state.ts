@@ -626,6 +626,7 @@ export async function snapshotUpdateCandidateState(
   },
 ): Promise<z.infer<typeof UpdateCandidateStateSnapshotSchema>> {
   const { createVerifiedSqliteSnapshot } = await import("./sqlite-snapshot.js");
+  const { AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
   const { copyUpdateCandidatePlugins, UpdateCandidatePluginPlanSchema } =
     await import("./update-candidate-plugins.js");
   const plugins = UpdateCandidatePluginPlanSchema.parse(
@@ -668,6 +669,7 @@ export async function snapshotUpdateCandidateState(
       // The rehearsal is private and disposable; compaction would create another
       // full image and alter implicit row IDs before candidate migrations run.
       preserveRowIds: true,
+      ftsSchemas: AGENT_FTS_SCHEMAS,
       onProgress: progress.onProgress,
       ...(file === shared
         ? {

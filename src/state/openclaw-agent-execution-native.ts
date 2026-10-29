@@ -28,8 +28,9 @@ import {
   captureAgentDatabasePreparationCompletion,
   captureAgentDatabasePreparationJournal,
 } from "./agent-database-admission.js";
+import { createAgentDatabaseStartupFtsAdmission } from "./agent-database-startup-fts.js";
 import { captureAgentDeletionCleanupAdmission } from "./agent-deletion-cleanup-admission.js";
-import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.js";
+import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.types.js";
 import {
   captureOpenClawAgentDatabaseRegistration,
   settleAgentRegistration,
@@ -57,6 +58,7 @@ import type {
   AgentDatabaseOperations,
 } from "./openclaw-agent-execution-contract.js";
 import { createAgentNativeStopObservation } from "./openclaw-agent-native-stop-observation.js";
+import { createAgentRegistrationCommitObserver } from "./openclaw-agent-registration-observer.js";
 import { runOpenClawAgentWorkerWrite } from "./openclaw-agent-write-admission.js";
 import {
   captureOpenClawDatabaseIntegrityVerifier,
@@ -156,34 +158,20 @@ export function createAgentDatabaseNativeGeneration(
         operation,
         assertSourceCurrent,
       );
-      const observeNative = (request: SqliteWorkerAdmissionRequest): void => {
-        const facts = request.facts;
-        if (
-          request.stage === "prepare" &&
-          isRecord(facts) &&
-          facts.kind === "agent-registration-committed"
-        ) {
-          const received = facts.registration;
-          if (
-            !registration ||
-            !lease ||
-            !isRecord(received) ||
-            received.agentId !== input.agentId ||
-            received.agentPath !== pathname ||
-            received.stateDatabasePath !== lease.sharedStatePath ||
-            received.stateDatabaseIdentity !== lease.sharedStateIdentity
-          ) {
-            throw new Error("Agent registration commit differs from its admitted native owner");
-          }
-          // Revocation governs future work; it cannot erase a witnessed COMMIT.
-          registration.recordCommitted({
-            agentId: input.agentId,
-            agentPath: pathname,
-            stateDatabasePath: lease.sharedStatePath,
-            stateDatabaseIdentity: lease.sharedStateIdentity,
-          });
-        }
-      };
+      const authorizeStartupFts = createAgentDatabaseStartupFtsAdmission({
+        pathname,
+        sharedStatePath: context.admission.databasePath,
+        expectedIdentity,
+        assertCurrent: assertSourceCurrent,
+        assertPreparationJournal,
+        getLease: () => lease,
+      });
+      const observeNative = createAgentRegistrationCommitObserver({
+        agentId: input.agentId,
+        pathname,
+        getRegistration: () => registration,
+        getLease: () => lease,
+      });
       const authorizeNative = (
         request: SqliteWorkerAdmissionRequest,
       ): AgentDatabaseFileExecutionIdentity | undefined => {
@@ -200,6 +188,9 @@ export function createAgentDatabaseNativeGeneration(
         }
         assertCurrent();
         cleanup?.assertCurrent();
+        if (request.stage === "prepare" && authorizeStartupFts(facts)) {
+          return undefined;
+        }
         if (!nativeIdentity || creatingIdentity) {
           assertCallerCurrent?.();
         }

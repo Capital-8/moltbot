@@ -45,6 +45,7 @@ describe("early service capability routing", () => {
         JSON.stringify({
           updateExecutor: "root-spawner-v1",
           targetRootBinding: true,
+          currentCoreRecoveryRiskGuard: true,
           definitionBackup: true,
           retainedOwnerBinding: true,
           originalDefinitionBinding: true,

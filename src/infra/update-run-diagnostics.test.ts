@@ -105,6 +105,40 @@ it("records serving health without replacing a persisted restart refusal", () =>
   );
 });
 
+it.each([undefined, "active-mutation"] as const)(
+  "preserves named data risk over an older refusal (%s) and healthy observation",
+  (existingRisk) => {
+    const options = { env: { OPENCLAW_STATE_DIR: dirs.make("update-data-risk-") } };
+    const run = createUpdateRun({ trigger: "cli" }, options);
+    recordUpdateRunVerification(
+      run.runId,
+      {
+        recovery: {
+          serviceRestartSafe: false,
+          reason: "runtime-verification-failed",
+          ...(existingRisk ? { dataAtRisk: existingRisk } : {}),
+        },
+      },
+      options,
+    );
+    const recovery = {
+      serviceRestartSafe: false,
+      reason: "runtime-verification-failed",
+      dataAtRisk: "unreadable-state",
+    } as const;
+    recordUpdateRunDiagnostics(
+      run.runId,
+      { recovery, verification: { serviceRunning: true, readyz: true } },
+      () => {},
+      options,
+    );
+    expect(getUpdateRun(run.runId, options)?.verification.recovery).toEqual({
+      ...recovery,
+      dataAtRisk: existingRisk ?? recovery.dataAtRisk,
+    });
+  },
+);
+
 it("keeps the first terminal receipt when a stale publisher carries success verification", () => {
   const options = { env: { OPENCLAW_STATE_DIR: dirs.make("update-terminal-diagnostics-") } };
   const run = createUpdateRun({ trigger: "cli" }, options);
@@ -217,3 +251,36 @@ it("keeps recovery observations atomic across a busy write without revising the 
   ).toBeNull();
   expect(renderUpdateRunReport(after!).markdown).not.toContain("verified serving");
 });
+
+it.each(["admission", "healthy", "secondary-refusal"] as const)(
+  "preserves later named risk against stale recovery-only %s diagnostics",
+  (phase) => {
+    const options = { env: { OPENCLAW_STATE_DIR: dirs.make("update-stale-risk-") } };
+    const run = createUpdateRun({ trigger: "cli" }, options);
+    const risk = {
+      serviceRestartSafe: false,
+      reason: "runtime-verification-failed",
+      dataAtRisk: "unreadable-state",
+    } as const;
+    recordUpdateRunVerification(run.runId, { recovery: risk }, options);
+    const observed =
+      phase === "secondary-refusal"
+        ? ({ serviceRestartSafe: false, reason: "runtime-verification-failed" } as const)
+        : ({
+            serviceRestartSafe: true,
+            version: "2026.9.5",
+            ...(phase === "healthy" ? { service: "healthy" as const } : {}),
+          } as const);
+    recordUpdateRunDiagnostics(
+      run.runId,
+      { recovery: observed },
+      () => {
+        throw new Error("write failed");
+      },
+      options,
+    );
+    expect(getUpdateRun(run.runId, options)?.verification.recovery).toEqual(risk);
+    closeOpenClawStateDatabaseForTest();
+    expect(getUpdateRun(run.runId, options)?.verification.recovery).toEqual(risk);
+  },
+);

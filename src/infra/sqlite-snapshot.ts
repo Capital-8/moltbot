@@ -19,7 +19,7 @@ import { sameFileMutationFingerprint, type FileMutationFingerprint } from "./fil
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
 import { backupNodeSqliteDatabase } from "./sqlite-backup.js";
 import { copySqliteFile } from "./sqlite-file-copy.js";
-import { assertSqliteIntegrity } from "./sqlite-integrity.js";
+import { assertSqliteIntegrityAllowingOwnedFts } from "./sqlite-integrity.js";
 import { createSqliteLifecycleAggregateError } from "./sqlite-lifecycle-errors.js";
 import { createPrivateSqliteTempDirectory } from "./sqlite-private-directory.js";
 import { withPreparedSqliteSnapshot } from "./sqlite-readonly-location-cleanup.js";
@@ -61,6 +61,8 @@ type CreateVerifiedSqliteSnapshotOptions = {
   requireNonEmptySource?: boolean;
   /** Skip compaction/ID rewriting; transforms may still change IDs and free-page data remains. */
   preserveRowIds?: boolean;
+  /** Update copies only: allow exactly owned derived FTS findings, not other damage. */
+  ftsSchemas?: readonly string[];
   transform?: (database: DatabaseSync) => void | Promise<void>;
   validate?: SqliteSnapshotValidator;
 };
@@ -599,7 +601,7 @@ async function verifyAndPublishSqliteSnapshot(
           try {
             // Pin validation and backup together; Node restarts stepped backups on concurrent writes.
             source.prepare("PRAGMA schema_version;").get();
-            assertSqliteIntegrity(source, options.sourcePath);
+            assertSqliteIntegrityAllowingOwnedFts(source, options.sourcePath, options.ftsSchemas);
             options.validate?.(source, options.sourcePath);
             if (!privateSourcePath) {
               await backupNodeSqliteDatabase(source, stagedPath, options.onProgress);
@@ -651,7 +653,11 @@ async function verifyAndPublishSqliteSnapshot(
             });
             try {
               published.exec("PRAGMA busy_timeout = 30000; PRAGMA trusted_schema = OFF;");
-              assertSqliteIntegrity(published, options.targetPath);
+              assertSqliteIntegrityAllowingOwnedFts(
+                published,
+                options.targetPath,
+                options.ftsSchemas,
+              );
               options.validate?.(published, options.targetPath);
               const publishedUserVersion = readSqliteUserVersion(published);
               if (publishedUserVersion !== userVersion) {

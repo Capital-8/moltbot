@@ -51,6 +51,8 @@ export async function verifyUpdateFailureRecovery(params: {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   serviceStopped?: boolean;
+  /** Omitted/unknown callers retain recovery probing. */
+  untouchedFailure?: boolean;
   serviceUpdateVerdict?: ManagedGatewayUpdateVerdict;
   waitForStartup?: boolean;
   assertCurrent?: () => void;
@@ -92,16 +94,38 @@ export async function verifyUpdateFailureRecovery(params: {
     warnRecording(`Could not read update recovery history: ${formatErrorMessage(error)}`);
   }
   const constraint = recorded?.verification.recovery;
+  const dataAtRisk = [result.recovery, constraint].some(
+    (recovery) => recovery?.serviceRestartSafe === false && Boolean(recovery.dataAtRisk),
+  );
+  const riskRecovery = [result.recovery, constraint].find(
+    (recovery) => recovery?.serviceRestartSafe === false && recovery.dataAtRisk,
+  );
   const previousRecovery =
-    constraint?.serviceRestartSafe === false
+    riskRecovery ??
+    (constraint?.serviceRestartSafe === false
       ? constraint
-      : (result.recovery ?? constraint ?? undefined);
+      : (result.recovery ?? constraint ?? undefined));
   result.recovery = previousRecovery;
   result.rollbackOutcome ??= recorded?.verification.rollbackOutcome ?? undefined;
   result.verification = {};
   const rollback = previousRecovery?.packageRollbackVerified;
   try {
     await withCommandProcessScope(async () => {
+      if (params.untouchedFailure === true && !params.serviceStopped && !dataAtRisk) {
+        result.steps.push({
+          name: "gateway recovery observation",
+          command: "gateway verification",
+          cwd: root,
+          durationMs: 0,
+          exitCode: 0,
+          diagnostics: [
+            "No recovery needed; still serving " +
+              (result.before?.version ?? "the previous version") +
+              ". No service was stopped or started.",
+          ],
+        });
+        return;
+      }
       // Package rollback restores files even on a headless install. Its original
       // service observation cannot become a request to wait for a new Gateway.
       if (params.serviceUpdateVerdict?.kind === "absent") {

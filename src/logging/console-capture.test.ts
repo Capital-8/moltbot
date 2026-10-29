@@ -68,6 +68,29 @@ afterAll(async () => {
 describe("enableConsoleCapture", () => {
   const secret = "sk-testsecret1234567890abcd";
 
+  it("redacts a bare Google OAuth client secret through captured console output", () => {
+    const googleSecret = "GOCSPX-abcdefghijklmnopqrstuvwx_y-z";
+    const writes: string[] = [];
+    const stream = new Writable({
+      write(chunk: Buffer, _encoding, callback) {
+        writes.push(chunk.toString());
+        callback();
+      },
+    });
+    setLoggerOverride({ level: "silent", consoleStyle: "pretty" });
+    vi.stubGlobal("console", new Console({ stdout: stream, stderr: stream }));
+    try {
+      enableConsoleCapture();
+      console.error(googleSecret);
+      console.error("GOCSPX-docs");
+      expect(writes.join("")).not.toContain(googleSecret);
+      expect(writes.join("")).toContain("GOCSPX-docs");
+    } finally {
+      vi.unstubAllGlobals();
+      stream.destroy();
+    }
+  });
+
   it.each([
     { source: "captured", active: true, suppressed: false },
     { source: "root", active: true, suppressed: false },

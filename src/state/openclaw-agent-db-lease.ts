@@ -27,13 +27,16 @@ import {
   readAgentDatabaseLeaseProvenance,
   agentDatabaseLeaseProcessDeathRefusal,
 } from "./openclaw-agent-db-lease-provenance.js";
-import type { OpenClawAgentDatabaseValidation } from "./openclaw-agent-db-validation-cache.js";
+import type {
+  OpenClawAgentDatabaseWorkerLeaseReceipt,
+  OpenClawAgentIntegrityVerificationReceiver,
+  PreparedOpenClawAgentDatabaseWorkerLease,
+} from "./openclaw-agent-db-lease.types.js";
 import {
   readOpenClawAgentIntegrityVerification,
   markOpenClawAgentIntegrityClean,
   clearOpenClawAgentIntegrityVerification,
   recordOpenClawAgentIntegrityVerification,
-  type OpenClawAgentIntegrityVerification,
 } from "./openclaw-quarantine-store.js";
 import { getOpenClawDatabaseMaintenanceScope } from "./openclaw-state-db-async-lifecycle.js";
 import {
@@ -151,13 +154,6 @@ export function renewAgentDatabaseMaintenanceAuthorityIfPresent(): void {
   }
   authority.renew();
 }
-
-export type OpenClawAgentIntegrityVerificationReceiver = (
-  record: OpenClawAgentIntegrityVerification | undefined,
-  canReuseRuntimeIntegrity: boolean,
-  invalidated: boolean,
-  because?: string,
-) => void;
 
 export function claimOpenClawAgentDatabaseLease(
   params: { agentId: string; path: string; env?: NodeJS.ProcessEnv },
@@ -461,22 +457,12 @@ export function assertOpenClawAgentDatabaseLease(
   }
 }
 
-export type OpenClawAgentDatabaseWorkerLeaseReceipt = ReturnType<
-  typeof readOpenClawAgentDatabaseWorkerLeaseReceiptFromClaim
->;
-
 /** Preparation grants no access; claim repeats admission on the captured shared owner. */
 export function prepareOpenClawAgentDatabaseWorkerLease(
   params: { agentId: string; path: string; env?: NodeJS.ProcessEnv },
   sharedDatabase: OpenClawStateDatabase,
   leaseId: string,
-): {
-  receipt: OpenClawAgentDatabaseWorkerLeaseReceipt;
-  provenance: string | null;
-  validation?: OpenClawAgentDatabaseValidation;
-  deferUnverifiedIntegrity?: boolean;
-  claim(onVerification?: OpenClawAgentIntegrityVerificationReceiver): string;
-} {
+): PreparedOpenClawAgentDatabaseWorkerLease {
   const database = {
     db: sharedDatabase.db,
     path: sharedDatabase.path,
@@ -533,7 +519,7 @@ export function prepareOpenClawAgentDatabaseWorkerLease(
 export function readOpenClawAgentDatabaseWorkerLeaseReceiptFromClaim(
   leaseId: string,
   params: { agentId: string; path: string; env?: NodeJS.ProcessEnv },
-) {
+): OpenClawAgentDatabaseWorkerLeaseReceipt {
   assertOpenClawAgentDatabaseLease(leaseId, params);
   const database = openOpenClawStateDatabase({
     env: params.env,

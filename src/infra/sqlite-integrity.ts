@@ -9,6 +9,7 @@ import {
   sameSqliteFileGeneration,
   type SqliteFileGeneration,
 } from "./sqlite-file-generation.js";
+import { findSqlClosingParenthesis, normalizeSchemaSql } from "./sqlite-schema-sql.js";
 
 /** SQLite recovers committed WAL frames; these checks do not scan table or index contents. */
 export function sqliteWalAdmissionRefusal(
@@ -136,6 +137,7 @@ export function runSqliteIntegrityCheckSync(check: SqliteIntegrityCheck): void {
 export function runSqliteIntegrityOperationSync<T>(
   operation: SqliteIntegrityOperation<T>,
   beforeResume?: () => void,
+  repairIntegrityError?: (check: SqliteIntegrityCheck, error: unknown) => boolean,
 ): T {
   beforeResume?.();
   let step = operation.next();
@@ -148,6 +150,23 @@ export function runSqliteIntegrityOperationSync<T>(
     }
     // A blocking check can outlive its caller; both success and failure resume schema work.
     beforeResume?.();
+    if (failure && repairIntegrityError) {
+      const original = failure.error;
+      try {
+        if (repairIntegrityError(step.value, original)) {
+          // A callback cannot turn tolerated corruption into healthy admission.
+          beforeResume?.();
+          runSqliteIntegrityCheckSync(step.value);
+          beforeResume?.();
+          failure = undefined;
+        }
+      } catch (repairError) {
+        // Preserve the original corruption verdict and its quarantine policy.
+        if (original instanceof Error) {
+          original.message += " Startup FTS repair failed: " + String(repairError);
+        }
+      }
+    }
     step = failure ? operation.throw(failure.error) : operation.next();
   }
   return step.value;
@@ -219,6 +238,91 @@ export function assertSqliteIntegrity(
   const integrityCheck = runSqliteCheck(database, databaseLabel, check);
   runSqliteForeignKeyCheck(database, databaseLabel);
   return { integrityCheck };
+}
+
+/** Maintenance must see every finding before deciding that only derived indexes need repair. */
+export function readSqliteIntegrityFindings(database: DatabaseSync): unknown[] {
+  return database
+    .prepare("PRAGMA integrity_check(2147483647)")
+    .all()
+    .map((row) => row.integrity_check);
+}
+
+/** Only exact, owned FTS definitions may treat their inverted index as derived data. */
+export function classifySqliteFtsIntegrityFindings(
+  database: DatabaseSync,
+  findings: readonly unknown[],
+  schemas: readonly string[],
+): string[] | undefined {
+  const names = new Set<string>();
+  for (const finding of findings) {
+    if (finding === "ok") {
+      continue;
+    }
+    const match =
+      typeof finding === "string"
+        ? /^malformed inverted index for FTS5 table main\.([A-Za-z_][A-Za-z0-9_]*)$/u.exec(finding)
+        : null;
+    if (!match?.[1]) {
+      return undefined;
+    }
+    names.add(match[1]);
+  }
+  if (names.size === 0) {
+    return undefined;
+  }
+  const definitions = new Map<string, Set<string | null>>();
+  for (const schema of schemas) {
+    for (const match of schema.matchAll(
+      /CREATE VIRTUAL TABLE (?:IF NOT EXISTS )?([A-Za-z_][A-Za-z0-9_]*) USING fts5\s*\(/gu,
+    )) {
+      const name = match[1]!;
+      const end = findSqlClosingParenthesis(schema, match.index + match[0].length - 1);
+      const variants = definitions.get(name) ?? new Set<string | null>();
+      variants.add(normalizeSchemaSql(schema.slice(match.index, end + 1)));
+      definitions.set(name, variants);
+    }
+  }
+  const tableSql = database.prepare(
+    "SELECT sql FROM main.sqlite_schema WHERE type = 'table' AND name = ?",
+  );
+  for (const name of names) {
+    const sql = tableSql.get(name)?.sql;
+    if (typeof sql !== "string" || !definitions.get(name)?.has(normalizeSchemaSql(sql))) {
+      return undefined;
+    }
+  }
+  return [...names].toSorted();
+}
+
+/**
+ * Update copies only: stale inverted indexes on exactly owned FTS definitions are
+ * derived data that the runtime admitting the copy rebuilds. A SQLite tokenizer
+ * change makes such healthy indexes report "malformed"; any other finding stays fatal.
+ */
+export function assertSqliteIntegrityAllowingOwnedFts(
+  database: DatabaseSync,
+  databaseLabel: string,
+  ftsSchemas: readonly string[] | undefined,
+): void {
+  try {
+    assertSqliteIntegrity(database, databaseLabel);
+  } catch (error) {
+    if (
+      !ftsSchemas ||
+      !(error instanceof Error) ||
+      error.name !== "SqliteIntegrityError" ||
+      error.cause !== undefined ||
+      !classifySqliteFtsIntegrityFindings(
+        database,
+        readSqliteIntegrityFindings(database),
+        ftsSchemas,
+      )
+    ) {
+      throw error;
+    }
+    runSqliteForeignKeyCheck(database, databaseLabel);
+  }
 }
 
 /** Reconfirm an advisory failure against the database currently at a closed path. */

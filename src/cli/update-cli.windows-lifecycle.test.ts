@@ -58,10 +58,7 @@ import {
   updateFinalizeCommand,
   updateGitCheckout,
 } from "./update-cli-modules.test-support.js";
-import {
-  recoveryVerificationStep,
-  registerFailureSelectorTests,
-} from "./update-cli/update-cli-failure-recovery.test-support.js";
+import { registerFailureSelectorTests } from "./update-cli/update-cli-failure-recovery.test-support.js";
 import {
   writeJsonFixture,
   writeNpmPackageInstall,
@@ -392,6 +389,11 @@ describe("update-cli", () => {
         version: "1.0.0",
       });
       expect(serviceRestart).not.toHaveBeenCalled();
+      expect(freshRestartCalls()).toEqual([]);
+      expect(triageCommand.mock.calls[0]?.[1]?.recovery).toHaveProperty(
+        "updateFailure.result.verification",
+        {},
+      );
       expect(triageCommand).toHaveBeenCalledOnce();
       expect(reportedError).toEqual(new ExitError(1));
       expect(defaultRuntime.exit).not.toHaveBeenCalled();
@@ -401,15 +403,17 @@ describe("update-cli", () => {
           result: {
             status: "error",
             recovery: { serviceRestartSafe: false, reason: "runtime-verification-failed" },
-            verification: {
-              runningVersion: "1.0.0",
-              versionMatch: true,
-              readyz: true,
-              settled: true,
-            },
+            verification: {},
             steps: [
               expect.objectContaining({ stderrTail: expect.stringContaining("enable denied") }),
-              recoveryVerificationStep(undefined, root),
+              {
+                name: "gateway recovery observation",
+                command: "gateway verification",
+                cwd: root,
+                durationMs: 0,
+                exitCode: 0,
+                diagnostics: [expect.stringContaining("No service was stopped or started.")],
+              },
             ],
           },
         },

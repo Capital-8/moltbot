@@ -635,6 +635,7 @@ async function drainPendingAuthMutations(commit?: () => void): Promise<void> {
     owners,
     publish: async (ownersToPublish, includeCredentialProviders, reuseGenerations) =>
       await publishPreparedModelRuntimeOwnerBatch({
+        reportSupersededAfterSiblingPublication: true,
         ownersToPublish,
         owners,
         agentBuildCompletions,

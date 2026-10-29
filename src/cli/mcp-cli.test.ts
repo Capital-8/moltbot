@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { setConfiguredMcpServer } from "../agents/mcp-config-mutation.js";
 import { withTempHome } from "../config/home-env.test-harness.js";
+import { REDACTED_SENTINEL } from "../config/redact-snapshot.js";
 import {
   cleanupMcpCliTestState,
   createWorkspace,
@@ -46,7 +47,7 @@ describe("mcp cli", () => {
   });
 
   it("adds a configured MCP server from flags without replacing operator knobs", async () => {
-    await withMcpHome(async () => {
+    await withMcpHome(async (home) => {
       await runMcpCommand([
         "mcp",
         "add",
@@ -78,7 +79,7 @@ describe("mcp cli", () => {
       expect(JSON.parse(lastLogLine())).toEqual({
         url: "https://mcp.example.com/mcp",
         transport: "streamable-http",
-        headers: { Authorization: "Bearer token" },
+        headers: { Authorization: REDACTED_SENTINEL },
         auth: "oauth",
         oauth: { scope: "docs.read" },
         toolFilter: { include: ["search", "read_*"] },
@@ -87,6 +88,77 @@ describe("mcp cli", () => {
         supportsParallelToolCalls: true,
         codex: { defaultToolsApprovalMode: "approve" },
       });
+      const saved = JSON.parse(
+        await fs.readFile(path.join(home, ".openclaw", "openclaw.json"), "utf8"),
+      );
+      expect(saved.mcp.servers.docs.headers).toEqual({ Authorization: "Bearer token" });
+    });
+  });
+
+  it("redacts MCP registry inspection without changing saved credentials", async () => {
+    await withMcpHome(async (home) => {
+      vi.stubEnv("MCP_DISPLAY_TOKEN", "example-resolved-token-not-real");
+      vi.stubEnv("MCP_DISPLAY_HEADER", "example-header-token-not-real");
+      const servers = {
+        remote: {
+          url: "https://mcp.example.com/mcp",
+          headers: {
+            Authorization: "Bearer ${MCP_DISPLAY_HEADER}",
+            "X-Goog-Api-Key": "example-maps-key-not-real",
+            "X-Custom-Credential": "example-custom-header-not-real",
+          },
+        },
+        local: {
+          command: "node",
+          args: ["server.mjs", "--api-key", "example-argv-key-not-real", "--region", "us-east-1"],
+          env: {
+            SERVICE_TOKEN: "example-env-token-not-real",
+            REFERENCE: "${MCP_DISPLAY_TOKEN}",
+          },
+        },
+      };
+      await writeMcpServers(home, servers);
+      const configPath = path.join(home, ".openclaw", "openclaw.json");
+      const originalBytes = await fs.readFile(configPath, "utf8");
+
+      for (const args of [
+        ["list", "--json"],
+        ["show", "--json"],
+        ["show", "remote", "--json"],
+        ["show", "local", "--json"],
+        ["show"],
+        ["show", "remote"],
+        ["show", "local"],
+      ]) {
+        mockLog.mockClear();
+        await runMcpCommand(["mcp", ...args]);
+        const output = mockLog.mock.calls.map(([line]) => String(line)).join("\n");
+        for (const secret of [
+          "example-header-token-not-real",
+          "example-maps-key-not-real",
+          "example-custom-header-not-real",
+          "example-argv-key-not-real",
+          "example-env-token-not-real",
+          "example-resolved-token-not-real",
+        ]) {
+          expect(output, args.join(" ")).not.toContain(secret);
+        }
+        const inspected = JSON.parse(lastLogLine());
+        if (args[1] !== "remote" && args[1] !== "local") {
+          expect(inspected.remote.url).toBe("https://mcp.example.com/mcp");
+          expect(inspected.local.args).toContain("us-east-1");
+          expect(inspected.local.env.REFERENCE).toBe(REDACTED_SENTINEL);
+        }
+      }
+
+      expect(await fs.readFile(configPath, "utf8")).toBe(originalBytes);
+      for (const name of ["remote", "local"]) {
+        mockLog.mockClear();
+        await runMcpCommand(["mcp", "show", name, "--json"]);
+        const redacted = JSON.parse(lastLogLine());
+        await runMcpCommand(["mcp", "set", name, JSON.stringify(redacted)]);
+      }
+      expect(JSON.parse(await fs.readFile(configPath, "utf8")).mcp.servers).toEqual(servers);
     });
   });
 

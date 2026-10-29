@@ -157,6 +157,12 @@ per-field revision triggers and rollback.
 
 Canonical main-key policy reads reuse a connection-owned value at the current read revision, including within transactions and pinned snapshots. The connection owner tracks local SQL mutations, including raw and trigger-driven writes; its mutation revision, admitted schema facts, observed foreign-commit version, and pinned snapshot identity invalidate that value. Native mutation and transaction-control callbacks and authorizer-controlled reads continue querying the policy. Policy facts do not grant canonical admission or continuation authority.
 
+If a shared-state writer worker is lost, its logical leases retire even while
+idle. Retirement joins dispatched commands but does not wait for external
+callback bodies, allowing agent lease cleanup to reach its existing recovery
+path. An uncertain write remains `outcome-unknown`; recovery never replays it or
+claims that it rolled back.
+
 The Gateway does not schedule daily full-database scans. Admission-requested
 background checks stay limited to the requested agent database: `quick_check`
 for clean restart proof, or a full check after proven same-boot process death or

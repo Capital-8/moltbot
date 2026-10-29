@@ -10,9 +10,15 @@ import { defaultRuntime } from "../../runtime.js";
 import { classifyUpdateOutcome, isVerifiedUpdateRollback } from "../../shared/update-outcome.js";
 import { convergeUpdatePlugins } from "./update-command-convergence.js";
 import {
-  shouldWaitForRecovery,
-  verifyUpdateFailureRecovery,
-} from "./update-command-failure-recovery.js";
+  refreshCurrentCoreRecovery,
+  admitCurrentCoreFailureRecovery,
+} from "./update-command-current-core-recovery.js";
+import {
+  observeFinalizerFailure,
+  publishRestorationFailure,
+  recordWindowsTaskRestorationFailure,
+  restoreFailedUpdateService,
+} from "./update-command-current-core-restoration.js";
 import type { FinishUpdateParams } from "./update-command-finish-types.js";
 import { parkForegroundUpdateForActivation } from "./update-command-handoff.js";
 import { appendPluginUpdateWarnings } from "./update-command-plugins-internals.js";
@@ -43,10 +49,7 @@ import {
   admitInstalledGatewayRecovery,
   refuseUnsettledDoctorRecovery,
 } from "./update-command-service-recovery.js";
-import {
-  maybeRestartService,
-  maybeRestartServiceAfterFailedMutableUpdate,
-} from "./update-command-service.js";
+import { maybeRestartService } from "./update-command-service.js";
 import {
   completeUpdateCommandResult,
   captureUpdateFinalization,
@@ -100,18 +103,16 @@ async function finishSettledUpdate(
     recordPhase,
     sentinelOptions,
   } = captured;
-  let gatewayStartAttempted = false;
-  const onGatewayStartAttempted = () => {
-    gatewayStartAttempted = true;
+  let gatewayStartAttempted: "install" | "restart" | undefined;
+  const onGatewayStartAttempted = (action: "install" | "restart" = "restart") => {
+    gatewayStartAttempted = gatewayStartAttempted === "restart" ? gatewayStartAttempted : action;
     observeGatewayStartAttempted?.();
   };
   const definitionRecovery: UpdateServiceDefinitionRecovery = {};
   const parkForegroundOrigin = () => parkForegroundUpdateForActivation(params, assertCurrent);
   assertCurrent();
   await assertUpdateCommandPackageFinalization(params);
-  const shouldRestart = progressFailure
-    ? false
-    : await preparePostUpdateService(params, assertCurrent);
+  const shouldRestart = !progressFailure && (await preparePostUpdateService(params, assertCurrent));
   assertCurrent();
   let gateway: TriageFailureContext["gateway"] = "preserve";
   let triageAllowed = true;
@@ -125,6 +126,7 @@ async function finishSettledUpdate(
   const currentServiceStop = () => latestServiceStop;
   let rolledBack = false;
   let originalServiceRecoveryHandled = false;
+  let currentCoreFailureRecovery = false;
   let completedDowntimeMs: number | undefined = params.coreAlreadyCurrent ? 0 : undefined;
   let pendingRestartAtMs =
     params.preManagedServiceStop?.stoppedAtMs ??
@@ -244,7 +246,24 @@ async function finishSettledUpdate(
         { env: params.opts.run.env },
       );
     }
-    const recoveryParams = { ...params, preManagedServiceStop: currentServiceStop() };
+    // Only restore this finalizer's unchanged current-core Doctor park. Package,
+    // definition and migrated-state recovery keep their existing conservative rules.
+    currentCoreFailureRecovery = admitCurrentCoreFailureRecovery(
+      params,
+      result,
+      {
+        rollbackAttempted,
+        definitionRecovery,
+        gatewayStartAttempted,
+        serviceStop: currentServiceStop(),
+      },
+      assertCurrent,
+    );
+    const recoveryParams = {
+      ...params,
+      preManagedServiceStop: currentServiceStop(),
+      currentCoreFailureRecovery,
+    };
     recoverService ||=
       !gatewayStartAttempted &&
       (await admitInstalledGatewayRecovery(recoveryParams, result, assertCurrent));
@@ -306,18 +325,7 @@ async function finishSettledUpdate(
       defaultRuntime.error(
         `Failed to restore Windows Scheduled Task autostart: ${String(restoreFailure.cause)}`,
       );
-      finalResult.status = "error";
-      finalResult.reason =
-        result.status === "error" ? result.reason : "windows-task-autostart-restore-failed";
-      finalResult.recovery = { serviceRestartSafe: false, reason: "runtime-verification-failed" };
-      finalResult.steps = finalResult.steps.concat({
-        name: "windows-task-autostart-recovery",
-        command: "openclaw update",
-        cwd: finalResult.root ?? params.root,
-        durationMs: 0,
-        exitCode: 1,
-        stderrTail: formatErrorMessage(restoreFailure.cause),
-      });
+      recordWindowsTaskRestorationFailure(finalResult, result, params.root, restoreFailure.cause);
     }
     const completedBeforeCleanup = deferredTerminal
       ? await captureUpdateCommandTerminalRecord(params, finalResult, assertCurrent)
@@ -330,31 +338,32 @@ async function finishSettledUpdate(
     }
     // The recovering Gateway reads this notification at startup. Persist once
     // before restarting; rewriting a consumed sentinel could deliver it twice.
+    if (currentCoreFailureRecovery) {
+      currentCoreFailureRecovery = refreshCurrentCoreRecovery(
+        finalResult,
+        params.opts.run,
+        assertCurrent,
+        true,
+      );
+    }
     if (recoverService && finalResult.recovery?.serviceRestartSafe === true) {
-      const service = await maybeRestartServiceAfterFailedMutableUpdate({
+      const restored = await restoreFailedUpdateService({
+        params,
+        result: finalResult,
+        currentCoreFailureRecovery,
+        serviceStop: currentServiceStop(),
         onGatewayStartAttempted,
-        recovery: finalResult.recovery,
-        originalManagedServiceRuntime: params.originalManagedServiceRuntime,
-        updateRun: params.opts.run,
-        preManagedServiceStop: currentServiceStop(),
-        jsonMode: Boolean(params.opts.json),
-        nodeRunner: params.packageUpdateNodeRunner,
-        timeoutMs: params.updateStepTimeoutMs,
-        invocationCwd: params.invocationCwd,
-      });
-      if (service && !params.originalManagedServiceRuntime) {
+        failure: (cause) => createFailure(finalResult, formatErrorMessage(cause), { cause }),
+      }).catch((error: unknown) =>
+        publishRestorationFailure(error, deferredTerminal, publishFinalResult),
+      );
+      if (restored.failure) {
+        return await reportResult(finalResult, false, restored.failure, false);
+      }
+      if (restored.service && !params.originalManagedServiceRuntime) {
         root = serviceVerdict && "root" in serviceVerdict ? serviceVerdict.root : root;
-        finalResult.recovery = { ...finalResult.recovery, service };
-        if (service === "healthy" && params.shouldRestart) {
+        if (restored.service === "healthy" && params.shouldRestart) {
           gateway = "verify-running";
-        }
-        if (service === "failed") {
-          finalResult.status = "error";
-          try {
-            await currentServiceStop()?.windowsTaskAutoStartRecovery?.complete(false);
-          } catch (cause) {
-            return await reportResult(finalResult, false, { cause }, false);
-          }
         }
       }
     }
@@ -372,17 +381,14 @@ async function finishSettledUpdate(
     // Rollback already verified its Gateway; cleanup failure needs a fresh observation.
     const needsObservation = cleanupFailure || (!rolledBack && finalResult.status === "error");
     if (needsObservation && !originalServiceRecoveryHandled) {
-      finalResult = await verifyUpdateFailureRecovery({
+      finalResult = await observeFinalizerFailure(params, {
         result: finalResult,
         root,
-        opts: params.opts,
-        env: currentServiceStop()?.serviceEnv ?? params.ownedManagedUpdateEnv,
-        timeoutMs: params.updateStepTimeoutMs,
-        serviceStopped: !rolledBack && currentServiceStop()?.stopped,
-        serviceUpdateVerdict: gatewayStartAttempted
-          ? undefined
-          : currentServiceStop()?.serviceUpdateVerdict,
-        waitForStartup: shouldWaitForRecovery(params, currentServiceStop(), rollbackAttempted),
+        serviceStop: currentServiceStop(),
+        gatewayStartAttempted,
+        definitionRecovery,
+        rollbackAttempted,
+        rolledBack,
         assertCurrent,
       });
       assertCurrent();
