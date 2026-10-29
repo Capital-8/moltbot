@@ -7,7 +7,6 @@ import {
   upsertSessionEntryCore,
   resetSessionEntryLifecycle,
   rewriteTranscriptMessageAtAnchor,
-  loadTranscriptEvents,
 } from "../../../config/sessions/session-accessor.js";
 import { captureSessionActorStorageOwner } from "../../../config/sessions/session-actor-storage-binding.js";
 import * as hydration from "../../../config/sessions/session-transcript-hydration.js";
@@ -26,6 +25,8 @@ it.each(["main", "second"])(
     await withOpenClawTestState(
       { label: "retained-reset-owner", scenario: "minimal" },
       async (state) => {
+        // Reset schedules real idle maintenance; this fixture is current, not a 1970 archive candidate.
+        const now = Date.now();
         const storePath = state.path("shared-reset.sqlite");
         setRuntimeConfigSnapshot({
           agents: { entries: { main: {}, second: {} } },
@@ -37,7 +38,7 @@ it.each(["main", "second"])(
             storePath,
             sessionKey: "agent:main:physical-owner",
           },
-          { sessionId: "physical", updatedAt: 1 },
+          { sessionId: "physical", updatedAt: now },
         );
         const target = captureSessionTranscriptTargetBinding({
           agentId,
@@ -49,7 +50,7 @@ it.each(["main", "second"])(
         await upsertSessionEntryCore(target, {
           sessionId: target.sessionId,
           lifecycleRevision: "before",
-          updatedAt: 1,
+          updatedAt: now,
         });
         let manager = await SessionManager.openAsync(target, state.workspaceDir);
         const appendSource = async (turnId: string) => {
@@ -109,11 +110,11 @@ it.each(["main", "second"])(
           storePath,
           target: { canonicalKey: target.sessionKey, storeKeys: [target.sessionKey] },
           resetBoundary: { context: "preserve-tail", reason: "idle", cwd: state.workspaceDir },
-          buildNextEntry: (entry) => ({
-            ...entry,
+          buildNextEntry: ({ currentEntry }) => ({
+            ...currentEntry,
             sessionId: target.sessionId,
             lifecycleRevision: "after",
-            updatedAt: 2,
+            updatedAt: now + 1,
           }),
         });
         const current = captureProgressWorkReader({
@@ -525,17 +526,6 @@ it("rejects raw memory metadata bytes as native coverage while retaining the obl
         );
         assert.equal(outcome.kind, "committed");
         const after = await reader.read();
-        const history = await loadTranscriptEvents(target);
-        console.log(
-          "PREPARED_BYTE_COUNTEREXAMPLE",
-          JSON.stringify({
-            before,
-            after,
-            forgedEntry: history.find(
-              (event) => asOptionalObjectRecord(event)?.id === "chosen-result-id",
-            ),
-          }),
-        );
         assert(after.kind === "retained");
         assert.equal(
           after.coverage?.kind,

@@ -262,6 +262,7 @@ it.each([
 
 it("keeps the real finalizer quiet after a same-process preserve-tail reset", async () => {
   await withOpenClawTestState({ label: "reset-finalizer", scenario: "minimal" }, async (state) => {
+    const now = Date.now();
     const storePath = state.path("reset-finalizer.sqlite");
     setRuntimeConfigSnapshot({ session: { store: storePath } });
     const target = captureSessionTranscriptTargetBinding({
@@ -272,7 +273,7 @@ it("keeps the real finalizer quiet after a same-process preserve-tail reset", as
     await upsertSessionEntryCore(target, {
       sessionId: target.sessionId,
       lifecycleRevision: "before",
-      updatedAt: 1,
+      updatedAt: now,
     });
     const manager = await SessionManager.openAsync(target, state.workspaceDir);
     const source = {
@@ -327,11 +328,11 @@ it("keeps the real finalizer quiet after a same-process preserve-tail reset", as
       storePath,
       target: { canonicalKey: target.sessionKey, storeKeys: [target.sessionKey] },
       resetBoundary: { context: "preserve-tail", reason: "idle", cwd: state.workspaceDir },
-      buildNextEntry: (entry) => ({
-        ...entry,
+      buildNextEntry: ({ currentEntry }) => ({
+        ...currentEntry,
         sessionId: target.sessionId,
         lifecycleRevision: "after",
-        updatedAt: 2,
+        updatedAt: now + 1,
       }),
     });
     const current = captureProgressWorkReader({
