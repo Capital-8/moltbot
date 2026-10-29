@@ -5,13 +5,6 @@ import {
   SKILL_WORKSHOP_TOOL_NAME,
 } from "./skill-workshop-prompt.js";
 
-const CORE_TOOL_PROMPT_GUIDANCE: ReadonlyArray<{ toolName: string; guidance: () => string }> = [
-  {
-    toolName: SKILL_WORKSHOP_TOOL_NAME,
-    guidance: () => buildSkillWorkshopPromptSection().join("\n").trim(),
-  },
-];
-
 const normalizeToolName = (name: string) => name.trim().toLowerCase();
 
 /**
@@ -21,14 +14,9 @@ const normalizeToolName = (name: string) => name.trim().toLowerCase();
  */
 export function listToolPromptGuidance(callableToolNames: Iterable<string>): string[] {
   const callable = new Set(Array.from(callableToolNames, normalizeToolName));
-  if (callable.size === 0) {
-    return [];
-  }
   const sections = new Set<string>();
-  for (const entry of CORE_TOOL_PROMPT_GUIDANCE) {
-    if (callable.has(entry.toolName)) {
-      sections.add(entry.guidance());
-    }
+  if (callable.has(SKILL_WORKSHOP_TOOL_NAME)) {
+    sections.add(buildSkillWorkshopPromptSection().join("\n").trim());
   }
   // Plugin load order can differ between runs; only ownership may order prompt bytes.
   const pluginEntries = requireActivePluginRegistry()
