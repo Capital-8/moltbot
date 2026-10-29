@@ -1,6 +1,7 @@
 import { readSqliteDatabaseWriteTokenForPath } from "../../infra/sqlite-database-admission.js";
 import { readDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
 import { freezeTrustedJsonSnapshot } from "../../shared/immutable-data.js";
+import { isArtifactPreservingStateRead } from "../../state/artifact-preserving-state-reads.js";
 import type { AgentDatabaseRegistryChange } from "../../state/openclaw-agent-db-contract.js";
 import {
   prepareOpenClawAgentDatabaseRegistrySnapshotRead,
@@ -96,6 +97,7 @@ export function prepareSessionStoreTargetInventoryRead(
 ) {
   const { candidates, ...prepared } = request;
   const selection = [
+    request.preserveSourceArtifacts,
     request.selection,
     request.recoveryExclusions,
     request.agentIds,
@@ -179,7 +181,10 @@ export async function withSessionStoreTarget<T>(
   onReadError?: (error: unknown, assertCurrent: () => void) => Promise<T>,
 ): Promise<T> {
   assertCallerCurrent?.();
-  const { candidates, ...targetRequest } = request;
+  const { candidates, ...targetRequest } = {
+    ...request,
+    ...(isArtifactPreservingStateRead("agent") ? { preserveSourceArtifacts: true as const } : {}),
+  };
   const registry = prepareOpenClawAgentDatabaseRegistrySnapshotRead({ env: request.env });
   return withSessionHistoryWorkerReadCandidates(
     candidates,
@@ -190,6 +195,7 @@ export async function withSessionStoreTarget<T>(
         discovery.assertCurrent();
       };
       const memo = captureSelectionMemo(targetSelections, request, [
+        targetRequest.preserveSourceArtifacts,
         request.agentId,
         request.defaultAgentId,
         request.storePath,

@@ -13,6 +13,10 @@ import {
   readAgentDatabaseReadAdmissionRefusal,
 } from "../../state/agent-database-admission.js";
 import {
+  isArtifactPreservingStateRead,
+  withArtifactPreservingStateReads,
+} from "../../state/artifact-preserving-state-reads.js";
+import {
   OPENCLAW_AGENT_SCHEMA_VERSION,
   type OpenClawRegisteredAgentDatabase,
 } from "../../state/openclaw-agent-db-contract.js";
@@ -70,6 +74,7 @@ import {
 } from "./targets.js";
 
 export type SessionStoreTargetReadRequest = {
+  preserveSourceArtifacts?: true;
   agentId?: string;
   defaultAgentId?: string;
   storePath: string;
@@ -102,6 +107,12 @@ class SessionStoreTargetDataReadError extends Error {
 export function readSessionStoreTargetResult(
   request: SessionStoreTargetReadRequest,
 ): Result<SessionStoreTargetReadResult, unknown> {
+  if (request.preserveSourceArtifacts) {
+    return withArtifactPreservingStateReads(
+      () => readSessionStoreTargetResult({ ...request, preserveSourceArtifacts: undefined }),
+      { agentDatabases: true },
+    );
+  }
   try {
     const target = resolveSqliteTargetFromSessionStorePath(request.storePath, {
       agentId: request.agentId,
@@ -196,6 +207,7 @@ export function captureSessionStoreWriteCandidates(storePath: string) {
 }
 
 export type SessionStoreTargetInventoryRequest = {
+  preserveSourceArtifacts?: true;
   selection?: "configured" | "recovery" | "known-owners";
   config: OpenClawConfig;
   agentIds: string[];
@@ -480,6 +492,7 @@ export function prepareSessionStoreTargetInventory(
     }
   }
   return {
+    ...(isArtifactPreservingStateRead("agent") ? { preserveSourceArtifacts: true as const } : {}),
     selection,
     config,
     agentIds,
@@ -541,6 +554,12 @@ function isSessionStoreRegistryDiscoveryPath(
 export function readSessionStoreTargetInventory(
   request: SessionStoreTargetInventoryRequest,
 ): SessionStoreTargetInventoryResult {
+  if (request.preserveSourceArtifacts) {
+    return withArtifactPreservingStateReads(
+      () => readSessionStoreTargetInventory({ ...request, preserveSourceArtifacts: undefined }),
+      { agentDatabases: true },
+    );
+  }
   const env = cloneEnvWithPlatformSemantics(request.env);
   const config = request.config;
   const cache: SessionStoreTargetsReadCache = new Map();

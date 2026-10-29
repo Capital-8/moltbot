@@ -2178,6 +2178,16 @@ export function isSessionGitHubActionParams(
 ): value is import("typebox").Static<
   typeof import("../../schema-modules.js").SessionGitHubActionParamsSchema
 >;
+export function isSessionGitHubReadinessParams(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").SessionGitHubReadinessParamsSchema
+>;
+export function isSessionGitHubReadinessResult(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").SessionGitHubReadinessResultSchema
+>;
 export function isSessionGitHubOptionsParams(
   value: unknown,
 ): value is import("typebox").Static<

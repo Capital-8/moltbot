@@ -1,8 +1,14 @@
 import { hasSqliteDatabaseSchemaAdmissionForPath } from "../../infra/sqlite-database-admission.js";
+import {
+  assertExistingDatabaseIdentity,
+  readDatabasePathIdentitySync,
+  type DatabasePathIdentity,
+} from "../../infra/sqlite-worker-identity.js";
 import { WorkerTaskError } from "../../infra/worker-task-pool.js";
 import type { WorkerTaskOptions, WorkerTaskResponse } from "../../infra/worker-task-pool.types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { runWithAgentDatabaseReadAdmissionTurn } from "../../state/agent-database-admission.js";
+import { isArtifactPreservingStateRead } from "../../state/artifact-preserving-state-reads.js";
 import type { OpenClawAgentDatabaseOptions } from "../../state/openclaw-agent-db-contract.js";
 import { captureOpenClawAgentDatabaseReadValidation } from "../../state/openclaw-agent-db-validation-cache.js";
 import type { SessionBranchSummaryReadRequest } from "./session-accessor.sqlite-branches.js";
@@ -162,6 +168,8 @@ export function retainSessionHistoryWorkerDatabase(
       timeoutMs = 60_000,
     ) => {
       let retirement: Promise<void> | undefined;
+      const preserveSourceArtifacts = isArtifactPreservingStateRead("agent", database.path);
+      let inspectionIdentity: DatabasePathIdentity | undefined;
       const hostEffects = new Set<Promise<WorkerTaskResponse>>();
       /** Retain schema admission through reply processing without locking the consumer. */
       const readAdmissionOptions = { ...options, ...database, lane };
@@ -245,6 +253,20 @@ export function retainSessionHistoryWorkerDatabase(
                     assertCurrent();
                     options.prepareRead?.();
                     const input = prepare();
+                    if (preserveSourceArtifacts && input.kind === "session-exact-entries") {
+                      inspectionIdentity = readDatabasePathIdentitySync(database.path);
+                      if (
+                        input.expectedIdentity &&
+                        (input.expectedIdentity.key !== inspectionIdentity.key ||
+                          input.expectedIdentity.birthtime !== inspectionIdentity.birthtime)
+                      ) {
+                        throw new Error(
+                          "Session authority inspection source changed before dispatch",
+                        );
+                      }
+                      input.preserveSourceArtifacts = true;
+                      input.expectedIdentity = inspectionIdentity;
+                    }
                     const projection = projectionTarget(input);
                     const projectionReceipt = projection?.sessionId
                       ? readSessionActorProjectionReceipt({
@@ -316,6 +338,30 @@ export function retainSessionHistoryWorkerDatabase(
             received.source
           ) {
             knownSource = true;
+          }
+          if (
+            typeof received === "object" &&
+            received !== null &&
+            !Array.isArray(received) &&
+            received.kind === "session-exact-entries" &&
+            received.snapshotSource
+          ) {
+            const source = received.snapshotSource;
+            assertCurrent();
+            if (
+              !inspectionIdentity ||
+              source.agentId !== database.agentId ||
+              source.path !== database.path ||
+              `file:${source.databaseIdentity}` !== inspectionIdentity.key ||
+              source.databaseBirthtime !== inspectionIdentity.birthtime
+            ) {
+              throw new Error("Session authority snapshot lost its admitted original source");
+            }
+            assertExistingDatabaseIdentity(
+              database.path,
+              inspectionIdentity.key,
+              inspectionIdentity.birthtime,
+            );
           }
           // SAFETY: The pool pairs this reply with the exact prepared request above.
           const paired = received as SessionTranscriptWorkerValues[ReturnType<

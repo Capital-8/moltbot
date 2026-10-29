@@ -382,32 +382,35 @@ export async function prepareSessionMutationFacts(
             read.result = store;
             if (loaded.sharing) {
               const source = loaded.databaseIdentity;
+              const snapshotSource = loaded.snapshotSource;
+              const birthtime = snapshotSource?.databaseBirthtime ?? source?.birthtime;
+              const identity = snapshotSource?.databaseIdentity ?? source?.identity;
               if (
                 !source ||
                 !source.incarnation ||
-                source.filename !== loaded.sharing.source.path ||
-                `file:${source.identity}` !== loaded.sharing.databaseIdentity ||
-                source.birthtime === undefined
+                (snapshotSource?.path ?? source.filename) !== loaded.sharing.source.path ||
+                `file:${identity}` !== loaded.sharing.databaseIdentity ||
+                birthtime === undefined
               ) {
                 throw new SessionMutationFactsUnavailableError();
               }
               assertExistingDatabaseIdentity(
                 loaded.sharing.source.path,
                 loaded.sharing.databaseIdentity,
-                source.birthtime,
+                birthtime,
               );
               preparedSources.push({
                 ...loaded.sharing.source,
                 identity: loaded.sharing.databaseIdentity,
-                birthtime: source.birthtime,
+                birthtime,
               });
               read.readSource = loaded.sharing.source;
               members.set(read.storePath, {
                 facts: loaded.sharing,
                 source: {
                   ...loaded.sharing.source,
-                  databaseIdentity: source.identity,
-                  databaseBirthtime: source.birthtime,
+                  databaseIdentity: identity,
+                  databaseBirthtime: birthtime,
                 },
               });
               for (const sessionKey of read.options.exactKeys!) {

@@ -85,6 +85,8 @@ export {
   isSessionDiscussionOpenResult,
   isSessionGitHubPublishParams,
   isSessionGitHubActionParams,
+  isSessionGitHubReadinessParams,
+  isSessionGitHubReadinessResult,
   isSessionGitHubOptionsParams,
   isSessionGitHubStatusParams,
   isSessionGitHubConfirmParams,
