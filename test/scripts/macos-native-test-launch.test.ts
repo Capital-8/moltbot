@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
@@ -58,6 +59,7 @@ function fixture(
   logicalCpu = "3",
   eventReport: string | null = eventStream("runStarted", "runEnded"),
   waitForSignal: false | "swift" | "security" = false,
+  cleanupFailure: "none" | "stage-write" | "keychain-budget" = "none",
 ) {
   const root = temps.make("native-launch-");
   const bin = path.join(root, "bin");
@@ -155,6 +157,11 @@ if (tool === 'sysctl') {
   console.log(${JSON.stringify(logicalCpu)});
 }
 if (tool === 'rg') console.log('apps/macos/Sources/Fixture.swift');
+if (tool === 'python3') {
+  assert.deepEqual(args.slice(0, 3), ['-I', '-S', '-c']);
+  assert.ok(args[3].includes('sys.version_info >= (3,10)'));
+  console.log('[120,300]');
+}
 if (tool === 'git' && args[0] === 'rev-parse' && args[1] === '--show-toplevel') console.log(${JSON.stringify(root)});
 if (tool === 'git' && args[0] === 'diff' && args.includes('--name-only')) console.log('apps/macos/Sources/Fixture.swift');
 if (['xcrun', 'lldb', 'xctest', 'swiftpm-testing-helper'].includes(tool)) {
@@ -162,7 +169,25 @@ if (['xcrun', 'lldb', 'xctest', 'swiftpm-testing-helper'].includes(tool)) {
 }
 if ((tool === 'swift' && args[0] === 'test') || tool === 'OpenClawRecoveryTestHost') {
   const appHost = tool === 'OpenClawRecoveryTestHost';
-  if (!appHost && env.OPENCLAW_TEST_MENU_CAPTURE_DIR) {
+  const filter = args[args.indexOf('--filter') + 1];
+  const settingsProof = filter?.startsWith('MLXSettings');
+  if (settingsProof) assert.equal(fs.readFileSync(path.join(env.OPENCLAW_STATE_DIR, 'mlx-settings-stage'), 'utf8'), filter);
+  if (filter === 'MLXSettingsSeedProofTests') {
+    assert.ok(!fs.existsSync(env.OPENCLAW_CONFIG_PATH));
+    fs.writeFileSync(env.OPENCLAW_CONFIG_PATH, '{"talk":{"provider":"mlx"},"actualStableWriterMetadata":true}');
+    fs.copyFileSync(env.OPENCLAW_CONFIG_PATH, path.join(env.OPENCLAW_STATE_DIR, 'stable-written-config.json'));
+  }
+  if (filter === 'MLXSettingsConsumerProofTests') {
+    assert.deepEqual(fs.readFileSync(env.OPENCLAW_CONFIG_PATH), fs.readFileSync(path.join(env.OPENCLAW_STATE_DIR, 'stable-written-config.json')));
+    assert.ok(fs.existsSync(path.join(env.OPENCLAW_STATE_DIR, 'talk-config-response.json')));
+    if (${JSON.stringify(cleanupFailure)} === 'stage-write' && process.cwd() === ${JSON.stringify(workspace)}) {
+      const marker = path.join(env.OPENCLAW_STATE_DIR, 'mlx-settings-stage');
+      fs.unlinkSync(marker);
+      fs.mkdirSync(marker);
+    }
+  }
+  if (filter === 'MLXSettingsCleanupProofTests' && ${JSON.stringify(cleanupFailure)} === 'keychain-budget') fs.writeFileSync(${JSON.stringify(path.join(root, "cleanup-clock-exhausted"))}, 'owned fake clock');
+  if (!appHost && !settingsProof && env.OPENCLAW_TEST_MENU_CAPTURE_DIR) {
     const name = env.OPENCLAW_PROFILE === 'default' ? 'catalog' : 'thread-reasoning';
     for (const suffix of ['-window.png', '-menu-42.png', '-capture-status.json']) {
       fs.writeFileSync(path.join(env.OPENCLAW_TEST_MENU_CAPTURE_DIR, name + suffix), suffix.endsWith('.json') ? JSON.stringify({blockers: ['synthetic fixture, not visual proof']}) : 'synthetic-png-bytes');
@@ -177,7 +202,7 @@ if ((tool === 'swift' && args[0] === 'test') || tool === 'OpenClawRecoveryTestHo
     assert.ok(eventPath.startsWith(path.dirname(appHost ? env.TMPDIR : env.HOME) + path.sep));
     assert.equal(args[args.indexOf('--event-stream-version') + 1], '6.3');
     const report = ${JSON.stringify(eventReport)};
-    if (report !== null) fs.writeFileSync(eventPath, appHost ? report.replaceAll('fixture/function', 'fixture/' + args[args.indexOf('--filter') + 1]) : report);
+    if (report !== null) fs.writeFileSync(eventPath, appHost || settingsProof ? report.replaceAll('fixture/function', 'fixture/' + filter) : report);
   }
   if (env.OPENCLAW_STATE_DIR !== ${JSON.stringify(path.join(root, "ambient-state"))}) {
     fs.writeFileSync(path.join(env.OPENCLAW_STATE_DIR, 'child-owned'), 'fixture');
@@ -190,6 +215,7 @@ if ((tool === 'swift' && args[0] === 'test') || tool === 'OpenClawRecoveryTestHo
     "security",
     "swift",
     "pnpm",
+    "python3",
     "node",
     "git",
     "uname",
@@ -298,6 +324,102 @@ function launchNamed(f: ReturnType<typeof fixture>, readyText: string) {
 }
 
 describe.skipIf(process.platform === "win32")("native test launch ownership", () => {
+  it.each([
+    { failCandidate: false, cleanupFailure: "none" },
+    { failCandidate: true, cleanupFailure: "none" },
+    { failCandidate: false, cleanupFailure: "stage-write" },
+    { failCandidate: false, cleanupFailure: "keychain-budget" },
+  ] as const)(
+    "keeps ordered source launches and distinct process/resource retirement for %j",
+    ({ failCandidate, cleanupFailure }) => {
+      const f = fixture("", "3", appHostEventStream("complete"), false, cleanupFailure);
+      const stable = path.join(f.env.RUNNER_TEMP, "stable-source");
+      const fixturePath = "apps/macos/Tests/OpenClawIPCTests/MLXSettingsUpgradeTests.swift";
+      const producerPath = "test/helpers/macos-mlx-settings-producer.ts";
+      const producer = `import fs from 'node:fs'; import assert from 'node:assert/strict';
+const [raw,out]=process.argv.slice(2);
+assert.equal(raw,process.env.OPENCLAW_CONFIG_PATH);
+assert.deepEqual(fs.readFileSync(raw),fs.readFileSync(raw.replace('openclaw.json','stable-written-config.json')));
+fs.appendFileSync(${JSON.stringify(f.log)},JSON.stringify({tool:'producer',cwd:process.cwd(),env:process.env})+'\\n');
+if (${failCandidate} && process.cwd()===${JSON.stringify(f.workspace)}) process.exit(41);
+fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
+      const overlays: Record<string, string> = {};
+      for (const source of [stable, f.workspace]) {
+        for (const [relative, content] of [
+          [fixturePath, "synthetic Swift fixture"],
+          [producerPath, producer],
+        ]) {
+          const file = path.join(source, relative!);
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, content!);
+          overlays[relative!] = createHash("sha256").update(content!).digest("hex");
+        }
+        const scripts = path.join(source, "scripts");
+        if (source === stable) fs.mkdirSync(scripts);
+        // The current fixture's scripts link points at real source; never overwrite it.
+        if (source === stable) fs.writeFileSync(path.join(scripts, "tsx.mjs"), "");
+      }
+      // The real current tsx loader needs the ready CI install. The synthetic stable
+      // producer uses its own loader/root; neither source shares dependency links.
+      const proof = path.join(f.env.RUNNER_TEMP, "proof");
+      fs.mkdirSync(proof);
+      const manifest = path.join(f.env.RUNNER_TEMP, "sources.json");
+      fs.writeFileSync(
+        manifest,
+        JSON.stringify({
+          stable: { sourceRoot: stable, sha: "a".repeat(40) },
+          fixed: { sourceRoot: fs.realpathSync(f.workspace), sha: "b".repeat(40) },
+          overlays,
+        }),
+      );
+      // Exhaust only the final Keychain admission, after the joined defaults
+      // cleanup. No real wait or native call participates in this clock fixture.
+      const clockPreload = path.join(f.root, "cleanup-clock.mjs");
+      fs.writeFileSync(
+        clockPreload,
+        `import fs from 'node:fs'; const {NativeCiBudget}=await import(${JSON.stringify(new URL("../../scripts/lib/native-ci-budget.mts", import.meta.url).href)}); const timeout=NativeCiBudget.prototype.timeout; NativeCiBudget.prototype.timeout=function(ceiling,cleanup){if(cleanup&&fs.existsSync(${JSON.stringify(path.join(f.root, "cleanup-clock-exhausted"))}))throw new Error('Native cleanup budget exhausted');return timeout.call(this,ceiling,cleanup);};`,
+      );
+      const result = f.run(
+        `node --import '${clockPreload}' scripts/test-macos-native.mts settings-upgrade '${manifest}' 1 '${proof}'`,
+      );
+      const failedCleanup = cleanupFailure !== "none";
+      expect(result.status, result.stderr).toBe(failCandidate || failedCleanup ? 1 : 0);
+      const calls = f.calls();
+      const producers = calls.filter((x) => x.tool === "producer");
+      expect(producers.map((x) => x.cwd)).toEqual([stable, f.workspace]);
+      const swift = calls.filter((x) => x.tool === "swift");
+      expect(swift.map((x) => x.args[x.args.indexOf("--filter") + 1])).toEqual([
+        "MLXSettingsSeedProofTests",
+        "MLXSettingsConsumerProofTests",
+        ...(!failCandidate ? ["MLXSettingsConsumerProofTests"] : []),
+        ...(cleanupFailure !== "stage-write" ? ["MLXSettingsCleanupProofTests"] : []),
+      ]);
+      expect(new Set([...producers, ...swift].map((x) => x.env.OPENCLAW_PROFILE)).size).toBe(1);
+      expect(new Set([...producers, ...swift].map((x) => x.env.OPENCLAW_CONFIG_PATH)).size).toBe(1);
+      expect(
+        calls.filter((x) => x.tool === "security" && x.args[0] === "create-keychain"),
+      ).toHaveLength(1);
+      const ownedRoot = path.dirname(swift[0].env.HOME);
+      try {
+        expect(calls.some((x) => x.tool === "security" && x.args[0] === "delete-keychain")).toBe(
+          !failedCleanup,
+        );
+        expect(fs.existsSync(ownedRoot)).toBe(failedCleanup);
+        expect(readJson(path.join(proof, "settings-consumers.json"))).toMatchObject({
+          complete: !failCandidate && !failedCleanup,
+          candidateReseeded: false,
+          defaultsRemoved: cleanupFailure !== "stage-write",
+          keychainRemoved: !failedCleanup,
+          processesRetired: true,
+          resourcesRemoved: !failedCleanup,
+        });
+        if (failedCleanup) expect(fs.existsSync(swift[0].settings.default)).toBe(true);
+      } finally {
+        // All synthetic children joined; this test owns the deliberately retained root.
+        if (failedCleanup) fs.rmSync(ownedRoot, { recursive: true, force: true });
+      }
+    },
+  );
   it.each([
     [appHostEventStream("complete"), "absent", 0, 3, ["retry", "credential-startup", "relaunch"]],
     [eventStream("runStarted", "runEnded"), "absent", 1, 1],

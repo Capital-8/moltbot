@@ -767,6 +767,52 @@ export function resolveAllowedGeneratedMixBranch(
   return "";
 }
 
+// Retained-settings proof exercises these concrete producer and consumer owners.
+// Keep unrelated app/config changes out of model-download qualification.
+const MLX_SETTINGS_PROOF_INPUTS = new Set([
+  "apps/macos/Sources/OpenClaw/AppProfile.swift",
+  "apps/macos/Sources/OpenClaw/OpenClawPaths.swift",
+  "apps/macos/Sources/OpenClaw/OpenClawConfigFile.swift",
+  "apps/macos/Sources/OpenClaw/Constants.swift",
+  "apps/macos/Sources/OpenClaw/ConfigStore.swift",
+  "apps/macos/Sources/OpenClaw/TalkModeGatewayConfig.swift",
+  "apps/shared/OpenClawKit/Sources/OpenClawKit/TalkConfigSnapshot.swift",
+  "apps/shared/OpenClawKit/Sources/OpenClawKit/TalkConfigParsing.swift",
+  "src/config/paths.ts",
+  "src/config/io.ts",
+  "src/config/runtime-config-capture-state.ts",
+  "src/config/runtime-source-projection.ts",
+  "src/config/config.ts",
+  "src/config/talk.ts",
+  "src/gateway/talk/handlers/index.ts",
+  "src/talk/provider-registry.ts",
+  "src/tts/provider-registry.ts",
+  "src/tts/provider-registry-core.ts",
+  "packages/gateway-protocol/src/index.ts",
+  "packages/gateway-protocol/src/schema/channels.ts",
+  "packages/gateway-protocol/src/validators/integrations.ts",
+  "packages/gateway-protocol/src/compiled/protocol.generated/validators-integrations.js",
+]);
+
+/**
+ * Model downloads belong only to explicit qualification of this native owner.
+ * The manifest combines this input fact with the existing release-gate admission.
+ * @param {readonly string[] | null} changedPaths
+ * @returns {boolean}
+ */
+export function hasMlxNativeProofInputs(changedPaths) {
+  return (
+    Array.isArray(changedPaths) &&
+    changedPaths.some(
+      (file) =>
+        MLX_SETTINGS_PROOF_INPUTS.has(file) ||
+        /^(?:apps\/macos-mlx-tts\/|apps\/shared\/OpenClawMLXTTSProtocol\/|apps\/macos\/Tests\/OpenClawIPCTests\/MLXSettingsUpgradeTests\.swift$|scripts\/(?:test-macos-mlx-native\.py|test-macos-(?:mlx-settings|native)\.mts|lib\/native-ci-budget\.mts|macos-health-render\.sb|ci-(?:changed-scope|build-manifest)\.(?:mjs|d\.mts))$|\.github\/workflows\/ci\.yml$|test\/helpers\/macos-mlx-settings-producer\.ts$|test\/scripts\/(?:macos-mlx-(?:native|settings)|macos-native-test-launch|ci-workflow-complete)\.test\.ts$|src\/scripts\/ci-changed-scope\.test\.ts$)/u.test(
+          file,
+        ),
+    )
+  );
+}
+
 /**
  * @param {string[] | null | undefined} changedPaths
  * @returns {boolean}

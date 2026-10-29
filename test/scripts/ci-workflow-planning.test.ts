@@ -2747,7 +2747,7 @@ describe("ci workflow guards", () => {
 
   it.each([
     ["macos-swift", false, "workflow_dispatch", false, ["release", "tests"]],
-    ["macos-swift-packages", false, "workflow_dispatch", false, ["packages"]],
+    ["macos-swift-packages", false, "workflow_dispatch", false, ["packages", "mlx"]],
     ["ios-build", false, "workflow_dispatch", false, ["release", "tests"]],
     ["ios-build", true, "workflow_dispatch", false, ["tests"]],
     ["ios-build", false, "pull_request", false, ["smoke"]],
@@ -2915,8 +2915,9 @@ describe("ci workflow guards", () => {
         ? job.strategy.matrix.phase
         : evaluateWorkflowExpression(job.strategy.matrix.phase, context);
       expect(appPhases).toEqual(full ? ["release", "tests"] : ["tests"]);
-      expect(packages.strategy.matrix.phase).toEqual(["packages"]);
-      const phases = [...appPhases, ...packages.strategy.matrix.phase];
+      const packagePhases = evaluateWorkflowExpression(packages.strategy.matrix.phase, context);
+      expect(packagePhases).toEqual(["packages", "mlx"]);
+      const phases = [...appPhases, ...packagePhases];
       expect(job.strategy["max-parallel"]).toBe(2);
       const env = Object.fromEntries(
         Object.entries(job.env).map(([key, value]) => [

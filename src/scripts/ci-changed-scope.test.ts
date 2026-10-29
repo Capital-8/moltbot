@@ -10,6 +10,7 @@ const {
   detectChangedScope,
   detectInstallSmokeScope,
   detectNodeFastScope,
+  hasMlxNativeProofInputs,
   isNodeTestDataOnlyPath,
   listChangedPaths,
   parseArgs,
@@ -17,6 +18,58 @@ const {
 } = await import("../../scripts/ci-changed-scope.mjs");
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
+it.each([
+  ["apps/macos-mlx-tts/Package.swift", true],
+  ["apps/shared/OpenClawMLXTTSProtocol/Sources/Protocol.swift", true],
+  ["scripts/test-macos-mlx-native.py", true],
+  ["scripts/macos-health-render.sb", true],
+  ["scripts/ci-build-manifest.mjs", true],
+  ["scripts/ci-changed-scope.mjs", true],
+  [".github/workflows/ci.yml", true],
+  ["apps/macos/Sources/Settings.swift", false],
+  ["apps/shared/OpenClawKit/Sources/Client.swift", false],
+  ["src/config/types.queue.ts", false],
+  ["src/gateway/talk/handlers/voice.ts", false],
+  ["src/talk/agent-target.ts", false],
+  ["packages/gateway-protocol/src/schema/sessions.ts", false],
+  ["docs/mlx.md", false],
+])("classifies extended MLX inputs without broad native fallback for %s", (file, selected) => {
+  expect(hasMlxNativeProofInputs([file])).toBe(selected);
+});
+
+it.each([
+  "apps/macos/Sources/OpenClaw/AppProfile.swift",
+  "apps/macos/Sources/OpenClaw/OpenClawPaths.swift",
+  "apps/macos/Sources/OpenClaw/OpenClawConfigFile.swift",
+  "apps/macos/Sources/OpenClaw/Constants.swift",
+  "apps/macos/Sources/OpenClaw/ConfigStore.swift",
+  "apps/macos/Sources/OpenClaw/TalkModeGatewayConfig.swift",
+  "apps/shared/OpenClawKit/Sources/OpenClawKit/TalkConfigSnapshot.swift",
+  "apps/shared/OpenClawKit/Sources/OpenClawKit/TalkConfigParsing.swift",
+  "src/config/paths.ts",
+  "src/config/io.ts",
+  "src/config/runtime-config-capture-state.ts",
+  "src/config/runtime-source-projection.ts",
+  "src/config/config.ts",
+  "src/config/talk.ts",
+  "src/gateway/talk/handlers/index.ts",
+  "src/talk/provider-registry.ts",
+  "src/tts/provider-registry.ts",
+  "src/tts/provider-registry-core.ts",
+  "packages/gateway-protocol/src/index.ts",
+  "packages/gateway-protocol/src/schema/channels.ts",
+  "packages/gateway-protocol/src/validators/integrations.ts",
+  "packages/gateway-protocol/src/compiled/protocol.generated/validators-integrations.js",
+])("selects the directly exercised retained-settings owner %s", (file) => {
+  expect(hasMlxNativeProofInputs([file])).toBe(true);
+  expect(hasMlxNativeProofInputs([`${file}.unrelated`])).toBe(false);
+});
+
+it("requires known affected inputs before downloading a model", () => {
+  expect(hasMlxNativeProofInputs(null)).toBe(false);
+  expect(hasMlxNativeProofInputs([])).toBe(false);
+});
 
 function parseGitHubOutput(output: string): Record<string, string> {
   return Object.fromEntries(
