@@ -97,7 +97,9 @@ it("keeps the admitted Gateway generation active through a different reply works
       agentId: "main",
       agentDir: "/tmp/openclaw-reply-agent",
       allowGatewaySubagentBinding: true,
-      workspaceDir,
+      // Inventory is agent-owned; the reply workspace remains the execution boundary.
+      workspaceDir: gatewayWorkspaceDir,
+      preserveWorkspaceDirOnRefresh: false,
       runtimePluginSelections: [
         { provider: "selected", modelId: "model", runtime: "selected-harness" },
       ],

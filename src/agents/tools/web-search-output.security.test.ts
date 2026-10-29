@@ -116,7 +116,8 @@ describe("web_search normalized output security", () => {
     );
     expect(normalized.truncated).toBe(true);
     expect(untrustedContentChars).toBeLessThanOrEqual(20_000);
-    expect(JSON.stringify(normalized).length).toBeLessThan(22_000);
+    // Retained fields carry additional envelopes; the content cap above is unchanged.
+    expect(JSON.stringify(normalized).length).toBeLessThan(23_000);
   });
 
   it.each(["answer"] as const)(

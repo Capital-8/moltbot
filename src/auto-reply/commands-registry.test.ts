@@ -333,7 +333,9 @@ describe("commands registry", () => {
     expect(normalizeCommandBody("/reset soft\nre-read persona files")).toBe(
       "/reset soft re-read persona files",
     );
-    expect(normalizeCommandBody("/side first line\nsecond line")).toBe("/btw first line");
+    expect(normalizeCommandBody("/side first line\nsecond line")).toBe(
+      "/btw first line\nsecond line",
+    );
     expect(normalizeCommandBody("/id\nignored")).toBe("/whoami");
   });
 

@@ -68,6 +68,7 @@ describe("ClawHub plugin catalog client", () => {
             ],
           },
         },
+        versions: { items: [] },
       }),
     });
     expect(detail.mcpServerDetails).toEqual([

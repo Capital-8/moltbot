@@ -145,13 +145,8 @@ describe("openai transport stream", () => {
     };
 
     expect(params.store).toBe(false);
-    const reasoningItem = params.input?.find((item) => item.type === "reasoning");
-    expectRecordFields(reasoningItem, {
-      type: "reasoning",
-      summary: [],
-    });
-    expect(reasoningItem?.id).toBeUndefined();
-    expect(reasoningItem).not.toHaveProperty("encrypted_content");
+    // Without a replay ID or authorized encrypted state, stateless reasoning cannot be verified.
+    expect(params.input?.some((item) => item.type === "reasoning")).toBe(false);
     const assistantMessage = params.input?.find(
       (item) => item.type === "message" && item.role === "assistant",
     );
