@@ -14,7 +14,7 @@ if (!output || process.platform !== "darwin" || process.arch !== "arm64") {
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-27-0";
 const deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
 const proof = {
-  kind: "stock-boot-normal-logging-experiment-not-qualification",
+  kind: "stock-boot-diagnostic-not-qualification",
   targetSha: process.env.GITHUB_SHA,
   imageVersion: process.env.ImageVersion,
   nodeVersion: process.version,
@@ -48,7 +48,6 @@ const started = performance.now();
 const save = () => writeFileSync(output, `${JSON.stringify(proof, null, 2)}\n`);
 async function command(bin, args, timeoutMs = 120_000, cleanup = false) {
   let stdout = "";
-  let stderr = "";
   const code = await runManagedCommand({
     bin,
     args,
@@ -60,29 +59,11 @@ async function command(bin, args, timeoutMs = 120_000, cleanup = false) {
       child.stdout.on("data", (chunk) => {
         stdout = (stdout + chunk.toString()).slice(-256 * 1024);
       });
-      child.stderr.on("data", (chunk) => {
-        stderr = (stderr + chunk.toString()).slice(-16 * 1024);
-      });
+      // Drain raw diagnostics without exporting paths or device identifiers.
+      child.stderr.resume();
     },
   });
   if (code !== 0) {
-    if (stage === "logging-policy") {
-      // Fixed categories only; native errors may include private paths or device identities.
-      const text = `${stdout}\n${stderr}`;
-      proof.loggingPolicyFailure = {
-        code,
-        permissionDenied:
-          /must be (?:run )?as root|must be root|requires root|not permitted|permission denied/iu.test(
-            text,
-          ),
-        unsupported: /not supported|unsupported|not implemented/iu.test(text),
-        invalidArguments:
-          /invalid (?:mode|option|argument)|unrecognized|unknown (?:mode|option|argument)/iu.test(
-            text,
-          ),
-        deviceNotReady: /not booted|current state:|device.*not.*boot/iu.test(text),
-      };
-    }
     throw new Error("native-command-failed");
   }
   return stdout.trim();
@@ -169,7 +150,6 @@ try {
   });
   await phase("boot", () => command("xcrun", ["simctl", "boot", udid]));
   await phase("ready", () => command("xcrun", ["simctl", "bootstatus", udid, "-b"], 600_000));
-  await phase("logging-policy", () => command("xcrun", ["simctl", "logverbose", udid, "disable"]));
   await phase("headroom", async () => {
     proof.headroom = await waitForIOSSimulatorHeadroom(controller.signal);
     if (proof.headroom.status !== "ready") {

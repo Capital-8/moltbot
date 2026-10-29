@@ -46,7 +46,6 @@ const phases = new Set([
   "stock-boot-baseline",
   "stock-boot-create",
   "stock-boot-boot",
-  "stock-boot-logging-policy",
   "stock-boot-ready",
   "stock-boot-headroom",
   "stock-boot-headroom-passed",
