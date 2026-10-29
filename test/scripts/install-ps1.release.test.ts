@@ -215,12 +215,12 @@ function Invoke-NpmCommand { throw 'unexpected npm invocation' }
 function Invoke-RestMethod {
     param([string]$Uri, [int]$TimeoutSec)
     if ($Uri -ne 'https://nodejs.org/dist/index.json') { throw "unexpected metadata URL: $Uri" }
-    return @([pscustomobject]@{ version = 'v26.1.0'; files = @('win-x64-zip', 'win-arm64-zip') })
+    return @([pscustomobject]@{ version = 'v26.12.1'; files = @('win-x64-zip', 'win-arm64-zip') })
 }
 function Save-InstallerDownload {
     param([string]$Uri, [string]$OutFile)
     if ($script:Scenario -eq 'download') { throw 'fixture download failure' }
-    if ($Uri -eq 'https://nodejs.org/dist/v26.1.0/SHASUMS256.txt') {
+    if ($Uri -eq 'https://nodejs.org/dist/v26.12.1/SHASUMS256.txt') {
         $archive = Get-ChildItem -LiteralPath (Split-Path -Parent $OutFile) -Filter '*.zip' | Select-Object -First 1
         $hash = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
         if ($script:Scenario -eq 'checksum') { $hash = '0' * 64 }
@@ -228,7 +228,7 @@ function Save-InstallerDownload {
         [IO.File]::WriteAllText($OutFile, "$hash  $name")
         return
     }
-    if ($Uri -notmatch '^https://nodejs\.org/dist/v26\.1\.0/node-v26\.1\.0-win-(x64|arm64)\.zip$') { throw "unexpected archive URL: $Uri" }
+    if ($Uri -notmatch '^https://nodejs\.org/dist/v26\.12\.1/node-v26\.12\.1-win-(x64|arm64)\.zip$') { throw "unexpected archive URL: $Uri" }
     [IO.File]::WriteAllText($OutFile, 'downloaded archive bytes')
 }
 function Expand-PortableNodeArchive {
@@ -464,11 +464,88 @@ try {
       '  if ($actual -ne $entry.Value) { throw "Version=$($entry.Key) Actual=$actual" }',
       "}",
     ),
+    "target-node-engine": installerFixture(
+      String.raw`
+$cases = @(
+  @('24.21.0', '>=24.22.1 <25 || >=26.12.1', $true),
+  @('24.22.1', '>=24.22.1 <25 || >=26.12.1', $false),
+  @('24.21.0', '>=24.16.0 <25 || >=26.1.0', $false),
+  @('24.21.0', '', $true),
+  @('26.12.0', '', $true),
+  @('26.12.1', '', $false)
+)
+function Check-ExistingOpenClaw { return $false }
+function Get-Command { return [pscustomobject]@{ Source = 'Invoke-FixtureNode' } }
+function Invoke-FixtureNode {
+  $global:LASTEXITCODE = 0
+  if ($args[0] -eq '-v') { return "v$script:fixtureVersion" }
+  $input | Out-Null
+  return '{"available":true,"version":"3.51.3","text":true,"blob":true,"json":true}'
+}
+function Invoke-NpmCommand {
+  param([string[]]$Arguments)
+  if (($Arguments -join ' ') -ne 'view openclaw@extended-stable engines.node --fetch-timeout=5000 --fetch-retries=0') { throw 'wrong target lookup' }
+  $global:LASTEXITCODE = if ($script:fixtureEngine) { 0 } else { 1 }
+  return $script:fixtureEngine
+}
+function Install-Node { $script:upgraded = $true; $script:fixtureVersion = '26.12.1'; return $true }
+function Test-PreviousGitWrapper { throw 'package stage reached' }
+$InstallMethod = 'npm'
+$Tag = 'extended-stable'
+foreach ($case in $cases) {
+  $script:fixtureVersion = $case[0]; $script:fixtureEngine = $case[1]; $script:upgraded = $false
+  try { Main; throw 'package stage missing' } catch {
+    if ($_.Exception.Message -ne 'package stage reached') { throw }
+  }
+  if ($script:upgraded -ne $case[2]) { throw "Incorrect upgrade decision for $case" }
+}
+`,
+    ),
+    "git-target-node-engine": installerFixture(
+      String.raw`
+$root = Join-Path $script:InstallerTempDirectory 'git-engine'
+$null = New-Item -ItemType Directory -Path (Join-Path $root '.git') -Force
+function Check-ExistingOpenClaw { return $false }
+function Ensure-Git { return $true }
+function Assert-GitCheckoutHasCommit { }
+function git { $global:LASTEXITCODE = 0 }
+function Update-GitCheckoutBestEffort {
+  Set-Content -LiteralPath (Join-Path $root 'package.json') -Value ('{"engines":{"node":"' + $script:fixtureEngine + '"}}')
+}
+function Get-Command { return [pscustomobject]@{ Source = 'Invoke-FixtureNode' } }
+function Invoke-FixtureNode {
+  if (-not (Test-Path (Join-Path $root 'package.json'))) { throw 'Node ran before checkout' }
+  $global:LASTEXITCODE = 0
+  if ($args[0] -eq '-v') { return "v$script:fixtureVersion" }
+  $input | Out-Null
+  return '{"available":true,"version":"3.51.3","text":true,"blob":true,"json":true}'
+}
+function Invoke-NpmCommand { throw 'npm ran before git build' }
+function Install-Node { $script:upgraded = $true; $script:fixtureVersion = '26.12.1'; return $true }
+function Ensure-Pnpm { throw 'git build reached' }
+$InstallMethod = 'git'; $GitDir = $root
+foreach ($case in @(
+  @('>=24.16.0 <25 || >=26.1.0', $false),
+  @('>=24.22.1 <25 || >=26.12.1', $true)
+)) {
+  Remove-Item -LiteralPath (Join-Path $root 'package.json') -ErrorAction SilentlyContinue
+  $script:fixtureVersion = '24.21.0'; $script:fixtureEngine = $case[0]; $script:upgraded = $false
+  try { Main; throw 'git build missing' } catch {
+    if ($_.Exception.Message -ne 'git build reached') { throw }
+  }
+  if ($script:upgraded -ne $case[1]) { throw "Incorrect upgrade decision for $case" }
+}
+`,
+    ),
     "node-capabilities": installerFixture(
+      '$script:NodePackageEngine = ">=24.16.0 <25 || >=26.1.0"',
       `$cases = ${toPowerShellSingleQuotedLiteral(
         JSON.stringify([
-          ["v24.19.0", "3.51.3", true, true],
-          ["v24.19.0", "3.51.3", false, false],
+          ["v24.22.1", "3.51.3", true, true],
+          ["v24.22.1", "3.51.3", false, false],
+          ["v24.16.0+vendor.1", "3.51.3", true, true],
+          ["v26.1.0", "3.51.3", true, true],
+          ["v24.16.0", "3.51.3", false, false],
           ["v24.15.0+vendor.1", "3.51.3", true, false],
           ["v26.0.0+vendor.1", "3.51.3", true, false],
           ["v24.15.0", "3.51.3", false, false],
@@ -483,7 +560,7 @@ try {
             "3.51.3": true,
             "3.53.1": true,
             unavailable: false,
-          }).map(([sqlite, expected]) => ["v26.1.0", sqlite, true, expected]),
+          }).map(([sqlite, expected]) => ["v26.12.1", sqlite, true, expected]),
         ]),
       )} | ConvertFrom-Json`,
       String.raw`
@@ -498,7 +575,7 @@ function Get-Command {
   return [pscustomobject]@{ Source = 'Invoke-FixtureNode' }
 }
 foreach ($script:nodeCapabilityCase in $cases) {
-  $script:explicit = $script:nodeCapabilityCase[0] -eq 'v26.1.0'
+  $script:explicit = $script:nodeCapabilityCase[0] -eq 'v26.12.1'
   $actual = if ($script:explicit) { Check-Node -NodePath 'Invoke-FixtureNode' } else { Check-Node }
   if ($actual -ne $script:nodeCapabilityCase[3]) { throw "Node/SQLite case failed: $script:nodeCapabilityCase actual=$actual" }
 }
@@ -1448,6 +1525,7 @@ try {
             "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)",
             installerFunctions([
               "Test-NodeVersionSupported",
+              "Test-NodePackageEngine",
               "Test-NodeSqliteSupported",
               "Check-Node",
             ]),
@@ -1456,7 +1534,8 @@ try {
         );
         const preflight = runNative(["-File", preflightPath], preflightRoot);
         const prerequisite = `${engine} requires usable Node/SQLite: ${preflight.stdout}\n${preflight.stderr}`;
-        expect(preflight, prerequisite).toMatchObject({ error: undefined, status: 0 });
+        expect(preflight.error, prerequisite).toBeUndefined();
+        expect(preflight.status, prerequisite).toBe(0);
         for (const usableCommand of [false, true]) {
           for (const mode of ["file", "scriptblock"]) {
             const root = harness.createTempDir("openclaw-native-upgrade-é-");
@@ -1596,11 +1675,14 @@ describe("install.ps1 stale Winget repair", () => {
       "Fail-Install",
       "Test-BooleanSuccessResult",
       "Test-NodeVersionSupported",
+      "Test-NodePackageEngine",
       "Test-NodeSqliteSupported",
       "Check-Node",
       "Invoke-NodePackageManagerInstall",
       "Install-Node",
+      "Resolve-NodePackageEngine",
       "Main",
+      "Ensure-Node",
     ]);
     const fixture = [
       "$ErrorActionPreference = 'Stop'",
@@ -1636,7 +1718,7 @@ function Get-Command {
 function Invoke-FixtureNode {
     $global:LASTEXITCODE = 0
     if ($args[0] -eq '-v') {
-        return 'v26.1.0'
+        return 'v26.12.1'
     }
     $probe = @($input) -join [Environment]::NewLine
     if (-not $probe.Contains('CREATE TABLE probe') -or -not $probe.Contains('a\u0000b\u0000')) {
