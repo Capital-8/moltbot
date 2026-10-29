@@ -6,10 +6,13 @@ import { installControlUiReactiveGraph } from "../../scripts/lib/control-ui-reac
 
 it("counts real Solid executions, unchanged outputs, and shared-write fan-out without retaining prior captures", async () => {
   const requireUi = createRequire(new URL("../../ui/package.json", import.meta.url));
-  const runtimeDir = path.dirname(requireUi.resolve("@solidjs/signals"));
+  const runtimeDir = path.join(
+    path.dirname(requireUi.resolve("@solidjs/signals/package.json")),
+    "dist",
+  );
   const [runtime, { attribution }] = await Promise.all([
-    import(pathToFileURL(path.resolve(runtimeDir, "../dev.js")).href),
-    import(pathToFileURL(path.resolve(runtimeDir, "../dev.attribution.js")).href),
+    import(pathToFileURL(path.join(runtimeDir, "dev.js")).href),
+    import(pathToFileURL(path.join(runtimeDir, "dev.attribution.js")).href),
   ]);
   const probe = installControlUiReactiveGraph(runtime.OBSERVE, attribution);
   let disposeRoot = () => {};
