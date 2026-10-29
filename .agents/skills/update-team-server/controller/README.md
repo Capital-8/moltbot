@@ -368,6 +368,98 @@ publication is not a deployment or a request to restart the Gateway.
    artifacts while referenced. Report publication to Night Watch's coordinator;
    actual deployment and native acceptance remain a separate approved action.
 
+## Retained-journal repair protocol
+
+The `retained-repair-preparation` proof interface provides `snapshot`, `seal`, and
+`check` actions within the complete local retained-repair protocol. Preparation
+alone does not authorize adoption or activation: a sealed capsule is evidence,
+not permission or successful recovery. Full native qualification and approval of
+the exact procedure remain required before live use. Ordinary preparation,
+deployment, and recovery retain their existing pending-journal restrictions.
+The proof command requires Linux procfs and inspects the real inherited FD 9
+exclusive `flock`; its standalone tests explicitly skip other platforms.
+
+This core accepts only an unchanged, selected, non-native, same-schema system
+`ROLLBACK_FAILED` journal with its original session witness. Under the real
+exclusive deployment lock it validates the canonical journal bytes/inode, both
+sealed releases, selected pointer inodes, config bytes, protected identities,
+procfs generation/boot/cwd/executable, runtime declaration, private profile, and
+the complete executing four-file closure. It binds one already-sealed distinct
+target whose manifest freezes its exact source SHA and whose schemas match.
+It does **not** establish fresh official Git ancestry, build provenance beyond
+the existing sealed-release validator, systemd invocation/listener ownership,
+process-instance RPC, or settled old readers; those remain activation-owner work.
+
+`seal` takes an exact fresh snapshot, exclusively publishes and fsyncs its private
+intent, byte-for-byte original journal archive, current continuity floor, then
+the version-2 capsule. It never replaces, renames, or retires `activation.json`.
+Original journal process identity remains historical; the observed selected
+process is separate. The original witness remains untouched. Both original and
+current transcript generations are checked strictly for this core, without
+changing ordinary acceptance history-warning semantics. A caller cannot replace
+the first current floor with an empty snapshot. After durable intent publication,
+retry accepts added sessions but refuses loss of either floor. The lifecycle
+stop boundary captures a fresh supplementary witness.
+
+Publication uses the existing exclusive hard-link and fsync owner; interrupted
+intent/archive/capsule publication can only resume byte-identical artifacts for
+the same operation. Conflicts fail closed and are retained. Capsules and intent
+contain private paths/profile data: never publish them in a PR or public log.
+A snapshot is capped at 512 KiB and each durable artifact at 1 MiB; larger
+evidence is refused rather than truncated. This bounded prototype has not been
+qualified against production-scale history. No new cleanup/pruning rule is
+implemented.
+
+Before any live use, review and qualify the complete adoption/recovery closure,
+strict registered-project RPC acceptance, generation-bound suspension and
+one-shot start, no-rewind failure restoration, and completion/retention protocol.
+Rehearse those effects on disposable real systemd. Approval to develop this core
+does not approve adopting a partial closure or executing a repair.
+
+### V2 pending-journal build and metadata transition
+
+The explicit
+`--prepare-retained-repair OPERATION TARGET CURRENT PID START JOURNAL_SHA256`
+mode is preparation only; activation uses the separate typed lifecycle path.
+Under the existing exclusive deployment lock it binds
+one exact failed legacy journal, current process and both history floors before
+calling the existing official mirror fetch, standalone build, prewarm and seal
+owners. It never invokes ordinary recovery, removes the failed journal, changes
+pointers, or issues a Gateway lifecycle command. Build failure retains the
+original incident and immutable intent. An already-sealed exact target may be
+validated and prewarmed without rebuilding it.
+
+The first origin observation requires the target to equal the just-fetched main
+and verifies actual Git ancestry from B. Replays retain that target and accept
+only descendant official main, never a replacement target. The library verifies
+local mirror facts through the existing isolated account with Git replacement
+objects and grafts disabled; the shell fetch owner, not a caller boolean or
+timestamp, owns freshness. The build intent, origin, original/current witness
+archives and completion receipt are private, bounded, inode-bound and fsynced.
+Build checks and completed-evidence consumers finish pending file/directory
+durability, including a final single-link publication whose directory fsync failed. The first
+preparation core's direct `check` also completes file/directory durability before
+returning `PREPARED`, including after a failed final capsule directory fsync.
+
+The library-only `retained-repair-transaction` owner consumes the complete build
+receipt and transitions the canonical slot from the exact original bytes/inode
+to `REPAIR_PREPARED`, then `REPAIR_EVIDENCE_VERIFIED`. It records exact-phase
+transition intents and a supplementary live B floor. `resume` reconciles only an
+exact durable transition, including rename-visible/directory-fsync failures;
+it cannot skip phases, replay a lifecycle command or retire evidence. Ordinary
+version-1 owners intentionally reject these version-2 records. The typed V3 shell
+activation/resume owner dispatches this transaction; EVIDENCE_VERIFIED means evidence validation,
+**not** Gateway acceptance, suspension, stopped custody, or adoption authority.
+
+The V3 typed lifecycle now captures another history floor at stop and validates
+current B's real service/instance/listener identity; the historical incident is
+not current custody evidence. Whole-four-file adoption includes an explicit
+ungated-incumbent bootstrap: durable fail-closed library and shell bridges
+precede retirement of loaded canonical readers and exact-inode replacement.
+See `RETAINED-REPAIR.md` for its managed absolute-entry/trusted-root contract,
+crash recovery, separate native custody requirements and remaining review/
+real-systemd qualification gates. Local implementation is not live permission.
+
 ## Standalone tests
 
 Use disposable Linux with Node 24.22.1+ or 26.12.1+, Bun 1.4.3+, Bash, Python 3, GNU

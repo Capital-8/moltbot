@@ -170,7 +170,7 @@ const args=process.argv.slice(2),command=args[0],journal=${JSON.stringify(f.jour
 const event=value=>fs.appendFileSync(${JSON.stringify(f.eventlog)},value+'\\n');
 if(command==='journal-create'&&${JSON.stringify(fault)}==='before-journal') {event('fixture.before-journal');process.exit(73);}
 // Non-consuming generation checks must leave a piped verification payload for its actual proof.
-const result=cp.spawnSync(process.execPath,[${JSON.stringify(f.library)},...args],{stdio:['inherit','pipe','pipe'],encoding:'utf8',env:process.env});
+const result=cp.spawnSync(process.execPath,[${JSON.stringify(f.library)},...args],{stdio:['inherit','pipe','pipe','ignore','ignore','ignore','ignore','ignore','ignore',9],encoding:'utf8',env:process.env});
 if(result.error)throw result.error;
 if(result.status===0&&((command==='compatibility'&&${JSON.stringify(fault)}==='manifest-at-compatibility')||
   (command==='journal-create'&&${JSON.stringify(fault)}==='manifest-after-journal'))) {
@@ -185,6 +185,9 @@ if(command==='journal-create'&&result.status===0) {
     throw Error('canonical journal lost the admitted selection or process');
   event('fixture.ordinary-journal-created');
   if(${JSON.stringify(fault)}==='after-journal')process.exit(73);
+}
+if(command==='compatibility'&&result.status===0&&${JSON.stringify(fault)}==='instance-at-compatibility') {
+  fs.writeFileSync(${JSON.stringify(join(f.state, "frozen-replacement-instance"))},'1');event('fixture.instance-changed-after-compatibility');
 }
 if(command==='session-preservation-witness'&&result.status===0&&${JSON.stringify(fault)}==='instance-before-preparation')
   fs.writeFileSync(${JSON.stringify(join(f.state, "frozen-replacement-instance"))},'1');
@@ -201,7 +204,7 @@ const pid=Number(read("pid")),count=present("instance-reads")?Number(read("insta
 put("instance-reads",count+1);
 emit({pid,processInstanceId:count>=${fault === "instance" ? 1 : 3}?'changed-with-identical-pid-and-ticks':'fixture-instance-'+pid});`));
   }
-  if (fault === "instance-before-preparation") {
+  if (fault === "instance-before-preparation" || fault === "instance-at-compatibility") {
     const cli = join(f.initial, "dist/index.js"), source = readFileSync(cli, "utf8");
     const original = 'const pid=Number(read("pid"));emit({pid,processInstanceId:"fixture-instance-"+pid});';
     assert.equal(source.split(original).length, 2);
@@ -353,6 +356,19 @@ test("does not recapture a replacement process instance while constructing the j
   assert.equal(existsSync(f.journal), false);
   assert.doesNotMatch(events(f), /service\..*\.(stop|start|restart)\n|fixture\.ordinary-journal-created/);
   assert.deepEqual(readFileSync(f.databasePath), f.before.database);
+});
+
+test("rechecks live instance after compatibility and before canonical journal publication", t => {
+  // Causal mutation at a transaction boundary, independent of RPC read counts.
+  const f = fixture(t, "instance-at-compatibility"), result = runOwner(f, f.args);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /process instance changed/);
+  assert.equal(existsSync(f.journal), false);
+  assert.equal(readlinkSync(join(f.serving, "current")), f.initial);
+  for (const [name, file] of [["config", f.config], ["database", f.databasePath], ["agent", f.agentDatabasePath], ["guard", f.guard], ["permit", f.permit]])
+    assert.deepEqual(readFileSync(file), f.before[name], name);
+  assert.doesNotMatch(events(f), /service\..*\.(stop|start|restart|daemon-reload)|fixture\.ordinary-journal-created/);
+  assert.match(events(f), /fixture\.instance-changed-after-compatibility/);
 });
 
 test("reports a busy canonical lock as refusal, never successful SKIP", t => {
