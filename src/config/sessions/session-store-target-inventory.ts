@@ -35,7 +35,6 @@ import { resolveStateDir } from "../state-dir.js";
 import type { OpenClawConfig } from "../types.openclaw.js";
 import { resolveAgentsDirFromSessionStorePath, resolveSessionStorePathCore } from "./paths.js";
 import { resolveSqliteAgentId } from "./session-accessor.sqlite-scope-helpers.js";
-import { encodeSessionTranscriptWorkerError } from "./session-history-worker-errors.js";
 import {
   listSqliteTargetCandidatePathsForSessionStorePath,
   resolveUnsuffixedSqliteTargetFromSessionStorePath,
@@ -54,7 +53,6 @@ import {
   type CapturedSessionStorePaths,
   type SessionStoreReadCandidate,
 } from "./session-store-read-candidates.js";
-import type { SessionHistoryWorkerInput } from "./session-transcript-worker.types.js";
 import {
   dedupeSessionStoreTargetsBySqliteTarget,
   type SessionStoreTarget,
@@ -696,25 +694,4 @@ export function readSessionStoreTargetInventory(
     }
     throw error;
   }
-}
-
-export function readSessionStoreTargetWorkerRequest(
-  request: Extract<
-    SessionHistoryWorkerInput,
-    { kind: "session-target-prepare" | "session-store-target" }
-  >,
-) {
-  if (request.kind === "session-target-prepare") {
-    return prepareSessionStoreTargetCandidates(request.request);
-  }
-  request.request.env = cloneEnvWithPlatformSemantics(request.request.env);
-  const read = readSessionStoreTargetResult(request.request);
-  if (read.ok) {
-    return read.value;
-  }
-  const readError = encodeSessionTranscriptWorkerError(read.error);
-  if (!readError) {
-    throw read.error;
-  }
-  return { kind: "session-store-target" as const, readError };
 }

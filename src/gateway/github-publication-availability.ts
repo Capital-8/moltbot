@@ -42,6 +42,10 @@ import {
   type GitHubPublicationPreparation,
 } from "./github-publication-failure.js";
 import { GitHubPublicationRecoveryPendingError } from "./github-publication-git-index.js";
+import type {
+  PublicationSessionIdentity,
+  PublicationSessionRead,
+} from "./github-publication-session.types.js";
 import {
   preparePublicationWorktreeRead,
   requirePublicationSessionOwner,
@@ -134,17 +138,6 @@ export function matchesCurrentGitHubPublicationIdentity(params: {
     ...params,
   });
 }
-
-export type PublicationSessionIdentity = {
-  sessionId: string;
-  sessionKey: string;
-  agentId: string;
-  lifecycleRevision?: string | null;
-};
-export type PublicationSessionRead = Pick<
-  Awaited<ReturnType<typeof loadGatewaySessionEntryReadOnlyInWorker>>,
-  "agentId" | "canonicalKey" | "storePath" | "entry"
->;
 
 /** The selected publication metadata is invalidated by the session writer's receipts. */
 export async function prepareGitHubPublicationSession(

@@ -5,14 +5,14 @@ import {
 } from "../agents/worktrees/registry-read.js";
 import type { ManagedWorktreeRecord } from "../agents/worktrees/types.js";
 import type { OpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.types.js";
-import type {
-  PublicationSessionIdentity,
-  PublicationSessionRead,
-} from "./github-publication-availability.js";
 import {
   GitHubPublicationWorkspaceChangedError,
   GitHubPublicationSessionChangedError,
 } from "./github-publication-failure.js";
+import type {
+  PublicationSessionIdentity,
+  PublicationSessionRead,
+} from "./github-publication-session.types.js";
 
 export type ExpectedWorktree = {
   worktreeId: string;

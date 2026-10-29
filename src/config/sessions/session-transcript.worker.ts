@@ -324,7 +324,7 @@ serveOwnedWorkerTasks(
       }
       if (request.kind === "session-target-prepare" || request.kind === "session-store-target") {
         const { readSessionStoreTargetWorkerRequest } =
-          await import("./session-store-target-inventory.js");
+          await import("./session-store-target.worker.js");
         return readSessionStoreTargetWorkerRequest(request);
       }
       if (request.kind === "session-retirement-read") {

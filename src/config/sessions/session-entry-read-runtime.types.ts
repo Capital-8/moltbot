@@ -1,7 +1,5 @@
 import type { DatabasePathIdentity } from "../../infra/sqlite-worker-identity.js";
-import type { AgentDatabaseRegistryChange } from "../../state/openclaw-agent-db-contract.js";
 import type { SessionEntryReadScope } from "./session-accessor.types.js";
-import type { CanonicalSessionReaderContinuation } from "./session-canonical-key.js";
 import type { CapturedSessionEntryReadSource } from "./session-entry-read-source.types.js";
 import type {
   SessionExactEntriesWorkerResult,
@@ -12,7 +10,6 @@ import type {
   SessionEntryListWorkerInput,
 } from "./session-entry-read.types.js";
 import type { SessionEntrySnapshotField } from "./session-entry-snapshot-values.js";
-import type { SessionHistoryWorkerDatabase } from "./session-transcript-worker.types.js";
 import type { InternalSessionEntry } from "./types.js";
 
 export type SessionStoreWorkerReadScope = {
@@ -94,16 +91,4 @@ export type SessionEntryCohortReader = {
     assertCallerCurrent: () => void,
     consume: (read: SessionEntryCohortResult, assertCurrent: () => void) => T,
   ): Promise<T>;
-};
-
-export type SessionStoreWorkerReader = {
-  reader: SessionHistoryWorkerDatabase;
-  database: PreparedSessionEntryWorkerRead["database"];
-  logicalAgentId: string;
-  selectedStore: Readonly<{ path: string; physicalPath: string }>;
-  continuation?: CanonicalSessionReaderContinuation;
-  assertCurrent: () => void;
-  onRegistryChange?: (change: AgentDatabaseRegistryChange) => void;
-  refreshBeforeDispatch?: (assertRetainedTarget: () => void) => Promise<void>;
-  revalidateTarget?: () => Promise<void>;
 };

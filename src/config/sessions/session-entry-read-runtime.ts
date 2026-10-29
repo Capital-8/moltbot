@@ -42,7 +42,6 @@ import type {
   SessionEntryWorkerRead,
   PreparedSessionEntryWorkerRead,
   SessionStoreWorkerReadInput,
-  SessionStoreWorkerReader,
   SessionStoreWorkerReadScope,
   SessionEntryReadSourcePreparation,
   SessionEntryCohortReadOptions,
@@ -64,6 +63,7 @@ import {
   prepareSessionStoreReaderCandidates,
   withSessionStoreTarget,
 } from "./session-store-target-runtime.js";
+import type { SessionStoreWorkerReader } from "./session-store-worker-reader.types.js";
 import {
   projectionLane,
   targetDiscoveryLane,

@@ -25,7 +25,6 @@ import {
   prepareCurrentGitHubPublicationOptionsIdentity,
   qualifyGitHubPublicationSource,
   prepareGitHubPublicationSession,
-  type PublicationSessionIdentity,
 } from "../github-publication-availability.js";
 import { refreshManagedWorkspaceBase } from "../github-publication-base-refresh.js";
 import { GitHubPublicationKnownFailure } from "../github-publication-failure.js";
@@ -33,6 +32,7 @@ import { performSessionGitHubInspection } from "../github-publication-inspect.js
 import { readGitHubPublicationReadiness } from "../github-publication-readiness.js";
 import { isGitHubPublicationSuperseded } from "../github-publication-relevance.js";
 import { prepareGitHubPublicationRequesterV2 } from "../github-publication-requester.js";
+import type { PublicationSessionIdentity } from "../github-publication-session.types.js";
 import { adoptUnboundPullRequestWorkspace } from "../session-pr-workspace-adoption.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { getSessionRowProjection } from "../session-row-projection-access.js";
