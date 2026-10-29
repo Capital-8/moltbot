@@ -207,6 +207,44 @@ function appendCatalogAdvancedThinkingLevels(
   }
 }
 
+/**
+ * A row that sets `compat.defaultThinkingLevel` owns its thinking profile: its levels come from
+ * the generic catalog ladder (`thinkingLevelMap`, `supportedReasoningEfforts`), plus `adaptive`,
+ * labels and the reasoning-off override it declares. Provider hooks only cover rows without it.
+ */
+function resolveCatalogRowThinkingProfile(
+  context: Pick<ThinkingCatalogEntry, "reasoning" | "thinkingLevelMap" | "compat">,
+  mappedLevels: readonly ("xhigh" | "max")[],
+): ResolvedThinkingProfile | undefined {
+  const compat = context.compat;
+  const defaultLevel = compat?.defaultThinkingLevel
+    ? normalizeThinkLevel(compat.defaultThinkingLevel)
+    : undefined;
+  if (!defaultLevel) {
+    return undefined;
+  }
+  if (context.reasoning === false && compat?.thinkingRequired !== true) {
+    return {
+      levels: [{ id: "off", label: "off", rank: THINKING_LEVEL_RANKS.off }],
+      defaultLevel: "off",
+    };
+  }
+  const ladder = buildBaseThinkingProfile();
+  appendCatalogAdvancedThinkingLevels(ladder, compat, context.thinkingLevelMap);
+  if (compat?.adaptiveThinking) {
+    appendProfileLevel(ladder, "adaptive");
+  }
+  const labels = compat?.thinkingLevelLabels ?? {};
+  return normalizeThinkingProfile(
+    {
+      levels: ladder.levels.map(({ id }) => ({ id, label: labels[id] ?? id })),
+      defaultLevel,
+    },
+    context.thinkingLevelMap,
+    mappedLevels,
+  );
+}
+
 /** Resolve only provider-owned effort choices, before adding harness modes. */
 function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThinkingProfile {
   const providerRaw = normalizeOptionalString(params.provider);
@@ -229,6 +267,17 @@ function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThi
     ...(candidate?.params ? { params: candidate.params } : {}),
     compat: candidate?.compat,
   };
+  const runtime = normalizeOptionalLowercaseString(params.agentRuntime);
+  const mappedLevels =
+    !runtime || runtime === "auto" || runtime === "openclaw"
+      ? listMappedModelThinkingLevels(context).filter(
+          (level) => level === "xhigh" || level === "max",
+        )
+      : [];
+  const rowProfile = resolveCatalogRowThinkingProfile(context, mappedLevels);
+  if (rowProfile) {
+    return rowProfile;
+  }
   const providerProfileParams = {
     provider,
     context,
@@ -256,13 +305,6 @@ function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThi
         })
       : undefined;
   const pluginProfile = providerProfile ?? anthropicMessagesProfile;
-  const runtime = normalizeOptionalLowercaseString(params.agentRuntime);
-  const mappedLevels =
-    !runtime || runtime === "auto" || runtime === "openclaw"
-      ? listMappedModelThinkingLevels(context).filter(
-          (level) => level === "xhigh" || level === "max",
-        )
-      : [];
   if (
     pluginProfile &&
     (context.reasoning !== false || pluginProfile.preserveWhenCatalogReasoningFalse === true)
