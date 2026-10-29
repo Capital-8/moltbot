@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 
-export type SessionSendDeliveryEndpoint = {
+type SessionSendDeliveryEndpoint = {
   agentId: string;
   sessionKey: string;
   sessionId: string;

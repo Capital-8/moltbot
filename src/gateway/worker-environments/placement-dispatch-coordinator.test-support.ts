@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { vi } from "vitest";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { coordinateWorkerPlacementDispatch } from "./placement-dispatch-coordinator.js";
-import type { WorkerProvisioningDispatchPlacement } from "./placement-dispatch-failure.js";
+import type { WorkerDispatchPlacement } from "./placement-dispatch-failure.js";
 import { REQUEST as DISPATCH_REQUEST } from "./placement-dispatch-test-fixtures.js";
 import type { WorkerPlacementDispatchService as DispatchService } from "./placement-dispatch.js";
 import { localPlacement, sessionIdentity } from "./placement-suite.test-support.js";
@@ -33,7 +33,7 @@ export const PROVISIONING_PLACEMENT = {
   state: "provisioning",
   sessionId: "cloud",
   environmentId: "worker-cloud",
-} satisfies WorkerProvisioningDispatchPlacement;
+} satisfies Extract<WorkerDispatchPlacement, { state: "provisioning" }>;
 
 export const ACTIVE_PLACEMENT = {
   ...LOCAL_PLACEMENT,

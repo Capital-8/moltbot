@@ -165,7 +165,7 @@ export function collectDeliveredMediaUrls(result: AgentDeliveryEvidence): string
   );
 }
 
-export function collectMessagingToolDeliveredMediaUrls(
+function collectMessagingToolDeliveredMediaUrls(
   result: Pick<AgentDeliveryEvidence, "messagingToolSentMediaUrls" | "messagingToolSentTargets">,
 ): string[] {
   const urls = new Set(normalizeSingleOrTrimmedStringList(result.messagingToolSentMediaUrls));
