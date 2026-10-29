@@ -28,6 +28,7 @@ import {
   resolveMcpLoopbackPolicyTools,
   resolveMcpLoopbackScopedTools,
 } from "./mcp-http.runtime.js";
+import { registerGatewayToolFinalEffectTests } from "./tool-resolution.effects.test-support.js";
 import { resolveGatewayScopedTools } from "./tool-resolution.js";
 
 async function resolveTools(
@@ -377,3 +378,5 @@ describe("resolveGatewayScopedTools", () => {
     expect(names).toContain("sessions_history");
   });
 });
+
+registerGatewayToolFinalEffectTests();

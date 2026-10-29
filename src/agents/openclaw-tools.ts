@@ -28,6 +28,7 @@ import {
   resolveOpenClawPluginToolsForOptionsAsync,
 } from "./openclaw-plugin-tools.js";
 import { filterToolsByClientCaps } from "./openclaw-tools.client-caps.js";
+import { resolveCapturedOpenClawToolsFsPolicy } from "./openclaw-tools.fs-policy.js";
 import {
   createHostedConversationTools,
   createHostedGatewayTools,
@@ -169,6 +170,7 @@ export function createOpenClawTools(
     config: captured.config,
     agentId: captured.requesterAgentIdOverride,
   });
+  captured.fsPolicy = resolveCapturedOpenClawToolsFsPolicy(captured, sessionAgentId);
   captured.authProfileStore ??= ensureAuthProfileStoreWithoutExternalProfiles(
     captured.agentDir ?? resolveAgentDir(captured.config ?? {}, sessionAgentId),
     { allowKeychainPrompt: false },
