@@ -537,7 +537,7 @@ ${check.run}
     expect(commands).toContain("-I -S scripts/test-macos-mlx-native.py --proof-dir ");
     expect(commands).toContain("--started 1234");
     expect(commands.includes("--extended")).toBe(row.extended);
-    expect(commands.includes("--foundation-admission-only")).toBe(row.extended);
+    expect(commands.includes("--foundation-admission-only")).toBe(false);
     const proof = readFileSync(path.join(root, "outputs"), "utf8")
       .trim()
       .slice("proof-path=".length);

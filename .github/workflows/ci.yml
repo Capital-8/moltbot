@@ -5381,8 +5381,7 @@ jobs:
           echo "proof-path=$mlx_proof" >> "$GITHUB_OUTPUT"
           mlx_args=()
           if [[ "$MLX_NATIVE_PROOF" == "true" ]]; then
-            # Temporary Foundation-only diagnosis; full cache/inference proof remains incomplete.
-            mlx_args+=(--extended --foundation-admission-only)
+            mlx_args+=(--extended)
           fi
           python3 -I -S scripts/test-macos-mlx-native.py --proof-dir "$mlx_proof" \
             --started "$NATIVE_STARTED" "${mlx_args[@]}"
