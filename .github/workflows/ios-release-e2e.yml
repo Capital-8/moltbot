@@ -79,7 +79,7 @@ jobs:
             arm, path.join(process.env.GITHUB_WORKSPACE, ".cache/ios-build-profile", arm),
           ]));
           const runGit = (arm, args) => execFileSync("git", args, {
-            cwd: sources[arm], encoding: "utf8",
+            cwd: sources[arm], encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
           }).trim();
           for (const arm of Object.keys(sources)) {
             const sha = process.env[arm.toUpperCase() + "_SHA"];
