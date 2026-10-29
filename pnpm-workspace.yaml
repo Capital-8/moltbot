@@ -131,6 +131,7 @@ packageExtensions:
       typescript: 5.9.3
 
 patchedDependencies:
+  "@discord/embedded-app-sdk@2.5.0": patches/@discord__embedded-app-sdk@2.5.0.patch
   "baileys@7.0.0-rc14": patches/baileys@7.0.0-rc14.patch
   "chrome-devtools-mcp@1.9.0": patches/chrome-devtools-mcp@1.9.0.patch
   "matrix-js-sdk@42.4.0": patches/matrix-js-sdk@42.4.0.patch
