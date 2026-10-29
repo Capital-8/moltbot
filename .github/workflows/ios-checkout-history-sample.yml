@@ -1,0 +1,241 @@
+name: iOS checkout history sample
+
+on:
+  workflow_call:
+    inputs:
+      arm:
+        type: string
+        required: true
+      sample:
+        type: number
+        required: true
+      depth:
+        type: number
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.22.1"
+  SOURCE_SHA: 0b538f7d5a4d9e3328f572cc07fe23402f733f36
+  BASELINE_REF: refs/openclaw/mobile-releases/ios/2026.10.70-3
+  BASELINE_SHA: 2eeec18db4c588382843b401baf8c174512db164
+
+jobs:
+  sample:
+    name: iOS checkout ${{ inputs.arm }} sample ${{ inputs.sample }}
+    runs-on: xcode-27-xlarge
+    timeout-minutes: 30
+    env:
+      PROOF_ARM: ${{ inputs.arm }}
+      PROOF_SAMPLE: ${{ inputs.sample }}
+    steps:
+      - name: Record idle host resources and start checkout timer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$GITHUB_WORKSPACE/.git"
+          python3 - <<'PYTHON'
+          import json, os, pathlib, subprocess, time
+          def command(args):
+              try:
+                  result = subprocess.run(args, text=True, capture_output=True, timeout=5, check=False)
+                  return {"status": result.returncode, "stdout": result.stdout.strip()}
+              except (subprocess.TimeoutExpired, OSError):
+                  return {"status": None, "stdout": ""}
+          resources = {
+              "atMs": time.time_ns() // 1_000_000,
+              "loadavg": os.getloadavg(),
+              "uptime": command(["/usr/bin/uptime"]),
+              "vmStat": command(["/usr/bin/vm_stat"]),
+              "memoryPressure": command(["/usr/bin/memory_pressure", "-Q"]),
+          }
+          pathlib.Path(os.environ["RUNNER_TEMP"], "resources-before.json").write_text(json.dumps(resources))
+          PYTHON
+          python3 -c 'import time; print(time.time_ns() // 1_000_000)' > "$RUNNER_TEMP/checkout-started-ms"
+
+      - name: Checkout the exact source using the selected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: ${{ inputs.depth }}
+          persist-credentials: false
+
+      - name: Record checkout and acquire candidate history
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout_end="$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')"
+          checkout_start="$(cat "$RUNNER_TEMP/checkout-started-ms")"
+          echo "CHECKOUT_MS=$((checkout_end - checkout_start))" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          history_start="$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')"
+          if [[ "$PROOF_ARM" == candidate ]]; then
+            git fetch --no-tags --filter=blob:none --unshallow origin "+$SOURCE_SHA:refs/remotes/origin/main"
+          fi
+          history_end="$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')"
+          echo "HISTORY_MS=$((history_end - history_start))" >> "$GITHUB_ENV"
+          python3 -c 'import time; print(time.time_ns() // 1_000_000)' > "$RUNNER_TEMP/setup-started-ms"
+
+      - name: Setup Node environment and frozen owner dependencies
+        uses: ./.github/actions/setup-node-env
+        with:
+          cache-mode: off
+          install-bun: "false"
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Exercise public release history and actual note evidence owners
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c 'import time; print(time.time_ns() // 1_000_000)' > "$RUNNER_TEMP/setup-ended-ms"
+          cat > "$RUNNER_TEMP/ios-checkout-consumer.mjs" <<'JS'
+          import assert from "node:assert/strict";
+          import { execFileSync, spawnSync } from "node:child_process";
+          import { createHash } from "node:crypto";
+          import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+          import os from "node:os";
+          import path from "node:path";
+          import { pathToFileURL } from "node:url";
+
+          const root = process.cwd();
+          const sourceSha = process.env.SOURCE_SHA;
+          const baselineSha = process.env.BASELINE_SHA;
+          const baselineRef = process.env.BASELINE_REF;
+          const startedAt = Number(readFileSync(path.join(process.env.RUNNER_TEMP, "checkout-started-ms"), "utf8"));
+          const setupStartedAt = Number(readFileSync(path.join(process.env.RUNNER_TEMP, "setup-started-ms"), "utf8"));
+          const setupEndedAt = Number(readFileSync(path.join(process.env.RUNNER_TEMP, "setup-ended-ms"), "utf8"));
+          const resourcesBefore = JSON.parse(readFileSync(path.join(process.env.RUNNER_TEMP, "resources-before.json"), "utf8"));
+          assert.equal(process.versions.node, "24.22.1");
+          const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+          function git(cwd, args, timeout = 300_000) {
+            return execFileSync("git", args, {
+              cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+              timeout, maxBuffer: 64 * 1024 * 1024,
+            }).trim();
+          }
+          function measure(operation) {
+            const start = performance.now();
+            const value = operation();
+            return { value, milliseconds: performance.now() - start };
+          }
+
+          const verification = measure(() => {
+            assert.equal(git(root, ["rev-parse", "HEAD"]), sourceSha);
+            assert.equal(git(root, ["rev-parse", "--is-shallow-repository"]), "false");
+            const tree = git(root, ["rev-parse", `${sourceSha}^{tree}`]);
+            assert.equal(tree, "089646b628062abd599e978db8ad15b6285bd5db");
+            const commits = git(root, ["rev-list", sourceSha]).split("\n").sort();
+            assert.equal(commits.length, 121756);
+            const ancestrySha256 = sha256(`${commits.join("\n")}\n`);
+            assert.equal(ancestrySha256, "905369c8ddd911412bd92235688834993110d56ce6de07335e45ed87029b5449");
+            const refs = git(root, ["for-each-ref", "--format=%(refname)"]).split("\n").filter(Boolean).sort();
+            const negotiationTipSha = git(root, ["rev-parse", "refs/remotes/origin/main"]);
+            if (process.env.PROOF_ARM === "candidate") {
+              assert.deepEqual(refs, ["refs/remotes/origin/main"]);
+              assert.equal(negotiationTipSha, sourceSha);
+            }
+            return { tree, sourceAncestryCount: commits.length, ancestrySha256, refCount: refs.length, negotiationTipSha };
+          });
+
+          // Match mobile-release.mjs mainSha(), including its later unfiltered fetch.
+          const mainFetch = measure(() => {
+            git(root, ["fetch", "--no-tags", "origin", "refs/heads/main"]);
+            const mainSha = git(root, ["rev-parse", "FETCH_HEAD"]);
+            git(root, ["merge-base", "--is-ancestor", sourceSha, mainSha]);
+            return mainSha;
+          });
+          const materialization = measure(() => {
+            const source = path.join(process.env.RUNNER_TEMP, "ios-history-consumer-source");
+            git(root, ["worktree", "add", "--detach", source, sourceSha]);
+            return source;
+          });
+          const source = materialization.value;
+          const evidenceDeadline = Date.now() + 5 * 60_000;
+          // Match the note owner's public-ref lookup/fetch and its 30-second bound.
+          const baseline = measure(() => {
+            const row = git(source, ["ls-remote", "--refs", "origin", baselineRef], 30_000).split(/\s+/u);
+            assert.deepEqual(row, [baselineSha, baselineRef]);
+            git(source, ["fetch", "--no-tags", "origin", baselineRef], 30_000);
+            assert.equal(git(source, ["rev-parse", "FETCH_HEAD"]), baselineSha);
+            git(source, ["merge-base", "--is-ancestor", baselineSha, sourceSha]);
+            return baselineSha;
+          });
+
+          const { collectReleaseInventory, collectSelectedReleaseEvidence } = await import(
+            pathToFileURL(path.join(root, "scripts/lib/mobile-release-evidence.ts")).href
+          );
+          const evidenceSource = {
+            rootDir: source, platform: "ios", baseline: baseline.value, source: sourceSha,
+            deadline: evidenceDeadline,
+          };
+          const inventory = measure(() => collectReleaseInventory(evidenceSource));
+          const selected = inventory.value.files.slice(0, 10).map(({ id }) => ({ id, focus: [] }));
+          assert.equal(selected.length, 10);
+          const evidence = measure(() => collectSelectedReleaseEvidence(evidenceSource, inventory.value, selected));
+          const inventorySha256 = sha256(JSON.stringify(inventory.value));
+          const evidenceSha256 = sha256(JSON.stringify(evidence.value));
+          assert.equal(inventorySha256, "82606f1ca72ecfa47e588ab470b3c547fdcb6181dfa81293422f0413ba2bbb2f");
+          assert.equal(evidenceSha256, "57f984c2be26bac00ad81ed7a0652def99bd50d4c9fd36a28d8bc2bc503b1dd6");
+          assert.equal(git(source, ["rev-parse", "HEAD"]), sourceSha);
+          assert.equal(git(source, ["status", "--porcelain", "--untracked-files=all"]), "");
+          assert.equal(git(root, ["rev-parse", "HEAD"]), sourceSha);
+          assert.equal(git(root, ["status", "--porcelain", "--untracked-files=all"]), "");
+          const refsAfter = git(root, ["for-each-ref", "--format=%(refname)"]).split("\n").filter(Boolean).sort();
+          if (process.env.PROOF_ARM === "candidate") assert.deepEqual(refsAfter, ["refs/remotes/origin/main"]);
+          const counts = git(root, ["count-objects", "-v"]);
+          const packedKiB = Number(/^size-pack: (\d+)$/mu.exec(counts)?.[1]);
+          const looseKiB = Number(/^size: (\d+)$/mu.exec(counts)?.[1]);
+          assert.ok(Number.isFinite(packedKiB) && Number.isFinite(looseKiB));
+          const consumerEndedAt = Date.now();
+          function resourceCommand(command, args = []) {
+            const query = spawnSync(command, args, { encoding: "utf8", timeout: 5_000 });
+            return { status: query.status, stdout: query.stdout?.trim() ?? "" };
+          }
+          const resourcesAfter = {
+            atMs: Date.now(), loadavg: os.loadavg(),
+            uptime: resourceCommand("/usr/bin/uptime"),
+            vmStat: resourceCommand("/usr/bin/vm_stat"),
+            memoryPressure: resourceCommand("/usr/bin/memory_pressure", ["-Q"]),
+          };
+          const result = {
+            schemaVersion: 1, arm: process.env.PROOF_ARM, sample: Number(process.env.PROOF_SAMPLE),
+            sourceSha, baselineRef, baselineSha, workflowSha: process.env.GITHUB_SHA,
+            ...verification.value, inventorySha256, evidenceSha256,
+            files: inventory.value.files.length, commitHints: inventory.value.commits.length,
+            evidenceItems: evidence.value.length,
+            selectedFiles: selected.map(({ id }) => inventory.value.files.find((file) => file.id === id).file),
+            liveMainSha: mainFetch.value, gitStoredBytes: (packedKiB + looseKiB) * 1024,
+            resources: { before: resourcesBefore, after: resourcesAfter },
+            host: {
+              platform: process.platform, arch: process.arch, cpus: os.availableParallelism(),
+              totalMemoryBytes: os.totalmem(), node: process.versions.node,
+              imageOS: process.env.ImageOS, imageVersion: process.env.ImageVersion,
+              git: git(root, ["--version"]),
+              xcode: execFileSync("xcodebuild", ["-version"], { encoding: "utf8" }).trim(),
+            },
+            milliseconds: {
+              checkout: Number(process.env.CHECKOUT_MS), history: Number(process.env.HISTORY_MS),
+              setup: setupEndedAt - setupStartedAt, graphVerification: verification.milliseconds,
+              laterMainFetch: mainFetch.milliseconds, sourceMaterialization: materialization.milliseconds,
+              baselineResolution: baseline.milliseconds, inventory: inventory.milliseconds,
+              selectedEvidence: evidence.milliseconds, acquisitionThroughConsumer: consumerEndedAt - startedAt,
+            },
+          };
+          const output = path.join(process.env.RUNNER_TEMP, `ios-checkout-${result.arm}-${result.sample}.json`);
+          writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`);
+          console.log(`IOS_CHECKOUT_PROOF_RESULT=${JSON.stringify(result)}`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `\n### Checkout proof: ${result.arm} sample ${result.sample}\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`);
+          JS
+          node --import ./scripts/tsx.mjs "$RUNNER_TEMP/ios-checkout-consumer.mjs"
+
+      - name: Retain the nonpublishing comparison receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-checkout-${{ inputs.arm }}-${{ inputs.sample }}
+          path: ${{ runner.temp }}/ios-checkout-${{ inputs.arm }}-${{ inputs.sample }}.json
+          if-no-files-found: error
+          retention-days: 14

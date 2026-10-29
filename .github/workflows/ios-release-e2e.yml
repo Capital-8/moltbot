@@ -1,6 +1,9 @@
-name: iOS Release E2E
+name: iOS qualification native build profile comparison (temporary)
+
+run-name: iOS native build profile comparison (5 baseline + 5 candidate)
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       target_sha:
@@ -12,221 +15,298 @@ on:
       resource_diagnostics:
         type: boolean
         default: true
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Stock qualification or four matched stock/SimSlim pairs
-        type: choice
-        options: [stock, compare]
-        default: stock
-      resource_diagnostics:
-        description: Collect the temporary resource timeline
-        type: boolean
-        default: true
 
 permissions:
-  actions: read
   contents: read
 
+concurrency:
+  group: ios-qualification-native-build-profile-comparison
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.22.1"
+  BASELINE_SHA: 0b538f7d5a4d9e3328f572cc07fe23402f733f36
+  CANDIDATE_SHA: 74b38ca11b3d44281fde99b782d880edc557af07
+  ACCEPTANCE_RULE: "Candidate median nativeBuildMs improves by at least 5%; p95 regresses by less than 20%; all ten builds pass; one fresh complete candidate stock qualification must pass before promotion."
+
 jobs:
-  qualify:
+  compare:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: xcode-27-xlarge
-    timeout-minutes: 240
-    env:
-      TARGET_SHA: ${{ inputs.target_sha || github.sha }}
-      E2E_MODE: ${{ inputs.mode }}
+    timeout-minutes: 180
     steps:
-      - name: Initialize failure proof and validate inputs
-        id: start
+      - name: Checkout trusted diagnostic tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require immutable sample identities and an acceptance rule
         shell: bash
         run: |
           set -euo pipefail
-          export PROOF_PATH="$RUNNER_TEMP/ios-release-e2e-proof.json"
-          echo "PROOF_PATH=$PROOF_PATH" >> "$GITHUB_ENV"
-          echo "GATEWAY_SELECTION_DIR=$RUNNER_TEMP/ios-release-gateway-selection" >> "$GITHUB_ENV"
-          echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
-          python3 - <<'PY'
-          import json, os, re
-          sha = os.environ["TARGET_SHA"]
-          mode = os.environ["E2E_MODE"]
-          with open(os.environ["PROOF_PATH"], "w") as out:
-              json.dump({"schema": 2, "kind": "qualification", "status": "failed", "trials": [],
-                         "targetSha": sha if re.fullmatch(r"[a-f0-9]{40}", sha) else None,
-                         "harnessSha": None,
-                         "mode": mode if mode in ("stock", "compare") else None,
-                         "errors": ["workflow-setup-incomplete"]}, out)
-          PY
-          [[ "$TARGET_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          [[ "$E2E_MODE" == stock || "$E2E_MODE" == compare ]] || exit 1
-          [[ "$TARGET_SHA" == "$GITHUB_SHA" ]] || exit 1
+          [[ "$BASELINE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$BASELINE_SHA" != "$CANDIDATE_SHA"
+          test -n "$ACCEPTANCE_RULE"
 
-      - name: Reserve host CPU for release qualification
+      - name: Checkout baseline source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASELINE_SHA }}
+          path: .cache/ios-build-profile/baseline
+          persist-credentials: false
+
+      - name: Checkout candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: .cache/ios-build-profile/candidate
+          persist-credentials: false
+
+      - name: Verify matched source trees and record the workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import fs from "node:fs";
+          import os from "node:os";
+          import path from "node:path";
+          import { execFileSync } from "node:child_process";
+          const output = path.join(process.env.RUNNER_TEMP, "ios-build-profile-results");
+          fs.mkdirSync(output, { recursive: true });
+          const sources = Object.fromEntries(["baseline", "candidate"].map((arm) => [
+            arm, path.join(process.env.GITHUB_WORKSPACE, ".cache/ios-build-profile", arm),
+          ]));
+          const runGit = (arm, args) => execFileSync("git", args, {
+            cwd: sources[arm], encoding: "utf8",
+          }).trim();
+          for (const arm of Object.keys(sources)) {
+            const sha = process.env[arm.toUpperCase() + "_SHA"];
+            if (runGit(arm, ["rev-parse", "HEAD"]) !== sha ||
+                runGit(arm, ["status", "--porcelain=v1", "--untracked-files=all"])) {
+              throw new Error(arm + " source is not the pinned clean checkout");
+            }
+          }
+          const inventory = (arm) => new Map(runGit(arm, [
+            "ls-tree", "-r", "--full-tree", "HEAD",
+          ]).split("\n").filter(Boolean).map((line) => {
+            const [identity, file] = line.split("\t");
+            return [file, identity];
+          }));
+          const baseline = inventory("baseline");
+          const candidate = inventory("candidate");
+          const files = new Set([...baseline.keys(), ...candidate.keys()]);
+          const changed = [...files].filter((file) => baseline.get(file) !== candidate.get(file));
+          const allowed = new Set([
+            "scripts/lib/ios-release-e2e-native.ts",
+            "test/scripts/ios-release-e2e.test.ts",
+            "docs/ci/runners.md",
+          ]);
+          if (!changed.includes("scripts/lib/ios-release-e2e-native.ts") ||
+              changed.some((file) => !allowed.has(file))) {
+            throw new Error("Comparison source differs outside the reviewed compilation profile");
+          }
+          const manifest = {
+            schema: 1,
+            workflowSha: process.env.GITHUB_SHA,
+            baselineSha: process.env.BASELINE_SHA,
+            candidateSha: process.env.CANDIDATE_SHA,
+            changedFiles: changed,
+            acceptanceRule: process.env.ACCEPTANCE_RULE,
+            samplesPerArm: 5,
+            order: Array.from({ length: 5 }, (_, index) => [
+              { arm: "baseline", round: index + 1 },
+              { arm: "candidate", round: index + 1 },
+            ]).flat(),
+            productCache: "new empty build directory for every sample; never reused",
+            sharedInputs: "one host/toolchain; pnpm download store, Cargo registry, global Xcode/SwiftPM caches and OS caches shared; checkout-local generated inputs can warm between samples",
+            coverage: "native-build only; requires a separate fresh complete stock qualification before promotion",
+            host: { cpus: os.cpus().length, totalMemoryBytes: os.totalmem(), platform: os.platform(), arch: os.arch() },
+          };
+          fs.writeFileSync(path.join(output, "workload.json"), JSON.stringify(manifest, null, 2) + "\n");
+          JS
+
+      - name: Reserve host CPU as in production qualification
         timeout-minutes: 2
         run: sudo -n /usr/bin/mdutil -i off /System/Volumes/Data
 
-      - name: Checkout exact qualification target
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Verify target and require target-owned harness
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || exit 1
-          test -f scripts/ios-release-e2e.ts
-          test -f scripts/lib/ios-release-e2e-native.ts
-          test -f test/helpers/openclaw-test-instance.ts
-
-      - name: Find this run's stable Gateway selection
-        id: gateway-selection
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            const name = `ios-release-gateway-selection-${context.runId}`;
-            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-              ...context.repo,
-              run_id: context.runId,
-              name,
-              per_page: 100,
-            });
-            const matches = artifacts.filter((artifact) => artifact.name === name);
-            if (matches.length > 1) {
-              throw new Error('Multiple stable Gateway selections exist for this run.');
-            }
-            if (matches.length === 0) {
-              if (Number(process.env.GITHUB_RUN_ATTEMPT) !== 1) {
-                throw new Error('This rerun has no saved stable Gateway selection. Start a new workflow run.');
-              }
-              core.setOutput('create', 'true');
-              core.setOutput('artifact-id', '');
-              return;
-            }
-            const artifact = matches[0];
-            if (artifact.expired || artifact.workflow_run?.id !== context.runId ||
-                artifact.workflow_run?.head_sha !== process.env.TARGET_SHA) {
-              throw new Error('The saved stable Gateway selection is expired or belongs to another source/run. Start a new workflow run.');
-            }
-            core.setOutput('create', 'false');
-            core.setOutput('artifact-id', String(artifact.id));
-
-      - name: Restore this run's stable Gateway selection
-        if: steps.gateway-selection.outputs.artifact-id != ''
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ steps.gateway-selection.outputs.artifact-id }}
-          github-token: ${{ github.token }}
-          run-id: ${{ github.run_id }}
-          path: ${{ env.GATEWAY_SELECTION_DIR }}
-          digest-mismatch: error
-
-      - name: Start shared toolchain installation clock
-        id: install-start
-        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node environment
+      - name: Setup shared Node and pnpm tools
         uses: ./.github/actions/setup-node-env
         with:
-          node-version: "24.22.1"
+          node-version: ${{ env.NODE_VERSION }}
           install-bun: "false"
+          install-deps: "false"
           cache-mode: "off"
 
-      - name: Prepare stable Gateway selection
+      - name: Install exact dependencies for both independent source checkouts
+        shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          RESTORED_SELECTION: ${{ steps.gateway-selection.outputs.artifact-id != '' }}
+          CI: "true"
+        run: |
+          set -euo pipefail
+          for arm in baseline candidate; do
+            pnpm --dir "$GITHUB_WORKSPACE/.cache/ios-build-profile/$arm" install \
+              --frozen-lockfile --store-dir "$RUNNER_TEMP/ios-build-profile-pnpm-store"
+          done
+
+      - name: Select Xcode and install shared pinned native tools
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$RESTORED_SELECTION" == true ]]; then
-            test -f "$GATEWAY_SELECTION_DIR/selection.json"
-            test -f "$GATEWAY_SELECTION_DIR/package.json"
-            test -f "$GATEWAY_SELECTION_DIR/package-lock.json"
-          fi
-          node --import ./scripts/tsx.mjs scripts/ios-release-gateway.ts \
-            --target-sha "$TARGET_SHA" --selection-dir "$GATEWAY_SELECTION_DIR"
-
-      - name: Save this run's stable Gateway selection
-        if: steps.gateway-selection.outputs.create == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-release-gateway-selection-${{ github.run_id }}
-          path: |
-            ${{ env.GATEWAY_SELECTION_DIR }}/selection.json
-            ${{ env.GATEWAY_SELECTION_DIR }}/package.json
-            ${{ env.GATEWAY_SELECTION_DIR }}/package-lock.json
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Select Xcode and install pinned native tools
-        shell: bash
-        run: |
-          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.cache/ios-build-profile/baseline"
           source scripts/lib/swift-toolchain.sh
           select_xcode_toolchain
-          swift_tools_dir="$RUNNER_TEMP/ios-release-e2e-tools"
+          swift_tools_dir="$RUNNER_TEMP/ios-build-profile-tools"
           ./scripts/install-xcodegen.sh "$swift_tools_dir"
           ./scripts/install-swift-tools.sh "$swift_tools_dir"
           echo "$swift_tools_dir" >> "$GITHUB_PATH"
           export PATH="$HOME/.cargo/bin:$PATH"
-          watch_toolchain="$(awk -F '"' '/^channel =/ { print $2; exit }' apps/shared/OpenClawWatchRTC/rust-toolchain.toml)"
+          watch_toolchain="$(awk -F '\"' '/^channel =/ { print $2; exit }' apps/shared/OpenClawWatchRTC/rust-toolchain.toml)"
           test -n "$watch_toolchain"
           rustup toolchain install "$watch_toolchain" --profile minimal --component rust-src
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Install pinned comparison meter
-        id: simslim
-        if: inputs.mode == 'compare'
+      - name: Run five serial interleaved native build samples per arm
+        shell: bash
+        env:
+          OPENCLAW_IOS_RESOURCE_DIAGNOSTICS: "1"
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/ios-build-profile-results"
+          for round in 1 2 3 4 5; do
+            for arm in baseline candidate; do
+              sample="$arm-$round"
+              source_dir="$GITHUB_WORKSPACE/.cache/ios-build-profile/$arm"
+              build_dir="$RUNNER_TEMP/ios-build-profile-products/$sample"
+              test ! -e "$build_dir"
+              if [[ "$arm" == baseline ]]; then
+                target_sha="$BASELINE_SHA"
+              else
+                target_sha="$CANDIDATE_SHA"
+              fi
+              export PROFILE_SAMPLE="$sample" PROFILE_ARM="$arm" PROFILE_ROUND="$round"
+              export PROFILE_OUTPUT="$output" PROFILE_BUILD_DIR="$build_dir"
+              node --input-type=module <<'JS'
+          import fs from "node:fs";
+          import os from "node:os";
+          import path from "node:path";
+          fs.writeFileSync(path.join(process.env.PROFILE_OUTPUT, process.env.PROFILE_SAMPLE + "-host-before.json"), JSON.stringify({
+            arm: process.env.PROFILE_ARM,
+            round: Number(process.env.PROFILE_ROUND),
+            at: new Date().toISOString(),
+            cpuCount: os.cpus().length,
+            totalMemoryBytes: os.totalmem(),
+            freeMemoryBytes: os.freemem(),
+            loadAverage: os.loadavg(),
+          }, null, 2) + "\n");
+          JS
+              (
+                cd "$source_dir"
+                node scripts/ios-resource-timeline.mjs --output "$output/$sample-resource.jsonl" -- \
+                  node --import ./scripts/tsx.mjs scripts/ios-release-e2e.ts \
+                  --mode stock --target-sha "$target_sha" --build-only \
+                  --build-dir "$build_dir" --output "$output/$sample-proof.json"
+              )
+              node --input-type=module <<'JS'
+          import fs from "node:fs";
+          import path from "node:path";
+          const proofPath = path.join(process.env.PROFILE_OUTPUT, process.env.PROFILE_SAMPLE + "-proof.json");
+          const proof = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+          const sha = process.env[process.env.PROFILE_ARM.toUpperCase() + "_SHA"];
+          if (proof.status !== "built" || proof.kind !== "native-build" ||
+              proof.targetSha !== sha || proof.harnessSha !== sha ||
+              proof.nativeBuildReused !== false ||
+              !Number.isFinite(proof.nativeBuildMs) || proof.nativeBuildMs <= 0) {
+            throw new Error("Sample failed native-build identity/freshness admission");
+          }
+          // Count index output after measured owner work completes; do not include collection in build time.
+          const indexRoot = path.join(process.env.PROFILE_BUILD_DIR, "DerivedData", "Index.noindex");
+          let files = 0;
+          let bytes = 0;
+          const visit = (directory) => {
+            for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+              const file = path.join(directory, entry.name);
+              if (entry.isDirectory()) visit(file);
+              else if (entry.isFile()) { files++; bytes += fs.statSync(file).size; }
+            }
+          };
+          if (fs.existsSync(indexRoot)) visit(indexRoot);
+          fs.writeFileSync(path.join(process.env.PROFILE_OUTPUT, process.env.PROFILE_SAMPLE + "-index-output.json"), JSON.stringify({
+            indexDirectoryPresent: fs.existsSync(indexRoot), files, bytes,
+          }, null, 2) + "\n");
+          JS
+              # These products are task-owned and no later sample or UI qualification consumes them.
+              rm -rf "$build_dir"
+            done
+          done
+
+      - name: Summarize paired cold-product native measurements
         shell: bash
         run: |
           set -euo pipefail
-          install_dir="$RUNNER_TEMP/ios-release-e2e-simslim"
-          ./scripts/install-simslim.sh "$install_dir"
-          echo "binary=$install_dir/simslim" >> "$GITHUB_OUTPUT"
+          node --input-type=module <<'JS'
+          import fs from "node:fs";
+          import path from "node:path";
+          const output = path.join(process.env.RUNNER_TEMP, "ios-build-profile-results");
+          const read = (file) => JSON.parse(fs.readFileSync(path.join(output, file), "utf8"));
+          const samples = [];
+          for (let round = 1; round <= 5; round++) {
+            for (const arm of ["baseline", "candidate"]) {
+              const name = arm + "-" + round;
+              const proof = read(name + "-proof.json");
+              const index = read(name + "-index-output.json");
+              samples.push({
+                arm, round, targetSha: proof.targetSha, harnessSha: proof.harnessSha,
+                nativeBuildMs: proof.nativeBuildMs, nativeHarnessMs: proof.harnessMs,
+                xcode: proof.xcode, xcodeBuild: proof.xcodeBuild,
+                runtime: proof.runtime, runtimeIdentifier: proof.runtimeIdentifier,
+                buildTimings: proof.buildTimings, index,
+              });
+            }
+          }
+          const toolchains = new Set(samples.map((sample) => JSON.stringify([
+            sample.xcode, sample.xcodeBuild, sample.runtimeIdentifier,
+          ])));
+          if (toolchains.size !== 1) throw new Error("Sample toolchain/runtime identity changed");
+          const stats = (values) => {
+            const sorted = values.toSorted((a, b) => a - b);
+            return {
+              samples: sorted.length, min: sorted[0], median: sorted[2],
+              p95: sorted[Math.ceil(sorted.length * 0.95) - 1], max: sorted.at(-1),
+            };
+          };
+          const arms = Object.fromEntries(["baseline", "candidate"].map((arm) => {
+            const rows = samples.filter((sample) => sample.arm === arm);
+            return [arm, {
+              nativeBuildMs: stats(rows.map((sample) => sample.nativeBuildMs)),
+              nativeHarnessMs: stats(rows.map((sample) => sample.nativeHarnessMs)),
+            }];
+          }));
+          const summary = {
+            schema: 1,
+            workload: read("workload.json"),
+            nativeBuildMedianRatio: arms.candidate.nativeBuildMs.median / arms.baseline.nativeBuildMs.median,
+            nativeBuildP95Ratio: arms.candidate.nativeBuildMs.p95 / arms.baseline.nativeBuildMs.p95,
+            nativeMeasurementsAccepted: arms.candidate.nativeBuildMs.median <= arms.baseline.nativeBuildMs.median * 0.95 && arms.candidate.nativeBuildMs.p95 < arms.baseline.nativeBuildMs.p95 * 1.20,
+            arms, samples,
+            qualification: "native-only measurements; fresh complete candidate stock qualification still required",
+          };
+          fs.writeFileSync(path.join(output, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
+          console.log(JSON.stringify({
+            nativeBuildMedianRatio: summary.nativeBuildMedianRatio,
+            nativeBuildP95Ratio: summary.nativeBuildP95Ratio,
+            arms,
+            nativeMeasurementsAccepted: summary.nativeMeasurementsAccepted,
+          }, null, 2));
+          if (!summary.nativeMeasurementsAccepted) throw new Error("Native compilation performance acceptance rule did not pass");
+          JS
 
-      - name: Finish shared toolchain installation clock
-        id: install-end
-        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
-
-      - name: Qualify native pairing and chat
-        env:
-          OPENCLAW_CI_SIMSLIM_BINARY: ${{ steps.simslim.outputs.binary }}
-          OPENCLAW_IOS_RESOURCE_DIAGNOSTICS: ${{ inputs.resource_diagnostics && '1' || '0' }}
-        run: |
-          node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-resource-timeline.jsonl" -- \
-            node --import ./scripts/tsx.mjs scripts/ios-release-e2e.ts \
-            --mode "$E2E_MODE" --target-sha "$TARGET_SHA" --output "$PROOF_PATH" \
-            --gateway-selection "$GATEWAY_SELECTION_DIR"
-
-      - name: Complete sanitized timing proof
-        if: always()
-        env:
-          START_EPOCH: ${{ steps.start.outputs.epoch }}
-          INSTALL_START: ${{ steps.install-start.outputs.epoch }}
-          INSTALL_END: ${{ steps.install-end.outputs.epoch }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
-        run: |
-          python3 - <<'PY'
-          import json, os, time
-          path = os.environ["PROOF_PATH"]
-          with open(path) as source:
-              proof = json.load(source)
-          proof["workflowSha"] = os.environ["WORKFLOW_SHA"]
-          proof["overallMs"] = round((time.time() - int(os.environ["START_EPOCH"])) * 1000)
-          start, end = os.environ["INSTALL_START"], os.environ["INSTALL_END"]
-          proof["sharedInstallerMs"] = (int(end) - int(start)) * 1000 if start and end else None
-          with open(path, "w") as out:
-              json.dump(proof, out, indent=2)
-          PY
-
-      - name: Upload sanitized proof only
+      - name: Retain sanitized measurements and resource diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ios-release-e2e-${{ inputs.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/ios-release-e2e-proof.json
-            ${{ runner.temp }}/ios-resource-timeline.jsonl
+          name: ios-build-profile-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-build-profile-results
           if-no-files-found: error
           retention-days: 14
