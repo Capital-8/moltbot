@@ -47,11 +47,15 @@ it("builds the bundled Kimi coding defaults", () => {
   expect(provider.models.map((m) => [m.id, m.name, m.contextWindow, m.maxTokens])).toEqual([
     ["k3", "Kimi K3", 1_048_576, 131_072],
     ["k3-256k", "Kimi K3 (256k)", 262_144, 131_072],
+    ["k3.1-pro", "Kimi K3.1 Pro", 1_048_576, 131_072],
+    ["k3.1-pro-highspeed", "Kimi K3.1 Pro Highspeed", 1_048_576, 131_072],
     ["kimi-for-coding", "Kimi Code", 262_144, 32_768],
     ["kimi-for-coding-highspeed", "Kimi K2.7 Code HighSpeed", 262_144, 32_768],
   ]);
-  expect(provider.models.map((m) => m.reasoning)).toEqual([true, true, true, true]);
+  expect(provider.models.every((m) => m.reasoning)).toBe(true);
   expect(provider.models.slice(2).map((model) => model.compat?.codeMode)).toEqual([
+    undefined,
+    undefined,
     undefined,
     undefined,
   ]);
