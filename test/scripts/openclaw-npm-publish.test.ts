@@ -88,7 +88,10 @@ describe("openclaw npm publish wrapper", () => {
     const tempRoot = tempDirs.make("openclaw-npm-publish-");
     const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version as string;
     const tarballVersion = `${packageVersion}-mismatch`;
-    const tarball = makePackageTarball(tempRoot, JSON.stringify({ version: tarballVersion }));
+    const tarball = makePackageTarball(
+      tempRoot,
+      JSON.stringify({ name: "openclaw", version: tarballVersion }),
+    );
     const result = runPublishWrapper(["--publish", tarball], {
       OPENCLAW_NPM_PUBLISH_TAG: "beta",
     });
@@ -102,7 +105,8 @@ describe("openclaw npm publish wrapper", () => {
   it.each([
     ["missing package.json", undefined, "missing a readable package/package.json"],
     ["malformed package.json", "{not-json", "package/package.json is malformed"],
-    ["missing version", JSON.stringify({ name: "openclaw" }), "has no valid version"],
+    ["missing version", JSON.stringify({ name: "openclaw" }), "has no valid package identity"],
+    ["missing name", JSON.stringify({ version: "2026.1.1" }), "has no valid package identity"],
   ])("rejects a tarball with %s", (_label, packageJson, expectedError) => {
     const tempRoot = tempDirs.make("openclaw-npm-publish-");
     const tarball = makePackageTarball(tempRoot, packageJson);
@@ -128,11 +132,18 @@ describe("openclaw npm publish wrapper", () => {
 
     expect(result.status).toBe(42);
     expect(result.stderr).toContain("Cannot publish over previously staged version");
-    expect(result.stderr).toContain("npm retained this exact version as staged or completed");
+    expect(result.stderr).toContain(
+      `npm retained openclaw@${packageVersion} as staged or completed`,
+    );
     expect(result.stderr).toContain("Exact-version registry observation: published");
     expect(result.stderr).toContain("Do not rerun npm publish");
     expect(result.stderr).toContain(`scripts/openclaw-npm-postpublish-verify.ts ${packageVersion}`);
-    expect(readFileSync(callsPath, "utf8").trim().split("\n").map(JSON.parse)).toEqual([
+    expect(
+      readFileSync(callsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
       ["publish", "--access", "public", "--tag", "beta", "--provenance"],
       [
         "view",
@@ -163,11 +174,59 @@ describe("openclaw npm publish wrapper", () => {
     );
     expect(result.stderr).toContain("npm error code E404");
     expect(result.stderr).toContain("Do not rerun npm publish");
-    expect(readFileSync(callsPath, "utf8").trim().split("\n").map(JSON.parse)).toEqual([
+    expect(
+      readFileSync(callsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
       ["publish", "--access", "public", "--tag", "beta", "--provenance"],
       [
         "view",
         `openclaw@${packageVersion}`,
+        "version",
+        "dist.integrity",
+        "--json",
+        "--prefer-online",
+      ],
+    ]);
+  });
+
+  it("observes a staged companion tarball by its exact package identity", () => {
+    const tempRoot = tempDirs.make("openclaw-npm-publish-");
+    const callsPath = makeStagedNpm(tempRoot);
+    const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version as string;
+    const packageName = "@openclaw/gateway-client";
+    const tarball = makePackageTarball(
+      tempRoot,
+      JSON.stringify({ name: packageName, version: packageVersion }),
+    );
+    const result = runPublishWrapper(["--publish", tarball], {
+      NPM_CALLS: callsPath,
+      OPENCLAW_NPM_PUBLISH_TAG: "beta",
+      PACKAGE_VERSION: packageVersion,
+      PATH: `${tempRoot}:${process.env.PATH}`,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `npm retained ${packageName}@${packageVersion} as staged or completed`,
+    );
+    expect(result.stderr).toContain(
+      "Do not rerun npm publish or run the openclaw postpublish verifier",
+    );
+    expect(result.stderr).toContain("resume the original release workflow");
+    expect(result.stderr).not.toContain("scripts/openclaw-npm-postpublish-verify.ts");
+    expect(
+      readFileSync(callsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
+      ["publish", tarball, "--access", "public", "--tag", "beta", "--provenance"],
+      [
+        "view",
+        `${packageName}@${packageVersion}`,
         "version",
         "dist.integrity",
         "--json",
