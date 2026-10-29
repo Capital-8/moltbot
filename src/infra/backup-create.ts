@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { isPathInside } from "@openclaw/fs-safe/path";
 import { resolveDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
+import * as companionPolicy from "../commands/backup-local-companion.js";
 import {
   sealBackupResourceInventory,
   describeCapturedBackupSqliteSnapshots,
@@ -56,6 +57,7 @@ import {
 } from "./backup-sqlite-snapshot.js";
 import { writeTarArchiveWithRetry } from "./backup-tar-retry.js";
 import { walkBackupTar } from "./backup-tar-walk.js";
+import { withDatabaseEngineSelection } from "./database-engine/context.js";
 import { isErrno } from "./errors.js";
 import {
   createLegacyAuditBackupCapture,
@@ -71,6 +73,10 @@ const loadTarRuntime = createLazyRuntimeModule(() => import("tar"));
 export type BackupCreateOptions = {
   /** Internal lifecycle cancellation for backup preparation, not admitted repairs. */
   signal?: AbortSignal;
+  /** Quiesced migration capture may only inspect private copies of source databases. */
+  preserveSourceArtifacts?: boolean;
+  /** Files/anchors for reconnecting to current PostgreSQL rows, never a database recovery image. */
+  localCompanion?: boolean;
   output?: string;
   dryRun?: boolean;
   includeWorkspace?: boolean;
@@ -100,6 +106,7 @@ export type BackupCreateResult = {
   includeWorkspace: boolean;
   excludeWorktreeTemplates?: boolean;
   onlyConfig: boolean;
+  localCompanion?: boolean;
   verified: boolean;
   assets: BackupAsset[];
   agentRoots?: readonly BackupManifestAgentRoot[];
@@ -244,6 +251,7 @@ function buildManifest(
       onlyConfig: result.onlyConfig,
       ...(result.excludeWorktreeTemplates ? { excludeWorktreeTemplates: true } : {}),
     },
+    ...(result.localCompanion ? { profile: "local-companion" as const } : {}),
     paths: {
       stateDir: plan.resources.stateDir,
       configPath: plan.configPath,
@@ -280,6 +288,8 @@ async function createConsistentStateSnapshotPlan(params: {
   stateDir?: string;
   tempDir: string;
   onlyConfig: boolean;
+  preserveSourceArtifacts?: boolean;
+  localCompanion?: boolean;
 }): Promise<ConsistentStateSnapshotPlan> {
   const captureSqlite = (
     tempDir: string,
@@ -289,6 +299,8 @@ async function createConsistentStateSnapshotPlan(params: {
       resources: params.resources,
       tempDir,
       legacyAuditSnapshots: audit?.snapshots ?? [],
+      preserveSourceArtifacts: params.preserveSourceArtifacts,
+      localCompanion: params.localCompanion,
       ...(audit ? { legacyAuditDatabaseWitness: audit.databaseWitness } : {}),
     });
   if (params.onlyConfig || !params.stateDir) {
@@ -299,6 +311,7 @@ async function createConsistentStateSnapshotPlan(params: {
             inventory: sealBackupResourceInventory(params.resources, []),
             snapshots: [],
             postgresSnapshots: [],
+            postgresAnchors: [],
             discoveredSourcePaths: new Set<string>(),
           }
         : await captureSqlite(params.tempDir),
@@ -315,6 +328,8 @@ async function createConsistentStateSnapshotPlan(params: {
     }
     await fs.rm(fastAttemptDir, { recursive: true, force: true });
   }
+
+  companionPolicy.assertMutableLegacyAuditCapture(params);
 
   let lastStateChangeMessage: string | undefined;
   for (let attempt = 0; attempt < MAX_LEGACY_AUDIT_CAPTURE_ATTEMPTS; attempt += 1) {
@@ -371,12 +386,17 @@ async function createBackupArchiveInScope(
       onlyConfig,
       nowMs,
     }));
-  const selection = plan.databaseSelection;
-  if (!preparedPlan && !opts.dryRun && selection?.postgres && plan.databaseConfig) {
+  if (!preparedPlan && opts.localCompanion) {
+    companionPolicy.assertLocalCompanionSelection(plan.databaseSelection, onlyConfig);
+    return withDatabaseEngineSelection(plan.databaseSelection, () =>
+      createBackupArchiveInScope({ ...opts, nowMs }, plan),
+    );
+  }
+  if (!preparedPlan && !opts.dryRun && plan.databaseSelection?.postgres && plan.databaseConfig) {
     return runOfflineDatabaseBackup(
       plan.stateDir,
       () => createBackupArchiveInScope({ ...opts, nowMs }, plan),
-      { config: plan.databaseConfig, selection },
+      { config: plan.databaseConfig, selection: plan.databaseSelection },
     );
   }
   const outputPath = await resolveBackupArchiveOutputPath({
@@ -419,6 +439,7 @@ async function createBackupArchiveInScope(
     includeWorkspace,
     ...(excludeWorktreeTemplates ? { excludeWorktreeTemplates: true } : {}),
     onlyConfig,
+    ...(opts.localCompanion ? { localCompanion: true } : {}),
     verified: false,
     assets: plan.included,
     ...(onlyConfig
@@ -446,7 +467,7 @@ async function createBackupArchiveInScope(
     log: opts.log,
   });
   if (maintenance.warnings.length) {
-    result.warnings = maintenance.warnings;
+    result.warnings = [...(result.warnings ?? []), ...maintenance.warnings];
   }
   for (const directory of maintenance.reclaimed) {
     opts.log?.(`Removed abandoned backup scratch: ${directory}`);
@@ -469,6 +490,8 @@ async function createBackupArchiveInScope(
       stateDir: stateAsset?.sourcePath,
       tempDir,
       onlyConfig,
+      preserveSourceArtifacts: opts.preserveSourceArtifacts,
+      localCompanion: opts.localCompanion,
     });
     const inventory = stateSqliteBackup.inventory;
     snapshotFacts = describeCapturedBackupSqliteSnapshots(
@@ -662,6 +685,9 @@ async function createBackupArchiveInScope(
                     manifestSha256: snapshot.manifestSha256,
                   }),
                 );
+                if (opts.localCompanion) {
+                  manifest.postgresAnchors = stateSqliteBackup.postgresAnchors;
+                }
                 return encodeBackupManifest(manifest);
               },
             ),

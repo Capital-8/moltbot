@@ -456,8 +456,36 @@ openclaw database migration-capture create --base-archive /private/filesystem.ta
 openclaw database migration-capture restore /private/migration-capsule --manifest-sha256 <producer-manifest-digest> --target /private/new-staging --json
 ```
 
-Creation requires exclusive offline ownership and an absent output directory
-outside the state/config roots. The private capsule contains the filesystem
+By default, creation requires exclusive offline ownership and a supplied base
+archive. A host whose existing Gateway must remain alive while its replica-local
+files are captured can explicitly use an already prepared **non-drain** suspension:
+
+```bash
+openclaw database migration-capture create --externally-quiesced --request-id <host-request-id> --suspension-id <ready-suspension-id> --output /private/migration-capsule --json
+```
+
+The host must first freeze and settle its broker and other non-Native file
+writers. This mode authenticates to the discovered local Gateway, checks the
+existing suspension and physical owner, renews the same request, and requires
+ready status with zero active work and write custody throughout capture. It
+creates and verifies the filesystem base **inside that suspension**; supplying
+`--base-archive` is refused. Exact database snapshots use artifact-preserving
+read-only copies while the old process remains alive. It does not claim the
+source is stopped, migrate its schema, resume it or commit shutdown. Legacy audit
+inputs requiring a writer lease refuse rather than mutating the source.
+
+A changed owner, expired lease, failed renewal or mismatched suspension refuses
+the capture, retaining partial artifacts without a successful receipt. The old
+renewal RPC has no expected-suspension compare-and-swap; if a delayed request
+returns a different suspension, the host must reconcile that actual state. The
+command never resumes an uncertain source. After success, the original host must
+continue renewing the same suspension and holding all other writers until its
+managed retirement is confirmed; the capsule alone does not stop future writes.
+The optional `quiescence` manifest field binds the request, suspension, physical
+owner, and observed expiry to this capture, not to future activation authority.
+
+Both modes require an absent output directory outside the state/config roots.
+The private capsule contains the filesystem
 archive, exact native SQLite snapshots, and authored configuration/includes.
 Registered and retained native stores, fixed-local credentials, safety journals
 and daemon intent are discovered through the existing exact recovery owner.
@@ -477,10 +505,12 @@ external lifecycle owner perform its existing state/config promotion before
 running the ordinary database porter.
 
 The receipt's exact profile covers the native database/configuration images.
-`verified: true` confirms artifact validation, not temporal consistency of an
-arbitrary base archive. The controller must bind a base created after non-Native
-writers are frozen and Native suspension is established to that same quiesced
-source generation; matching `sourceStateDir` alone is not that proof.
+`verified: true` confirms artifact validation. For the default offline mode it
+does not establish temporal consistency of an arbitrary supplied base: the
+controller must bind that base to the same frozen source generation; matching
+`sourceStateDir` alone is not that proof. The externally quiesced mode creates
+its own base under the checked suspension, while the host remains responsible
+for the non-Native writer barrier and subsequent source retirement.
 Keep the complete capsule private; it includes credentials, claims and completion
 records deliberately absent from portable user backups. An incomplete capture
 is retained for diagnosis and never grants updater rollback or port-resume

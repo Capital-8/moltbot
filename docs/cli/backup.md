@@ -894,3 +894,18 @@ no-clobber move, so cleanup does not try to replace an existing directory.
 - [Restore a full archive](/install/backups#restore-a-full-archive)
 - [Storage locations](/concepts/storage-locations)
 - [Storage CLI](/cli/storage)
+
+## Local companion checkpoints
+
+Use `openclaw backup create --local-companion --verify` for a local restart
+checkpoint when PostgreSQL owns shared state. It archives local files, fixed-local
+SQLite databases, and PostgreSQL anchor files, without exporting PostgreSQL rows.
+Verification checks the captured anchors offline and does not contact PostgreSQL.
+
+Use `openclaw backup restore <archive> --target <dir> --local-companion`
+to require this profile and refuse ordinary backups before extraction.
+
+This profile is **not disaster recovery**. Restore keeps the same PostgreSQL store
+identities and namespaces; it does not roll back PostgreSQL data or create new
+namespaces. Keep the corresponding PostgreSQL database available. Ordinary backups
+continue to include PostgreSQL exports for disaster recovery.

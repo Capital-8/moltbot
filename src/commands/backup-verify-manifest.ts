@@ -17,7 +17,16 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { normalizeWindowsPathForComparison } from "../infra/path-guards.js";
 import { SQLITE_SIDECAR_SUFFIXES } from "../infra/sqlite-files.js";
 import { UpdateRunDriverSchema } from "../infra/update-run-driver-schema.js";
+import {
+  parseLocalCompanionProfile,
+  isRegularArchiveFile,
+  type BackupManifestPostgresAnchor,
+} from "./backup-local-companion.js";
 import { BACKUP_MAX_DECOMPRESSION_RATIO, buildBackupArchivePath } from "./backup-shared.js";
+export {
+  isRegularArchiveFile,
+  type BackupManifestPostgresAnchor,
+} from "./backup-local-companion.js";
 
 const recoveryPath = z
   .string()
@@ -226,6 +235,8 @@ type BackupManifestSqliteSnapshot = { sourcePath: string } & (
 );
 
 export type BackupManifest = {
+  profile?: "local-companion";
+  postgresAnchors?: BackupManifestPostgresAnchor[];
   schemaVersion: number;
   createdAt: string;
   archiveRoot: string;
@@ -482,6 +493,7 @@ export function parseBackupManifest(raw: string): BackupManifest {
   }
 
   return {
+    ...parseLocalCompanionProfile(parsed, parseBackupManifestSourcePath),
     schemaVersion: 1,
     archiveRoot,
     createdAt,
@@ -654,10 +666,6 @@ async function readBackupManifestEntry(entry: tar.ReadEntry): Promise<string | E
   } catch (error) {
     return toStringifiedError(error);
   }
-}
-
-export function isRegularArchiveFile(entryType: string | undefined): boolean {
-  return entryType === "File" || entryType === "OldFile" || entryType === "ContiguousFile";
 }
 
 export function resolvePostgresRestoreEntries(

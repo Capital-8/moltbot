@@ -4,7 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { withDaemonRuntimePinStore } from "../daemon/runtime-pin-store.js";
 import { createBackupArchive } from "../infra/backup-create.js";
-import { runClientCredentialOperation } from "../infra/client-credential-store.js";
+import { readClientCredentialFileIdentity } from "../infra/client-credential-receipt.js";
+import { capturePortClientCredentialBinding } from "../infra/client-credential-restore.js";
+import {
+  openClientCredentialCustody,
+  runClientCredentialOperation,
+} from "../infra/client-credential-store.js";
 import { enqueueDelivery } from "../infra/outbound/delivery-queue-storage.js";
 import {
   closeOpenClawStateDatabaseAsync,
@@ -77,33 +82,55 @@ describe("exact database migration capture", () => {
       });
       const staged = (file: string) =>
         path.join(restored.targetPath, buildBackupArchivePath(restored.archiveRoot, file));
-      using database = new DatabaseSync(staged(state.statePath("state/openclaw.sqlite")), {
-        readOnly: true,
-      });
-      expect(database.prepare("SELECT value FROM migration_witness").all()).toEqual([
-        { value: "exact retained history" },
-      ]);
-      expect(database.prepare("SELECT entry_json FROM delivery_queue_entries").all()).toEqual([
-        expect.objectContaining({ entry_json: expect.stringContaining("retained send intent") }),
-      ]);
-      expect(await fs.readFile(staged(witness), "utf8")).toBe("retained workspace bytes");
-      using pins = new DatabaseSync(staged(state.statePath("control/services.sqlite")), {
-        readOnly: true,
-      });
-      expect(pins.prepare("SELECT state_key,value_json FROM daemon_runtime_pins").all()).toEqual([
-        { state_key: "migration-pin", value_json: "retained runtime" },
-      ]);
-      using credentials = new DatabaseSync(staged(state.statePath("client/credentials.sqlite")), {
-        readOnly: true,
-      });
-      expect(
-        credentials
-          .prepare(
-            "SELECT socket_token FROM native_exec_socket_credentials WHERE socket_key='current'",
-          )
-          .get(),
-      ).toEqual({ socket_token: "retained-private-token" });
+      {
+        using database = new DatabaseSync(staged(state.statePath("state/openclaw.sqlite")), {
+          readOnly: true,
+        });
+        expect(database.prepare("SELECT value FROM migration_witness").all()).toEqual([
+          { value: "exact retained history" },
+        ]);
+        expect(database.prepare("SELECT entry_json FROM delivery_queue_entries").all()).toEqual([
+          expect.objectContaining({ entry_json: expect.stringContaining("retained send intent") }),
+        ]);
+        expect(await fs.readFile(staged(witness), "utf8")).toBe("retained workspace bytes");
+        using pins = new DatabaseSync(staged(state.statePath("control/services.sqlite")), {
+          readOnly: true,
+        });
+        expect(pins.prepare("SELECT state_key,value_json FROM daemon_runtime_pins").all()).toEqual([
+          { state_key: "migration-pin", value_json: "retained runtime" },
+        ]);
+        using credentials = new DatabaseSync(staged(state.statePath("client/credentials.sqlite")), {
+          readOnly: true,
+        });
+        expect(
+          credentials
+            .prepare(
+              "SELECT socket_token FROM native_exec_socket_credentials WHERE socket_key='current'",
+            )
+            .get(),
+        ).toEqual({ socket_token: "retained-private-token" });
+      }
       expect(await fs.readFile(witness, "utf8")).toBe("retained workspace bytes");
+      const promotedState = state.path("promoted-state");
+      await fs.rename(staged(state.stateDir), promotedState);
+      const promotedEnv = { ...state.env, OPENCLAW_STATE_DIR: promotedState };
+      const promotedShared = path.join(promotedState, "state/openclaw.sqlite");
+      const promotedFile = readClientCredentialFileIdentity(promotedShared);
+      if (!promotedFile) {
+        throw new Error("Promoted synthetic shared store is missing");
+      }
+      expect(
+        capturePortClientCredentialBinding({
+          env: promotedEnv,
+          sourcePath: promotedShared,
+          sourceFile: promotedFile,
+        }),
+      ).not.toBeNull();
+      using admitted = openClientCredentialCustody(promotedEnv, { readOnly: true });
+      expect(admitted?.run({ kind: "socket.read" })).toMatchObject({
+        kind: "socket",
+        socket: { socket_token: "retained-private-token" },
+      });
     });
   });
 
