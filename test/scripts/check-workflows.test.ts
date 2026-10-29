@@ -241,7 +241,7 @@ describe("check-workflows", () => {
 
     expect(result.status).toBe(0);
     const pythonArgs = readFileSync(markerPath, "utf8");
-    expect(pythonArgs).toContain("-m pip install --disable-pip-version-check pre-commit==4.6.2");
+    expect(pythonArgs).toContain("-m pip install --disable-pip-version-check pre-commit==4.7.0");
     expect(pythonArgs).toContain(
       "-m pre_commit run --config .pre-commit-config.yaml actionlint --files",
     );
@@ -279,7 +279,7 @@ describe("check-workflows", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("python3 is 3.9.6");
-    expect(result.stderr).toContain("pre-commit 4.6.2 requires Python >=3.10");
+    expect(result.stderr).toContain("pre-commit 4.7.0 requires Python >=3.10");
     expect(existsSync(markerPath)).toBe(false);
   });
 
@@ -315,7 +315,7 @@ describe("check-workflows", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("python venv unavailable");
     expect(result.stderr).toContain("missing pre-commit runtime for actionlint");
-    expect(result.stderr).toContain("Python venv support for pre-commit 4.6.2");
+    expect(result.stderr).toContain("Python venv support for pre-commit 4.7.0");
   });
 
   it("cleans the temporary Python venv before exiting on hook failure", () => {
