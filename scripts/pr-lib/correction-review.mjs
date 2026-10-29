@@ -68,7 +68,7 @@ function proofPublication(review, findings, head, source, binding) {
   const oid = (value) => typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
   if (
     !proof ||
-    JSON.stringify(Object.keys(proof).sort()) !== JSON.stringify(keys) ||
+    JSON.stringify(Object.keys(proof).toSorted()) !== JSON.stringify(keys) ||
     proof.version !== 1 ||
     proof.kind !== "published-candidate-proof" ||
     review.recommendation !== "NEEDS WORK" ||
@@ -118,7 +118,7 @@ function proofPublication(review, findings, head, source, binding) {
     !pending.every(
       (item) =>
         item &&
-        JSON.stringify(Object.keys(item).sort()) === '["evidence","id"]' &&
+        JSON.stringify(Object.keys(item).toSorted()) === '["evidence","id"]' &&
         typeof item.id === "string" &&
         /^[A-Za-z0-9_.-]+$/u.test(item.id) &&
         typeof item.evidence === "string" &&

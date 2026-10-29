@@ -622,13 +622,13 @@ describePosix("pending-proof correction publication", () => {
       }
       f.writeReview();
       const review = f.readLocal("correction-review.json");
-      const retained = f.readLocal("prepare-push-result.env");
+      const retainedReceipt = f.readLocal("prepare-push-result.env");
       // Invalid new authority must not consume or rewrite the prior receipt.
       if (change === "revised evidence") {
         f.review.correction.proofPublication.pendingFindings = [];
         f.writeReview();
         expectExit(f.run("prepare-publish-for-proof"), 1);
-        expect(f.readLocal("prepare-push-result.env")).toEqual(retained);
+        expect(f.readLocal("prepare-push-result.env")).toEqual(retainedReceipt);
         f.writeLocal("correction-review.json", review);
         const mutation = join(f.root, "receipt-mutation");
         const marker = join(f.root, "receipt-mutation-reached");
@@ -649,8 +649,10 @@ process.exit(result.status??1);
         expectExit(refused, 1);
         expect(refused.stdout + refused.stderr).toContain("Correction review authority changed");
         expect(readFileSync(marker, "utf8")).toBe("reached");
-        expect(f.readLocal("prepare-push-result.env").toString()).toBe(`${retained.toString()}\n`);
-        f.writeLocal("prepare-push-result.env", retained);
+        expect(f.readLocal("prepare-push-result.env").toString()).toBe(
+          `${retainedReceipt.toString()}\n`,
+        );
+        f.writeLocal("prepare-push-result.env", retainedReceipt);
       }
       const realGit = spawnSync("sh", ["-c", "command -v git"], {
         env: f.env,
