@@ -1,4 +1,4 @@
-// Import-safe state proof helpers: runtime operations are injected after child isolation.
+// Import-safe compaction proof helpers: runtime operations stay deferred until child isolation.
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
@@ -12,6 +12,52 @@ import {
   recordCompactionProofCheckpoint,
   type CompactionProofCase as ProofCase,
 } from "./gateway-compaction-provider.fixture.js";
+
+export function assertCompactionProofEnvironment(root: string) {
+  for (const name of [
+    "HOME",
+    "OPENCLAW_HOME",
+    "OPENCLAW_STATE_DIR",
+    "OPENCLAW_CONFIG_PATH",
+    "OPENCLAW_OAUTH_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+  ]) {
+    const value = process.env[name];
+    assert.ok(value && path.isAbsolute(value), `Outer launcher must set ${name} before imports`);
+    const relative = path.relative(root, value);
+    assert.ok(
+      relative && !relative.startsWith("..") && !path.isAbsolute(relative),
+      `${name} must be inside the owned TMPDIR`,
+    );
+  }
+}
+
+// Keep runtime imports deferred until each entry point validates its owned environment.
+export async function loadCompactionProofRuntime() {
+  const [qa, sessions, store, transcript, guards, evidence, writer, hostStore] = await Promise.all([
+    import("../../../../extensions/qa-lab/api.js"),
+    import("openclaw/plugin-sdk/agent-sessions"),
+    import("openclaw/plugin-sdk/session-store-runtime"),
+    import("openclaw/plugin-sdk/session-transcript-runtime"),
+    import("openclaw/plugin-sdk/string-coerce-runtime"),
+    import("./script-evidence.js"),
+    import("../../../../src/agents/embedded-agent-runner/run/session-bootstrap.js"),
+    import("../../../../src/config/sessions/session-accessor.js"),
+  ]);
+  return {
+    qa,
+    sessions,
+    store,
+    transcript,
+    isRecord: guards.isRecord,
+    evidence,
+    claimAgentSessionWriter: writer.claimAgentSessionWriter,
+    loadSessionEntry: hostStore.loadSessionEntry,
+    resolveSessionTranscriptDatabasePath: hostStore.resolveSessionTranscriptDatabasePath,
+  };
+}
 
 type StateRuntime = {
   sessions: {
