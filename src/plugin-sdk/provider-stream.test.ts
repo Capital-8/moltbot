@@ -111,30 +111,28 @@ it("createMoonshotThinkingWrapper: sanitizes an async caller replacement for K2.
   expect(payload.tool_choice).toBe("auto");
 });
 
-it("createMoonshotThinkingWrapper: keeps the shipped K3 contract when a map omits off", async () => {
-  let finalPayload: Record<string, unknown> | undefined;
-  const baseStreamFn: StreamFn = async (model, _context, options) => {
-    const payload = { model: model.id, thinking: { type: "disabled" }, temperature: 0 };
-    const replacement = await options?.onPayload?.(payload, model);
-    finalPayload = requireRecord(replacement ?? payload, "final payload");
-    return {} as never;
-  };
-  const wrapped = createMoonshotThinkingWrapper(baseStreamFn, "disabled");
-  await wrapped(
-    {
-      api: "openai-completions",
-      id: "kimi-k3",
-      provider: "moonshot",
-      thinkingLevelMap: { max: "max" },
-    } as never,
-    {} as never,
-    {},
-  );
-  const payload = requirePayload(finalPayload);
-  expect(payload.reasoning_effort).toBe("max");
-  expect(payload).not.toHaveProperty("thinking");
-  expect(payload).not.toHaveProperty("temperature");
-});
+it.each([{ max: "max" }, { off: null, max: "max" }])(
+  "createMoonshotThinkingWrapper: keeps the shipped K3 contract for map %j without efforts",
+  async (thinkingLevelMap) => {
+    let finalPayload: Record<string, unknown> | undefined;
+    const baseStreamFn: StreamFn = async (model, _context, options) => {
+      const payload = { model: model.id, thinking: { type: "disabled" }, temperature: 0 };
+      const replacement = await options?.onPayload?.(payload, model);
+      finalPayload = requireRecord(replacement ?? payload, "final payload");
+      return {} as never;
+    };
+    const wrapped = createMoonshotThinkingWrapper(baseStreamFn, "disabled");
+    await wrapped(
+      { api: "openai-completions", id: "kimi-k3", provider: "moonshot", thinkingLevelMap } as never,
+      {} as never,
+      {},
+    );
+    const payload = requirePayload(finalPayload);
+    expect(payload.reasoning_effort).toBe("max");
+    expect(payload).not.toHaveProperty("thinking");
+    expect(payload).not.toHaveProperty("temperature");
+  },
+);
 
 it("composeProviderStreamWrappers: applies wrappers left to right", () => {
   const order: string[] = [];

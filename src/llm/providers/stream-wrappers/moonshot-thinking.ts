@@ -75,7 +75,14 @@ function resolveAlwaysThinking(
     }
     const efforts = asPayloadRecord(model.compat)?.supportedReasoningEfforts;
     const last: unknown = Array.isArray(efforts) ? efforts.at(-1) : undefined;
-    effort = typeof last === "string" ? last : undefined;
+    // Without effort metadata, the shipped IDs keep their fixed effort.
+    const id = model.id.trim().toLowerCase();
+    effort =
+      typeof last === "string"
+        ? last
+        : Object.hasOwn(LEGACY_ALWAYS_THINKING, id)
+          ? LEGACY_ALWAYS_THINKING[id]
+          : undefined;
   } else {
     const id = model.id.trim().toLowerCase();
     if (!Object.hasOwn(LEGACY_ALWAYS_THINKING, id)) {
