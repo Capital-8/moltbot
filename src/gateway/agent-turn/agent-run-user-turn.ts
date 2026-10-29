@@ -41,6 +41,7 @@ import {
   type UserTurnInput,
   type UserTurnTranscriptRecorder,
 } from "../../sessions/user-turn-transcript.js";
+import type { UserTurnTranscriptAdmissionReceipt } from "../../sessions/user-turn-transcript.types.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel-constants.js";
 import {
   INLINE_IMAGE_DURABLE_OMISSION_MARKER,
@@ -148,6 +149,7 @@ export function recordAgentRunUserTurnParticipant(
 export async function prepareAgentRunUserTurn(params: {
   assertCurrent: () => void;
   onUserTurnMediaPersisted: () => void;
+  onInputCommitted?: (receipt: UserTurnTranscriptAdmissionReceipt) => void | Promise<void>;
   assertCompletionCurrent?: () => void;
   privateCompletion?: true;
   replyExpectation?: ReplyExpectation;
@@ -389,6 +391,16 @@ export async function prepareAgentRunUserTurn(params: {
             }
           : resolveTarget,
         errorContext: "gateway agent user turn transcript",
+        onMessagePersisted: () => {
+          const receipt = recorder?.getAdmissionReceipt?.();
+          if (receipt) {
+            params.assertCurrent();
+            return params.onInputCommitted
+              ? params.context.trackExecution(() => params.onInputCommitted!(receipt))
+              : undefined;
+          }
+          return undefined;
+        },
         beforeMessageWrite: (writeContext) => {
           const preparedMessage = runAgentHarnessBeforeMessageWriteHook(writeContext);
           params.assertCurrent();

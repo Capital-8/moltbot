@@ -477,6 +477,7 @@ export async function prepareAgentRunDispatch(
     assertInputAdmissionCurrent?.();
     userTurn = await prepareAgentRunUserTurn({
       ...params,
+      onInputCommitted: params.io.emitInputCommitted,
       assertCurrent: () => {
         assertInputOwnerCurrent();
         activeRunAbort.controller.signal.throwIfAborted();

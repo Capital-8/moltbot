@@ -94,6 +94,55 @@ it("counts resident and durable descendants without restoring settled text", asy
   );
 });
 
+it.each(["error", "timeout"] as const)(
+  "returns a failed %s member without waiting for its collector subtree",
+  async (status) => {
+    const { entry, params, child } = fixture();
+    const failed = child("failed", {
+      execution: { status: "terminal", endedAt: 5, outcome: { status, error: "provider failed" } },
+      delivery: { status: "pending" },
+    });
+    const collector = child("collector", {
+      requesterSessionKey: failed.childSessionKey,
+      collect: true,
+      swarmRunId: "accepted-collector",
+      execution: { status: "running" },
+      delivery: { status: "not_required" },
+    });
+    const healthy = child("healthy", { execution: { status: "running" } });
+    const healthyDescendant = child("healthy-descendant", {
+      requesterSessionKey: healthy.childSessionKey,
+      execution: { status: "running" },
+    });
+    for (const run of [failed, collector, healthy, healthyDescendant]) {
+      subagentRuns.set(run.runId, run);
+    }
+    const read = createRequesterDescendantReader({
+      ...params,
+      rootRunIds: new Set([entry.runId, failed.runId, healthy.runId]),
+    });
+    // Every direct member still settles; only a failed member's descendants stop blocking.
+    await expect(read()).resolves.toEqual({ unsettled: true, active: 2 });
+    subagentRuns.set(healthy.runId, {
+      ...healthy,
+      execution: { status: "terminal", endedAt: 6, outcome: { status: "ok" } },
+    });
+    await expect(read()).resolves.toEqual({ unsettled: true, active: 1 });
+    subagentRuns.set(healthyDescendant.runId, {
+      ...healthyDescendant,
+      execution: { status: "terminal", endedAt: 7, outcome: { status: "ok" } },
+    });
+    await expect(read()).resolves.toEqual({
+      unsettled: true,
+      active: 0,
+      deliveryWaitUntil: 300_007,
+    });
+    subagentRuns.set(failed.runId, { ...failed, delivery: { status: "delivered" } });
+    await expect(read()).resolves.toEqual({ unsettled: false, active: 0 });
+    expect(subagentRuns.get(collector.runId)?.execution.status).toBe("running");
+  },
+);
+
 it.each(["removed", "replaced", "rearmed"] as const)(
   "discards descendant facts when the owner is %s during preparation",
   async (change) => {

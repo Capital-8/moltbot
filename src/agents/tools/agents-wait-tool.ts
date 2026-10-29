@@ -5,19 +5,30 @@ import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
+import {
+  attachInternalToolResultAcknowledgement,
+  copyInternalToolResultState,
+} from "../../../packages/agent-core/src/internal-hooks.js";
 import { tryResolveLegacyCompatibilityAgentId } from "../../config/legacy.default-agent-owner.js";
 import { resolvePersistedSessionStoreOwnerForKey } from "../../config/sessions/session-store-owner.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createAbortError } from "../../infra/abort-signal.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
+import { defaultRuntime } from "../../runtime.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import {
+  captureRequesterSessionEntryCurrent,
+  loadRequesterSessionEntry,
+} from "../subagents/announce/subagent-announce-delivery.runtime.js";
 import { resolveSubagentCompletionResultText } from "../subagents/completion/subagent-completion-result.js";
+import { recordSubagentFailureHandoff } from "../subagents/registry/subagent-failure-handoff.js";
 import { capFrozenResultText } from "../subagents/registry/subagent-registry-helpers.js";
 import { subscribeSubagentRunChanges } from "../subagents/registry/subagent-registry-publication.js";
 import { matchesSubagentRequesterSession } from "../subagents/registry/subagent-registry-queries.js";
 import { prepareSubagentRunsByRunIds } from "../subagents/registry/subagent-registry.js";
 import type { SubagentRunRecord } from "../subagents/registry/subagent-registry.types.js";
+import { isFailedTerminalSubagentRun } from "../subagents/subagent-failure.js";
 import { markCollectorReaderTool } from "../subagents/swarm/swarm-collector-capability.js";
 import { resolveSwarmConfig } from "../subagents/swarm/swarm-config.js";
 import { describeAgentsWaitTool } from "../tool-description-presets.js";
@@ -57,7 +68,7 @@ const CollectorCompletionSchema = Type.Object(
       Type.Literal("timeout"),
     ]),
     result: Type.String(),
-    // The result may be incomplete: its complete answer was unavailable or exceeded 100 KB.
+    // The result may be incomplete: its complete text was unavailable or exceeded 100 KB.
     resultTruncated: Type.Optional(Type.Literal(true)),
     structured: Type.Optional(Type.Unknown()),
     error: Type.Optional(Type.String()),
@@ -100,6 +111,7 @@ const AgentsWaitOutputSchema = Type.Object(
 type WaitError = NonNullable<Static<typeof AgentsWaitOutputSchema>["errors"]>[number];
 
 type CollectorOwnerScope = {
+  consumerSessionKey?: string;
   currentSessionKeys: ReadonlySet<string>;
   currentAgentId?: string;
   config?: OpenClawConfig;
@@ -202,7 +214,7 @@ function completionResult(
     status: completion.status,
     result: resolveSubagentCompletionResultText(entry) ?? "",
     ...(completion.structured !== undefined ? { structured: completion.structured } : {}),
-    ...(entry.execution.outcome?.status === "error"
+    ...(entry.execution.outcome?.status === "error" || entry.execution.outcome?.status === "timeout"
       ? { error: entry.execution.outcome.error }
       : {}),
     ...(completion.schemaError ? { schemaError: completion.schemaError } : {}),
@@ -218,13 +230,33 @@ function completionResult(
 export type CollectorCompletionResult = NonNullable<ReturnType<typeof completionResult>>;
 
 /**
- * Lifecycle evidence keeps a 4,096-character reply preview. Return the run's complete
- * recorded answer instead, within the 100 KB bound frozen collector results already use.
+ * Lifecycle evidence keeps a 4,096-character reply preview. Return the run's recorded
+ * answer or failure cause and saved progress within the shared 100 KB bound for frozen
+ * collector results.
  */
 async function completeCollectorResult(
   result: CollectorCompletionResult,
   entry: SubagentRunRecord,
+  readCurrent: (runId: string) => SubagentRunRecord | undefined,
 ): Promise<CollectorCompletionResult> {
+  if (
+    entry.execution.outcome?.status === "error" ||
+    entry.execution.outcome?.status === "timeout"
+  ) {
+    const prepared = await finalAnswerLoader
+      .load()
+      .then((output) => output.readSubagentRunAnnounceResult(entry, readCurrent));
+    if (!prepared.isCurrent()) {
+      throw new ToolInputError("Collector result changed during preparation.");
+    }
+    const text = prepared.text ?? result.result;
+    const bounded = capFrozenResultText(text);
+    return {
+      ...result,
+      result: bounded,
+      ...(bounded !== text.trim() ? { resultTruncated: true as const } : {}),
+    };
+  }
   const preview = entry.completion?.terminalReply;
   // Only a capped preview ends with this marker; trimming can shorten it, so length proves nothing.
   if (
@@ -256,7 +288,7 @@ async function completeCollectorResult(
 
 /** Park one host bridge until its collector completes; registry writes wake it without polling. */
 export async function waitForCollectorCompletion(
-  params: CollectorOwnerScope & { runId: string; signal?: AbortSignal },
+  params: CollectorOwnerScope & { runId: string; signal?: AbortSignal; assertCurrent?: () => void },
 ): Promise<CollectorCompletionResult> {
   const state = await waitForCollector({
     ...params,
@@ -267,7 +299,10 @@ export async function waitForCollectorCompletion(
   if (error) {
     throw new ToolInputError(`agents.run ${error.error}: ${error.runId}`);
   }
-  return expectDefined(state.completed[0], "collector completion");
+  return copyInternalToolResultState(
+    state,
+    expectDefined(state.completed[0], "collector completion"),
+  );
 }
 
 function readWaitState(
@@ -343,14 +378,90 @@ type CollectorWaitParams = CollectorOwnerScope & {
 async function waitForCollector(params: CollectorWaitParams) {
   const state = await waitForCollectorState(params);
   const completed = await Promise.all(
-    state.completed.map(({ result, entry }) => completeCollectorResult(result, entry)),
+    state.completed.map(({ result, entry }) =>
+      completeCollectorResult(result, entry, state.readCurrent),
+    ),
   );
   // Transcript reads happen after the registry wait; recheck its effect-time authority.
   params.assertCurrent?.();
   if (params.signal?.aborted) {
     throw params.abortError();
   }
-  return { ...state, completed };
+  const { readCurrent: _readCurrent, ...result } = state;
+  const output = { ...result, completed };
+  const failed = state.completed.map(({ entry }) => entry).filter(isFailedTerminalSubagentRun);
+  const caller = getGatewayToolCallerIdentity();
+  const callerAssertion = captureGatewayToolCallerAssertion();
+  const consumerSessionKey = caller?.sessionKey ?? params.consumerSessionKey;
+  if (!failed.length || (!params.assertCurrent && !callerAssertion) || !consumerSessionKey) {
+    return output;
+  }
+  const assertCurrent = () => {
+    params.assertCurrent?.();
+    callerAssertion?.();
+    if (params.signal?.aborted) {
+      throw params.abortError();
+    }
+  };
+  // A read is not consumption. Only the host's durable tool-result ACK records it.
+  const requester = await loadRequesterSessionEntry(
+    consumerSessionKey,
+    params.currentAgentId,
+  ).catch(() => undefined);
+  assertCurrent();
+  if (!requester?.entry || !requester.physicalStorePath) {
+    return output;
+  }
+  const consumer = { ...params, currentSessionKeys: new Set([requester.canonicalKey]) };
+  if (failed.some((entry) => !ownsRun(entry, consumer))) {
+    return output;
+  }
+  const gateway = caller?.gatewayContextResolver?.();
+  const capturedRequester = {
+    sessionKey: requester.canonicalKey,
+    sessionId: requester.entry.sessionId,
+    storePath: requester.physicalStorePath,
+  };
+  const lifecycleRevision = requester.entry.lifecycleRevision;
+  return attachInternalToolResultAcknowledgement(output, () => {
+    const commit = async () => {
+      assertCurrent();
+      const recipient = await captureRequesterSessionEntryCurrent(
+        capturedRequester.sessionKey,
+        params.currentAgentId,
+      );
+      try {
+        await recordSubagentFailureHandoff({
+          entries: failed,
+          requester: capturedRequester,
+          collector: { lifecycleRevision, ownsRun: (entry) => ownsRun(entry, consumer) },
+          assertCurrent: () => {
+            assertCurrent();
+            const current = recipient.readCurrent();
+            if (
+              current?.sessionId !== capturedRequester.sessionId ||
+              current.lifecycleRevision !== lifecycleRevision
+            ) {
+              throw new ToolInputError("Collector consumer changed before consumption.");
+            }
+            for (const entry of failed) {
+              const source = state.readCurrent(entry.runId);
+              if (!source || !ownsRun(source, consumer)) {
+                throw new ToolInputError("Collector result source changed before consumption.");
+              }
+            }
+          },
+        });
+      } finally {
+        recipient.release();
+      }
+    };
+    void (gateway ? gateway.trackExecution(commit) : commit()).catch((error: unknown) => {
+      defaultRuntime.log(
+        "[warn] Collector failure handoff could not be recorded: " + String(error),
+      );
+    });
+  });
 }
 
 async function waitForCollectorState(params: CollectorWaitParams) {
@@ -379,7 +490,14 @@ async function waitForCollectorState(params: CollectorWaitParams) {
     for (;;) {
       assertNotAborted();
       changed = false;
-      let read: { ready: true; value: ReturnType<typeof readWaitState> } | { ready: false };
+      let read:
+        | {
+            ready: true;
+            value: ReturnType<typeof readWaitState> & {
+              readCurrent: (runId: string) => SubagentRunRecord | undefined;
+            };
+          }
+        | { ready: false };
       let callbackAbort: Error | undefined;
       try {
         const prepared = await prepareSubagentRunsByRunIds(params.ids);
@@ -389,7 +507,15 @@ async function waitForCollectorState(params: CollectorWaitParams) {
             throw callbackAbort;
           }
           params.assertCurrent?.();
-          return readWaitState(entries, params.ids, params);
+          return {
+            ...readWaitState(entries, params.ids, params),
+            readCurrent: (runId: string) => {
+              const current = prepared.consume((runs) =>
+                [...runs.values()].find((run) => run.runId === runId),
+              );
+              return current.ready ? current.value : undefined;
+            },
+          };
         });
       } catch (error) {
         if (params.signal?.aborted && error !== callbackAbort) {
@@ -471,22 +597,30 @@ export function createAgentsWaitTool(opts: {
         throw new ToolInputError("agents_wait ids must be an array of run id strings.");
       }
       const scope = nativeCollectorOwner.getStore();
-      return jsonResult(
-        await collectNativeSubagentResults({
-          ...params,
-          currentSessionKeys: new Set(
-            [opts.runSessionKey, opts.agentSessionKey].filter((key): key is string =>
-              Boolean(key?.trim()),
-            ),
+      const nativeOwner =
+        scope?.identity === identity && scope.toolCallId === toolCallId ? scope.owner : undefined;
+      const assertToolAllowed = getGatewayToolCallerIdentity()?.assertToolAllowed;
+      const result = await collectNativeSubagentResults({
+        ...params,
+        currentSessionKeys: new Set(
+          [opts.runSessionKey, opts.agentSessionKey].filter((key): key is string =>
+            Boolean(key?.trim()),
           ),
-          currentAgentId: opts.agentId,
-          config: opts.config,
-          ...(scope?.identity === identity && scope.toolCallId === toolCallId
-            ? scope.owner
-            : undefined),
-          signal,
-        }),
-      );
+        ),
+        consumerSessionKey: opts.runSessionKey ?? opts.agentSessionKey,
+        currentAgentId: opts.agentId,
+        config: opts.config,
+        ...nativeOwner,
+        assertCurrent:
+          nativeOwner || assertToolAllowed
+            ? () => {
+                nativeOwner?.assertCurrent();
+                assertToolAllowed?.("agents_wait");
+              }
+            : undefined,
+        signal,
+      });
+      return jsonResult(result);
     },
   });
 }
@@ -524,6 +658,7 @@ async function collectNativeSubagentResults(
   const result = await waitForCollector({
     ids,
     currentSessionKeys,
+    consumerSessionKey: params.consumerSessionKey,
     currentAgentId: params.currentAgentId,
     config: params.config,
     timeoutMs: params.awaitResults ? undefined : timeoutSeconds * 1_000,

@@ -262,8 +262,8 @@ async function deliverSubagentAnnouncementBound(
       sourceTool: sourceTool ?? "subagent_announce",
     };
     // The recorder guards the exact requester session the completion steers into.
-    createCompletionUserTurnTranscriptRecorder = (sessionId) =>
-      createUserTurnTranscriptRecorder({
+    createCompletionUserTurnTranscriptRecorder = (sessionId) => {
+      const recorder = createUserTurnTranscriptRecorder({
         input: {
           text: transcriptMessage,
           idempotencyKey: `${directIdempotencyKey}:active-wake`,
@@ -288,7 +288,17 @@ async function deliverSubagentAnnouncementBound(
           };
         },
         errorContext: "active requester completion transcript",
+        onMessagePersisted: () => {
+          const receipt = recorder.getAdmissionReceipt?.();
+          if (!receipt || sourceOwnerChanged()) {
+            return;
+          }
+          const observe = () => params.onInputCommitted?.(receipt);
+          return params.resolveGatewayContext?.()?.trackExecution(observe) ?? observe();
+        },
       });
+      return recorder;
+    };
   }
   if (sourceOwnerChanged()) {
     return sourceOwnerChangedResult();

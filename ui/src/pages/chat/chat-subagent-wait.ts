@@ -303,7 +303,7 @@ export function projectProgressCardRuntime(
   let childError: string | undefined;
   const children =
     session && roster.subagentSessionsHydrated && !roster.subagentSessionsPending
-      ? { running: 0, queued: 0, waiting: 0, failed: 0, stopped: 0 }
+      ? { running: 0, queued: 0, waiting: 0, failed: 0, attentionFailed: 0, stopped: 0 }
       : undefined;
   if (session && children) {
     for (const row of directChildren(session, roster)) {
@@ -319,9 +319,12 @@ export function projectProgressCardRuntime(
         const outcome = endedWithoutFinishing(row);
         if (outcome === "failed") {
           children.failed++;
-          childError ??= row.lastRunError
-            ? `${resolveSessionDisplayName(row.key, row)}: ${row.lastRunError}`
-            : resolveSessionDisplayName(row.key, row);
+          if (!row.failureHandedOff) {
+            children.attentionFailed++;
+            childError ??= row.lastRunError
+              ? `${resolveSessionDisplayName(row.key, row)}: ${row.lastRunError}`
+              : resolveSessionDisplayName(row.key, row);
+          }
         } else if (outcome === "stopped") {
           children.stopped++;
         }

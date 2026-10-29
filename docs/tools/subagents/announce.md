@@ -64,9 +64,12 @@ account, or thread, or perform actions other than `send`. Explicit `replyTo` sta
 limited to the current message or thread; inline reply and audio directives remain
 restricted. See [message tool access](/tools#configure-access-and-approvals).
 
-After `sessions_yield`, the frozen batch waits for its own children and their
-descendants to settle. A still-running child from an earlier requester turn does
-not delay that batch's result; the earlier batch retains its own completion wake.
+After `sessions_yield`, the frozen batch waits for every direct child and each
+healthy child's descendants to settle. A child that ends with an error or timeout
+returns its cause and saved partial progress without waiting for its descendants.
+Pending delegated runs are listed privately in its findings; the failed child is
+not restarted to summarize them. A still-running child from an earlier requester
+turn does not delay this batch; the earlier batch retains its own completion wake.
 
 Completion and settle run IDs stay within the 256-character execution-identity
 admission limit, including nested completions. IDs that fit remain unchanged;
@@ -233,10 +236,25 @@ unavailable rather than skipping an unclassified generation. This read limit doe
 not change retained archives or completion delivery's final-answer scanner.
 Tasks reports this as a non-retryable preview limit; refreshing cannot resolve it.
 
-Terminal failed runs report failure status without replaying captured
-reply text. When completion is recovered from the child's stored session, its
-recorded failure or timeout diagnostic is preserved for the parent.
-Tool/toolResult output is not promoted into child result text.
+Terminal failed runs preserve the failure or timeout diagnostic and distinguish
+saved partial progress from a completed answer. Progress belongs to that exact
+run, not a later turn in the child session. If optional progress cannot be read,
+the parent still receives the cause with a progress-unavailable notice. Raw tool
+output is not promoted into a child answer.
+
+The parent continues recoverable work within its existing authority. Only a
+genuinely human-owned decision should become a native `ask_user` question, with
+a recommended choice and free-text input. A nested agent returns such a blocker
+to its own parent instead.
+
+The Control UI removes inherited failure attention only after the current parent
+has durably received that exact failure. Queue acceptance or reading collector
+status is not enough: collector results must reach the tool-result
+persistence boundary. An ancestor already authorized to collect can take custody;
+the receipt names that actual consumer without changing the spawning owner or
+automatically waking a collector. The child's failed status, history, and diagnostic
+counts remain inspectable. The parent's own errors, real questions, and approvals are
+unchanged.
 
 ### Stats line
 

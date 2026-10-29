@@ -594,6 +594,12 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
               dispatchAccepted = true;
               params.onAccepted?.();
             },
+            onInputCommitted: pauseNotice
+              ? undefined
+              : sourceReceiptAdmission.observeFailureHandoff(
+                  settledBatch,
+                  isSourceSessionEffectsAllowed,
+                ),
             onBeforeDispatch: async () => {
               await params.transitionBatch(
                 settledBatch,
