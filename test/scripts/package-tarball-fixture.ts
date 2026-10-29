@@ -90,7 +90,7 @@ export function withTarball(
     includeLifecycleMarker?: boolean;
     includeWorkspaceTemplates?: boolean;
     inventoryBody?: string | null;
-    packageJson?: Record<string, unknown>;
+    packageJson?: Record<string, unknown> & { name?: string };
     pack?: "npm" | "pnpm";
     beforePack?: (packageRoot: string) => void;
     postinstall?: boolean;
@@ -186,7 +186,7 @@ export function withTarball(
     // against restrictive host umasks the way the packer normalizes artifacts.
     chmodTreeWorldReadable(packageRoot);
 
-    const packageName = String(options.packageJson?.name ?? "openclaw");
+    const packageName = options.packageJson?.name ?? "openclaw";
     const tarball = options.pack
       ? join(root, `${packageName.replace(/^@/u, "").replaceAll("/", "-")}-${version}.tgz`)
       : join(root, process.platform === "win32" ? "openclaw.tgz" : "openclaw:local.tgz");
