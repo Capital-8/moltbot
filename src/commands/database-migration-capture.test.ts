@@ -1,0 +1,142 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { describe, expect, it } from "vitest";
+import { withDaemonRuntimePinStore } from "../daemon/runtime-pin-store.js";
+import { createBackupArchive } from "../infra/backup-create.js";
+import { runClientCredentialOperation } from "../infra/client-credential-store.js";
+import { enqueueDelivery } from "../infra/outbound/delivery-queue-storage.js";
+import {
+  closeOpenClawStateDatabaseAsync,
+  openOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import { buildBackupArchivePath } from "./backup-shared.js";
+import {
+  createDatabaseMigrationCapture,
+  restoreDatabaseMigrationCapture,
+} from "./database-migration-capture.js";
+import { createTestRuntime } from "./test-runtime-config-helpers.js";
+
+describe("exact database migration capture", () => {
+  it("restores exact delivery and fixed-local data over a full private filesystem base", async () => {
+    await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
+      await state.writeConfig({ plugins: { enabled: false } });
+      const source = openOpenClawStateDatabase({ env: state.env });
+      source.db.exec(
+        "CREATE TABLE migration_witness(value TEXT); INSERT INTO migration_witness VALUES ('exact retained history');",
+      );
+      withDaemonRuntimePinStore(state.env, true, (db) => {
+        db.prepare("INSERT INTO daemon_runtime_pins VALUES (?, ?, ?)").run(
+          "migration-pin",
+          "retained runtime",
+          123,
+        );
+      });
+      runClientCredentialOperation(state.env, {
+        kind: "socket.ensure",
+        fallback: {
+          socket_key: "current",
+          socket_path: "/synthetic/native.sock",
+          socket_token: "retained-private-token",
+          updated_at_ms: 123,
+        },
+        requested: { token: "retained-private-token" },
+      });
+      await enqueueDelivery(
+        { channel: "matrix", to: "!room:example", payloads: [{ text: "retained send intent" }] },
+        state.stateDir,
+      );
+      const witness = await state.writeText("workspace/user.txt", "retained workspace bytes");
+      await closeOpenClawStateDatabaseAsync();
+      const base = await createBackupArchive({ output: state.path("base.tar.gz"), verify: true });
+      const output = state.path("capsule");
+      const capture = await createDatabaseMigrationCapture({
+        baseArchive: base.archivePath,
+        output,
+      });
+      expect(capture).toMatchObject({ ok: true, profile: "exact-sqlite-migration" });
+      const manifest = JSON.parse(await fs.readFile(capture.manifestPath, "utf8"));
+      expect(manifest.databases).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sourcePath: state.statePath("state/openclaw.sqlite") }),
+          expect.objectContaining({ sourcePath: state.statePath("client/credentials.sqlite") }),
+          expect.objectContaining({ sourcePath: state.statePath("control/services.sqlite") }),
+        ]),
+      );
+      const runtime = createTestRuntime();
+      const restored = await restoreDatabaseMigrationCapture(runtime, {
+        capture: output,
+        target: state.path("staging"),
+        manifestSha256: capture.manifestSha256,
+      });
+      expect(runtime.log).not.toHaveBeenCalled();
+      expect(restored.exactMigration).toMatchObject({
+        captureId: capture.captureId,
+        sourceStateDir: state.stateDir,
+      });
+      const staged = (file: string) =>
+        path.join(restored.targetPath, buildBackupArchivePath(restored.archiveRoot, file));
+      using database = new DatabaseSync(staged(state.statePath("state/openclaw.sqlite")), {
+        readOnly: true,
+      });
+      expect(database.prepare("SELECT value FROM migration_witness").all()).toEqual([
+        { value: "exact retained history" },
+      ]);
+      expect(database.prepare("SELECT entry_json FROM delivery_queue_entries").all()).toEqual([
+        expect.objectContaining({ entry_json: expect.stringContaining("retained send intent") }),
+      ]);
+      expect(await fs.readFile(staged(witness), "utf8")).toBe("retained workspace bytes");
+      using pins = new DatabaseSync(staged(state.statePath("control/services.sqlite")), {
+        readOnly: true,
+      });
+      expect(pins.prepare("SELECT state_key,value_json FROM daemon_runtime_pins").all()).toEqual([
+        { state_key: "migration-pin", value_json: "retained runtime" },
+      ]);
+      using credentials = new DatabaseSync(staged(state.statePath("client/credentials.sqlite")), {
+        readOnly: true,
+      });
+      expect(
+        credentials
+          .prepare(
+            "SELECT socket_token FROM native_exec_socket_credentials WHERE socket_key='current'",
+          )
+          .get(),
+      ).toEqual({ socket_token: "retained-private-token" });
+      expect(await fs.readFile(witness, "utf8")).toBe("retained workspace bytes");
+    });
+  });
+
+  it("refuses a changed capsule before creating any restore target", async () => {
+    await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
+      await state.writeConfig({ plugins: { enabled: false } });
+      openOpenClawStateDatabase({ env: state.env });
+      await closeOpenClawStateDatabaseAsync();
+      const base = await createBackupArchive({ output: state.path("base.tar.gz"), verify: true });
+      const capture = await createDatabaseMigrationCapture({
+        baseArchive: base.archivePath,
+        output: state.path("capsule"),
+      });
+      const manifest = JSON.parse(await fs.readFile(capture.manifestPath, "utf8"));
+      await fs.appendFile(path.join(capture.directory, manifest.configs[0].file), "changed");
+      const target = state.path("staging");
+      await expect(
+        restoreDatabaseMigrationCapture(createTestRuntime(), {
+          capture: capture.directory,
+          target,
+          manifestSha256: capture.manifestSha256,
+        }),
+      ).rejects.toThrow("artifact changed");
+      await expect(fs.stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+      await fs.appendFile(capture.manifestPath, " ");
+      await expect(
+        restoreDatabaseMigrationCapture(createTestRuntime(), {
+          capture: capture.directory,
+          target,
+          manifestSha256: capture.manifestSha256,
+        }),
+      ).rejects.toThrow("differs from its producer receipt");
+      await expect(fs.stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+});

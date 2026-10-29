@@ -8,6 +8,7 @@ import {
   type DatabaseEngineSelection,
 } from "../infra/database-engine/context.js";
 import { assertDatabasePortStartupAllowed } from "../infra/database-port-recovery.js";
+import { setGatewayCredentialEnvKeys } from "../infra/host-env-security.js";
 
 /** Direct servers and embedded kernels enter before locks, state reads, or plugin config. */
 export async function installGatewayDatabaseEngine(
@@ -15,19 +16,24 @@ export async function installGatewayDatabaseEngine(
   selection?: DatabaseEngineSelection,
 ): Promise<void> {
   assertDatabasePortStartupAllowed(resolveStateDir(process.env));
+  let installed = getDatabaseEngineSelection();
   if (selection) {
     installDatabaseEngineSelection(selection);
-    return;
+    installed = selection;
   }
-  if (getDatabaseEngineSelection()) {
-    return;
+  if (!installed) {
+    const selected =
+      snapshot ??
+      (await readConfigFileSnapshot({
+        observe: false,
+        isolateEnv: true,
+        pluginValidation: "core-only",
+      }));
+    installed = await resolveDatabaseEngineSelection(selected.config);
+    installDatabaseEngineSelection(installed);
   }
-  const selected =
-    snapshot ??
-    (await readConfigFileSnapshot({
-      observe: false,
-      isolateEnv: true,
-      pluginValidation: "core-only",
-    }));
-  installDatabaseEngineSelection(await resolveDatabaseEngineSelection(selected.config));
+  setGatewayCredentialEnvKeys(
+    "database.postgres.connection",
+    installed.postgres?.connectionEnvKey ? [installed.postgres.connectionEnvKey] : [],
+  );
 }

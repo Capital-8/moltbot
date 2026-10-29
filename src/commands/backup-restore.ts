@@ -276,7 +276,7 @@ function formatRestoreResult(result: BackupRestoreResult): string {
 /** Verify first, then extract a whole backup archive into a fresh staging directory. */
 export async function backupRestoreCommand(
   runtime: RuntimeEnv,
-  options: { archive: string; target?: string; json?: boolean },
+  options: { archive: string; target?: string; json?: boolean; sourceEngine?: "sqlite" },
 ) {
   const targetPath = resolveRequiredBackupPath(options.target, "--target");
   await assertTargetOutsideLiveState(targetPath);
@@ -290,6 +290,11 @@ export async function backupRestoreCommand(
     recoveryConfigContextPath,
     manifest,
   } = await prepareBackupArchive(options.archive);
+  if (options.sourceEngine === "sqlite" && databaseRestoreCandidates.length > 0) {
+    throw new Error(
+      "This restore requires a SQLite-only archive; PostgreSQL namespaces were not imported.",
+    );
+  }
   assertRestoreCapacity(targetPath, regularFileExtractionBytes);
   const target = await prepareRestoreTarget(targetPath);
 
