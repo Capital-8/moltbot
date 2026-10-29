@@ -108,6 +108,11 @@ it.for([
         recursive: true,
       });
     }
+    fs.mkdirSync(at("test/helpers"), { recursive: true });
+    fs.copyFileSync(
+      path.join(repoRoot, "test/helpers/postgres-pool-roots.ts"),
+      at("test/helpers/postgres-pool-roots.ts"),
+    );
     for (const name of ["scripts", "src", "packages", "ui", "node_modules"]) {
       fs.symlinkSync(path.join(repoRoot, name), at(name), "junction");
     }
