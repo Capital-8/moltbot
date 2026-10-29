@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { chromium, type Browser } from "playwright";
 import { expect, it } from "vitest";
 import { createDarkDesktopControlUiContextOptions } from "../../e2e/control-ui-browser-options.test-support.ts";
+import { seedSidebarSettings } from "../../e2e/sidebar-contract.test-support.ts";
 import { createControlUiE2eArtifactDir } from "../../test-helpers/control-ui-e2e-artifacts.ts";
 import { takeControlUiScreenshotFrame } from "../../test-helpers/control-ui-e2e-screenshot.ts";
 import {
@@ -9,9 +10,105 @@ import {
   installMockGateway,
   resolvePlaywrightChromiumExecutablePath,
   startControlUiE2eServer,
+  waitForControlUiRoute,
 } from "../../test-helpers/control-ui-e2e.ts";
 
 const executablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
+it.skipIf(!canRunPlaywrightChromium(executablePath))(
+  "loads the creator on the first sidebar action and keeps duplicate clicks behind one admission",
+  async () => {
+    const server = await startControlUiE2eServer();
+    const release = Promise.withResolvers<void>();
+    let browser: Browser | undefined;
+    try {
+      browser = await chromium.launch({ executablePath });
+      const page = await browser.newPage(createDarkDesktopControlUiContextOptions());
+      await seedSidebarSettings(page, server.baseUrl, { sidebarAgentsMode: "roster" });
+      const config = { gateway: { controlUi: { experimental: { templates: true } } } };
+      const scope = { input: "Repository", job: "Summarize", output: "Brief", authority: "Read" };
+      const gateway = await installMockGateway(page, {
+        assistantName: "Harbor",
+        featureMethods: [
+          "chat.send",
+          "templates.drafts.create",
+          "templates.drafts.read",
+          "templates.drafts.review",
+        ],
+        methodResponses: {
+          "config.get": {
+            config,
+            sourceConfig: config,
+            hash: "creator-first-use",
+            valid: true,
+            issues: [],
+          },
+          "templates.drafts.create": {
+            draftId: "ec8f46b0-4ca3-4991-8a73-dfdcc8764087",
+            prompt: "Create a shareable Template",
+          },
+          "templates.drafts.read": { revision: "a".repeat(64), content: JSON.stringify({ scope }) },
+          "templates.drafts.review": {
+            revision: "a".repeat(64),
+            reviewToken: "b".repeat(64),
+            publisher: "maker",
+            name: "@maker/first-use",
+            displayName: "First use",
+            version: "0.1.0",
+            description: "First-use Template",
+            items: [],
+            files: [],
+            scope,
+          },
+        },
+      });
+      const imports: string[] = [];
+      page.on("request", (request) => {
+        if (/\/template-creator-runtime-[^/]+\.js$/u.test(new URL(request.url()).pathname)) {
+          imports.push(request.url());
+        }
+      });
+      await page.goto(`${server.baseUrl}chat`);
+      await waitForControlUiRoute(page, { routeId: "chat" });
+      const row = page.locator('.sidebar-agent-roster__row[data-agent-id="main"]');
+      const menu = page.getByRole("button", { name: "Options for Harbor" });
+      await menu.waitFor({ state: "visible" });
+      expect(imports).toEqual([]);
+      let held = 0;
+      await page.route("**/assets/template-creator-runtime-*.js", async (route) => {
+        held += 1;
+        await release.promise;
+        await route.continue();
+      });
+      await gateway.deferNext("chat.send");
+      await row.hover();
+      await menu.click();
+      await page.getByRole("menuitem", { name: "Create Template", exact: true }).click();
+      await expect.poll(() => held).toBe(1);
+      await row.hover();
+      await menu.click();
+      await page.getByRole("menuitem", { name: "Create Template", exact: true }).click();
+      expect(await gateway.getRequests("templates.drafts.create")).toHaveLength(0);
+      release.resolve();
+      await gateway.waitForRequest("chat.send");
+      const creates = await gateway.getRequests("templates.drafts.create");
+      expect(creates).toHaveLength(1);
+      expect(creates[0]?.params).toEqual({ agentId: "main" });
+      expect(imports).toHaveLength(1);
+      const dialog = page.getByRole("dialog", { name: "Review your Template" });
+      expect(await dialog.count()).toBe(0);
+      await gateway.resolveDeferred("chat.send", { status: "started" });
+      await dialog.waitFor({ state: "visible" });
+      expect(await dialog.getByLabel("Name").inputValue()).toBe("First use");
+      expect(await gateway.getRequests("templates.drafts.create")).toHaveLength(1);
+      expect(await gateway.getRequests("chat.send")).toHaveLength(1);
+    } finally {
+      release.resolve();
+      await browser?.close();
+      await server.close();
+    }
+  },
+);
+
 it.skipIf(!canRunPlaywrightChromium(executablePath))(
   "publishes the reviewed selection after closing a pending publish and retrying its failure",
   async () => {

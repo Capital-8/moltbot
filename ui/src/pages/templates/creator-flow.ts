@@ -9,8 +9,11 @@ import { createChangeListeners } from "../../../../src/shared/listeners.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationContext } from "../../app/context.ts";
 import { t } from "../../i18n/index.ts";
+import { registerAgentsHomeEnglish } from "../../i18n/locales/en-agents-home.ts";
+import { registerTemplateCreatorEnglish } from "../../i18n/locales/en-template-creator.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import { openExternalUrlSafe } from "../../lib/open-external-url.ts";
+import { registerEnglishCatalog } from "../../lib/reactive/i18n.ts";
 import { sessionNavigationTarget } from "../../lib/sessions/route-navigation.ts";
 import {
   buildAgentMainSessionKey,
@@ -19,7 +22,10 @@ import {
 } from "../../lib/sessions/session-key.ts";
 import { showToast } from "../../lib/toast.ts";
 import { generateUUID } from "../../lib/uuid.ts";
-import { canCreateTemplateDraft } from "./draft-navigation.ts";
+import { templateCreatorOwner } from "./creator-owner.ts";
+
+registerEnglishCatalog(registerAgentsHomeEnglish);
+registerEnglishCatalog(registerTemplateCreatorEnglish);
 
 type Target = {
   agentId: string;
@@ -118,6 +124,7 @@ export class TemplateCreatorFlow {
   }
 
   private reset(target: Target | null) {
+    this.retirePendingStart();
     this.retirePresentation();
     this.generation += 1;
     this.reviewRequest += 1;
@@ -145,6 +152,7 @@ export class TemplateCreatorFlow {
     if (!client || this.busy === "starting") {
       return;
     }
+    this.retirePendingStart();
     this.busy = "starting";
     this.error = null;
     this.changed();
@@ -381,22 +389,20 @@ export class TemplateCreatorFlow {
       void this.refreshReview(target, this.generation);
     }
   }
-}
 
-const flows = new WeakMap<ApplicationContext, TemplateCreatorFlow>();
+  private retirePendingStart() {
+    const owner = templateCreatorOwner(this.context);
+    if (owner.flow === this) {
+      owner.pending = null;
+    }
+  }
+}
 
 export function templateCreatorFlow(context: ApplicationContext) {
-  let flow = flows.get(context);
-  if (!flow) {
-    flow = new TemplateCreatorFlow(context);
-    flows.set(context, flow);
+  const owner = templateCreatorOwner(context);
+  if (!owner.flow) {
+    owner.flow = new TemplateCreatorFlow(context);
+    owner.publish();
   }
-  return flow;
-}
-
-export function templateCreatorAction(context: ApplicationContext, agentId: string | undefined) {
-  if (!agentId || !canCreateTemplateDraft(context)) {
-    return undefined;
-  }
-  return () => void templateCreatorFlow(context).start(agentId);
+  return owner.flow;
 }

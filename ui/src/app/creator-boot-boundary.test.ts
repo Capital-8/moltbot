@@ -1,10 +1,12 @@
 // @vitest-environment node
 import path from "node:path";
-import { build } from "vite";
+import { fileURLToPath } from "node:url";
+import { build, normalizePath } from "vite";
 import { expect, it } from "vitest";
+import { controlUiSolidPlugin } from "../../config/control-ui-solid.ts";
 
 it("keeps creator construction outside the roster and dormant chat review entries", async () => {
-  const root = new URL("../", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("../", import.meta.url));
   const entries = {
     roster: path.join(root, "components/sidebar-agent-roster.tsx"),
     review: path.join(root, "pages/templates/creator-review.tsx"),
@@ -23,6 +25,7 @@ it("keeps creator construction outside the roster and dormant chat review entrie
     publicDir: false,
     logLevel: "silent",
     plugins: [
+      ...controlUiSolidPlugin(),
       {
         name: "creator-boot-boundary",
         enforce: "pre",
@@ -72,7 +75,7 @@ it("keeps creator construction outside the roster and dormant chat review entrie
         .filter(([, module]) => module.renderedLength > 0)
         .map(([id]) => id),
     );
-  expect(modules).toEqual(expect.arrayContaining(Object.values(entries)));
+  expect(modules).toEqual(expect.arrayContaining(Object.values(entries).map(normalizePath)));
   expect(modules.some((id) => id.endsWith("/pages/templates/creator-flow.ts"))).toBe(false);
   expect(modules.some((id) => id.endsWith("/i18n/locales/en-template-creator.ts"))).toBe(false);
   expect(modules.some((id) => id.endsWith("/pages/templates/creator-owner.ts"))).toBe(true);
