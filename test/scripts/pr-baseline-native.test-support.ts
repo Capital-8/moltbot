@@ -207,6 +207,7 @@ if (args[0] === 'api' && args[1] === 'user') {
   headRefOid:git('rev-parse','topic'),baseRefName:'main',isDraft:false,mergeCommit:null,
   autoMergeRequest:null,isInMergeQueue:false,isMergeQueueEnabled:false,
   mergeable:'MERGEABLE',mergeStateStatus:'CLEAN'};
+ if (args.includes('--include')) process.stdout.write('HTTP/2.0 200 OK\\r\\n\\r\\n');
  console.log(JSON.stringify({data:{repository:{id:'R_fixture',databaseId:1,
   nameWithOwner:'fixture/repo',url:'https://github.com/fixture/repo',
   ref:{target:{oid:git('rev-parse','main')}},pullRequest}}}));
