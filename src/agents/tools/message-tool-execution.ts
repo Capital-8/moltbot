@@ -555,7 +555,8 @@ function* createMessageToolSteps(
         : params;
       const hasExactSourceTurn =
         action === "send" &&
-        sourceReplySinkDeliveryMode === "message_tool_only" &&
+        (sourceReplySinkDeliveryMode === "message_tool_only" ||
+          requestedSourceReplyFinal === true) &&
         normalizeOptionalString(trustedTurnContext?.toolContext?.currentSourceTurnId) !== undefined;
       return await withChannelReadAuthority(
         action === "download-file" || scheduledRead || assertDashboardReadCurrent

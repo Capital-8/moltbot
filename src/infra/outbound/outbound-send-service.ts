@@ -32,6 +32,7 @@ import type { MessagePollResult, MessageSendResult } from "./message.js";
 import { sendMessage, sendPoll } from "./message.js";
 import type { OutboundSessionRoute } from "./outbound-session.js";
 import { buildOutboundSessionContext } from "./session-context.js";
+import { mirrorDeliveredSourceReplyToTranscript } from "./source-reply-mirror.js";
 
 const log = createSubsystemLogger("outbound/send-service");
 
@@ -90,7 +91,10 @@ async function tryHandleWithPluginAction(params: {
   ctx: OutboundSendContext;
   action: "send" | "poll";
   reply?: OutboundReplyFacts;
-  onHandled?: (deliveryFact: EmbeddedMessageDeliveryFact | undefined) => Promise<void> | void;
+  onHandled?: (
+    deliveryFact: EmbeddedMessageDeliveryFact | undefined,
+    result: AgentToolResult<unknown>,
+  ) => Promise<void> | void;
 }): Promise<PluginHandledResult | null> {
   if (params.ctx.dryRun) {
     return null;
@@ -128,7 +132,7 @@ async function tryHandleWithPluginAction(params: {
   }
   const deliveryFact = projectPluginMessageDeliveryFact(handled);
   if (!deliveryFact || deliveryFact.status === "settled") {
-    await params.onHandled?.(deliveryFact);
+    await params.onHandled?.(deliveryFact, handled);
   }
   return {
     handledBy: "plugin",
@@ -201,7 +205,7 @@ export async function executeSendAction(params: SendActionParams): Promise<{
         ctx: pluginCtx,
         action: "send",
         reply: params.reply,
-        onHandled: async (deliveryFact) => {
+        onHandled: async (deliveryFact, deliveredResult) => {
           try {
             await params.ctx.onSendAccepted?.();
             if (
@@ -214,6 +218,28 @@ export async function executeSendAction(params: SendActionParams): Promise<{
             if (deliveryFact.createdThreadIds.length > 1) {
               log.warn("Confirmed plugin outbound transcript skipped: multiple delivery threads");
               return;
+            }
+            // Gateway actions mirror at RPC settlement. Local plugin sends never
+            // cross that boundary, and destination history skips the producer.
+            if (!params.ctx.input.gatewayOwnedDelivery) {
+              const input = params.ctx.input;
+              await mirrorDeliveredSourceReplyToTranscript({
+                action: "send",
+                channel: params.ctx.channel,
+                actionParams: pluginCtx.params,
+                cfg: params.ctx.cfg,
+                accountId: params.ctx.accountId,
+                currentAccountId: input.messageActionAuthorization?.requesterAccountId,
+                sessionKey: input.sourceReplySessionKey ?? input.sessionKey,
+                sessionId: input.sessionId,
+                agentId: params.ctx.agentId,
+                toolContext: input.messageActionAuthorization?.toolContext,
+                idempotencyKey: params.ctx.idempotencyKey,
+                sourceReplyFinal: input.sourceReplyFinal,
+                toolCallId: input.sourceReplyToolCallId,
+                deliveredPayload: extractToolPayload(deliveredResult),
+                replyToIsExplicit: params.reply?.source === "explicit",
+              });
             }
             const threadId = deliveryFact.createdThreadIds[0] ?? params.threadId;
             const threadChanged =
