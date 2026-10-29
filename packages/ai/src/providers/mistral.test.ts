@@ -328,6 +328,16 @@ describe("Mistral provider", () => {
     },
   );
 
+  it("keeps reasoning effort for standalone callers that pass a bare model", async () => {
+    await runSimpleMistralFixture(
+      context,
+      { reasoning: "high" },
+      { ...makeMistralModel(), id: "mistral-small-latest", reasoning: true },
+    );
+    expect(payload().reasoningEffort).toBe("high");
+    expect(payload()).not.toHaveProperty("promptMode");
+  });
+
   it("keeps request bytes stable across equivalent tool input order", async () => {
     const tools = [
       { ...makeHealthyTool(), name: "zeta_tool", description: "Zeta tool" },
