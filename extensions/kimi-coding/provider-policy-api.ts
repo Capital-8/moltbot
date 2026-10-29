@@ -42,10 +42,12 @@ const KIMI_K3_THINKING_LEVELS = [
   { id: "max" },
 ] as const satisfies ProviderThinkingProfile["levels"];
 
-function readEfforts(compat: object | null | undefined): readonly unknown[] | undefined {
-  const efforts = (compat as { supportedReasoningEfforts?: unknown } | null | undefined)
-    ?.supportedReasoningEfforts;
-  return Array.isArray(efforts) ? efforts : undefined;
+function readEfforts(compat: object | null | undefined): readonly string[] | undefined {
+  const efforts =
+    compat && "supportedReasoningEfforts" in compat ? compat.supportedReasoningEfforts : undefined;
+  return Array.isArray(efforts) && efforts.every((effort) => typeof effort === "string")
+    ? efforts
+    : undefined;
 }
 
 function normalizeModelId(modelId: string): string {

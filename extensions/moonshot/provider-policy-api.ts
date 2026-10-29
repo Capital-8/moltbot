@@ -12,10 +12,12 @@ type MoonshotThinkingFacts = Pick<ProviderDefaultThinkingPolicyContext, "thinkin
   compat?: object | null;
 };
 
-function readEfforts(compat: object | null | undefined): readonly unknown[] | undefined {
-  const efforts = (compat as { supportedReasoningEfforts?: unknown } | null | undefined)
-    ?.supportedReasoningEfforts;
-  return Array.isArray(efforts) ? efforts : undefined;
+function readEfforts(compat: object | null | undefined): readonly string[] | undefined {
+  const efforts =
+    compat && "supportedReasoningEfforts" in compat ? compat.supportedReasoningEfforts : undefined;
+  return Array.isArray(efforts) && efforts.every((effort) => typeof effort === "string")
+    ? efforts
+    : undefined;
 }
 
 const MANIFEST_ROWS: ReadonlyMap<string, MoonshotThinkingFacts & { input: readonly string[] }> =
@@ -51,8 +53,10 @@ export function resolveMoonshotAlwaysThinkingEffort(
   if (facts.thinkingLevelMap?.off !== null) {
     return undefined;
   }
-  return { effort: readEfforts(facts.compat)?.at(-1) as string | undefined };
+  return { effort: readEfforts(facts.compat)?.at(-1) };
 }
+
+const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export function isNativeMoonshotBaseUrl(baseUrl: string | undefined): boolean {
   return [MOONSHOT_BASE_URL, MOONSHOT_CN_BASE_URL].some(
@@ -89,8 +93,9 @@ export function resolveThinkingProfile(context: ProviderDefaultThinkingPolicyCon
     withMoonshotThinkingFacts(context.modelId, context),
   );
   if (always) {
-    const level = always.effort
-      ? { id: always.effort as "max", label: always.effort }
+    const effortLevel = EFFORT_LEVELS.find((level) => level === always.effort);
+    const level = effortLevel
+      ? { id: effortLevel, label: effortLevel }
       : { id: "low" as const, label: "on" };
     return {
       levels: [level],

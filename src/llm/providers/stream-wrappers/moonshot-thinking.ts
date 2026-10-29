@@ -9,6 +9,7 @@ const loadDefaultStream = createLazyRuntimeModule(() => import("../../stream.js"
 type MoonshotThinkingType = "enabled" | "disabled";
 type MoonshotThinkingKeep = "all";
 type MoonshotPayloadFinalizer = (result: unknown, payload: Record<string, unknown>) => unknown;
+const ALWAYS_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const FIXED_SAMPLING_FIELDS = "temperature top_p n presence_penalty frequency_penalty".split(" ");
 /** Always-on thinking; `effort` is the fixed reasoning_effort, absent for a plain on switch. */
 type MoonshotAlwaysThinking = { effort?: string };
@@ -59,7 +60,8 @@ function resolveAlwaysThinking(
     return undefined;
   }
   const efforts = asPayloadRecord(model.compat)?.supportedReasoningEfforts;
-  const effort = Array.isArray(efforts) ? (efforts.at(-1) as string | undefined) : undefined;
+  const last: unknown = Array.isArray(efforts) ? efforts.at(-1) : undefined;
+  const effort = typeof last === "string" ? last : undefined;
   // A fixed effort is the direct Moonshot API contract; proxies map effort themselves.
   return effort && !directMoonshotModel ? undefined : { effort };
 }
@@ -159,7 +161,12 @@ export function createMoonshotThinkingWrapper(
     const alwaysThinking = resolveAlwaysThinking(model, directMoonshotModel);
     const streamModel = alwaysThinking ? { ...model, reasoning: true } : model;
     const streamOptions = alwaysThinking
-      ? { ...options, reasoning: (alwaysThinking.effort ?? "low") as "low" | "max" }
+      ? {
+          ...options,
+          reasoning: ALWAYS_THINKING_LEVELS.find(
+            (level) => level === (alwaysThinking.effort ?? "low"),
+          ),
+        }
       : options;
     return underlying(streamModel, context, {
       ...streamOptions,
