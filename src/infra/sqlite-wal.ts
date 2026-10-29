@@ -127,7 +127,8 @@ export type SqliteWalMaintenanceOptions = SqliteWalCheckpointOptions & {
 
 export type SqliteConnectionPragmaOptions = SqliteWalMaintenanceOptions & {
   foreignKeys?: boolean;
-  synchronous?: "NORMAL";
+  /** WAL defaults to NORMAL; owners with a stronger durability contract must select it here. */
+  synchronous?: "NORMAL" | "FULL" | "EXTRA";
 };
 
 /** Restrict inspection connections without changing journal or persistence policy. */
@@ -681,8 +682,13 @@ export function configureSqliteConnectionPragmas(
   const { foreignKeys, synchronous, ...walOptions } = options;
   const maintenance = configureSqliteWalMaintenance(db, walOptions);
   try {
-    if (synchronous) {
-      db.exec(`PRAGMA synchronous = ${synchronous};`);
+    const syncMode =
+      synchronous ??
+      (readJournalModeResult(db.prepare("PRAGMA journal_mode;").get()) === "wal"
+        ? "NORMAL"
+        : undefined);
+    if (syncMode) {
+      db.exec(`PRAGMA synchronous = ${syncMode};`);
     }
     if (foreignKeys) {
       db.exec("PRAGMA foreign_keys = ON;");

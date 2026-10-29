@@ -644,6 +644,31 @@ durability, transaction contents, reader lifetimes, schemas, or history retentio
 it never unlinks a live WAL. Upgrades need no state migration, and older binaries
 can continue reading the same databases.
 
+Runtime SQLite connections configured by `configureSqliteConnectionPragmas` default
+to `synchronous=NORMAL` only after WAL mode has been confirmed. The shared-state
+and agent database openers already select NORMAL explicitly, as do Workboard,
+Logbook, and Team Reports. The default also covers private memory reindex shadows,
+memory CLI reset connections, and legacy path-based proxy capture stores.
+The lower-level WAL maintenance helper does not select a synchronous policy.
+
+With WAL and NORMAL, transactions remain atomic and consistent, and committed
+transactions survive an application-process crash. An operating-system crash or
+power loss can roll back recent commits that have not reached durable storage.
+NORMAL does not introduce database corruption in WAL mode; this guarantee assumes
+SQLite's filesystem and hardware requirements hold. Checkpoints still synchronize
+storage, so NORMAL does not eliminate checkpoint stalls or disk contention. See
+[SQLite's synchronous contract](https://www.sqlite.org/pragma.html#pragma_synchronous).
+
+Rollback-journal and in-memory connections retain their existing setting unless
+the caller explicitly selects one. Owners requiring commit-time durability pass
+`synchronous: "FULL"` or `"EXTRA"` to the connection helper. Native activation and
+update handoff journals, runtime pins, quarantine, credential custody, workspace
+quiescence scripts, and offline repair tools retain their independent durability
+policies. Backup destinations retain standalone rollback journaling and explicit
+file synchronization. External-ownership repair retains its required successful
+checkpoint before handoff. No schema or on-disk format changes are required;
+changing the connection policy takes effect when that connection opens.
+
 Quarantine decisions live only in a dedicated `openclaw-quarantine.sqlite` store, so they survive damage to the databases being quarantined.
 
 Successful writable agent admission also preserves this store as evidence that

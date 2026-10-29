@@ -20,6 +20,15 @@ and the database handle's native close. Stopping closes timer admission and join
 accepted maintenance; it does not change transaction ownership or close the
 database. Synchronous `close()` remains available for failed-open and process-exit
 cleanup, where asynchronous joins cannot be completed.
+
+The helper defaults WAL connections to `synchronous=NORMAL`; rollback-journal
+connections keep their existing setting. NORMAL can lose recent commits after an
+OS crash or power loss while preserving WAL consistency. A store requiring FULL
+or EXTRA must pass `synchronous: "FULL"` or `"EXTRA"` explicitly, including when
+it previously set the pragma before calling the helper. Existing explicit
+NORMAL selections keep their behavior. See the
+[storage durability contract](/reference/database-schemas/integrity-and-recovery).
+
 Memory Core's private shadow-index owner uses
 `stopMemorySqliteWalMaintenance(db)` from its existing
 `memory-core-host-engine-storage` facade before draining its private queue and

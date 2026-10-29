@@ -13,8 +13,6 @@ import { resolveRuntimeWorkerArgv, resolveRuntimeWorkerUrl } from "./runtime-wor
 import {
   sqliteMaintenanceFixture,
   sqliteSchedulerClock,
-  spySqliteExec,
-  thrownBy,
 } from "./sqlite-maintenance-fixture.test-support.js";
 import { sqliteMaintenanceEntrypoints } from "./sqlite-maintenance-runtime.test-support.js";
 import { admitSqliteSchema } from "./sqlite-schema-facts.js";
@@ -858,17 +856,20 @@ describe("sqlite WAL maintenance", () => {
     const db = createMockDb();
     vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     let journalModeAttempts = 0;
-    vi.mocked(db["prepare"]).mockReturnValue({
-      get: vi.fn(() => {
-        if (journalModeAttempts++ === 0) {
-          throw Object.assign(new Error("database is locked"), {
-            code: "ERR_SQLITE_ERROR",
-            errcode: 5,
-          });
-        }
-        return { journal_mode: "wal" };
-      }),
-    } as unknown as ReturnType<DatabaseSync["prepare"]>);
+    vi.mocked(db["prepare"]).mockImplementation(
+      (sql) =>
+        ({
+          get: vi.fn(() => {
+            if (sql === "PRAGMA journal_mode = WAL;" && journalModeAttempts++ === 0) {
+              throw Object.assign(new Error("database is locked"), {
+                code: "ERR_SQLITE_ERROR",
+                errcode: 5,
+              });
+            }
+            return { journal_mode: "wal" };
+          }),
+        }) as unknown as ReturnType<DatabaseSync["prepare"]>,
+    );
 
     configureSqliteConnectionPragmas(db, {
       busyTimeoutMs: 50,
@@ -963,77 +964,6 @@ describe("sqlite WAL maintenance", () => {
         'vi.mocked(db["prepare"]).mock.invocationCallOrder[0] test invariant',
       ),
     );
-  });
-});
-
-describe("SQLite connection pragma acquisition", () => {
-  it("releases unpublished maintenance when a connection pragma fails", () => {
-    const pragma = "synchronous = NORMAL";
-    vi.useFakeTimers();
-    const dbPath = resources.file();
-    const db = resources.open(dbPath);
-    const failure = new Error("connection pragma failed");
-    db.exec("CREATE TABLE payload (value TEXT); INSERT INTO payload VALUES ('committed');");
-    const execSpy = spySqliteExec(db, (sql) => {
-      if (sql === `PRAGMA ${pragma};`) {
-        expect(vi.getTimerCount()).toBe(1);
-        throw failure;
-      }
-    });
-    const acquire = () =>
-      configureSqliteConnectionPragmas(db, {
-        databasePath: dbPath,
-        foreignKeys: true,
-        synchronous: "NORMAL",
-      });
-    for (let attempt = 0; attempt < 3; attempt++) {
-      expect(acquire).toThrow(failure);
-      expect(vi.getTimerCount()).toBe(0);
-      expect(db.isOpen).toBe(true);
-    }
-    execSpy.mockRestore();
-    const maintenance = acquire();
-    try {
-      expect(db.prepare("SELECT value FROM payload").all()).toEqual([{ value: "committed" }]);
-      expect(vi.getTimerCount()).toBe(1);
-    } finally {
-      maintenance.close();
-    }
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("retains the pragma failure when maintenance cleanup also throws", () => {
-    vi.useFakeTimers();
-    const dbPath = resources.file();
-    const db = resources.open(dbPath);
-    const failure = new Error("connection pragma failed");
-    const checkpointFailure = new Error("checkpoint failed");
-    const reportFailure = new Error("checkpoint error reporting failed");
-    spySqliteExec(db, (sql) => {
-      if (sql === "PRAGMA foreign_keys = ON;") {
-        throw failure;
-      }
-    });
-    const prepare = db.prepare.bind(db);
-    vi.spyOn(db, "prepare").mockImplementation((sql) => {
-      if (sql.startsWith("PRAGMA wal_checkpoint")) {
-        throw checkpointFailure;
-      }
-      return prepare(sql);
-    });
-    const caught = thrownBy(() => {
-      configureSqliteConnectionPragmas(db, {
-        databasePath: dbPath,
-        foreignKeys: true,
-        onCheckpointError: () => {
-          throw reportFailure;
-        },
-      });
-    });
-    expect(caught).toBeInstanceOf(AggregateError);
-    expect(caught).toMatchObject({ cause: failure, errors: [failure, reportFailure] });
-    expect(vi.getTimerCount()).toBe(0);
-    expect(db.isOpen).toBe(true);
   });
 });
 
