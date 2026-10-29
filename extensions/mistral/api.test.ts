@@ -7,6 +7,10 @@ import {
   MISTRAL_SMALL_LATEST_ID,
 } from "./api.js";
 import mistralPlugin from "./index.js";
+import manifest from "./openclaw.plugin.json" with { type: "json" };
+
+const rowMap = (id: string) =>
+  manifest.modelCatalog.providers.mistral.models.find((row) => row.id === id)?.thinkingLevelMap;
 
 const transportCompat = {
   supportsStore: false,
@@ -27,6 +31,7 @@ describe("applyMistralModelCompat", () => {
     (id) => {
       const normalized = applyMistralModelCompat({
         id,
+        thinkingLevelMap: rowMap(id),
         compat: {
           supportsStore: true,
           supportsReasoningEffort: false,
@@ -72,6 +77,7 @@ describe("applyMistralModelCompat", () => {
     const profile = provider.resolveThinkingProfile?.({
       provider: "mistral",
       modelId: MISTRAL_SMALL_LATEST_ID,
+      thinkingLevelMap: rowMap(MISTRAL_SMALL_LATEST_ID),
     });
     expect(profile?.levels.map(({ id }) => id)).toEqual([
       "off",
