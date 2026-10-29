@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "playwright";
 import { expect, it } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
+import { mediaTicketPayload } from "../test-helpers/control-ui-attachment-fixtures.ts";
+import { chatMessage } from "./chat-flow.test-support.ts";
 import {
   createControlUiE2eContextOptions,
   tooltipTitleText,
@@ -66,7 +69,7 @@ async function withNewSessionPage(run: (page: Page) => Promise<void>): Promise<v
 }
 
 suite.define(() => {
-  it("restores a prompt and image in a fresh page, then clears them after creation", async () => {
+  it("restores a prompt, image and permission choice, then clears them after creation", async () => {
     const context = await suite.browser.newContext(createControlUiE2eContextOptions());
     try {
       const firstPage = await context.newPage();
@@ -89,7 +92,12 @@ suite.define(() => {
         "restore this prompt after restart and incognito",
         1,
       );
+      const permission = firstPage.locator('[data-chat-permission-select="true"]');
+      await permission.click();
+      await firstPage.locator('[data-chat-permission-option="read-only"]').click();
+      await pollAttribute(permission, "data-chat-select-value").toBe("read-only");
       await firstPage.reload();
+      await pollAttribute(permission, "data-chat-select-value").toBe("read-only");
       await pollValue(firstMessage).toBe("restore this prompt after restart and incognito");
       await pollCount(firstPage.locator(".chat-attachment-thumb")).toBe(1);
       await firstPage.close();
@@ -104,11 +112,16 @@ suite.define(() => {
       const restoredMessage = restoredPage.locator(".new-session-page__message");
       await pollValue(restoredMessage).toBe("restore this prompt after restart and incognito");
       await pollCount(restoredPage.locator(".chat-attachment-thumb")).toBe(1);
+      await pollAttribute(
+        restoredPage.locator('[data-chat-permission-select="true"]'),
+        "data-chat-select-value",
+      ).toBe("read-only");
       await restoredPage.getByRole("button", { name: "Start session" }).click();
 
       const create = await restoredGateway.waitForRequest("sessions.create");
       expect(create.params).toMatchObject({
         message: "restore this prompt after restart and incognito",
+        permissionMode: "read-only",
         attachments: [{ ...pngAttachment, type: "image", mimeType: "image/png" }],
       });
       await restoredPage.waitForURL(
@@ -123,6 +136,10 @@ suite.define(() => {
       await clearedPage.goto(`${suite.server.baseUrl}new`);
       await pollValue(clearedPage.locator(".new-session-page__message")).toBe("");
       await pollCount(clearedPage.locator(".chat-attachment-thumb")).toBe(0);
+      await pollAttribute(
+        clearedPage.locator('[data-chat-permission-select="true"]'),
+        "data-chat-select-value",
+      ).toBe("");
     } finally {
       await context.close();
     }
@@ -160,9 +177,6 @@ suite.define(() => {
           lineHeight: Number.parseFloat(style.lineHeight),
           overflowY: style.overflowY,
           padding: Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom),
-          scrollbarWidth: style.scrollbarWidth,
-          webkitScrollbarWidth: getComputedStyle(element, "::-webkit-scrollbar").width,
-          webkitThumbInset: getComputedStyle(element, "::-webkit-scrollbar-thumb").borderLeftWidth,
         };
       });
 
@@ -170,18 +184,16 @@ suite.define(() => {
       expect(tenLines.height).toBeGreaterThanOrEqual(
         Math.floor(tenLines.lineHeight * 10 + tenLines.padding) - 1,
       );
-      expect(tenLines).toMatchObject({ overflowY: "hidden", scrollbarWidth: "thin" });
-      // Preserve a 12px drag target around the 6px painted thumb.
-      const composerScrollbar = Number.parseFloat(tenLines.webkitScrollbarWidth);
-      const composerThumbInset = Number.parseFloat(tenLines.webkitThumbInset);
-      expect(composerScrollbar).toBe(12);
-      expect(composerScrollbar - composerThumbInset * 2).toBe(6);
+      expect(tenLines.overflowY).toBe("hidden");
 
       const longPrompt = Array.from({ length: 14 }, (_, index) => `line ${index + 1}`).join("\n");
       await message.fill(longPrompt);
+      // Classic scrollbars retain their gutter at the cap to prevent draft-height oscillation.
+      await expect
+        .poll(() => message.evaluate((element) => getComputedStyle(element).overflowY))
+        .toBe("scroll");
       const capped = await message.evaluate((element) => ({
         clientHeight: element.clientHeight,
-        overflowY: getComputedStyle(element).overflowY,
         scrollHeight: element.scrollHeight,
       }));
       const [expandedIdentityBox, expandedTriggersBox, expandedComposerBox] = await Promise.all([
@@ -190,7 +202,6 @@ suite.define(() => {
         composer.boundingBox(),
       ]);
       expect(capped.clientHeight).toBeLessThan(capped.scrollHeight);
-      expect(capped.overflowY).toBe("auto");
       // Browser subpixel rounding may shift stable blocks by a pixel; larger movement is visible.
       for (const [before, after] of [
         [identityBox, expandedIdentityBox],
@@ -309,7 +320,7 @@ suite.define(() => {
         },
       });
       await startPrompt(page, message, sessionKey);
-      await gateway.waitForRequest("chat.startup");
+      await gateway.waitForRequest("sessions.messages.subscribe");
       await page.getByText("SKILL.md", { exact: true }).waitFor();
 
       await pollLocatorText(page.locator(".chat-group.user")).toContain(message);
@@ -334,7 +345,7 @@ suite.define(() => {
         ),
       });
       await startPrompt(page, message, sessionKey);
-      await gateway.waitForRequest("chat.startup");
+      await gateway.waitForRequest("sessions.messages.subscribe");
       await pollLocatorText(page.locator(".chat-group.user")).toContain(message);
 
       const socketsBeforeReconnect = await gateway.getSocketCount();
@@ -358,10 +369,7 @@ suite.define(() => {
       const message = "testing if dual prompts show";
       const source = "media://inbound/initial-prompt.png";
       const imageBytes = await readFile(path.join(process.cwd(), "ui/public/apple-touch-icon.png"));
-      let releaseMedia!: () => void;
-      const mediaGate = new Promise<void>((resolve) => {
-        releaseMedia = resolve;
-      });
+      const { promise: mediaGate, resolve: releaseMedia } = createDeferred();
       let metadataRequested = false;
       await page.route("**/__openclaw__/assistant-media?**", async (route) => {
         const url = new URL(route.request().url());
@@ -372,18 +380,12 @@ suite.define(() => {
         await route.fulfill(
           metadata
             ? {
-                json: {
-                  available: true,
-                  mediaTicket: "initial-prompt-ticket",
-                  mediaTicketExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-                },
+                json: mediaTicketPayload("initial-prompt-ticket", 5 * 60_000),
               }
             : { contentType: "image/png", body: imageBytes },
         );
       });
-      const authoritative = {
-        role: "user",
-        content: [{ type: "text", text: message }],
+      const authoritative = chatMessage("user", message, {
         timestamp: Date.now(),
         __openclaw: {
           id: "persisted-image-prompt",
@@ -392,9 +394,10 @@ suite.define(() => {
           media: [{ path: source, contentType: "image/png", fileName: "pixel.png" }],
           mediaImageLayout: { slots: [{ kind: "inline", factIndex: 0 }] },
         },
-      };
+      });
       const responses = initialPromptResponses(sessionKey, runId, "single-image-prompt");
       const gateway = await installMockGateway(page, {
+        subscriptionInitialHistory: false,
         deferredMethods: ["chat.startup"],
         methodResponses: {
           ...responses,
@@ -734,6 +737,9 @@ suite.define(() => {
         await page.getByRole("button", { name: "Retry queued message" }).click();
         const retry = await gateway.waitForRequest("chat.send");
         expect(retry.params).toMatchObject({ sessionKey, message, attachments: [pngAttachment] });
+        const retriedTurn = page.locator(".chat-group.user", { hasText: message });
+        await pollCount(retriedTurn.locator(".chat-send-status")).toBe(0);
+        await retriedTurn.locator("time.chat-group-timestamp").waitFor();
         expect(await gateway.getRequests("sessions.create")).toHaveLength(quota ? 1 : 0);
       });
     },

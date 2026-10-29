@@ -99,7 +99,7 @@ function createProjectSessionStore(
     { metadataPrepared: true, ordered: true },
   );
   const paths = projection.state.scope({}).paths;
-  const selectedEntries = selection.entries();
+  const selectedEntries = selection.entries("all");
   const targets = new Map(selectedEntries.map(([key]) => [key, selection.getTarget(key)!]));
   // Stable locale-equal recency ties retain physical-store and SQLite binary key order.
   const entries = selectedEntries
@@ -122,6 +122,17 @@ function createProjectSessionStore(
   }
   return Object.freeze({
     store: Object.freeze(store),
+    readMembership(key: string) {
+      const target = targets.get(key);
+      return (
+        target &&
+        projection.readMembership({
+          key: target.key,
+          agentId: target.agentId,
+          storePath: target.storeTarget.storePath,
+        })
+      );
+    },
     assertCurrent(keys: Iterable<string>) {
       for (const key of keys) {
         // The memory snapshot retains its own final disclosure guard.
