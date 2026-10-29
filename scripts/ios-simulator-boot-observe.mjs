@@ -48,6 +48,7 @@ const started = performance.now();
 const save = () => writeFileSync(output, `${JSON.stringify(proof, null, 2)}\n`);
 async function command(bin, args, timeoutMs = 120_000, cleanup = false) {
   let stdout = "";
+  let stderr = "";
   const code = await runManagedCommand({
     bin,
     args,
@@ -59,11 +60,29 @@ async function command(bin, args, timeoutMs = 120_000, cleanup = false) {
       child.stdout.on("data", (chunk) => {
         stdout = (stdout + chunk.toString()).slice(-256 * 1024);
       });
-      // Drain raw diagnostics without exporting paths or device identifiers.
-      child.stderr.resume();
+      child.stderr.on("data", (chunk) => {
+        stderr = (stderr + chunk.toString()).slice(-16 * 1024);
+      });
     },
   });
   if (code !== 0) {
+    if (stage === "stream-policy") {
+      // Fixed categories only; native errors may include private paths or device identities.
+      const text = `${stdout}\n${stderr}`;
+      proof.streamPolicyFailure = {
+        code,
+        permissionDenied:
+          /must be (?:run )?as root|must be root|requires root|not permitted|permission denied/iu.test(
+            text,
+          ),
+        unsupported: /not supported|unsupported|not implemented/iu.test(text),
+        invalidArguments:
+          /invalid (?:mode|option|argument)|unrecognized|unknown (?:mode|option|argument)/iu.test(
+            text,
+          ),
+        deviceNotReady: /not booted|current state:|device.*not.*boot/iu.test(text),
+      };
+    }
     throw new Error("native-command-failed");
   }
   return stdout.trim();
