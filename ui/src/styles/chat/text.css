@@ -1152,7 +1152,7 @@
   --chat-code-background: oklch(
     from var(--chat-bubble-background) calc(l - 0.035) calc(c * 0.55) h
   );
-  --chat-code-border: color-mix(in srgb, var(--text) 8%, var(--chat-code-background));
+  --chat-code-border: var(--border);
 }
 
 :where(:root[data-theme-mode="light"]) .chat-group:is(.user, .chat-group--forwarded) .chat-bubble {
