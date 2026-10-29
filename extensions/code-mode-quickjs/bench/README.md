@@ -653,8 +653,19 @@ Acceptance is declared before execution:
   ShellBench correctness from this synthetic owner workload. In particular,
   `host.close()` does not prove retirement of QuickJS's shared worker pool.
 
-Results are pending. This protocol alone supplies no execution or performance
-proof and does not justify removing either executor.
+The first attempt used Blacksmith Testbox's focused profile. Its
+[allocation](https://github.com/openclaw/openclaw/actions/runs/40829446692)
+queued and was stopped before remote workspace preparation or any benchmark
+cell ran. Native
+cleanup reconciled the completed lease with the cancelled GitHub run. No host
+resource preflight, timing record or successful arm was produced. Local
+dependency reuse also failed qualification because the installed lockfile
+differed from the frozen checkout's lockfile; it was not forced.
+
+Results remain pending an immediately available Testbox allocation or a locally
+qualified dependency installation for the frozen source. This protocol and failed
+attempt supply no execution or performance proof and do not justify removing
+either executor.
 
 ## Reproduction and remaining qualification
 
