@@ -633,11 +633,24 @@
 }
 
 @media (forced-colors: none) {
-  /* Small neutral controls remain raised from the participant-tinted prose. */
   :is(.chat-group:is(.user, .chat-group--forwarded), .chat-session-activity__message)
-    .chat-bubble:not(.chat-bubble--tool-shell)
-    :is(.chat-message-load-error__retry, .task-list-item-checkbox:not(:checked)) {
-    background: var(--chat-composer-surface, var(--popover));
+    .chat-bubble:not(.chat-bubble--tool-shell) {
+    .task-list-item-checkbox:not(:checked) {
+      background: var(--chat-composer-surface, var(--popover));
+    }
+
+    /* Interaction overlays follow the actual bubble instead of importing canvas paint. */
+    :is(.chat-text, .chat-thinking) :where(details > summary:hover) {
+      background: var(--surface-hover);
+    }
+
+    .chat-message-load-error__retry {
+      background: var(--surface-selected);
+    }
+
+    .chat-message-load-error__retry:hover {
+      background: var(--surface-selected-hover);
+    }
   }
 }
 
