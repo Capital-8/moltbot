@@ -695,6 +695,7 @@ describe("durable pre-reply run failure", () => {
       const report = entries[0] as { details: { error: string } };
       expect(report.details.error.length).toBeLessThanOrEqual(512);
       expect(report.details.error).not.toContain("\n");
+      expect(report.details.error).toMatch(/upload failed$/);
       const lastRunError = loadSessionEntry(target)?.lastRunError;
       expect(lastRunError).not.toContain(secret);
       expect(lastRunError).not.toContain("abcdefghijklmnopqrstuvwxyz");
@@ -717,8 +718,13 @@ describe("durable pre-reply run failure", () => {
     },
     {
       name: "Unicode diagnostic context",
-      prefix: `Worker: ${"🦞".repeat(200)}: `,
+      prefix: `Worker: ${"🦞".repeat(400)}: `,
       context: "Worker:",
+    },
+    {
+      name: "repeated allocator warnings",
+      prefix: '<jemalloc>: failed to open "/var/tmp/jeprof/gw.123.0.u0.heap"\n'.repeat(20),
+      context: "<jemalloc>:",
     },
   ])("retains the terminal cause of a bounded $name", async ({ prefix, context }) => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
@@ -735,6 +741,12 @@ describe("durable pre-reply run failure", () => {
       expect(failed?.lastRunError).toContain(cause);
       expect(failed?.lastRunError?.length).toBeLessThanOrEqual(160);
       expect(failed?.lastRunError).not.toMatch(/[\uD800-\uDFFF]/u);
+      expect(await reports()).toMatchObject([
+        {
+          content: expect.stringContaining(cause),
+          details: { error: expect.stringContaining(cause) },
+        },
+      ]);
     });
   });
 

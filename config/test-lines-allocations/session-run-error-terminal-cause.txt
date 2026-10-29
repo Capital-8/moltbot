@@ -1,0 +1,2 @@
+# Persisted failure notices must retain terminal causes after long warnings and redact before truncation.
+12
