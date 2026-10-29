@@ -9,15 +9,13 @@ const loadDefaultStream = createLazyRuntimeModule(() => import("../../stream.js"
 type MoonshotThinkingType = "enabled" | "disabled";
 type MoonshotThinkingKeep = "all";
 type MoonshotPayloadFinalizer = (result: unknown, payload: Record<string, unknown>) => unknown;
-const MOONSHOT_ALWAYS_THINKING = {
-  "kimi-k2.7-code": "low",
-  "kimi-k2.7-code-highspeed": "low",
-  "kimi-k3": "max",
-  "kimi-k3.1-pro": "max",
-  "kimi-k3.1-pro-highspeed": "max",
-} as const;
 const FIXED_SAMPLING_FIELDS = "temperature top_p n presence_penalty frequency_penalty".split(" ");
-type MoonshotAlwaysThinkingEffort = "low" | "max";
+/** Always-on thinking; `effort` is the fixed reasoning_effort, absent for a plain on switch. */
+type MoonshotAlwaysThinking = { effort?: string };
+type MoonshotThinkingFacts = {
+  thinkingLevelMap?: Partial<Record<string, string | null>>;
+  compat?: unknown;
+};
 
 function normalizeMoonshotThinkingType(value: unknown): MoonshotThinkingType | undefined {
   const type = asPayloadRecord(value)?.type ?? value;
@@ -52,23 +50,28 @@ function ensureMoonshotToolCallReasoningContent(payload: Record<string, unknown>
   }
 }
 
-function resolveAlwaysThinkingEffort(
-  modelId: string,
+// A row that maps `off` to null always thinks; with listed efforts it runs at the highest one.
+function resolveAlwaysThinking(
+  model: MoonshotThinkingFacts,
   directMoonshotModel: boolean,
-): MoonshotAlwaysThinkingEffort | undefined {
-  const effort = MOONSHOT_ALWAYS_THINKING[modelId as keyof typeof MOONSHOT_ALWAYS_THINKING];
-  // K3-family max effort is the direct Moonshot API contract; proxies map effort themselves.
-  return effort && (effort !== "max" || directMoonshotModel) ? effort : undefined;
+): MoonshotAlwaysThinking | undefined {
+  if (model.thinkingLevelMap?.off !== null) {
+    return undefined;
+  }
+  const efforts = asPayloadRecord(model.compat)?.supportedReasoningEfforts;
+  const effort = Array.isArray(efforts) ? (efforts.at(-1) as string | undefined) : undefined;
+  // A fixed effort is the direct Moonshot API contract; proxies map effort themselves.
+  return effort && !directMoonshotModel ? undefined : { effort };
 }
 
 function sanitizeAlwaysThinkingPayload(
   payload: Record<string, unknown>,
-  effort: MoonshotAlwaysThinkingEffort,
+  { effort }: MoonshotAlwaysThinking,
 ): void {
   delete payload.thinking;
   delete payload.reasoningEffort;
   FIXED_SAMPLING_FIELDS.forEach((field) => Reflect.deleteProperty(payload, field));
-  if (effort === "max") {
+  if (effort) {
     payload.reasoning_effort = effort;
   } else {
     delete payload.reasoning_effort;
@@ -81,7 +84,7 @@ function sanitizeAlwaysThinkingPayload(
 function prepareThinkingPayload(
   payload: Record<string, unknown>,
   modelId: string,
-  directMoonshotModel: boolean,
+  alwaysThinking: MoonshotAlwaysThinking | undefined,
   thinkingType?: MoonshotThinkingType,
   thinkingKeep?: MoonshotThinkingKeep,
 ) {
@@ -92,11 +95,10 @@ function prepareThinkingPayload(
     payload.thinking = { type: thinkingType };
     effectiveThinkingType = thinkingType;
   }
-  const effort = resolveAlwaysThinkingEffort(payloadModelId, directMoonshotModel);
-  if (effort) {
-    sanitizeAlwaysThinkingPayload(payload, effort);
+  if (alwaysThinking) {
+    sanitizeAlwaysThinkingPayload(payload, alwaysThinking);
     return (finalPayload: Record<string, unknown>) => {
-      sanitizeAlwaysThinkingPayload(finalPayload, effort);
+      sanitizeAlwaysThinkingPayload(finalPayload, alwaysThinking);
       ensureMoonshotToolCallReasoningContent(finalPayload);
     };
   }
@@ -154,10 +156,10 @@ export function createMoonshotThinkingWrapper(
   return function moonshotThinkingStream(model, context, options) {
     const modelId = model.id.trim().toLowerCase();
     const directMoonshotModel = normalizeOptionalLowercaseString(model.provider) === "moonshot";
-    const alwaysThinkingEffort = resolveAlwaysThinkingEffort(modelId, directMoonshotModel);
-    const streamModel = alwaysThinkingEffort ? { ...model, reasoning: true } : model;
-    const streamOptions = alwaysThinkingEffort
-      ? { ...options, reasoning: alwaysThinkingEffort }
+    const alwaysThinking = resolveAlwaysThinking(model, directMoonshotModel);
+    const streamModel = alwaysThinking ? { ...model, reasoning: true } : model;
+    const streamOptions = alwaysThinking
+      ? { ...options, reasoning: (alwaysThinking.effort ?? "low") as "low" | "max" }
       : options;
     return underlying(streamModel, context, {
       ...streamOptions,
@@ -169,7 +171,7 @@ export function createMoonshotThinkingWrapper(
         const postThinking = prepareThinkingPayload(
           record,
           modelId,
-          directMoonshotModel,
+          alwaysThinking,
           thinkingType,
           thinkingKeep,
         );

@@ -19,8 +19,8 @@ import {
   parseBooleanValue,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
-  isKimiCodeEnabledOnlyModelId,
-  isKimiK3ModelId,
+  isKimiCodeEnabledOnlyModel,
+  isKimiK3Model,
   KIMI_K3_THINKING_EFFORTS,
 } from "./provider-policy-api.js";
 
@@ -219,12 +219,13 @@ export function wrapKimiProviderStream(ctx: ProviderWrapStreamFnContext): Stream
   return (model, context, options) => {
     const api = ctx.sourceApi ?? model.api;
     const anthropic = api === "anthropic-messages";
-    const k3 = anthropic && isKimiK3ModelId(model.id);
-    const openaiK3 = api === "openai-completions" && isKimiK3ModelId(model.id);
+    const k3Model = isKimiK3Model(model.id, model);
+    const k3 = anthropic && k3Model;
+    const openaiK3 = api === "openai-completions" && k3Model;
     const requestedLevel = options?.reasoning ?? ctx.thinkingLevel ?? (k3 ? "high" : undefined);
     const thinkingLevel =
       anthropic &&
-      isKimiCodeEnabledOnlyModelId(model.id) &&
+      isKimiCodeEnabledOnlyModel(model.id, model) &&
       (!requestedLevel || requestedLevel === "off")
         ? k3
           ? "high"

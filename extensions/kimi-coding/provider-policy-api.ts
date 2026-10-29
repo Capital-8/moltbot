@@ -3,20 +3,24 @@ import type {
   ProviderDefaultThinkingPolicyContext,
   ProviderThinkingProfile,
 } from "openclaw/plugin-sdk/plugin-entry";
+import manifest from "./openclaw.plugin.json" with { type: "json" };
 
-// K3.1 Pro shares K3's efforts and adaptive request shape, but Kimi Code rejects disabled thinking.
-const KIMI_K3_1_MODEL_IDS = ["k3.1-pro", "k3.1-pro-highspeed"] as const;
-export const KIMI_K3_MODEL_IDS = ["k3", "k3-256k", "kimi-k3", ...KIMI_K3_1_MODEL_IDS] as const;
-const KIMI_K3_LEGACY_MODEL_IDS = ["k3[1m]"] as const;
-// Kimi Code's K2.8 backend leaks reasoning when thinking is disabled; K3.1 Pro rejects it.
-const KIMI_CODE_ENABLED_ONLY_MODEL_IDS = [
-  "kimi-for-coding",
-  "kimi-for-coding-highspeed",
-  // Legacy aliases of kimi-for-coding.
-  "kimi-code",
-  "k2p5",
-  ...KIMI_K3_1_MODEL_IDS,
-] as const;
+type KimiThinkingFacts = Pick<ProviderDefaultThinkingPolicyContext, "thinkingLevelMap"> & {
+  compat?: object | null;
+};
+
+const MANIFEST_ROWS: ReadonlyMap<string, KimiThinkingFacts> = new Map(
+  manifest.modelCatalog.providers.kimi.models.map((row) => [row.id, row]),
+);
+const MODEL_ALIASES: ReadonlyMap<string, string> = new Map(
+  Object.entries(manifest.modelIdNormalization.providers.kimi.aliases),
+);
+// Self-hosted K3 serves this wire ID, which has no Kimi Code catalog row; thinking stays off by
+// default there (README "Catalog notes").
+const KIMI_K3_SELF_HOSTED_MODEL_ID = "kimi-k3";
+// Kimi Code's K2.8 backend leaks reasoning when thinking is disabled. Released readers still
+// offer `off` for these rows, so `off: null` in hosted data would change them.
+const KIMI_CODE_ENABLED_ONLY_MODEL_IDS = new Set(["kimi-for-coding", "kimi-for-coding-highspeed"]);
 
 export const KIMI_K3_THINKING_EFFORTS = {
   minimal: "low",
@@ -38,33 +42,52 @@ const KIMI_K3_THINKING_LEVELS = [
   { id: "max" },
 ] as const satisfies ProviderThinkingProfile["levels"];
 
-export function isKimiK3ModelId(modelId: string): boolean {
-  const normalized = modelId.trim().toLowerCase();
-  return (
-    KIMI_K3_MODEL_IDS.includes(normalized as (typeof KIMI_K3_MODEL_IDS)[number]) ||
-    KIMI_K3_LEGACY_MODEL_IDS.includes(normalized as (typeof KIMI_K3_LEGACY_MODEL_IDS)[number])
-  );
+function readEfforts(compat: object | null | undefined): readonly unknown[] | undefined {
+  const efforts = (compat as { supportedReasoningEfforts?: unknown } | null | undefined)
+    ?.supportedReasoningEfforts;
+  return Array.isArray(efforts) ? efforts : undefined;
 }
 
-/** Kimi Code models whose backend cannot honor disabled thinking. */
-export function isKimiCodeEnabledOnlyModelId(modelId: string): boolean {
+function normalizeModelId(modelId: string): string {
   const normalized = modelId.trim().toLowerCase();
-  return KIMI_CODE_ENABLED_ONLY_MODEL_IDS.some((id) => id === normalized);
+  return MODEL_ALIASES.get(normalized) ?? normalized;
 }
 
-export function resolveThinkingProfile({
-  modelId,
-}: ProviderDefaultThinkingPolicyContext): ProviderThinkingProfile {
-  if (isKimiK3ModelId(modelId)) {
+/** K3-family rows list their efforts; the request then uses adaptive thinking with that effort. */
+export function isKimiK3Model(modelId: string, facts?: KimiThinkingFacts | null): boolean {
+  const id = normalizeModelId(modelId);
+  const efforts = readEfforts(facts?.compat) ?? readEfforts(MANIFEST_ROWS.get(id)?.compat);
+  return id === KIMI_K3_SELF_HOSTED_MODEL_ID || (efforts?.length ?? 0) > 0;
+}
+
+/** Kimi Code models whose backend cannot honor disabled thinking: their row maps `off` to null. */
+export function isKimiCodeEnabledOnlyModel(
+  modelId: string,
+  facts?: KimiThinkingFacts | null,
+): boolean {
+  const id = normalizeModelId(modelId);
+  const map =
+    facts?.thinkingLevelMap && "off" in facts.thinkingLevelMap
+      ? facts.thinkingLevelMap
+      : MANIFEST_ROWS.get(id)?.thinkingLevelMap;
+  return map?.off === null || KIMI_CODE_ENABLED_ONLY_MODEL_IDS.has(id);
+}
+
+export function resolveThinkingProfile(
+  context: ProviderDefaultThinkingPolicyContext,
+): ProviderThinkingProfile {
+  const enabledOnly = isKimiCodeEnabledOnlyModel(context.modelId, context);
+  if (isKimiK3Model(context.modelId, context)) {
     return {
-      levels: isKimiCodeEnabledOnlyModelId(modelId)
+      levels: enabledOnly
         ? KIMI_K3_THINKING_LEVELS.filter(({ id }) => id !== "off")
         : KIMI_K3_THINKING_LEVELS,
-      defaultLevel: modelId.trim().toLowerCase() === "kimi-k3" ? "off" : "high",
+      defaultLevel:
+        context.modelId.trim().toLowerCase() === KIMI_K3_SELF_HOSTED_MODEL_ID ? "off" : "high",
       preserveWhenCatalogReasoningFalse: true,
     };
   }
-  if (isKimiCodeEnabledOnlyModelId(modelId)) {
+  if (enabledOnly) {
     return { levels: [{ id: "low", label: "on" }], defaultLevel: "low" };
   }
   return {

@@ -8,8 +8,9 @@ import {
 } from "openclaw/plugin-sdk/provider-stream-shared";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
-  isMoonshotAlwaysThinkingModelId,
+  isMoonshotAlwaysThinkingModel,
   isMoonshotK3NativeVideoRoute,
+  withMoonshotThinkingFacts,
 } from "./provider-policy-api.js";
 
 const VIDEO_PREFIX = "data:video/mp4;base64,";
@@ -32,7 +33,7 @@ export function wrapMoonshotStream(
   requestBytesExclusive = MOONSHOT_REQUEST_BYTES_EXCLUSIVE,
 ): StreamFn {
   const underlying = ctx.streamFn ?? streamSimple;
-  if (simple && !isMoonshotAlwaysThinkingModelId(ctx.modelId)) {
+  if (simple && !isMoonshotAlwaysThinkingModel(ctx.modelId, ctx.model)) {
     return underlying;
   }
   const withVideoContext: StreamFn = (model, context, options) =>
@@ -41,7 +42,7 @@ export function wrapMoonshotStream(
           underlying(model, providerContext as never, options),
         )
       : underlying(model, context, options);
-  return createMoonshotThinkingWrapper(
+  const thinking = createMoonshotThinkingWrapper(
     withVideoContext,
     resolveMoonshotThinkingType({
       configuredThinking: ctx.extraParams?.thinking,
@@ -80,4 +81,6 @@ export function wrapMoonshotStream(
       return result;
     },
   );
+  return (model, context, options) =>
+    thinking(withMoonshotThinkingFacts(model.id, model), context, options);
 }

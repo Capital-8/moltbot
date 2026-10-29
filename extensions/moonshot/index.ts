@@ -16,7 +16,7 @@ import {
   MOONSHOT_DEFAULT_MODEL_REF,
 } from "./provider-catalog.js";
 import {
-  isMoonshotAlwaysThinkingModelId,
+  isMoonshotAlwaysThinkingModel,
   isMoonshotK3NativeVideoRoute,
   resolveThinkingProfile,
 } from "./provider-policy-api.js";
@@ -101,7 +101,7 @@ export default defineSingleProviderPluginEntry({
     wrapStreamFn: wrapMoonshotStream,
     wrapSimpleCompletionStreamFn: (ctx) => wrapMoonshotStream(ctx, true),
     resolveThinkingProfile,
-    isModernModelRef: ({ modelId }) => isMoonshotAlwaysThinkingModelId(modelId),
+    isModernModelRef: ({ modelId }) => isMoonshotAlwaysThinkingModel(modelId),
   },
   register(api) {
     api.registerMediaUnderstandingProvider({

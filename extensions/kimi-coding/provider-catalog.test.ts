@@ -3,7 +3,7 @@ import { parseModelRef } from "openclaw/plugin-sdk/provider-model-shared";
 import { expect, it } from "vitest";
 import manifest from "./openclaw.plugin.json" with { type: "json" };
 import { buildKimiCodingProvider, normalizeKimiCodingModelId } from "./provider-catalog.js";
-import { KIMI_K3_MODEL_IDS } from "./provider-policy-api.js";
+import { isKimiK3Model } from "./provider-policy-api.js";
 
 const catalog = manifest.modelCatalog.providers.kimi;
 
@@ -64,10 +64,11 @@ it("builds the bundled Kimi coding defaults", () => {
 
 it("covers every K3 catalog row with the K3 thinking policy", () => {
   const ids = buildKimiCodingProvider()
-    .models.filter((model) => model.thinkingLevelMap)
+    .models.filter((model) => model.thinkingLevelMap?.max)
     .map((model) => model.id);
 
-  expect(KIMI_K3_MODEL_IDS).toEqual(expect.arrayContaining([...ids, "kimi-k3"]));
+  expect(ids.filter((id) => !isKimiK3Model(id))).toEqual([]);
+  expect(isKimiK3Model("kimi-k3")).toBe(true);
 });
 
 it.each([

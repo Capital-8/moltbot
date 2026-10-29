@@ -92,7 +92,8 @@ it("createMoonshotThinkingWrapper: sanitizes an async caller replacement for K2.
   };
   const wrapped = createMoonshotThinkingWrapper(baseStreamFn, "disabled", "all");
 
-  await wrapped({ api: "openai-completions", id: modelId } as never, {} as never, {
+  const row = { thinkingLevelMap: { off: null } };
+  await wrapped({ api: "openai-completions", id: modelId, ...row } as never, {} as never, {
     onPayload: async () => ({
       model: modelId,
       thinking: { type: "disabled" },
@@ -269,7 +270,7 @@ it("buildProviderStreamFamilyHooks: covers the stream family matrix", async () =
 
   const k27 = await check(
     keepStream,
-    { ...completions("kimi-k2.7-code"), reasoning: false },
+    { ...completions("kimi-k2.7-code"), thinkingLevelMap: { off: null }, reasoning: false },
     {
       tool_choice: toolChoice,
       temperature: 0,
@@ -296,7 +297,13 @@ it("buildProviderStreamFamilyHooks: covers the stream family matrix", async () =
 
   const k3 = await check(
     keepStream,
-    { ...completions("kimi-k3"), provider: "moonshot", reasoning: false },
+    {
+      ...completions("kimi-k3"),
+      provider: "moonshot",
+      thinkingLevelMap: { off: null, max: "max" },
+      compat: { supportedReasoningEfforts: ["max"] },
+      reasoning: false,
+    },
     {
       thinking: { type: "disabled" },
       tool_choice: toolChoice,

@@ -234,6 +234,30 @@ describe("kimi tool-call markup wrapper", () => {
     },
   );
 
+  it("reads K3 enabled-only thinking from a catalog row with no bundled entry", () => {
+    const captured = createPayloadCapturingStream({ thinking: { type: "enabled" } });
+    const wrapped = wrapKimiProviderStream({
+      provider: "kimi",
+      modelId: "k-future",
+      thinkingLevel: "off",
+      streamFn: captured.streamFn,
+    });
+    void wrapped(
+      {
+        ...KIMI_MODEL,
+        id: "k-future",
+        thinkingLevelMap: { off: null, high: "high" },
+        compat: { supportedReasoningEfforts: ["low", "high", "max"] },
+      } as Model<"anthropic-messages">,
+      KIMI_CONTEXT,
+      {},
+    );
+    expect(captured.captured.payload).toEqual({
+      thinking: adaptiveThinking,
+      output_config: { effort: "high" },
+    });
+  });
+
   it.each([
     ["off", undefined],
     ["minimal", "low"],

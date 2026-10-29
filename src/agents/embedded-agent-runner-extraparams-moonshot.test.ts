@@ -15,6 +15,15 @@ function createReadToolCallHistory() {
   ];
 }
 
+const MOONSHOT_ROW_FACTS: Record<string, object> = {
+  "kimi-k3": {
+    thinkingLevelMap: { off: null, max: "max" },
+    compat: { supportedReasoningEfforts: ["max"] },
+  },
+  "kimi-k2.7-code": { thinkingLevelMap: { off: null } },
+  "kimi-k2.7-code-highspeed": { thinkingLevelMap: { off: null } },
+};
+
 function moonshotConfig(modelId: string, params: Record<string, unknown>) {
   return { agents: { defaults: { models: { [`moonshot/${modelId}`]: { params } } } } };
 }
@@ -27,7 +36,12 @@ beforeEach(() => {
     resolveProviderExtraParamsForTransport: () => undefined,
     wrapProviderStreamFn: (params) => {
       if (params.provider === "moonshot") {
-        return buildProviderStreamFamilyHooks("moonshot-thinking").wrapStreamFn?.(params.context);
+        const wrapped = buildProviderStreamFamilyHooks("moonshot-thinking").wrapStreamFn?.(
+          params.context,
+        );
+        // The Moonshot plugin supplies these facts from its catalog rows.
+        return (model, context, options) =>
+          wrapped?.({ ...model, ...MOONSHOT_ROW_FACTS[model.id] }, context, options);
       }
       return params.context.streamFn;
     },

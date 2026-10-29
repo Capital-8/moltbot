@@ -151,6 +151,28 @@ describe("moonshot provider plugin", () => {
       expect(provider.isModernModelRef?.(ref)).toBe(true);
     },
   );
+
+  it("reads always-max thinking from a catalog row with no bundled entry", async () => {
+    const facts = {
+      thinkingLevelMap: { off: null, low: null, high: null, xhigh: "max", max: "max" },
+      compat: { supportedReasoningEfforts: ["max"] },
+    };
+    const ref = { provider: "moonshot", modelId: "kimi-future" };
+    expect(provider.resolveThinkingProfile?.({ ...ref, reasoning: true, ...facts })).toEqual({
+      levels: [{ id: "max", label: "max" }],
+      defaultLevel: "max",
+      preserveWhenCatalogReasoningFalse: true,
+    });
+    const captured = createCapturedThinkingConfigStream();
+    const wrapped = provider.wrapStreamFn?.({
+      ...ref,
+      thinkingLevel: "off",
+      streamFn: captured.streamFn,
+    } as never);
+    const model = { ...makeModel("kimi-future"), ...facts } as Model<"openai-completions">;
+    await wrapped?.(model, { messages: [] } as Context, {});
+    expect(captured.getCapturedPayload()).toMatchObject({ reasoning_effort: "max" });
+  });
 });
 
 const MP4_A = "data:video/mp4;base64,YWFhYWFhYWFhYWFhYWFhYQ==";

@@ -14,7 +14,7 @@ import { applyKimiCodeConfig } from "./onboard.js";
 import manifest from "./openclaw.plugin.json" with { type: "json" };
 import { buildKimiCodingProvider, normalizeKimiCodingModelId } from "./provider-catalog.js";
 import {
-  isKimiK3ModelId,
+  isKimiK3Model,
   KIMI_K3_THINKING_EFFORTS,
   resolveThinkingProfile,
 } from "./provider-policy-api.js";
@@ -111,7 +111,7 @@ export default defineSingleProviderPluginEntry({
     buildReplayPolicy: () => ({ preserveSignatures: false }),
     normalizeResolvedModel: ({ model }) => {
       const normalizedId = normalizeKimiCodingModelId(model.id);
-      if (isKimiK3ModelId(normalizedId)) {
+      if (isKimiK3Model(normalizedId, model)) {
         // Session setup clamps before the stream wrapper can map the selected effort, and
         // hosted catalog rows such as K3.1 do not carry the bundled K3 map.
         return {
@@ -125,7 +125,7 @@ export default defineSingleProviderPluginEntry({
     normalizeModelId: ({ modelId }) => normalizeKimiCodingModelId(modelId),
     resolveThinkingProfile,
     wrapSimpleCompletionStreamFn: (ctx) =>
-      isKimiK3ModelId(ctx.modelId) ? wrapKimiProviderStream(ctx) : ctx.streamFn,
+      isKimiK3Model(ctx.modelId, ctx.model) ? wrapKimiProviderStream(ctx) : ctx.streamFn,
     wrapStreamFn: wrapKimiProviderStream,
   },
 });
