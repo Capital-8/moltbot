@@ -3,35 +3,68 @@ import {
   type SessionProjectionState,
   type SessionProjectionEntry,
 } from "@openclaw/gateway-client/browser";
-import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
+import {
+  nativeHistoryMessageSourceIdentity,
+  nativeHistoryMessageSourceId,
+} from "../../lib/chat/history-message-identity.ts";
 import type {
   ChatHistoryCursor,
   ChatHistoryPagination,
   ChatHistorySegment,
 } from "./chat-history-pagination.ts";
+import {
+  CHAT_HISTORY_REQUEST_LIMIT,
+  CHAT_HISTORY_REQUEST_MAX_BYTES,
+} from "./chat-history-request-params.ts";
 
 // Counts admitted message entries, before renderer grouping. Source groups and
 // lifecycle-owned pins are indivisible exceptions, not a whole-pane heap bound.
 export const CHAT_RESIDENT_ENTRY_TARGET = 400;
 export const CHAT_RESIDENT_WEIGHT_TARGET = 3 * 1024 * 1024;
-const MAX_RESIDENT_SEGMENTS = 8;
+export const MAX_RESIDENT_SEGMENTS = 8;
 const messageWeights = new WeakMap<object, number>();
 
-function admitResidentLiveSources(
+/** Body mutations revoke wire provenance without changing coverage or opaque edges. */
+export function invalidateChatHistoryPacketSources(
   pagination: ChatHistoryPagination,
+  sources: ReadonlySet<string>,
+): ChatHistoryPagination {
+  let changed = false;
+  const segments = pagination.segments?.map((segment) => {
+    if (!segment.boundedPacket || !segment.sources.some((source) => sources.has(source))) {
+      return segment;
+    }
+    changed = true;
+    return { ...segment, boundedPacket: undefined };
+  });
+  return changed ? { ...pagination, segments } : pagination;
+}
+
+function admitResidentLiveSources(
+  initialPagination: ChatHistoryPagination,
   entries: readonly SessionProjectionEntry[],
 ): ChatHistoryPagination {
-  if (!pagination.segments?.length) {
-    return pagination;
+  if (!initialPagination.segments?.length) {
+    return initialPagination;
   }
-  const segments = [...pagination.segments];
-  const owners = new Map(
-    segments.flatMap((segment, index) => segment.sources.map((source) => [source, index] as const)),
-  );
   const sourceEntries = entries.map((entry) => ({
     entry,
     source: nativeHistoryMessageSourceIdentity(entry.message),
   }));
+  // A source can gain fragments or replace its body without changing its name.
+  // Revoke every overlapping packet, without turning flag-only changes into repartitioning.
+  const pagination = invalidateChatHistoryPacketSources(
+    initialPagination,
+    new Set(
+      sourceEntries.flatMap(({ entry, source }) =>
+        source && (entry.live || entry.pending) ? [source] : [],
+      ),
+    ),
+  );
+  const segments = [...pagination.segments!];
+  const owners = new Map(
+    segments.flatMap((segment, index) => segment.sources.map((source) => [source, index] as const)),
+  );
   const firstHeld = sourceEntries.findIndex(({ source }) => source !== null && owners.has(source));
   const lastHeld = sourceEntries.findLastIndex(
     ({ source }) => source !== null && owners.has(source),
@@ -61,6 +94,7 @@ function admitResidentLiveSources(
     segments[owner] = {
       ...segment,
       sources,
+      boundedPacket: undefined,
       ...(segment.hasNewer && insertion === segment.sources.length
         ? { newerCursor: undefined }
         : {}),
@@ -95,7 +129,8 @@ function admitResidentLiveSources(
         const group = groups.get(source);
         if (
           chunks.at(-1)!.length &&
-          (count + (group?.count ?? 0) > 80 || weight + (group?.weight ?? 0) > 256 * 1024)
+          (count + (group?.count ?? 0) > CHAT_HISTORY_REQUEST_LIMIT ||
+            weight + (group?.weight ?? 0) > CHAT_HISTORY_REQUEST_MAX_BYTES)
         ) {
           chunks.push([]);
           count = 0;
@@ -136,6 +171,29 @@ function messageWeight(message: unknown): number {
   return JSON.stringify([message]).length - 1;
 }
 
+function sourceGroups(messages: readonly unknown[]) {
+  const groups = new Map<string, { count: number; weight: number; reopenable: boolean }>();
+  for (const message of messages) {
+    const source = nativeHistoryMessageSourceIdentity(message);
+    if (source) {
+      const previous = groups.get(source);
+      groups.set(source, {
+        count: (previous?.count ?? 0) + 1,
+        weight: (previous?.weight ?? 0) + messageWeight(message),
+        reopenable: Boolean(nativeHistoryMessageSourceId(message)),
+      });
+    }
+  }
+  return groups;
+}
+
+function intrinsicGroup(group: { count: number; weight: number } | undefined) {
+  return Boolean(
+    group &&
+    (group.count > CHAT_RESIDENT_ENTRY_TARGET || group.weight + 1 > CHAT_RESIDENT_WEIGHT_TARGET),
+  );
+}
+
 export function prepareChatHistorySegment(
   messages: readonly unknown[],
   pagination: ChatHistoryPagination,
@@ -161,6 +219,22 @@ export function prepareChatHistorySegment(
   };
 }
 
+/** Prepare immutable wire facts once, before tentative batch admission reuses them. */
+export function prepareChatHistoryPacket(
+  messages: readonly unknown[],
+  pagination: ChatHistoryPagination,
+  newerCursor?: string,
+): ChatHistorySegment {
+  const page = prepareChatHistorySegment(messages, pagination, newerCursor);
+  if (
+    page.sources.length <= CHAT_HISTORY_REQUEST_LIMIT &&
+    new TextEncoder().encode(JSON.stringify(messages)).byteLength <= CHAT_HISTORY_REQUEST_MAX_BYTES
+  ) {
+    page.boundedPacket = true;
+  }
+  return page;
+}
+
 /** Each opaque edge certifies its own complete server response segment. */
 export function extendChatHistoryWindow(
   previous: ChatHistoryPagination,
@@ -170,8 +244,9 @@ export function extendChatHistoryWindow(
   newerCursor: string | undefined,
   direction: "older" | "newer" | "tail",
   retainedCoverage?: ChatHistoryPagination,
+  preparedPacket?: ChatHistorySegment,
 ): ChatHistoryPagination {
-  const page = prepareChatHistorySegment(incoming, pagination, newerCursor);
+  const page = preparedPacket ?? prepareChatHistorySegment(incoming, pagination, newerCursor);
   const held = previous.segments ?? [
     prepareChatHistorySegment(previousMessages, previous, previous.newerCursor),
   ];
@@ -181,10 +256,16 @@ export function extendChatHistoryWindow(
     // Hidden/overlap-only traversal advances a raw edge, not a new body page.
     segments = [...held];
     if (direction === "older") {
-      segments[0] = { ...held[0]!, hasOlder: page.hasOlder, olderCursor: page.olderCursor };
+      segments[0] = {
+        ...held[0]!,
+        hasOlder: page.hasOlder,
+        olderCursor: page.olderCursor,
+        boundedPacket: undefined,
+      };
     } else {
       segments[segments.length - 1] = {
         ...held.at(-1)!,
+        boundedPacket: undefined,
         hasNewer: page.hasNewer,
         newerCursor: page.newerCursor,
       };
@@ -196,7 +277,11 @@ export function extendChatHistoryWindow(
       .map((segment) =>
         segment.hasNewer
           ? segment
-          : Object.assign({}, segment, { hasNewer: true, newerCursor: undefined }),
+          : Object.assign({}, segment, {
+              hasNewer: true,
+              newerCursor: undefined,
+              boundedPacket: undefined,
+            }),
       );
     // A refresh must not rewind a hidden-page edge just because its visible
     // prefix is empty. The reconciliation owner already proved continuity.
@@ -205,6 +290,7 @@ export function extendChatHistoryWindow(
       : [
           {
             ...page,
+            boundedPacket: undefined,
             hasOlder: previous.hasMore,
             olderCursor: previous.hasMore ? previous.olderCursor : undefined,
           },
@@ -229,7 +315,7 @@ export function extendChatHistoryWindow(
         });
         return sources.length === segment.sources.length
           ? segment
-          : Object.assign({}, segment, { sources });
+          : Object.assign({}, segment, { sources, boundedPacket: undefined });
       });
     }
     segments =
@@ -239,8 +325,14 @@ export function extendChatHistoryWindow(
           ? [page, ...retained]
           : [...retained, page];
   }
+  // Record this at authoritative admission, never by reselecting a different
+  // oversized group during warm publication or reader movement.
+  const intrinsicSource =
+    [...sourceGroups(incoming)].findLast(([, group]) => intrinsicGroup(group))?.[0] ??
+    (direction !== "tail" || retainedCoverage ? previous.intrinsicSource : undefined);
   return {
     ...(retainedCoverage ?? pagination),
+    ...(intrinsicSource ? { intrinsicSource } : {}),
     segments,
     ...(direction === "older" && previous.hasNewer
       ? {
@@ -254,37 +346,92 @@ export function extendChatHistoryWindow(
   };
 }
 
+/** Only a real source ID can reopen an interior cut. A bounded original packet
+ * keeps both opaque edges while its unkeyed reader still owns that packet. */
+export function chatHistoryReaderBridge(
+  messages: readonly unknown[],
+  pagination: ChatHistoryPagination,
+  reader: string | null | undefined,
+  direction: "older" | "newer",
+): readonly string[] {
+  const segments = pagination.segments ?? [];
+  const index = segments.findIndex((segment) => reader && segment.sources.includes(reader));
+  if (index < 0 || !reader) {
+    return [];
+  }
+  const segment = segments[index]!;
+  const sourceIndex = segment.sources.indexOf(reader);
+  const intact =
+    segment.boundedPacket &&
+    !messages.some(
+      (message) =>
+        nativeHistoryMessageSourceIdentity(message) === reader &&
+        nativeHistoryMessageSourceId(message),
+    );
+  return direction === "older"
+    ? [
+        ...segments.slice(0, index).flatMap((page) => page.sources),
+        ...segment.sources.slice(0, intact ? undefined : sourceIndex + 1),
+      ]
+    : [
+        ...segment.sources.slice(intact ? 0 : sourceIndex),
+        ...segments.slice(index + 1).flatMap((page) => page.sources),
+      ];
+}
+
 /** Bound the reloadable portion, then let the reducer preserve exact live pins. */
 export function selectChatHistoryResidency(
   messages: readonly unknown[],
   pagination: ChatHistoryPagination,
   direction: "older" | "newer" | "tail" = "tail",
   readerSource?: string | null,
-): { messages: readonly unknown[]; pagination: ChatHistoryPagination } {
+): { messages: readonly unknown[]; pagination: ChatHistoryPagination; withinBudget: boolean } {
   if (!pagination.segments?.length) {
-    return { messages, pagination };
+    return { messages, pagination, withinBudget: true };
   }
   const segments = [...pagination.segments];
   const protectsReader = (segment: ChatHistorySegment) =>
     readerSource != null && segment.sources.includes(readerSource);
-  const groups = new Map<string, { count: number; weight: number }>();
-  for (const message of messages) {
-    const source = nativeHistoryMessageSourceIdentity(message);
-    if (!source) {
-      continue;
-    }
-    const previous = groups.get(source);
-    groups.set(source, {
-      count: (previous?.count ?? 0) + 1,
-      weight: (previous?.weight ?? 0) + messageWeight(message),
-    });
-  }
+  const groups = sourceGroups(messages);
+  const intrinsicSource = intrinsicGroup(groups.get(pagination.intrinsicSource ?? ""))
+    ? pagination.intrinsicSource
+    : undefined;
+  const readerPacket = segments.find(
+    (segment) =>
+      protectsReader(segment) && segment.boundedPacket && !groups.get(readerSource!)?.reopenable,
+  );
+  // Ordinary packets remain charged. Only the unavoidable over-budget packet
+  // containing an unkeyed reader may retain its original opaque boundaries.
+  const packetCost = readerPacket?.sources.reduce(
+    (cost, source) => {
+      const group = groups.get(source);
+      if (source !== intrinsicSource && !(source === readerSource && intrinsicGroup(group))) {
+        cost.count += group?.count ?? 0;
+        cost.weight += group?.weight ?? 0;
+      }
+      return cost;
+    },
+    { count: 0, weight: 1 },
+  );
+  const packetException =
+    packetCost &&
+    (packetCost.count > CHAT_RESIDENT_ENTRY_TARGET ||
+      packetCost.weight > CHAT_RESIDENT_WEIGHT_TARGET)
+      ? new Set(readerPacket!.sources)
+      : null;
   const sources = () => new Set(segments.flatMap((segment) => segment.sources));
   const withinBudget = () => {
     let count = 0;
     let weight = 1;
     for (const source of sources()) {
       const group = groups.get(source);
+      if (
+        source === intrinsicSource ||
+        (source === readerSource && intrinsicGroup(group)) ||
+        (segments.includes(readerPacket!) && packetException?.has(source))
+      ) {
+        continue;
+      }
       count += group?.count ?? 0;
       weight += group?.weight ?? 0;
     }
@@ -295,37 +442,62 @@ export function selectChatHistoryResidency(
     );
   };
   let trimmed = false;
-  while (segments.length > 1 && !withinBudget()) {
-    const fromRight =
-      direction === "older" ? !protectsReader(segments.at(-1)!) : protectsReader(segments[0]!);
-    if (fromRight) {
-      segments.pop();
-      const last = segments.at(-1)!;
-      segments[segments.length - 1] = { ...last, hasNewer: true };
-    } else {
-      segments.shift();
-      segments[0] = { ...segments[0]!, hasOlder: true };
+  const trimEnd = (fromRight: boolean) => {
+    const index = fromRight ? segments.length - 1 : 0;
+    const segment = segments[index]!;
+    if (segments.length > 1 && !protectsReader(segment)) {
+      if (fromRight) {
+        segments.pop();
+        segments[segments.length - 1] = { ...segments.at(-1)!, hasNewer: true };
+      } else {
+        segments.shift();
+        segments[0] = { ...segments[0]!, hasOlder: true };
+      }
+      return true;
     }
-    trimmed = true;
-  }
-  // Old warm records can contain a larger unsegmented page. Reopen an actual
-  // retained source boundary after group trimming; never reuse an interior edge.
-  while (
-    segments.length === 1 &&
-    !protectsReader(segments[0]!) &&
-    segments[0]!.sources.length > 1 &&
-    !withinBudget()
-  ) {
-    const segment = segments[0]!;
-    segments[0] =
-      direction === "older"
-        ? {
-            ...segment,
-            sources: segment.sources.slice(0, -1),
-            hasNewer: true,
-            newerCursor: undefined,
-          }
-        : { ...segment, sources: segment.sources.slice(1), hasOlder: true, olderCursor: undefined };
+    if (segment === readerPacket) {
+      return false;
+    }
+    // Every new interior edge must be reopenable by its actual source ID.
+    const cut = fromRight
+      ? segment.sources.findLastIndex(
+          (source, sourceIndex) =>
+            sourceIndex < segment.sources.length - 1 &&
+            groups.get(source)?.reopenable &&
+            (!readerSource || !segment.sources.slice(sourceIndex + 1).includes(readerSource)),
+        )
+      : segment.sources.findIndex(
+          (source, sourceIndex) =>
+            sourceIndex > 0 &&
+            groups.get(source)?.reopenable &&
+            (!readerSource || !segment.sources.slice(0, sourceIndex).includes(readerSource)),
+        );
+    if (cut < 0) {
+      return false;
+    }
+    segments[index] = fromRight
+      ? {
+          ...segment,
+          boundedPacket: undefined,
+          sources: segment.sources.slice(0, cut + 1),
+          hasNewer: true,
+          newerCursor: undefined,
+        }
+      : {
+          ...segment,
+          boundedPacket: undefined,
+          sources: segment.sources.slice(cut),
+          hasOlder: true,
+          olderCursor: undefined,
+        };
+    return true;
+  };
+  while (!withinBudget()) {
+    const fromRight =
+      direction === "older" || (direction === "tail" && protectsReader(segments[0]!));
+    if (!trimEnd(fromRight) && !trimEnd(!fromRight)) {
+      break;
+    }
     trimmed = true;
   }
   const first = segments[0]!;
@@ -363,11 +535,13 @@ export function selectChatHistoryResidency(
             : { needsNewerBoundary: true as const }),
         }
       : {}),
+    ...(intrinsicSource && retained.has(intrinsicSource) ? { intrinsicSource } : {}),
     segments,
   };
   return {
     messages: admitted,
     pagination: nextPagination,
+    withinBudget: withinBudget(),
   };
 }
 

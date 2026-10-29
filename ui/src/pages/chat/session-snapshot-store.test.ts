@@ -289,6 +289,84 @@ describe("persistent chat session snapshots", () => {
     },
   );
 
+  it.each([true, false])(
+    "serializes the admitted intrinsic fact only while its source survives disk trimming (retained=%s)",
+    async (retained) => {
+      const giant = Array.from({ length: 401 }, (_, index) => ({
+        role: "assistant",
+        content: `fragment-${index}`,
+        __openclaw: { id: "giant", seq: retained ? 90 : 1 },
+      }));
+      const ordinary = Array.from({ length: 89 }, (_, index) => ({
+        role: "user",
+        content: `message-${index}`,
+        __openclaw: { id: `ordinary-${index}`, seq: index + (retained ? 1 : 2) },
+      }));
+      await seed({
+        messages: retained ? [...ordinary, ...giant] : [...giant, ...ordinary],
+        sessionId: "session-1",
+        pagination: { hasMore: false, intrinsicSource: "id:giant" },
+      });
+      const stored = await readStoredChatSnapshotRecord(sessionKey);
+      expect(stored).toBeDefined();
+      const restored = await readSnapshot();
+      assert(restored);
+      expect(restored.messages).toEqual(retained ? giant : ordinary.slice(-80));
+      expect(restored.pagination.intrinsicSource).toBe(retained ? "id:giant" : undefined);
+      const host = makeChatHost();
+      applyChatCacheSnapshot(host, restored);
+      expect(host.chatMessages).toEqual(restored.messages);
+      expect(host.chatHistoryPagination.intrinsicSource).toBe(retained ? "id:giant" : undefined);
+    },
+  );
+
+  it.each([true, false])(
+    "preserves only admitted intact packet provenance through strict store restore (certified=%s)",
+    async (certified) => {
+      const messages = [1, 2].map((seq) => ({
+        role: "assistant",
+        content: "message-" + seq,
+        __openclaw: { seq },
+      }));
+      await seed({
+        messages,
+        sessionId: "session-1",
+        pagination: {
+          hasMore: true,
+          olderCursor: "before-1",
+          hasNewer: true,
+          newerCursor: "after-2",
+          ...(certified
+            ? {
+                segments: [
+                  {
+                    sources: ["seq:1", "seq:2"],
+                    olderCursor: "before-1",
+                    newerCursor: "after-2",
+                    hasOlder: true,
+                    hasNewer: true,
+                    boundedPacket: true,
+                  },
+                ],
+              }
+            : {}),
+        },
+      });
+      const restored = await readSnapshot();
+      assert(restored);
+      expect(restored.messages).toEqual(messages);
+      const host = makeChatHost();
+      applyChatCacheSnapshot(host, restored);
+      expect(host.chatHistoryPagination.segments?.[0]?.boundedPacket).toBe(
+        certified ? true : undefined,
+      );
+      expect(host.chatHistoryPagination).toMatchObject({
+        olderCursor: "before-1",
+        newerCursor: "after-2",
+      });
+    },
+  );
+
   it("preserves authoritative empty coverage through store read and cache application", async () => {
     await seed({
       messages: [],

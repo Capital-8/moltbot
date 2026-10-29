@@ -13,6 +13,8 @@ import { subscribeToSharedRequest } from "../../lib/shared-request-subscription.
 import {
   chatHistoryRequestParams,
   CHAT_HISTORY_TOOL_RESULT_MAX_CHARS,
+  CHAT_HISTORY_REQUEST_LIMIT,
+  CHAT_HISTORY_REQUEST_MAX_BYTES,
 } from "./chat-history-request-params.ts";
 import { retryChatHistoryRead } from "./chat-history-retry.ts";
 import {
@@ -32,7 +34,7 @@ import {
   acceptsHistoryResult,
   type InitialChatHistoryReceipt,
 } from "./chat-history-state.ts";
-import { chatHistoryWindowBoundary } from "./chat-history-window.ts";
+import { chatHistoryWindowBoundary, prepareChatHistoryPacket } from "./chat-history-window.ts";
 import type { ChatHistorySessions, ChatState } from "./chat-state-contract.ts";
 import type { ChatHistoryState } from "./chat-transcript-metadata.ts";
 import type { ChatHistoryRunObservation } from "./run-lifecycle.ts";
@@ -64,11 +66,6 @@ export function captureChatHistoryRun(
       }
     : undefined;
 }
-
-// Directional pages fit the reloadable resident window. Source groups and the
-// Gateway's hard byte/fetchable-message contract still own individual replies.
-const CHAT_HISTORY_OLDER_PAGE_LIMIT = 80;
-const CHAT_HISTORY_OLDER_PAGE_MAX_BYTES = 256 * 1024;
 
 export function attachHistoryActivity<Result extends ChatHistoryResponse>(result: Result): Result {
   if (isHistoryCursor(result) && result.kind === "reset") {
@@ -363,24 +360,36 @@ export async function requestChatSessionSnapshot(
   };
 }
 
-type OlderHistorySelector = { cursor: string } | { messageId: string; sessionId: string };
+type OlderHistorySelector =
+  | { cursor: string; limit?: 1 }
+  | { messageId: string; sessionId: string };
 
-export function chatHistoryOlderSelector(state: ChatState): OlderHistorySelector {
+export function chatHistoryPageSelector(
+  state: ChatState,
+  direction: "older" | "newer",
+): OlderHistorySelector {
   const pagination = state.chatHistoryPagination;
-  if (pagination.hasMore) {
-    if (pagination.needsBoundary) {
+  const hasMore = direction === "older" ? pagination.hasMore : pagination.hasNewer;
+  const needsBoundary =
+    direction === "older"
+      ? pagination.hasMore && pagination.needsBoundary
+      : pagination.needsNewerBoundary;
+  const cursor =
+    direction === "older" ? pagination.hasMore && pagination.olderCursor : pagination.newerCursor;
+  if (hasMore) {
+    if (needsBoundary) {
       const messageId = nativeHistoryMessageSourceId(
-        chatHistoryWindowBoundary(state.chatMessages, pagination, "older"),
+        chatHistoryWindowBoundary(state.chatMessages, pagination, direction),
       );
       const sessionId = state.currentSessionId?.trim();
       if (messageId && sessionId) {
         return { messageId, sessionId };
       }
-    } else if (pagination.olderCursor) {
-      return { cursor: pagination.olderCursor };
+    } else if (cursor) {
+      return { cursor };
     }
   }
-  throw new Error("History has no usable older boundary. Reload the session to retry.");
+  throw new Error(`History has no usable ${direction} boundary. Reload the session to retry.`);
 }
 
 async function requestOlderChatHistoryPage(
@@ -404,108 +413,92 @@ async function requestOlderChatHistoryPage(
             sessionKey,
             toolResultMaxChars: CHAT_HISTORY_TOOL_RESULT_MAX_CHARS,
             ...(requestAgentId ? { agentId: requestAgentId } : {}),
-            limit: "messageId" in selector ? 1 : CHAT_HISTORY_OLDER_PAGE_LIMIT,
-            maxBytes: CHAT_HISTORY_OLDER_PAGE_MAX_BYTES,
+            limit: "messageId" in selector ? 1 : CHAT_HISTORY_REQUEST_LIMIT,
+            maxBytes: CHAT_HISTORY_REQUEST_MAX_BYTES,
             ...selector,
           },
           { signal: readSignal },
         ),
     }),
   );
+  const messages = visibleChatHistoryMessages(result.messages);
   return {
     ...result,
-    messages: visibleChatHistoryMessages(result.messages),
+    messages,
+    packet: prepareChatHistoryPacket(
+      messages,
+      resolveChatHistoryPagination(result),
+      result.newerCursor,
+    ),
+  };
+}
+
+/** One version claim owns every serial packet until its atomic admission. */
+export function createChatHistoryPageRead(state: ChatState, speculative = false) {
+  if (!state.client || !state.connected) {
+    return null;
+  }
+  const client = state.client;
+  const sessionKey = state.sessionKey;
+  const agentId = isUiSelectedGlobalSessionKey(state, sessionKey)
+    ? resolveUiSelectedSessionAgentId(state)
+    : undefined;
+  // Speculation must not invalidate a concurrent authoritative tail refresh.
+  const claim = speculative
+    ? {
+        client,
+        connectionEpoch: state.connectionEpoch,
+        sessionKey,
+        sessions: state.sessions,
+        version: chatHistoryRequests(state).historyVersion,
+        agentId,
+      }
+    : beginHistoryRequest(state, client, state.connectionEpoch, sessionKey, agentId);
+  return {
+    claim,
+    isCurrent: () => acceptsHistoryResult(state, claim),
+    read: async (selector: OlderHistorySelector, signal: AbortSignal) => {
+      const result = await requestOlderChatHistoryPage(
+        client,
+        sessionKey,
+        agentId,
+        selector,
+        () => acceptsHistoryResult(state, claim),
+        signal,
+      );
+      return !signal.aborted && acceptsHistoryResult(state, claim) ? result : undefined;
+    },
   };
 }
 
 export async function loadOlderChatHistoryPage(
   state: ChatState,
   selector: OlderHistorySelector,
-  signal?: AbortSignal,
+  signal = new AbortController().signal,
 ): Promise<ChatHistoryResult | undefined> {
-  if (!state.client || !state.connected) {
-    return undefined;
-  }
-  const client = state.client;
-  const sessionKey = state.sessionKey;
-  const requestAgentId = isUiSelectedGlobalSessionKey(state, sessionKey)
-    ? resolveUiSelectedSessionAgentId(state)
-    : undefined;
-  const ownership = beginHistoryRequest(
-    state,
-    client,
-    state.connectionEpoch,
-    sessionKey,
-    requestAgentId,
-  );
-  const result = await requestOlderChatHistoryPage(
-    client,
-    sessionKey,
-    requestAgentId,
-    selector,
-    () => acceptsHistoryResult(state, ownership),
-    signal,
-  );
-  if (signal?.aborted || !acceptsHistoryResult(state, ownership)) {
-    return undefined;
-  }
-  return result;
+  return createChatHistoryPageRead(state)?.read(selector, signal);
 }
 
-export type StagedOlderHistoryPage = NonNullable<
-  Awaited<ReturnType<typeof fetchStagedOlderHistoryPage>>
->;
+export type StagedOlderHistoryPage = {
+  claim: NonNullable<ReturnType<typeof createChatHistoryPageRead>>["claim"];
+  requestedCursor: string;
+  limit?: 1;
+  result: ChatHistoryResult;
+};
 
-// The staged prefetch deliberately skips beginHistoryRequest: request
-// ownership is last-writer-wins, so a background fetch bumping the version
-// could invalidate a concurrent tail load's apply. The claim below carries the
-// same facts and the pane validates it at consume time instead.
-export async function fetchStagedOlderHistoryPage(
-  state: ChatState,
-  cursor: string,
-  signal?: AbortSignal,
-) {
-  if (!state.client || !state.connected) {
-    return undefined;
-  }
-  const client = state.client;
-  const connectionEpoch = state.connectionEpoch;
-  const sessionKey = state.sessionKey;
-  const version = chatHistoryRequests(state).historyVersion;
-  const requestAgentId = isUiSelectedGlobalSessionKey(state, sessionKey)
-    ? resolveUiSelectedSessionAgentId(state)
-    : undefined;
-  const claim = {
-    client,
-    connectionEpoch,
-    sessionKey,
-    sessions: state.sessions,
-    version,
-    agentId: requestAgentId,
-  };
-  const result = await requestOlderChatHistoryPage(
-    client,
-    sessionKey,
-    requestAgentId,
-    { cursor },
-    () => acceptsHistoryResult(state, claim),
-    signal,
-  );
-  return { claim, requestedCursor: cursor, result };
-}
-
-/** A staged page is valid only for the exact connection, session, and the
- * pagination cursor it was fetched at; any drift means the reactive path must
- * refetch (tail reloads may replace the window, resets reuse session keys). */
+/** Validate the published root, never the chain's private advancing frontier. */
 export function isStagedOlderHistoryPageCurrent(
   state: ChatState,
   staged: StagedOlderHistoryPage,
+  rootCursor = staged.requestedCursor,
+  direction: "older" | "newer" = "older",
 ): boolean {
-  const claim = staged.claim;
   const pagination = state.chatHistoryPagination;
   return (
-    acceptsHistoryResult(state, claim) &&
-    pagination.hasMore &&
-    pagination.olderCursor === staged.requestedCursor
+    acceptsHistoryResult(state, staged.claim) &&
+    (direction === "older" ? pagination.hasMore : pagination.hasNewer) === true &&
+    (direction === "older"
+      ? pagination.hasMore && pagination.olderCursor
+      : pagination.newerCursor) === rootCursor
   );
 }

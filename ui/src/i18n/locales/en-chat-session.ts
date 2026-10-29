@@ -228,6 +228,7 @@ const enChatSession = {
       loadingEarlier: "Loading earlier…",
       retryEarlier: "Retry earlier messages",
       earlierUnavailable: "Couldn’t load earlier messages",
+      historyCapacity: "Move further into the loaded messages, then try again.",
       earlierInterrupted: "History refreshed before this page loaded. Try again.",
       earlierConnecting: "Waiting for connection…",
       earlierHint: "Scroll up for earlier messages",

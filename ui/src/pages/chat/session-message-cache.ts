@@ -29,7 +29,11 @@ import { prepareChatHistorySegment, selectChatHistoryResidency } from "./chat-hi
 import type { ChatSessionStateSnapshot } from "./chat-session-state-snapshot.ts";
 import type { ChatHistoryState, ChatTranscriptMetadata } from "./chat-transcript-metadata.ts";
 import { createTranscriptMemo } from "./components/chat-transcript-memo.ts";
-import { readChatSessionProjectionScope, reduceChatSessionProjection } from "./history-merge.ts";
+import {
+  getChatSessionProjection,
+  readChatSessionProjectionScope,
+  reduceChatSessionProjection,
+} from "./history-merge.ts";
 import { getSessionCacheValue, setSessionCacheValue } from "./session-cache.ts";
 import type { ChatDetailsSnapshot } from "./session-details-snapshot-schema.ts";
 import type { SessionSnapshotInvalidationReason } from "./session-snapshot-invalidation-events.ts";
@@ -409,6 +413,15 @@ export function applyChatCacheSnapshot(
       ),
     ],
   };
+  // Initialize the old projection before installing incoming coverage; its
+  // empty first publication must not retire the accepted snapshot's source fact.
+  const scope = readChatSessionProjectionScope(state, {
+    sessionId: snapshot.sessionId,
+    ...(Object.hasOwn(snapshot, "displayedLeafEntryId")
+      ? { activeLeafEntryId: snapshot.displayedLeafEntryId }
+      : {}),
+  });
+  getChatSessionProjection(state, scope);
   state.chatHistoryPagination = selectChatHistoryResidency(
     snapshot.messages,
     pagination,
@@ -416,14 +429,7 @@ export function applyChatCacheSnapshot(
   reduceChatSessionProjection(
     state,
     { type: "snapshotLoaded", messages: snapshot.messages },
-    {
-      scope: readChatSessionProjectionScope(state, {
-        sessionId: snapshot.sessionId,
-        ...(Object.hasOwn(snapshot, "displayedLeafEntryId")
-          ? { activeLeafEntryId: snapshot.displayedLeafEntryId }
-          : {}),
-      }),
-    },
+    { scope },
   );
   state.currentSessionId = snapshot.sessionId;
   state.chatDisplayedLeafEntryId = snapshot.displayedLeafEntryId;
@@ -618,7 +624,9 @@ function boundChatSessionSnapshot(snapshot: ChatSessionSnapshot): CachedChatSess
       return null;
     }
     const pagination =
-      start === 0 ? snapshot.pagination : trimmedChatHistoryPagination(snapshot.pagination);
+      start === 0
+        ? snapshot.pagination
+        : trimmedChatHistoryPagination(snapshot.pagination, snapshot.messages, start);
     const rowDisplay = projectChatRowDisplay(snapshot, start);
     const envelope = { ...snapshot, messages: [], rowDisplay, pagination };
     let weight: number | null;

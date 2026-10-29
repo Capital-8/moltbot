@@ -2,7 +2,7 @@ import { createSessionProjection, reduceSessionProjection } from "@openclaw/gate
 import { expectDefined } from "@openclaw/normalization-core/expect";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect, it } from "vitest";
-import { admitChatHistoryPage } from "../../../ui/src/pages/chat/chat-history-snapshot.ts";
+import { admitChatHistoryPages } from "../../../ui/src/pages/chat/chat-history-snapshot.ts";
 import { prepareChatHistorySegment } from "../../../ui/src/pages/chat/chat-history-window.ts";
 import { makeChatHost } from "../../../ui/src/pages/chat/chat-host.test-support.ts";
 import {
@@ -131,6 +131,53 @@ it("keeps every source fragment when a one-message tail is followed by older his
     expect(older.hasMore).toBe(false);
   });
 });
+
+it.each(["olderCursor", "newerCursor"] as const)(
+  "refines the same %s from eighty raw sources to one complete projected source",
+  async (direction) => {
+    await withHistoryState(async () => {
+      const fragments = Array.from({ length: 401 }, (_, index) => ({
+        type: "text",
+        text: `Fragment ${index}`,
+        textSignature: JSON.stringify({ v: 1, id: `fragment-${index}`, phase: "commentary" }),
+      }));
+      const { read } = await seedHistory([
+        makeMessage("Before", { role: "user" }),
+        { role: "assistant", content: fragments },
+        makeMessage("After", { role: "user" }),
+      ]);
+      const initial = await read({
+        messageId: direction === "olderCursor" ? "message-2" : "message-0",
+        limit: 1,
+      });
+      const cursor = expectDefined(initial[direction], "original opaque edge");
+      const broad = await read({ cursor, limit: 80, maxBytes: 256 * 1024 });
+      const refined = await read({ cursor, limit: 1, maxBytes: 256 * 1024 });
+      expect(messageIds(broad)).toEqual(
+        direction === "olderCursor"
+          ? ["message-0", ...Array.from({ length: 401 }, () => "message-1")]
+          : [...Array.from({ length: 401 }, () => "message-1"), "message-2"],
+      );
+      expect(messageIds(refined)).toEqual(Array.from({ length: 401 }, () => "message-1"));
+      expect(refined.messages).toEqual(
+        (broad.messages as unknown[]).filter(
+          (message) => readChatHistoryMessageId(message) === "message-1",
+        ),
+      );
+      const continuation = await read({
+        cursor: expectDefined(refined[direction], "refined opaque continuation"),
+        limit: 1,
+      });
+      expect(messageIds(continuation)).toEqual([
+        direction === "olderCursor" ? "message-0" : "message-2",
+      ]);
+      const reverse = direction === "olderCursor" ? "newerCursor" : "olderCursor";
+      expect(messageIds(await read({ cursor: continuation[reverse], limit: 1 }))).toEqual(
+        messageIds(refined),
+      );
+    });
+  },
+);
 
 it.each(["anchor", "tail", "offset"] as const)(
   "walks both sides of a byte-limited %s page without gaps and rejects replaced transcripts",
@@ -271,7 +318,7 @@ it("consumes a sparse empty tail's raw cursor after an earlier live receipt is a
       messages,
       newerCursor: typeof older.newerCursor === "string" ? older.newerCursor : undefined,
     };
-    expect(admitChatHistoryPage(host, result, "older")).toBe("messages");
+    expect(admitChatHistoryPages(host, [result], "older")).toBe("messages");
     const expected = ["message-0", "message-1", "message-2"];
     expect(host.chatMessages.map(readChatHistoryMessageId)).toEqual(expected);
     expect(host.chatHistoryPagination.hasMore).toBe(false);
@@ -285,7 +332,7 @@ it("consumes a sparse empty tail's raw cursor after an earlier live receipt is a
       hasOlder: true,
       hasNewer: false,
     });
-    expect(admitChatHistoryPage(host, result, "older")).toBe(false);
+    expect(admitChatHistoryPages(host, [result], "older")).toBe(false);
     expect(host.chatMessages.map(readChatHistoryMessageId)).toEqual(expected);
     expect(host.chatHistoryPagination.hasMore).toBe(false);
     expect(host.chatHistoryPagination.hasNewer).toBeUndefined();
@@ -471,7 +518,7 @@ it.each(["source ID", "tool identity"])(
     });
     expect(Buffer.byteLength(JSON.stringify(page.messages))).toBeLessThan(1024);
     const host = makeChatHost({ sessionKey: scope.sessionKey, currentSessionId: scope.sessionId });
-    expect(admitChatHistoryPage(host, page, "around")).toBe("messages");
+    expect(admitChatHistoryPages(host, [page], "around")).toBe("messages");
     expect(host.chatMessages).toEqual(page.messages);
     expect(page.messages[1]).toHaveProperty("__openclaw", { seq: 2 });
     expect(host.chatHistoryPagination.segments?.flatMap((segment) => segment.sources)).toEqual([

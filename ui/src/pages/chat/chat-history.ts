@@ -2,10 +2,7 @@ import type { ChatEvent } from "../../../../packages/gateway-protocol/src/schema
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { AgentsListResult } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
-import {
-  nativeHistoryMessageSourceId,
-  nativeHistoryMessageSourceIdentity,
-} from "../../lib/chat/history-message-identity.ts";
+import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
 import {
   areUiSessionKeysEquivalent,
   isUiSelectedGlobalSessionKey,
@@ -20,10 +17,8 @@ import { CHAT_HISTORY_REQUEST_LIMIT, loadOlderChatHistoryPage } from "./chat-his
 import { formatChatHistoryLoadError } from "./chat-history-retry.ts";
 import type { ChatHistoryResult, ObservedChatHistoryResult } from "./chat-history-snapshot.ts";
 import {
-  admitChatHistoryPage,
+  admitChatHistoryPages,
   clearHistoryCursor,
-  reopenChatHistoryBoundary,
-  resolveChatHistoryPagination,
   historySessionId,
 } from "./chat-history-snapshot.ts";
 import {
@@ -31,7 +26,6 @@ import {
   getChatHistoryLoadState,
   setChatHistoryLoad,
 } from "./chat-history-state.ts";
-import { chatHistoryWindowBoundary } from "./chat-history-window.ts";
 import { readChatInputRunIds } from "./chat-pending-inputs.ts";
 import type { ChatRunStartupPhase } from "./chat-run-startup.ts";
 import type { ChatHistoryHost, ChatState } from "./chat-state-contract.ts";
@@ -138,7 +132,7 @@ export async function restoreChatHistoryBookmark(
     ) {
       throw new Error(t("chat.messages.originalUnavailable"));
     }
-    admitChatHistoryPage(state, result, "around");
+    admitChatHistoryPages(state, [result], "around");
     if (!containsBookmark()) {
       throw new Error(t("chat.messages.originalUnavailable"));
     }
@@ -367,67 +361,6 @@ export type ChatEventPayload = {
   localModelMayStillBeFinishing?: boolean;
   yielded?: true;
 };
-
-export async function loadNewerChatHistoryWindow(
-  state: ChatHistoryHost & ChatScrollHost,
-  signal: AbortSignal,
-  isCurrent: () => boolean,
-): Promise<boolean> {
-  const sessionId = state.currentSessionId;
-  try {
-    for (let attempt = 0; attempt < 3 && state.chatHistoryPagination.hasNewer; attempt++) {
-      const pagination = state.chatHistoryPagination;
-      const held = chatHistoryWindowBoundary(state.chatMessages, pagination, "newer");
-      const boundary = pagination.needsNewerBoundary
-        ? nativeHistoryMessageSourceIdentity(held)
-        : null;
-      const messageId = boundary ? nativeHistoryMessageSourceId(held) : null;
-      const selector =
-        boundary && messageId && sessionId
-          ? { messageId, sessionId }
-          : pagination.newerCursor
-            ? { cursor: pagination.newerCursor }
-            : null;
-      if (!selector) {
-        throw new Error("History has no usable newer boundary. Reload the session to retry.");
-      }
-      const result = await loadOlderChatHistoryPage(state, selector, signal);
-      if (!isCurrent()) {
-        return false;
-      }
-      if (!result) {
-        state.lastError = t("chat.thread.earlierInterrupted");
-        return false;
-      }
-      if (requiresChatHistoryReload(result, sessionId ?? "", boundary)) {
-        await reloadChatHistoryWindow(state);
-        return true;
-      }
-      const next = resolveChatHistoryPagination(result);
-      if (boundary) {
-        reopenChatHistoryBoundary(state, boundary, next, "newer");
-        continue;
-      }
-      if (next.newerCursor && next.newerCursor === pagination.newerCursor) {
-        throw new Error("History returned the same newer boundary. Reload the session to retry.");
-      }
-      const admitted = admitChatHistoryPage(state, result, "newer");
-      scheduleChatScroll(state, false);
-      if (admitted === "messages") {
-        return true;
-      }
-      if (!admitted) {
-        return false;
-      }
-    }
-    return false;
-  } catch (error) {
-    if (isCurrent()) {
-      state.lastError = formatChatHistoryLoadError(error);
-    }
-    return false;
-  }
-}
 
 export function restoreChatHistoryTail(
   state: ChatHistoryHost & ChatScrollHost,

@@ -14,6 +14,7 @@ import {
   getChatSessionProjection as projectionFor,
   readChatSessionProjectionScope as scopeFor,
   reconcileChatInputCustody,
+  retireChatSubmissionDisplay,
   reduceChatSessionProjection as reduceChat,
   setChatRunOwner,
   publishChatSessionProjection as publish,
@@ -317,6 +318,22 @@ it("publishes each pane reducer transition and displayed transcript together", (
   expect(composed.entries[1]?.live).toBe(false);
   publishMessages(owner, [liveUser, liveUser]);
   expect(projectionFor(owner).entries).toEqual(composed.entries);
+});
+
+it("accepts custody after a scope change without publishing an unaccepted empty projection", () => {
+  const { owner, deliver } = initialFixture(false);
+  const delivered = deliver();
+  const previous = message("assistant", "held prior session");
+  snapshot(owner, [previous]);
+  const displayed = owner.chatMessages;
+  owner.sessionKey = "agent:main:replacement";
+  retireChatSubmissionDisplay(owner, new Set(["initial-run"]));
+  expect(owner.chatMessages).toBe(displayed);
+  expect(delivered.pending).toBe(true);
+  owner.sessionKey = delivered.sessionKey;
+  retireChatSubmissionDisplay(owner, new Set(["initial-run"]));
+  expect(delivered.pending).toBe(false);
+  expect(owner.chatMessages).toBe(displayed);
 });
 
 it.each([false, true])("owns initial adoption with cached seed: %s", (cached) => {

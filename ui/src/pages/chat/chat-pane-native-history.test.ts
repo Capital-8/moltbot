@@ -80,7 +80,7 @@ it("keeps the aggregate oldest edge across a staged page and an appended tail re
   });
   await loadChatHistory(state, { deferBranches: true });
   await pane.loadOlderMessages();
-  await vi.waitFor(() => expect(pane.stagedOlder.load).toBeNull());
+  await vi.waitFor(() => expect(pane.stagedHistory.load).toBeNull());
   refreshed = true;
   await loadChatHistory(state, { deferBranches: true });
 
@@ -135,7 +135,7 @@ it("hands an empty cursor reset to authoritative history instead of adopting an 
   expect(request.mock.calls).toHaveLength(3);
   expect(request.mock.calls[2]![1]).not.toHaveProperty("cursor");
   expect(request.mock.calls[2]![1]).not.toHaveProperty("offset");
-  expect(pane.stagedOlder.page).toBeNull();
+  expect(pane.stagedHistory.page).toBeNull();
 });
 
 it("reopens a disk-trimmed held boundary after tail refresh without skipping discarded rows", async () => {

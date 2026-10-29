@@ -4,7 +4,6 @@ import {
   type CommandPaletteTargetDetail,
 } from "../../components/command-palette-contract.ts";
 import { t } from "../../i18n/index.ts";
-import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import {
   announceCatalogSessionContinued,
@@ -27,77 +26,44 @@ import { captureChatConnectionOwner } from "./chat-connection-owner.ts";
 import { rewindChatHistory, switchChatHistoryBranch } from "./chat-history-actions.ts";
 import { hasVisibleOlderHistoryPage } from "./chat-history-page-visibility.ts";
 import {
-  fetchStagedOlderHistoryPage,
-  chatHistoryOlderSelector,
-  isStagedOlderHistoryPageCurrent,
-  loadOlderChatHistoryPage,
-  type StagedOlderHistoryPage,
-} from "./chat-history-request.ts";
-import { formatChatHistoryLoadError } from "./chat-history-retry.ts";
-import {
-  admitChatHistoryPage,
-  reopenChatHistoryBoundary,
-  resolveChatHistoryPagination,
-  type ChatHistoryResult,
-} from "./chat-history-snapshot.ts";
-import {
   chatHistoryRequests,
   getChatHistoryLoadState,
   retireChatHistoryRead,
 } from "./chat-history-state.ts";
 import { syncSelectedSessionMessageSubscription } from "./chat-history-subscription.ts";
-import { chatHistoryWindowBoundary } from "./chat-history-window.ts";
-import {
-  loadChatHistory,
-  loadNewerChatHistoryWindow,
-  reloadChatHistoryWindow,
-  requiresChatHistoryReload,
-  resumePendingChatHistoryLoad,
-} from "./chat-history.ts";
+import { loadChatHistory, resumePendingChatHistoryLoad } from "./chat-history.ts";
+import { ChatPaneHistoryPackets } from "./chat-pane-history-packets.ts";
 import {
   CHAT_HISTORY_PREFETCH_EDGE_PX,
   CHAT_HISTORY_INTENT_IDLE_MS,
   clearPaneSessionHandoff,
   preparePaneSessionHandoff,
 } from "./chat-pane-shared.ts";
-import { ChatPaneSnapshotHydration } from "./chat-pane-snapshot-hydration.ts";
 import { saveChatTranscriptReadingPosition } from "./chat-pane-transcript-residency.ts";
 import { TranscriptHistoryInput } from "./chat-scroll-input.ts";
-import type { ChatState } from "./chat-state-contract.ts";
 import { refreshPageChat } from "./chat-state-refresh.ts";
 import { resolveChatAgentId } from "./chat-state-route.ts";
 import { readTranscriptViewport } from "./components/chat-transcript-scroll-events.ts";
 import { persistChatComposerState } from "./composer-draft-storage.ts";
 import { getChatSessionProjection, publishChatSessionProjection } from "./history-merge.ts";
-import { scheduleChatScroll } from "./scroll.ts";
 import { resetToolStream } from "./tool-stream-state.ts";
 
-export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
+export abstract class ChatPaneHistory extends ChatPaneHistoryPackets {
   private activeCatalogContinuation: symbol | null = null;
   private activeOlderLoad: Promise<boolean> | null = null;
   private activeOlderRead: AbortController | null = null;
   private activeNewerRead: AbortController | null = null;
   private historyViewportFillAttempted = false;
   private readonly historyInput = new TranscriptHistoryInput();
-  // Staged prefetch: after a consumed older page, the next page is fetched in
-  // the background and parked here, so the following boundary crossing
-  // prepends without a visible round trip. One slot per pane; the claim is
-  // validated at consume time. Catalog sessions stay reactive: their opaque
-  // cursor loads apply directly to pane state and cannot be parked.
-  // Viewport resets replace the owner; ordinary loads keep an in-flight prefetch joinable.
-  private stagedOlder: {
-    controller: AbortController;
-    page: StagedOlderHistoryPage | null;
-    load: Promise<void> | null;
-  } = { controller: new AbortController(), page: null, load: null };
-
-  private retireOlderMessagesReads(interrupted = false): void {
+  private retireOlderMessagesReads(interrupted = false, keep?: "newer"): void {
     this.olderLoadGeneration += 1;
     this.activeOlderLoad = null;
     this.activeOlderRead?.abort();
     this.activeOlderRead = null;
-    this.stagedOlder.controller.abort();
-    this.stagedOlder = { controller: new AbortController(), page: null, load: null };
+    if (this.stagedHistory.direction !== keep || !keep) {
+      this.stagedHistory.controller.abort();
+      this.stagedHistory = { controller: new AbortController(), page: null, load: null };
+    }
     if (this.history.loadingOlder) {
       if (interrupted) {
         this.history.olderError = t("chat.thread.earlierInterrupted");
@@ -179,7 +145,7 @@ export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
     if (!state?.chatHistoryPagination.hasNewer || this.activeNewerRead || state.chatLoading) {
       return false;
     }
-    this.retireOlderMessagesReads();
+    this.retireOlderMessagesReads(false, "newer");
     const read = new AbortController();
     this.activeNewerRead = read;
     const ownsConnection = captureChatConnectionOwner(state);
@@ -194,7 +160,7 @@ export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
       state.currentSessionId === sessionId &&
       resolveChatAgentId(state) === agentId;
     try {
-      return await loadNewerChatHistoryWindow(state, read.signal, isCurrent);
+      return await this.loadNativeHistoryPackets(state, "newer", true, read.signal, isCurrent);
     } finally {
       if (this.activeNewerRead === read) {
         this.activeNewerRead = null;
@@ -229,7 +195,7 @@ export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
     const historyLoading = catalogSession ? this.history.catalogLoading : this.state?.chatLoading;
     if (historyLoading) {
       this.historyObserverArmed = false;
-      if (this.history.loadingOlder || this.stagedOlder.load || this.stagedOlder.page) {
+      if (this.history.loadingOlder || this.stagedHistory.load || this.stagedHistory.page) {
         this.retireOlderMessagesReads(true);
       }
     }
@@ -421,14 +387,20 @@ export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
     if (this.activeOlderLoad) {
       return this.activeOlderLoad;
     }
+    this.activeNewerRead?.abort();
+    this.activeNewerRead = null;
+    if (this.stagedHistory.direction === "newer") {
+      this.stagedHistory.controller.abort();
+      this.stagedHistory = { controller: new AbortController(), page: null, load: null };
+    }
     const load = (async () => {
       // A sparse or overlapping page is cursor progress, not a visible result.
       // Keep boot autofill to one page; reader actions may cross three pages,
       // then yield so a long hidden interval cannot monopolize the connection.
       for (let page = 0; page < (readerIntent ? 3 : 1); page += 1) {
         const loaded = await this.performOlderMessagesLoad(readerIntent);
-        if (loaded !== "empty") {
-          return loaded;
+        if (loaded !== "empty" || !parseCatalogSessionKey(this.state?.sessionKey ?? "")) {
+          return loaded !== false;
         }
       }
       return true;
@@ -477,75 +449,17 @@ export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
           this.history.catalogMessages.slice(0, this.history.catalogMessages.length - count),
         );
       } else {
-        let result = this.takeStagedOlderPage(state);
-        if (!result && this.stagedOlder.load) {
-          // Join the in-flight prefetch instead of issuing a duplicate request.
-          this.history.loadingOlder = true;
-          await this.stagedOlder.load;
-          if (!isCurrent()) {
-            return false;
-          }
-          result = this.takeStagedOlderPage(state);
-        }
-        const pagination = state.chatHistoryPagination;
-        if (!pagination.hasMore || (!readerIntent && pagination.needsBoundary)) {
-          return false;
-        }
-        const expectedSessionId = state.currentSessionId?.trim() ?? "";
-        const selector = chatHistoryOlderSelector(state);
-        const boundary =
-          "messageId" in selector
-            ? nativeHistoryMessageSourceIdentity(
-                chatHistoryWindowBoundary(state.chatMessages, pagination, "older"),
-              )
-            : undefined;
-        const requestedCursor = pagination.olderCursor;
-        if (!result) {
-          this.history.loadingOlder = true;
-          result = (await loadOlderChatHistoryPage(state, selector, read.signal)) ?? null;
-        }
-        if (!isCurrent()) {
-          return false;
-        }
-        if (!result) {
-          // A same-session refresh may supersede the request without changing
-          // the pane. Preserve the cursor and make that interrupted action retryable.
-          this.history.olderError = t("chat.thread.earlierInterrupted");
-          return false;
-        }
-        if (requiresChatHistoryReload(result, expectedSessionId, boundary)) {
-          this.stagedOlder.controller.abort();
-          this.stagedOlder = { controller: new AbortController(), page: null, load: null };
-          await reloadChatHistoryWindow(state);
-          prepended = true;
-          return true;
-        }
-        const nextPagination = resolveChatHistoryPagination(result, pagination.totalMessages);
-        if (boundary) {
-          // Probe rows never enter presentation. This attempt spends one of the
-          // same three reader slots; the next attempt consumes the reopened edge.
-          reopenChatHistoryBoundary(state, boundary, nextPagination);
-          prepended = true;
-          visible = false;
-          return nextPagination.hasMore ? "empty" : true;
-        }
-        if (nextPagination.hasMore && nextPagination.olderCursor === requestedCursor) {
-          throw new Error("History returned the same older boundary. Reload the session to retry.");
-        }
-        const messages = result.messages ?? [];
-        visible = contributesContent(messages);
-        prepended = Boolean(admitChatHistoryPage(state, result, "older"));
-        scheduleChatScroll(state, false);
-        if (prepended && state.chatHistoryPagination.hasMore && readerIntent) {
-          this.stageNextOlderPage(state);
-        }
+        prepended = await this.loadNativeHistoryPackets(
+          state,
+          "older",
+          readerIntent,
+          read.signal,
+          isCurrent,
+        );
       }
     } catch (error) {
       if (isCurrent()) {
-        this.history.olderError = formatChatHistoryLoadError(error);
-        // Loading-row removal can emit a layout scroll. Align the tracker so it
-        // cannot masquerade as renewed user intent and consume the manual retry.
-        this.transcriptScrollTop = this.transcript.scrollElement?.scrollTop ?? null;
+        this.recordHistoryPacketFailure(state, "older", error);
       }
     } finally {
       if (this.activeOlderRead === read) {
@@ -559,48 +473,6 @@ export abstract class ChatPaneHistory extends ChatPaneSnapshotHydration {
       }
     }
     return prepended && !visible && this.hasOlderMessages() ? "empty" : prepended;
-  }
-
-  private stageNextOlderPage(state: ChatState): void {
-    if (this.stagedOlder.page || this.stagedOlder.load) {
-      return;
-    }
-    const pagination = state.chatHistoryPagination;
-    const cursor = pagination.hasMore && pagination.olderCursor;
-    if (!cursor) {
-      return;
-    }
-    const owner = this.stagedOlder;
-    // One async closure keeps the bookkeeping inside the awaited promise, so a
-    // joiner resuming from this load always observes the staged page and the
-    // cleared in-flight slot together. The owner guard keeps a stale
-    // finally (fetch outliving a viewport reset) off a successor's slot.
-    this.stagedOlder.load = (async () => {
-      try {
-        const staged = await fetchStagedOlderHistoryPage(state, cursor, owner.controller.signal);
-        if (staged && owner === this.stagedOlder && this.state === state) {
-          this.stagedOlder.page = staged;
-        }
-      } catch {
-        // Prefetch is best-effort: the reactive path owns retries, error
-        // surfacing, and the blocked-until-intent machinery.
-      } finally {
-        if (owner === this.stagedOlder) {
-          this.stagedOlder.load = null;
-        }
-      }
-    })();
-  }
-
-  // Single-consume: an invalid staged page is discarded rather than retried so
-  // stale prefetches can never shadow the reactive path's fresh cursor.
-  private takeStagedOlderPage(state: ChatState): ChatHistoryResult | null {
-    const staged = this.stagedOlder.page;
-    if (!staged) {
-      return null;
-    }
-    this.stagedOlder.page = null;
-    return isStagedOlderHistoryPageCurrent(state, staged) ? staged.result : null;
   }
 
   protected async continueCatalogSession(key: CatalogSessionKey) {

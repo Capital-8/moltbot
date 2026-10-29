@@ -84,7 +84,7 @@ export function nativeHistoryMessageIdentity(message: unknown): string | null {
 }
 
 /** Preserve projected siblings while removing only overlapping page occurrences. */
-export function prependUniqueNativeMessages(messages: unknown[], current: unknown[]): unknown[] {
+export function prependUniqueNativeMessages(messages: unknown[], current: unknown[]) {
   const incomingSources = new Set<string>();
   for (const message of messages) {
     const source = nativeHistoryMessageSourceIdentity(message);
@@ -93,7 +93,7 @@ export function prependUniqueNativeMessages(messages: unknown[], current: unknow
     }
   }
   const overlappingSources = new Map<string, number>();
-  const duplicateCounts = new Map<string, number>();
+  const duplicateCounts = new Map<string, { count: number; source: string }>();
   for (const [index, message] of current.entries()) {
     const source = nativeHistoryMessageSourceIdentity(message);
     if (!source || !incomingSources.has(source)) {
@@ -104,20 +104,26 @@ export function prependUniqueNativeMessages(messages: unknown[], current: unknow
     const identity = nativeHistoryMessageIdentity(message);
     if (identity) {
       overlappingSources.set(source, index + 1);
-      duplicateCounts.set(identity, (duplicateCounts.get(identity) ?? 0) + 1);
+      const duplicate = duplicateCounts.get(identity);
+      duplicateCounts.set(identity, { count: (duplicate?.count ?? 0) + 1, source });
     }
   }
   const insertions = new Map<number, unknown[]>();
+  const incomingExpandedSources = new Set<string>();
+  const currentExpandedSources = new Set<string>();
   let after = 0;
   for (const message of messages) {
     const source = nativeHistoryMessageSourceIdentity(message);
     const overlap = source ? overlappingSources.get(source) : undefined;
     const identity = overlap !== undefined ? nativeHistoryMessageIdentity(message) : null;
-    const remaining = identity ? (duplicateCounts.get(identity) ?? 0) : 0;
-    if (overlap !== undefined && identity && remaining > 0) {
-      duplicateCounts.set(identity, remaining - 1);
+    const duplicate = identity ? duplicateCounts.get(identity) : undefined;
+    if (overlap !== undefined && duplicate && duplicate.count > 0) {
+      duplicate.count -= 1;
       after = Math.max(after, overlap);
       continue;
+    }
+    if (overlap !== undefined && source) {
+      currentExpandedSources.add(source);
     }
     // Live receipts may already occupy an interior source of this server page.
     // Insert disjoint sources after that observed group, keeping current objects
@@ -126,6 +132,13 @@ export function prependUniqueNativeMessages(messages: unknown[], current: unknow
     const queued = insertions.get(position) ?? [];
     queued.push(message);
     insertions.set(position, queued);
+  }
+  // Carry occurrence facts into page admission: source names alone cannot
+  // certify a wire packet after either input contributes additional siblings.
+  for (const { count, source } of duplicateCounts.values()) {
+    if (count > 0) {
+      incomingExpandedSources.add(source);
+    }
   }
   const merged: unknown[] = [];
   for (let index = 0; index <= current.length; index += 1) {
@@ -136,5 +149,5 @@ export function prependUniqueNativeMessages(messages: unknown[], current: unknow
       merged.push(current[index]);
     }
   }
-  return merged;
+  return { messages: merged, incomingExpandedSources, currentExpandedSources };
 }

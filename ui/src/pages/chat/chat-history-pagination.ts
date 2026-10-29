@@ -1,12 +1,18 @@
+import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
+
 export type ChatHistorySegment = {
   sources: readonly string[];
   olderCursor?: string;
   newerCursor?: string;
   hasOlder: boolean;
   hasNewer: boolean;
+  // Only intact, bounded wire admission can certify otherwise unreopenable cuts.
+  boundedPacket?: true;
 };
 
 type ResidentHistoryCoverage = {
+  // Only the admitted indivisible source is exempt; reader custody is separate.
+  intrinsicSource?: string;
   newerCursor?: string;
   hasNewer?: true;
   needsNewerBoundary?: true;
@@ -36,9 +42,19 @@ export type ChatHistoryCursor = {
 
 export function trimmedChatHistoryPagination(
   pagination: ChatHistoryPagination,
+  messages: readonly unknown[],
+  start = 0,
 ): ChatHistoryPagination {
   return {
     hasMore: true,
+    ...(pagination.intrinsicSource &&
+    messages.some(
+      (message, index) =>
+        index >= start &&
+        nativeHistoryMessageSourceIdentity(message) === pagination.intrinsicSource,
+    )
+      ? { intrinsicSource: pagination.intrinsicSource }
+      : {}),
     needsBoundary: true,
     ...(pagination.hasNewer ? { hasNewer: true as const, needsNewerBoundary: true as const } : {}),
     ...(pagination.totalMessages !== undefined ? { totalMessages: pagination.totalMessages } : {}),

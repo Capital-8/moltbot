@@ -1,0 +1,286 @@
+import { t } from "../../i18n/index.ts";
+import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
+import { hasVisibleOlderHistoryPage } from "./chat-history-page-visibility.ts";
+import {
+  createChatHistoryPageRead,
+  chatHistoryPageSelector,
+  isStagedOlderHistoryPageCurrent,
+  type StagedOlderHistoryPage,
+} from "./chat-history-request.ts";
+import { formatChatHistoryLoadError } from "./chat-history-retry.ts";
+import {
+  admitChatHistoryPages,
+  prepareChatHistoryPages,
+  reopenChatHistoryBoundary,
+  resolveChatHistoryPagination,
+} from "./chat-history-snapshot.ts";
+import { chatHistoryWindowBoundary, MAX_RESIDENT_SEGMENTS } from "./chat-history-window.ts";
+import { reloadChatHistoryWindow, requiresChatHistoryReload } from "./chat-history.ts";
+import { ChatPaneSnapshotHydration } from "./chat-pane-snapshot-hydration.ts";
+import { scheduleChatScroll } from "./scroll.ts";
+
+export abstract class ChatPaneHistoryPackets extends ChatPaneSnapshotHydration {
+  // One bounded reply may wait after an admission or capacity stop. Its root
+  // claim is revalidated on consumption; reset/hide/retirement replace this owner.
+  // Catalog pages keep their separate reactive lifecycle and never enter this slot.
+  protected stagedHistory: {
+    controller: AbortController;
+    direction?: "older" | "newer";
+    page: StagedOlderHistoryPage | null;
+    load: Promise<void> | null;
+    capacityNotice?: string;
+  } = { controller: new AbortController(), page: null, load: null };
+
+  protected async loadNativeHistoryPackets(
+    state: NonNullable<ChatPaneHistoryPackets["state"]>,
+    direction: "older" | "newer",
+    readerIntent: boolean,
+    signal: AbortSignal,
+    ownsIntent: () => boolean,
+  ): Promise<boolean> {
+    const owner = this.stagedHistory;
+    const take = () => {
+      const page = owner.page;
+      owner.page = null;
+      return page &&
+        owner.direction === direction &&
+        isStagedOlderHistoryPageCurrent(state, page, page.requestedCursor, direction)
+        ? page
+        : null;
+    };
+    let staged = take();
+    if (!staged && owner.direction === direction && owner.load) {
+      if (direction === "older") {
+        this.history.loadingOlder = true;
+      }
+      await owner.load;
+      if (!ownsIntent()) {
+        return false;
+      }
+      staged = take();
+    }
+    const read = createChatHistoryPageRead(state);
+    if (!read) {
+      return false;
+    }
+    const sessionId = state.currentSessionId?.trim() ?? "";
+    const edge = () =>
+      direction === "older"
+        ? state.chatHistoryPagination.hasMore && state.chatHistoryPagination.olderCursor
+        : state.chatHistoryPagination.newerCursor;
+    let root = edge();
+    const isCurrent = () =>
+      !signal.aborted &&
+      ownsIntent() &&
+      owner === this.stagedHistory &&
+      read.isCurrent() &&
+      edge() === root;
+    const packets: StagedOlderHistoryPage[] = [];
+    let overflow: StagedOlderHistoryPage | null = null;
+    let failure: unknown;
+    let capacityBlocked = false;
+    let coverageAdvanced = false;
+    let sparse = 0;
+    try {
+      let selector = chatHistoryPageSelector(state, direction);
+      if (!readerIntent && "messageId" in selector) {
+        return false;
+      }
+      for (let packet = 0; packet < (readerIntent ? MAX_RESIDENT_SEGMENTS : 1); packet++) {
+        const requestedCursor = "cursor" in selector ? selector.cursor : "";
+        const boundary =
+          "messageId" in selector
+            ? nativeHistoryMessageSourceIdentity(
+                chatHistoryWindowBoundary(
+                  state.chatMessages,
+                  state.chatHistoryPagination,
+                  direction,
+                ),
+              )
+            : null;
+        if (!staged && direction === "older" && packets.length === 0) {
+          this.history.loadingOlder = true;
+        }
+        const limit = staged?.limit ?? ("limit" in selector ? selector.limit : undefined);
+        let result = staged?.result ?? (await read.read(selector, signal));
+        staged = null;
+        if (!isCurrent()) {
+          return false;
+        }
+        if (!result) {
+          throw new Error(t("chat.thread.earlierInterrupted"));
+        }
+        if (requiresChatHistoryReload(result, sessionId, boundary)) {
+          owner.page = null;
+          owner.controller.abort();
+          this.stagedHistory = { controller: new AbortController(), page: null, load: null };
+          try {
+            await reloadChatHistoryWindow(state);
+          } catch (error) {
+            // Our own reload retires the packet owner/version. Its failure
+            // still belongs to the current reader intent.
+            if (ownsIntent() && !signal.aborted) {
+              this.recordHistoryPacketFailure(state, direction, error);
+            }
+            return false;
+          }
+          return true;
+        }
+        const next = resolveChatHistoryPagination(
+          result,
+          state.chatHistoryPagination.totalMessages,
+        );
+        if (boundary) {
+          reopenChatHistoryBoundary(state, boundary, next, direction);
+          coverageAdvanced = true;
+          root = edge();
+          if (
+            ++sparse >= (readerIntent ? 3 : 1) ||
+            !(direction === "older" ? next.hasMore : next.hasNewer)
+          ) {
+            break;
+          }
+          selector = chatHistoryPageSelector(state, direction);
+          continue;
+        }
+        const cursor = direction === "older" ? next.hasMore && next.olderCursor : next.newerCursor;
+        if (cursor === requestedCursor) {
+          throw new Error("History returned the same boundary. Reload the session to retry.");
+        }
+        let page: StagedOlderHistoryPage | null = {
+          claim: read.claim,
+          requestedCursor,
+          result,
+          ...(limit ? { limit } : {}),
+        };
+        let results = [...packets.map((entry) => entry.result), result];
+        if (!prepareChatHistoryPages(state, results, direction).fits) {
+          if (!packets.length && !limit) {
+            // Discard this body before awaiting a narrower read from the same
+            // authoritative edge; rejected replies never certify coverage.
+            selector = { cursor: requestedCursor, limit: 1 };
+            result = undefined;
+            page = null;
+            results = [];
+            continue;
+          }
+          overflow = page;
+          if (!packets.length) {
+            capacityBlocked = true;
+            failure = new Error(t("chat.thread.historyCapacity"));
+          }
+          break;
+        }
+        packets.push(page);
+        const visible = hasVisibleOlderHistoryPage(state, this.paneId, result.messages ?? []);
+        if (!visible && ++sparse >= (readerIntent ? 3 : 1)) {
+          break;
+        }
+        if (!cursor) {
+          break;
+        }
+        selector = { cursor };
+      }
+    } catch (error) {
+      if (!isCurrent()) {
+        return false;
+      }
+      failure = error;
+    }
+    if (!isCurrent()) {
+      return false;
+    }
+    // Reader/live publication may have changed capacity during a later reply.
+    // Keep only a fitting contiguous prefix; its first unadmitted packet is
+    // the sole staged remainder. Later bodies are released without moving an edge.
+    while (
+      packets.length &&
+      !prepareChatHistoryPages(
+        state,
+        packets.map((page) => page.result),
+        direction,
+      ).fits
+    ) {
+      overflow = packets.pop()!;
+    }
+    if (!packets.length && !failure && overflow) {
+      capacityBlocked = true;
+      failure = new Error(t("chat.thread.historyCapacity"));
+    }
+    const admitted =
+      packets.length &&
+      admitChatHistoryPages(
+        state,
+        packets.map((page) => page.result),
+        direction,
+      );
+    owner.direction = direction;
+    owner.page = overflow;
+    if (admitted) {
+      if (owner.capacityNotice && state.lastError === owner.capacityNotice) {
+        state.lastError = null;
+      }
+      delete owner.capacityNotice;
+      scheduleChatScroll(state, false);
+    }
+    if (failure) {
+      this.recordHistoryPacketFailure(state, direction, failure);
+      if (capacityBlocked && direction === "newer") {
+        owner.capacityNotice = state.lastError ?? undefined;
+      }
+    } else if (admitted && readerIntent && !overflow) {
+      this.stageNextHistoryPage(state, direction);
+    }
+    return Boolean(admitted || (coverageAdvanced && !failure));
+  }
+
+  protected recordHistoryPacketFailure(
+    state: NonNullable<ChatPaneHistoryPackets["state"]>,
+    direction: "older" | "newer",
+    error: unknown,
+  ): void {
+    if (direction === "newer") {
+      state.lastError = formatChatHistoryLoadError(error);
+      return;
+    }
+    this.history.olderError = formatChatHistoryLoadError(error);
+    this.historyAutoLoadBlocked = true;
+    // Loading-row removal must not masquerade as renewed reader input.
+    this.transcriptScrollTop = this.transcript.scrollElement?.scrollTop ?? null;
+  }
+
+  private stageNextHistoryPage(
+    state: NonNullable<ChatPaneHistoryPackets["state"]>,
+    direction: "older" | "newer",
+  ): void {
+    const owner = this.stagedHistory;
+    if (owner.page || owner.load) {
+      return;
+    }
+    const pagination = state.chatHistoryPagination;
+    const cursor =
+      direction === "older" ? pagination.hasMore && pagination.olderCursor : pagination.newerCursor;
+    if (!cursor) {
+      return;
+    }
+    const read = createChatHistoryPageRead(state, true);
+    if (!read) {
+      return;
+    }
+    owner.direction = direction;
+    owner.load = (async () => {
+      try {
+        const result = await read.read({ cursor }, owner.controller.signal);
+        if (result && owner === this.stagedHistory && this.state === state && read.isCurrent()) {
+          owner.page = { claim: read.claim, requestedCursor: cursor, result };
+        }
+      } catch {
+        // A speculative failure is silent; a foreground chain reports its own.
+      } finally {
+        if (owner === this.stagedHistory) {
+          owner.load = null;
+        }
+      }
+    })();
+  }
+}

@@ -43,7 +43,7 @@ import {
   readRunProjections,
   applyHistoryRun,
 } from "./chat-history-stream.ts";
-import { extendChatHistoryWindow } from "./chat-history-window.ts";
+import { extendChatHistoryWindow, prepareChatHistoryPacket } from "./chat-history-window.ts";
 import { loadChatLiveTools } from "./chat-live-tools.ts";
 import { applyChatPendingInputs } from "./chat-pending-inputs.ts";
 import { isChatRunRecoveryStatus, reconcileChatRunStartup } from "./chat-run-startup.ts";
@@ -330,6 +330,7 @@ export async function hydrateChatHistory(
             res.newerCursor,
             "tail",
             reconciledHistory?.retainedCoverage ? reconciledHistory.pagination : undefined,
+            prepareChatHistoryPacket(visibleMessages, nextPagination, res.newerCursor),
           );
     const scope = readChatSessionProjectionScope(state, {
       sessionKey,

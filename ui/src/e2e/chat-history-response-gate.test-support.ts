@@ -70,6 +70,29 @@ export async function installHistoryResponseGate(page: Page, sessionKey: string)
         reply.deliver();
       }
     },
+    // Keep speculation armed while one foreground claim releases its serial
+    // members. A published window wins over a newly held speculative reply.
+    releaseAdmission: async (published: () => Promise<boolean>, maxPackets: number) => {
+      const first = released.length;
+      for (;;) {
+        let status = "waiting";
+        await expect
+          .poll(async () => {
+            status = (await published()) ? "published" : replies.length ? "reply" : "waiting";
+            return status;
+          })
+          .not.toBe("waiting");
+        if (status === "published") {
+          return released.length - first;
+        }
+        if (released.length - first >= maxPackets) {
+          throw new Error("Foreground history chain exceeded its packet bound");
+        }
+        const reply = replies.shift()!;
+        reply.deliver();
+        released.push({ id: reply.id, cursor: reply.cursor, sha256: reply.sha256 });
+      }
+    },
     released,
   };
 }
@@ -151,4 +174,83 @@ export async function detectNonInputHistoryShift(page: Page, bubble: Locator) {
   const maxDrift = Math.max(...positions.map((top) => Math.abs(top! - positions[0]!)));
   expect(maxDrift, "non-input shift must fail the placement oracle").toBeGreaterThan(2);
   return { positions, maxDrift };
+}
+
+type HistoryPacketMetric = {
+  requestId: string;
+  receivedMs?: number;
+  cursor?: string;
+  limit?: number;
+  olderCursor?: string;
+  newerCursor?: string;
+  sourceNumbers?: number[];
+};
+
+export function createHistoryAdmissionRecorder(read: () => HistoryPacketMetric[]) {
+  const admissionReceipts: Array<{
+    direction: string;
+    admitted: string[];
+    refined: string[];
+    staged: string[];
+    retired: string[];
+  }> = [];
+  let seenRequests = 0;
+  let remainder: { direction: string; metric: HistoryPacketMetric } | undefined;
+  const recordAdmission = (direction: string, retained: number[]) => {
+    const history = read();
+    const retired =
+      remainder && remainder.direction !== direction ? [remainder.metric.requestId] : [];
+    const chain = [
+      ...(remainder?.direction === direction ? [remainder.metric] : []),
+      ...history.slice(seenRequests),
+    ];
+    seenRequests = history.length;
+    const sources = new Set(retained);
+    const refined = chain.filter((metric, index) => {
+      const next = chain[index + 1];
+      if (!next || metric.cursor !== next.cursor) {
+        return false;
+      }
+      expect(metric.receivedMs).toBeDefined();
+      expect(next.limit).toBe(1);
+      expect(next.limit!).toBeLessThan(metric.limit!);
+      return true;
+    });
+    const admitted = chain.filter(
+      (metric) =>
+        !refined.includes(metric) &&
+        metric.sourceNumbers?.length &&
+        metric.sourceNumbers.every((source) => sources.has(source)),
+    );
+    const staged = chain.filter(
+      (metric) => !admitted.includes(metric) && !refined.includes(metric),
+    );
+    // Eight foreground attempts include discarded broad reads and their
+    // narrower retry. Only one unadmitted successor may remain staged.
+    expect(admitted.length).toBeGreaterThan(0);
+    expect(admitted.length).toBeLessThanOrEqual(8);
+    expect(staged.length).toBeLessThanOrEqual(1);
+    expect(admitted.length + refined.length).toBeLessThanOrEqual(8);
+    expect(chain.length).toBeLessThanOrEqual(9);
+    for (let index = 1; index < chain.length; index++) {
+      const previous = chain[index - 1]!;
+      expect(previous.receivedMs).toBeDefined();
+      expect(chain[index]!.cursor).toBe(
+        refined.includes(previous)
+          ? previous.cursor
+          : direction === "older"
+            ? previous.olderCursor
+            : previous.newerCursor,
+      );
+    }
+    remainder = staged[0] ? { direction, metric: staged[0] } : undefined;
+    admissionReceipts.push({
+      direction,
+      admitted: admitted.map((metric) => metric.requestId),
+      refined: refined.map((metric) => metric.requestId),
+      staged: staged.map((metric) => metric.requestId),
+      retired,
+    });
+  };
+  return { receipts: admissionReceipts, record: recordAdmission };
 }

@@ -25,6 +25,7 @@ import { enterControlUiSession } from "../test-helpers/control-ui-session-entry.
 import { chatMessage, waitForChatScrollIdle } from "./chat-flow.test-support.ts";
 import { installHistoryPaginationProbe } from "./chat-history-pagination-probe.test-support.ts";
 import {
+  createHistoryAdmissionRecorder,
   detectNonInputHistoryShift,
   installHistoryResponseGate,
   sampleControlledHistoryAdmission,
@@ -609,6 +610,10 @@ suite.define(() => {
             });
             return numbers;
           };
+          const { receipts: admissionReceipts, record: recordAdmission } =
+            createHistoryAdmissionRecorder(() =>
+              olderHistoryRequests(rpc.slice(startupMetrics.length)),
+            );
           responseGate?.arm();
           let numbers = await recordWindow("tail");
           let olderPageCommits = 0;
@@ -622,7 +627,12 @@ suite.define(() => {
             await page.mouse.wheel(0, -500);
             await responseGate?.wait();
             const finishAnchor = responseGate ? await watchAnchor("older", before) : undefined;
-            responseGate?.release();
+            if (responseGate) {
+              await responseGate.releaseAdmission(
+                async () => (await residentNumbers())[0]! < before,
+                8,
+              );
+            }
             await expect.poll(async () => (await residentNumbers())[0]).toBeLessThan(before);
             await finishAnchor?.();
             await waitForChatScrollIdle(page);
@@ -631,10 +641,7 @@ suite.define(() => {
             if (olderPageCommits === 1) {
               await paginationSample;
             }
-            // One committed reader page may stage one successor, never drain history.
-            expect(
-              olderHistoryRequests(rpc.slice(startupMetrics.length)).length,
-            ).toBeLessThanOrEqual(olderPageCommits + 1);
+            recordAdmission("older", numbers);
             expect(olderPageCommits).toBeLessThan(transcriptLength / 2);
           }
           await waitForHistoryGesture();
@@ -663,11 +670,17 @@ suite.define(() => {
             await page.mouse.wheel(0, 500);
             await responseGate?.wait();
             const finishAnchor = responseGate ? await watchAnchor("newer", before) : undefined;
-            responseGate?.release();
+            if (responseGate) {
+              await responseGate.releaseAdmission(
+                async () => (await residentNumbers()).at(-1)! > before,
+                8,
+              );
+            }
             await expect.poll(async () => (await residentNumbers()).at(-1)).toBeGreaterThan(before);
             await finishAnchor?.();
             await waitForChatScrollIdle(page);
             numbers = await recordWindow("newer");
+            recordAdmission("newer", numbers);
           }
           await thread.evaluate((element) => {
             element.scrollTop = element.scrollHeight;
@@ -706,6 +719,7 @@ suite.define(() => {
             JSON.stringify({
               pagination,
               windows,
+              admissionReceipts,
               anchors,
               negativeCalibration,
               releasedResponses: responseGate?.released,
@@ -753,24 +767,27 @@ suite.define(() => {
           expect(reversePages.length).toBeGreaterThan(1);
           let olderCursor = selectStartupHistory(startupMetrics, selectedKey)[0]?.olderCursor;
           const covered = new Set<number>();
+          const refined = new Set(admissionReceipts.flatMap((receipt) => receipt.refined));
           for (const metric of olderPages) {
             expect(metric.receivedMs).toBeDefined();
             expect(metric.cursor).toBe(olderCursor);
             expect(metric.offset).toBeUndefined();
-            expect(metric.limit).toBe(80);
+            expect([80, 1]).toContain(metric.limit);
             expect(metric.maxBytes).toBe(256 * 1024);
             expect(metric.historyBytes).toBeLessThanOrEqual(metric.maxBytes!);
             for (const source of metric.sourceNumbers ?? []) {
               covered.add(source);
             }
-            olderCursor = metric.olderCursor;
+            if (!refined.has(metric.requestId)) {
+              olderCursor = metric.olderCursor;
+            }
           }
           expect(covered.size + initialLoadedMessages).toBe(transcriptLength);
           expect(olderCursor).toBeUndefined();
           for (const metric of reversePages) {
             expect(metric.cursor).toEqual(expect.any(String));
             expect(metric.offset).toBeUndefined();
-            expect(metric.limit).toBe(80);
+            expect([80, 1]).toContain(metric.limit);
             expect(metric.maxBytes).toBe(256 * 1024);
           }
           responseGate?.disarm();

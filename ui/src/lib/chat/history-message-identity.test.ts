@@ -34,7 +34,7 @@ function nativeHistoryMessage(seq: number, text = `message ${seq}`) {
   };
 }
 function expectPrepend(older: unknown[], current: unknown[], expected: unknown[]) {
-  expect(prependUniqueNativeMessages(older, current)).toEqual(expected);
+  expect(prependUniqueNativeMessages(older, current).messages).toEqual(expected);
 }
 
 it("keeps multiple projected messages from the same transcript sequence", () => {
@@ -51,6 +51,23 @@ it("keeps multiple projected messages from the same transcript sequence", () => 
   expectPrepend([...projected, projected[1], projected[1]], current, [projected[1], ...current]);
   const unidentified = { role: "assistant", content: "No source identity" };
   expectPrepend([unidentified], [unidentified], [unidentified, unidentified]);
+});
+
+it.each([
+  { incoming: ["a"], current: ["a"], expandedIncoming: false, expandedCurrent: false },
+  { incoming: ["a", "b"], current: ["a"], expandedIncoming: false, expandedCurrent: true },
+  { incoming: ["a"], current: ["a", "b"], expandedIncoming: true, expandedCurrent: false },
+  { incoming: ["a"], current: ["b"], expandedIncoming: true, expandedCurrent: true },
+  { incoming: ["a", "a"], current: ["a"], expandedIncoming: false, expandedCurrent: true },
+])("records changed occurrence groups for $incoming against $current", (example) => {
+  const result = prependUniqueNativeMessages(
+    example.incoming.map((part) => nativeHistoryMessage(1, part)),
+    example.current.map((part) => nativeHistoryMessage(1, part)),
+  );
+  expect(result.incomingExpandedSources).toEqual(
+    new Set(example.expandedIncoming ? ["seq:1"] : []),
+  );
+  expect(result.currentExpandedSources).toEqual(new Set(example.expandedCurrent ? ["seq:1"] : []));
 });
 
 it("deduplicates byte-different live-event and history projections of one transcript row", () => {
@@ -82,7 +99,7 @@ it("keeps the page order around live sources already admitted inside an empty ra
     [second, fourth],
     [first, second, third, fourth, fifth],
   );
-  const retained = prependUniqueNativeMessages([first, { ...second }, third], [second]);
+  const retained = prependUniqueNativeMessages([first, { ...second }, third], [second]).messages;
   expect(retained[1]).toBe(second);
   expectPrepend(retained, [second, third, fourth], [first, second, third, fourth]);
   const fragments = ["a", "b"].map((part) =>
@@ -110,7 +127,7 @@ it.each([0, 50])("bounds prepend serialization with %i overlapping rows", (overl
   });
   let merged: unknown[];
   try {
-    merged = prependUniqueNativeMessages(older, current);
+    merged = prependUniqueNativeMessages(older, current).messages;
   } finally {
     serialization.mockRestore();
   }

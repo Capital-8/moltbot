@@ -1,12 +1,17 @@
 import { createSessionProjection, reduceSessionProjection } from "@openclaw/gateway-client/browser";
 import { expect, it } from "vitest";
 import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
+import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
+import { admitChatHistoryPages, prepareChatHistoryPages } from "./chat-history-snapshot.ts";
 import {
   extendChatHistoryWindow,
   prepareChatHistorySegment,
+  prepareChatHistoryPacket,
   projectResidentChatHistory,
   selectChatHistoryResidency,
 } from "./chat-history-window.ts";
+import { makeChatHost } from "./chat-host.test-support.ts";
+import { getChatSessionProjection, publishChatSessionProjection } from "./history-merge.ts";
 
 it("keeps an indivisible source group above the entry target", () => {
   const messages = Array.from({ length: 401 }, (_, index) => ({
@@ -24,7 +29,7 @@ it("keeps an indivisible source group above the entry target", () => {
   expect(admitted.pagination.hasNewer).toBeUndefined();
 });
 
-it("keeps a protected reader segment intact above the weight target until the reader moves", () => {
+it("charges neighboring groups inside the protected reader segment to the weight target", () => {
   const messages = [1, 2].map((seq) => ({
     role: "assistant",
     content: "x".repeat(2 * 1024 * 1024),
@@ -38,16 +43,32 @@ it("keeps a protected reader segment intact above the weight target until the re
     "tail",
     nativeHistoryMessageSourceIdentity(messages[0]),
   );
-  expect(held.messages).toEqual(messages);
-  const released = selectChatHistoryResidency(messages, held.pagination);
-  expect(released.messages).toEqual([messages[1]]);
-  expect(released.pagination).toMatchObject({ hasMore: true, needsBoundary: true });
+  expect(held.messages).toEqual([messages[0]]);
+  expect(held.pagination).toMatchObject({
+    hasMore: false,
+    hasNewer: true,
+    needsNewerBoundary: true,
+  });
+  const released = selectChatHistoryResidency(held.messages, held.pagination);
+  expect(released.messages).toEqual(held.messages);
 });
 
 const durable = (seq: number) => ({
   role: "user",
   content: `source-${seq}`,
   __openclaw: { id: `source-${seq}`, seq },
+});
+
+it("charges ordinary neighbors independently of an admitted intrinsic source group", () => {
+  const fragments = Array.from({ length: 401 }, (_, index) => ({
+    ...durable(1),
+    content: `fragment-${index}`,
+  }));
+  const state = { chatMessages: [], chatHistoryPagination: { hasMore: false as const } };
+  expect(prepareChatHistoryPages(state, [{ messages: fragments }], "older").fits).toBe(true);
+  expect(
+    prepareChatHistoryPages(state, [{ messages: [...fragments, durable(2)] }], "older").fits,
+  ).toBe(true);
 });
 
 it.each([
@@ -217,3 +238,237 @@ it.each(["older", "newer"] as const)(
     expect(segment.sources).toEqual(held.map(nativeHistoryMessageSourceIdentity));
   },
 );
+
+it("records one admitted intrinsic source and releases the old reader exception after movement", () => {
+  const giant = (seq: number) =>
+    Array.from({ length: 401 }, (_, index) => ({
+      ...durable(seq),
+      content: `fragment-${index}`,
+    }));
+  const a = giant(3);
+  const b = giant(2);
+  const host = makeChatHost();
+  let reader: string | null = "id:source-3";
+  host.readTranscriptAnchorSource = () => reader;
+  admitChatHistoryPages(host, [{ messages: a, hasMore: true, olderCursor: "older-2" }], "around");
+  expect(
+    admitChatHistoryPages(
+      host,
+      [{ messages: b, hasMore: true, olderCursor: "older-1", newerCursor: "newer-3" }],
+      "older",
+    ),
+  ).toBe("messages");
+  expect(host.chatMessages).toEqual([...b, ...a]);
+  expect(host.chatHistoryPagination).toHaveProperty("intrinsicSource", "id:source-2");
+  publishChatSessionProjection(host, getChatSessionProjection(host));
+  expect(host.chatMessages).toEqual([...b, ...a]);
+  reader = "id:source-2";
+  publishChatSessionProjection(host, getChatSessionProjection(host));
+  expect(host.chatMessages).toEqual(b);
+  expect(
+    admitChatHistoryPages(host, [{ messages: [durable(1)], newerCursor: "newer-2" }], "older"),
+  ).toBe("messages");
+  expect(host.chatMessages).toEqual([durable(1), ...b]);
+  expect(host.chatHistoryPagination).toHaveProperty("intrinsicSource", "id:source-2");
+  reader = null;
+  admitChatHistoryPages(host, [{ messages: [durable(9)] }], "around");
+  expect(host.chatHistoryPagination).not.toHaveProperty("intrinsicSource");
+});
+
+it("retires an old intrinsic group sharing the reader's single packet after reader movement", () => {
+  const giant = (seq: number) =>
+    Array.from({ length: 401 }, (_, index) => ({
+      ...durable(seq),
+      content: `fragment-${index}`,
+    }));
+  const a = giant(1);
+  const b = giant(2);
+  const host = makeChatHost();
+  let reader = "id:source-1";
+  host.readTranscriptAnchorSource = () => reader;
+  admitChatHistoryPages(host, [{ messages: [...a, ...b] }], "around");
+  expect(host.chatMessages).toEqual([...a, ...b]);
+  reader = "id:source-2";
+  publishChatSessionProjection(host, getChatSessionProjection(host));
+  expect(host.chatMessages).toEqual(b);
+  expect(host.chatHistoryPagination).toMatchObject({
+    intrinsicSource: "id:source-2",
+    hasMore: true,
+    needsBoundary: true,
+  });
+});
+
+it("certifies only bounded wire packets and invalidates provenance on live membership changes", () => {
+  const messages = [1, 2].map(durable);
+  const pagination = { hasMore: false as const };
+  const admitted = extendChatHistoryWindow(
+    pagination,
+    [],
+    messages,
+    pagination,
+    undefined,
+    "tail",
+    undefined,
+    prepareChatHistoryPacket(messages, pagination),
+  );
+  expect(admitted.segments?.[0]?.boundedPacket).toBe(true);
+  expect(prepareChatHistorySegment(messages, pagination).boundedPacket).toBeUndefined();
+  for (const incoming of [
+    Array.from({ length: 81 }, (_unused, index) => durable(index + 1)),
+    [{ ...durable(1), content: "x".repeat(256 * 1024) }],
+    [{ ...durable(1), content: "界".repeat(90 * 1024) }],
+  ]) {
+    expect(prepareChatHistoryPacket(incoming, pagination).boundedPacket).toBeUndefined();
+  }
+  const projection = reduceSessionProjection(createSessionProjection({}, messages), {
+    type: "messagePersisted",
+    message: durable(3),
+  });
+  const extended = projectResidentChatHistory(projection, admitted, null);
+  expect(extended.projection.messages).toEqual([...messages, durable(3)]);
+  expect(extended.pagination.segments?.every((segment) => !segment.boundedPacket)).toBe(true);
+});
+
+it.each(["append", "replace"] as const)(
+  "invalidates wire provenance after a same-source live %s",
+  (operation) => {
+    const first = {
+      ...durable(1),
+      role: "assistant",
+      openclawStreamFallback: { source: "segment", itemId: "item-1", runId: "run-1" },
+    };
+    const messages = [first, durable(2)];
+    const pagination = { hasMore: false as const };
+    const packet = prepareChatHistoryPacket(messages, pagination);
+    const admitted = { ...pagination, segments: [packet, { ...packet }] };
+    expect(packet.boundedPacket).toBe(true);
+    const incoming = {
+      ...first,
+      content: "updated-source-1",
+      openclawStreamFallback: {
+        ...first.openclawStreamFallback,
+        itemId: operation === "append" ? "item-2" : "item-1",
+      },
+    };
+    const projection = reduceSessionProjection(createSessionProjection({}, messages), {
+      type: "messagePersisted",
+      message: incoming,
+    });
+    expect(projection.messages).toHaveLength(operation === "append" ? 3 : 2);
+    expect(projection.messages).toContain(incoming);
+    expect(new Set(projection.messages.map(nativeHistoryMessageSourceIdentity))).toEqual(
+      new Set(packet.sources),
+    );
+    expect(prepareChatHistoryPacket(projection.messages, pagination).boundedPacket).toBe(true);
+    const updated = projectResidentChatHistory(projection, admitted, null);
+    expect(updated.projection.messages).toEqual(projection.messages);
+    expect(updated.pagination.segments?.[0]?.sources).toEqual(packet.sources);
+    expect(updated.pagination.segments).toHaveLength(2);
+    expect(updated.pagination.segments?.map((segment) => segment.boundedPacket)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  },
+);
+
+it.each([
+  { direction: "older", retainQr: false },
+  { direction: "older", retainQr: true },
+  { direction: "newer", retainQr: false },
+  { direction: "newer", retainQr: true },
+] as const)(
+  "rechecks wire provenance after historical publication ($direction, pairing=$retainQr)",
+  ({ direction, retainQr }) => {
+    const owner = {
+      sessionKey: "agent:main:pairing",
+      chatMessages: [] as unknown[],
+      chatHistoryPagination: undefined as ChatHistoryPagination | undefined,
+      readTranscriptAnchorSource: () => "seq:2",
+    };
+    const scope = { sessionKey: owner.sessionKey };
+    const reply = {
+      ...durable(3),
+      role: "assistant",
+      content: [{ type: "text", text: "Pairing details" }],
+    };
+    const qr = { type: "openclaw_pairing_qr", image_url: "data:image/png;base64,aQ==" };
+    const initial = retainQr ? { ...reply, content: [...reply.content, qr] } : reply;
+    publishChatSessionProjection(
+      owner,
+      reduceSessionProjection(createSessionProjection(scope), {
+        type: "messagePersisted",
+        message: initial,
+      }),
+    );
+    const messages = [{ role: "assistant", content: "reader", __openclaw: { seq: 2 } }, reply];
+    const pagination = {
+      hasMore: true as const,
+      olderCursor: "older-packet",
+      hasNewer: true as const,
+      newerCursor: "newer-packet",
+    };
+    const packet = prepareChatHistoryPacket(messages, pagination, pagination.newerCursor);
+    owner.chatHistoryPagination = { ...pagination, segments: [packet] };
+    publishChatSessionProjection(owner, createSessionProjection(scope, messages));
+    expect(owner.chatMessages).toEqual([messages[0], retainQr ? initial : reply]);
+    expect(
+      getChatSessionProjection(owner).entries.every((entry) => !entry.live && !entry.pending),
+    ).toBe(true);
+    expect(owner.chatHistoryPagination.segments?.[0]).toEqual({
+      ...packet,
+      boundedPacket: retainQr ? undefined : true,
+    });
+    const incoming = direction === "older" ? [durable(1), ...messages] : [...messages, durable(4)];
+    const nextPagination = { hasMore: false as const };
+    const nextPacket = prepareChatHistoryPacket(incoming, nextPagination);
+    const prepared = prepareChatHistoryPages(
+      {
+        chatMessages: owner.chatMessages,
+        chatHistoryPagination: owner.chatHistoryPagination,
+        readTranscriptAnchorSource: owner.readTranscriptAnchorSource,
+      },
+      [{ ...nextPagination, messages: incoming, packet: nextPacket }],
+      direction,
+    );
+    expect(prepared.fits).toBe(true);
+    expect(prepared.messages).toContain(reply);
+    if (retainQr) {
+      expect(prepared.messages).toContain(owner.chatMessages[1]);
+    }
+    const incomingPacket =
+      direction === "older"
+        ? prepared.pagination.segments?.[0]
+        : prepared.pagination.segments?.at(-1);
+    expect(incomingPacket?.boundedPacket).toBe(retainQr ? undefined : true);
+  },
+);
+
+it("keeps normal unkeyed reader packets charged to the ordinary target", () => {
+  const packet = (start: number) =>
+    Array.from({ length: 80 }, (_unused, index) => ({
+      role: "assistant",
+      content: "row",
+      __openclaw: { seq: start + index },
+    }));
+  const messages: unknown[] = [];
+  let pagination: ChatHistoryPagination = { hasMore: false };
+  for (let start = 1; start <= 401; start += 80) {
+    const incoming = packet(start);
+    pagination = extendChatHistoryWindow(
+      pagination,
+      messages,
+      incoming,
+      { hasMore: false },
+      undefined,
+      "newer",
+      undefined,
+      prepareChatHistoryPacket(incoming, { hasMore: false }),
+    );
+    messages.push(...incoming);
+  }
+  const admitted = selectChatHistoryResidency(messages, pagination, "newer", "seq:401");
+  expect(admitted.withinBudget).toBe(true);
+  expect(admitted.messages).toHaveLength(400);
+  expect(admitted.pagination.segments).toHaveLength(5);
+  expect(admitted.messages[0]).toBe(messages[80]);
+});
