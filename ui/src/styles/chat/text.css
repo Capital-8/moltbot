@@ -100,9 +100,9 @@
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border: 1px solid var(--chat-content-border, color-mix(in srgb, var(--border) 72%, transparent));
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: var(--radius-sm);
-  background: var(--chat-content-surface, color-mix(in srgb, var(--secondary) 78%, transparent));
+  background: color-mix(in srgb, var(--secondary) 78%, transparent);
   color: var(--muted);
   font: inherit;
   font-size: var(--control-ui-text-sm);
@@ -559,7 +559,7 @@
 }
 
 :is(.chat-text, .chat-thinking) :where(details > summary:hover) {
-  background: var(--chat-content-hover, var(--bg-hover));
+  background: var(--bg-hover);
 }
 
 :is(.chat-text, .chat-thinking) :where(details > summary:focus-visible) {
@@ -628,8 +628,17 @@
   margin: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--chat-content-surface, var(--bg));
+  background: var(--bg);
   opacity: 1;
+}
+
+@media (forced-colors: none) {
+  /* Small neutral controls remain raised from the participant-tinted prose. */
+  :is(.chat-group:is(.user, .chat-group--forwarded), .chat-session-activity__message)
+    .chat-bubble:not(.chat-bubble--tool-shell)
+    :is(.chat-message-load-error__retry, .task-list-item-checkbox:not(:checked)) {
+    background: var(--chat-composer-surface, var(--popover));
+  }
 }
 
 :is(.chat-text, .chat-thinking) :where(.task-list-item-checkbox:checked) {
