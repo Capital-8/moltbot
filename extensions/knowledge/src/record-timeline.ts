@@ -1,5 +1,6 @@
 import type { ChronicleOutput } from "./chronicle-contract.js";
 import { loadingPlaceholder } from "./loading-view.js";
+import { markdownView } from "./markdown-view.js";
 import type { Page } from "./page-context.js";
 import { button, el, tile } from "./page-dom.js";
 import { formatSourceDate } from "./temporal.js";
@@ -89,8 +90,16 @@ function timelineRow(item: Item, open: (id: string) => void) {
   copy.append(el("small", meta.join(" · ")), el("span", item.record.title));
   source.append(tile(item.record.type, 24, item.record.kind), copy);
   row.append(source);
-  if (item.summary && item.summary !== item.record.title) {
-    row.append(el("p", item.summary, "knowledge-timeline-note"));
+  // Summaries are capped server-side, so drop an internal comment the cap cut open.
+  const summary = item.summary.replace(/<!--[\s\S]*?(?:-->|$)/g, "").trim();
+  if (summary && summary !== item.record.title) {
+    const note = markdownView(
+      summary,
+      open,
+      (item.links ?? []).map(({ href, id }) => ({ href, id, status: "resolved" as const })),
+    );
+    note.classList.add("knowledge-timeline-note");
+    row.append(note);
   }
   return row;
 }

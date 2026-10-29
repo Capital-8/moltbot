@@ -324,7 +324,19 @@ it("group source derives an entity Timeline from relationship notes and sourced 
   expect(history.items.find((row) => row.record.id === "meeting_review")?.noteRecord).toBe(
     "rel_attended",
   );
-  // Without a note, the source-event claim speaks for the row.
+  // A note's links resolve within scope; unknown targets are left out.
+  await f.put(
+    "rel_note_links",
+    edge("person_bobby", "meeting_review", "attended"),
+    "private",
+    "Paired with [[person_alice|Alice]] and [[nobody_here|Nobody]]. <!-- project: x -->",
+  );
+  const linked = await f.service.timeline({ entity: "person_bobby", group: "source" }, f.owner);
+  expect(linked.items[0]!.links).toStrictEqual([
+    { href: "#wiki=person_alice", id: "person_alice" },
+  ]);
+  await rm(path.join(f.root, "private", "relationships", "rel_note_links.md"));
+
   const bobby = await f.service.timeline({ entity: "person_bobby", group: "source" }, f.owner);
   expect(bobby.items.map((row) => [row.record.id, row.summary, row.claims])).toStrictEqual([
     ["meeting_review", "The launch review took place.", 0],

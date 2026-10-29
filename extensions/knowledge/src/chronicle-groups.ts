@@ -10,6 +10,8 @@ type SourceRow = {
   /** The entity's claims from this source; absent on a claim's own row. */
   claims?: number;
   note?: LoadedRecord;
+  /** The record whose body is the summary; its links resolve from its own path. */
+  author?: LoadedRecord;
 };
 
 type Group = {
@@ -109,13 +111,20 @@ export function sourceRows(
     });
     standalone.push(...own);
     const counted = claims.length - own.length;
-    const summary = note?.body.trim() || event?.body.trim() || "";
-    rows.push({ record: source, date, summary, claims: counted, ...(note ? { note } : {}) });
+    const author = note?.body.trim() ? note : event?.body.trim() ? event : undefined;
+    rows.push({
+      record: source,
+      date,
+      summary: author?.body.trim() ?? "",
+      claims: counted,
+      ...(note ? { note } : {}),
+      ...(author ? { author } : {}),
+    });
   }
   for (const claim of standalone) {
     const date = recordDate(claim, "occurred_at");
     if (date) {
-      rows.push({ record: claim, date, summary: claim.body.trim() });
+      rows.push({ record: claim, date, summary: claim.body.trim(), author: claim });
     }
   }
   return rows;

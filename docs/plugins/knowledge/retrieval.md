@@ -127,7 +127,8 @@ ranges without claiming an exact instant.
   dated source connected to it by a relationship or a sourced claim, dated by
   the source. The row's `summary` is the body of the relationship between them
   (`noteRecord`), else the source's event claim, and `claims` counts the
-  entity's claims from that source. Claims with no dated source, or dated
+  entity's claims from that source, and `links` lists the summary's links
+  that resolve to a record in the same scope. Claims with no dated source, or dated
   outside their source's date, keep their own rows. It takes occurrence time only and no `kind` filter.
 - A shared event claim with `source_event: true` represents its source meeting.
   On occurrence timelines it replaces the meeting page row; a `kind: "meeting"`

@@ -5,7 +5,8 @@ import { Check } from "typebox/value";
 import { type ChronicleOutput, TimelineInput, DayInput } from "./chronicle-contract.js";
 import { assertSourceGrouping, sourceRows } from "./chronicle-groups.js";
 import { reconcileChronicle, chronologicalIds, entityRecordIds } from "./chronicle-index.js";
-import { mergeRedirects } from "./merge.js";
+import { resolveLinks } from "./markdown-links.js";
+import { linkTargets, mergeRedirects } from "./merge.js";
 import type { LoadedRecord } from "./model.js";
 import { queryFreshness } from "./query-freshness.js";
 import { eligible } from "./retrieval.js";
@@ -127,7 +128,7 @@ export function chronicle(
     ids = [];
   }
   const matched = input.group
-    ? groupedRows(input, ids, byId, visible)
+    ? groupedRows(input, ids, byId, visible, linkTargets(data.records, records))
     : recordRows(input, field, ids, byId, visible, predicate);
   const offset = input.offset ?? 0,
     limit = input.limit ?? 20;
@@ -229,6 +230,7 @@ function groupedRows(
   ids: string[],
   byId: Map<string, LoadedRecord>,
   visible: Set<string>,
+  targets: ReturnType<typeof linkTargets>,
 ): Array<() => Row> {
   const { start, end } = timeBounds(input),
     sign = input.order === "asc" ? 1 : -1;
@@ -247,20 +249,33 @@ function groupedRows(
         sign * (a.interval.start - b.interval.start) ||
         sign * (a.row.record.id < b.row.record.id ? -1 : a.row.record.id > b.row.record.id ? 1 : 0),
     )
-    .map(({ row }) => () => ({
-      row: {
-        record: reference(row.record, visible),
-        date: row.date,
-        dateField: "occurred_at",
-        precision: row.date.length === 10 ? "day" : "instant",
-        summary: truncateUtf16Safe(row.summary, 1000),
-        entities: (row.record.metadata.entities ?? []).filter((id) => visible.has(id)),
-        evidenceCount: row.record.metadata.evidence?.length ?? 0,
-        ...(row.claims === undefined ? {} : { claims: row.claims }),
-        ...(row.note ? { noteRecord: row.note.id } : {}),
-      },
-      ...(row.record.kind === "page" ? { source: row.record } : {}),
-    }));
+    .map(({ row }) => () => {
+      // Resolve links in the record the summary came from, as a record read does.
+      const links = row.author
+        ? resolveLinks(row.author, targets.candidates, targets.canonical)
+            .flatMap((link) =>
+              link.status === "resolved" && link.id && visible.has(link.id)
+                ? [{ href: link.href, id: link.id }]
+                : [],
+            )
+            .slice(0, 100)
+        : [];
+      return {
+        row: {
+          record: reference(row.record, visible),
+          date: row.date,
+          dateField: "occurred_at",
+          precision: row.date.length === 10 ? "day" : "instant",
+          summary: truncateUtf16Safe(row.summary, 1000),
+          entities: (row.record.metadata.entities ?? []).filter((id) => visible.has(id)),
+          evidenceCount: row.record.metadata.evidence?.length ?? 0,
+          ...(row.claims === undefined ? {} : { claims: row.claims }),
+          ...(row.note ? { noteRecord: row.note.id } : {}),
+          ...(links.length ? { links } : {}),
+        },
+        ...(row.record.kind === "page" ? { source: row.record } : {}),
+      };
+    });
 }
 
 /** An operator can inspect an unprovisioned store without creating its files or database. */

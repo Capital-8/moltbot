@@ -110,6 +110,13 @@ const ChronicleItem = Type.Object({
       description: "group=source: the entity's claims from this source.",
     }),
   ),
+  links: Type.Optional(
+    Type.Array(Type.Object({ href: text(2000), id: text(96) }, { additionalProperties: false }), {
+      maxItems: 100,
+      description:
+        "group=source: the summary's links that resolve to a record in this scope, as rendered hrefs.",
+    }),
+  ),
   noteRecord: Type.Optional(
     Type.String({
       maxLength: 96,
