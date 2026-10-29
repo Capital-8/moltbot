@@ -1943,7 +1943,9 @@ if (hybridHostedEligible) {
     "postgres-conformance": count(manifest.run_postgres_conformance, 3),
     "skills-python": count(manifest.run_skills_python_job),
     "macos-node": count(manifest.run_macos_node, manifest.macos_node_matrix.include.length),
-    "macos-swift": count(manifest.run_macos_swift, 2),
+    // Eligible profiles emit one app test row plus packages and mlx; settings
+    // and release rows require a different dispatch admission.
+    "macos-swift": count(manifest.run_macos_swift, 3),
     "ios-build": count(manifest.run_ios_build),
     "ios-screenshot-capture": count(parseCiEnvFlag(process.env.OPENCLAW_CI_RUN_IOS_SCREENSHOTS), 1),
     "ios-screenshot-evidence": count(parseCiEnvFlag(process.env.OPENCLAW_CI_RUN_IOS_SCREENSHOTS)),
