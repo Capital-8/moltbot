@@ -16,6 +16,7 @@ import {
 } from "./native-module-require.js";
 import {
   bundledPluginCaptureInputs,
+  pluginCacheRootFor,
   withBundledPluginReloadSource,
 } from "./plugin-bundled-reload.js";
 import type { InspectionNativeEsmRetention, PluginModuleLoader } from "./plugin-cache-artifacts.js";
@@ -327,7 +328,7 @@ export function bindPluginInstanceModuleLoader(input: PluginInstanceModuleLoader
   if (retained) {
     retained.artifact = artifact;
   }
-  bindPluginCacheRoot(params.rootDir, artifact.sourceRoot);
+  bindPluginCacheRoot(params.rootDir, pluginCacheRootFor(params, artifact.sourceRoot));
   params.instance.sourceDigest = artifact.sourceDigest;
   params.instance.onModuleDispose(() => {
     retained?.owners.delete(params.instance);

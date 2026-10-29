@@ -63,6 +63,17 @@ export function withBundledPluginReloadSource<
     : input;
 }
 
+/**
+ * Canonical cache root for a captured plugin. Bundled reload captures from the host
+ * root, so its plugin keeps its own root instead of aliasing the host's cache record.
+ */
+export function pluginCacheRootFor(
+  params: { rootDir: string; bundledReloadSource?: BundledPluginReloadSource },
+  capturedSourceRoot: string,
+): string {
+  return params.bundledReloadSource ? params.rootDir : capturedSourceRoot;
+}
+
 /** Select source roots for a fresh capture or a recovered bundled generation. */
 export function bundledPluginCaptureInputs(
   rootDir: string,
