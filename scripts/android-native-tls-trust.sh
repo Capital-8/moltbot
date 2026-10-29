@@ -26,6 +26,11 @@ case "$mode" in
     adb_task root
     adb_task wait-for-device
     [[ "$(adb_task shell id -u | tr -d '\r')" == 0 ]]
+    adb_task shell getprop ro.build.fingerprint > "$state/build-fingerprint.txt"
+    adb_task shell getprop ro.build.version.security_patch > "$state/security-patch.txt"
+    adb_task shell sha256sum /system/bin/toybox > "$state/toybox.sha256"
+    image_metadata="${ANDROID_SDK_ROOT:?}/${SYSTEM_IMAGE//;/\/}/package.xml"
+    cp "$image_metadata" "$state/system-image-package.xml"
     adb_task shell getenforce > "$state/selinux.before.txt"
     [[ "$(tr -d '\r' < "$state/selinux.before.txt")" == Enforcing ]]
     manifest > "$state/baseline.sha256"
@@ -47,7 +52,7 @@ case "$mode" in
     [[ -s "$state/zygotes.txt" ]]
     while read -r pid; do
       [[ "$pid" =~ ^[0-9]+$ ]]
-      manifest nsenter --mount="/proc/$pid/ns/mnt" > "$state/zygote-$pid.before.sha256"
+      manifest nsenter --mount="/proc/$pid/ns/mnt" -- > "$state/zygote-$pid.before.sha256"
       cmp "$state/baseline.sha256" "$state/zygote-$pid.before.sha256"
       # This disposable image must not have a pre-existing mount at the fixture target.
       [[ "$(store_mount_count "$pid" before)" == 0 ]]
@@ -76,9 +81,9 @@ PY
     adb_task shell "chown -R root:root $remote && chmod 755 $remote && chmod 644 $remote/* && chcon -R u:object_r:system_file:s0 $remote"
     # New app processes inherit zygote mount namespaces on Android 14+.
     while read -r pid; do
-      adb_task shell nsenter --mount="/proc/$pid/ns/mnt" mount --bind "$remote" "$store"
+      adb_task shell nsenter --mount="/proc/$pid/ns/mnt" -- mount --bind "$remote" "$store"
       printf '%s\n' "$pid" >> "$state/mounted-zygotes.txt"
-      manifest nsenter --mount="/proc/$pid/ns/mnt" > "$state/zygote-$pid.fixture.sha256"
+      manifest nsenter --mount="/proc/$pid/ns/mnt" -- > "$state/zygote-$pid.fixture.sha256"
       [[ "$(wc -l < "$state/zygote-$pid.fixture.sha256")" -eq "$(($(wc -l < "$state/baseline.sha256") + 2))" ]]
     done < "$state/eligible-zygotes.txt"
     ;;
@@ -96,10 +101,10 @@ PY
         count=$(store_mount_count "$pid" cleanup)
         [[ "$count" == 0 || "$count" == 1 ]]
         if [[ "$count" == 1 ]]; then
-          adb_task shell nsenter --mount="/proc/$pid/ns/mnt" umount "$store"
+          adb_task shell nsenter --mount="/proc/$pid/ns/mnt" -- umount "$store"
         fi
         [[ "$(store_mount_count "$pid" restored)" == 0 ]]
-        manifest nsenter --mount="/proc/$pid/ns/mnt" > "$state/zygote-$pid.restored.sha256"
+        manifest nsenter --mount="/proc/$pid/ns/mnt" -- > "$state/zygote-$pid.restored.sha256"
         cmp "$state/baseline.sha256" "$state/zygote-$pid.restored.sha256"
       done < "$state/eligible-zygotes.txt"
     fi
