@@ -333,7 +333,7 @@ it("retries a timed-out health probe while the overall deadline still has time",
   const healthy = cancelTrackedFetchResponse(true);
   let probeSignal: AbortSignal | undefined;
   const now = vi.spyOn(performance, "now").mockReturnValue(100.25).mockReturnValueOnce(100);
-  const timeout = vi.spyOn(AbortSignal, "timeout");
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(AbortSignal.abort());
   const fetchImpl = vi
     .fn<QaDockerFetchLike>(async () => healthy.response)
     .mockImplementationOnce(async (_input, init) => {
