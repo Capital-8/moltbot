@@ -3,7 +3,10 @@ import {
   uniqueStrings,
 } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { resolvePathViaExistingAncestorSync, safeRealpathSync } from "../../infra/boundary-path.js";
+import {
+  resolveIdentityPathViaExistingAncestorSync,
+  safeRealpathSync,
+} from "../../infra/boundary-path.js";
 import { resolveUserPath } from "../../utils.js";
 
 export function resolveAllowedSkillSymlinkTargetRealPaths(config?: OpenClawConfig): string[] {
@@ -15,8 +18,9 @@ export function resolveAllowedSkillSymlinkTargetRealPaths(config?: OpenClawConfi
 
 export function tryRealpath(filePath: string): string | null {
   try {
-    // Use fs-safe's native platform handling, then require an existing path.
-    return safeRealpathSync(resolvePathViaExistingAncestorSync(filePath));
+    // Kernel realpath adopts on-disk casing (fs-safe 0.26.5's sync ancestor
+    // resolver keeps input casing), then require an existing path.
+    return safeRealpathSync(resolveIdentityPathViaExistingAncestorSync(filePath));
   } catch {
     return null;
   }
