@@ -68,11 +68,11 @@ it("attributes queued commands without changing wire bytes or exposing private c
     ["session.entries.replace", "session.entries.replace"],
     ["session.archivePruning.pruneRetention", "session.archivePruning.pruneRetention"],
     ["session.lifecycle.delete", "session.lifecycle.delete"],
-    ["session.transcript.watermark.read", "session.transcript.watermark.read"],
-    ["cron.schedulerTick", "cron.schedulerTick"],
-    ["pluginState.executeOperation", "pluginState.executeOperation"],
-    ["transcripts.append", "transcripts.append"],
-    ["transcripts.exportDigest", "transcripts.exportDigest"],
+    // Other families keep their established dashboard labels.
+    ["session.transcript.watermark.read", "transcripts"],
+    ["cron.schedulerTick", "cron"],
+    ["pluginState.executeOperation", "plugin_state"],
+    ["transcripts.append", "transcripts"],
     ["session.actor.private-customer-123", "sessions"],
     ["session.archivePruning.pruneRetention.private-customer-123", "sessions"],
     ["session.transcript.private-customer-123", "transcripts"],
@@ -100,7 +100,7 @@ it("attributes queued commands without changing wire bytes or exposing private c
     ["execute", undefined, "claim", "domain_execute"],
     ["execute", undefined, "transcript.prepare", "transcript.prepare"],
     ["execute", undefined, "session.metadata.append", "session.metadata.append"],
-    ["publish", js, "session.transcript.lock.commit", "session.transcript.lock.commit"],
+    ["publish", js, "session.transcript.lock.commit", "transcripts"],
     ["execute", undefined, "session.metadata.append.private-customer-123", "sessions"],
   ] as const;
   for (const [type, moduleUrl, innerType, requestClass] of domainCases) {

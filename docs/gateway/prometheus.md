@@ -885,24 +885,18 @@ The allowlists bound cardinality without publishing session IDs, database paths,
 command suffixes, or caller-provided names. The exporter's shared series cap still
 applies.
 
-Known session writer commands retain their exact owner names, including
-`session.entries.replace`, `session.lifecycle.deletePlan`, `session.lifecycle.delete`,
-`session.archivePruning.pruneRetention`, `session.archivePruning.removeLegacy`,
-`session.archivePruning.reclaimPages`, and `session.metadata.append`.
-Transcript reads that borrow a locked writer also retain exact names, such as
-`session.transcript.watermark.read`; an exact read label does not imply a read-only
-transport. Cron, plugin-state, and meeting-transcript owner commands likewise use
-exact names, such as `cron.schedulerTick`, `pluginState.executeOperation`, and
-`transcripts.append`. Payload-defined plugin operations remain inside the bounded
-`pluginState.executeOperation` label.
+The `transcripts` request family includes stored event appends and retention.
 
-The closed vocabulary lives in `src/infra/sqlite-worker-request-class.ts` and also
-applies to worker payload-byte metrics. Unknown `session.*` commands still use
-`sessions`; unknown history, transcript, cron, and plugin-state commands retain
-their existing family labels. Queries selecting only a family no longer include
-its newly named commands; aggregate the exact labels when comparing older builds.
-These labels improve attribution without changing writer scheduling, transactions,
-or durability. The `execute` phase includes I/O and commit waits, not just SQL or CPU.
+Known session writer commands outside the transcript and history families retain
+their exact owner names, including `session.entries.replace`,
+`session.lifecycle.deletePlan`, `session.lifecycle.delete`,
+`session.archivePruning.pruneRetention`, `session.archivePruning.reclaimPages`, and
+`session.metadata.append`. Unknown `session.*` commands still use `sessions`, so
+queries that compare with older builds should aggregate `sessions` with the
+`session.*` labels. Cron, plugin-state, transcript and history commands keep their
+family labels. The closed vocabulary lives in `src/infra/sqlite-worker-request-class.ts`
+and also applies to worker payload-byte metrics. The `execute` phase includes I/O and
+commit waits, not just SQL or CPU.
 
 Shared-state reads use kind `stateRead` (formerly `state_read`) and the same
 bounded operation-family classifier as SQLite writers. Examples include
