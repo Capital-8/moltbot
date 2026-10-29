@@ -71,7 +71,7 @@
               "low": null,
               "medium": null,
               "high": null,
-              "xhigh": "max",
+              "xhigh": null,
               "max": "max"
             },
             "input": [
@@ -92,6 +92,8 @@
               "supportedReasoningEfforts": [
                 "max"
               ],
+              "defaultThinkingLevel": "max",
+              "thinkingRequired": true,
               "codeMode": "preferred"
             }
           },
@@ -105,7 +107,7 @@
               "low": null,
               "medium": null,
               "high": null,
-              "xhigh": "max",
+              "xhigh": null,
               "max": "max"
             },
             "input": [
@@ -119,7 +121,9 @@
               "supportsReasoningEffort": true,
               "supportedReasoningEfforts": [
                 "max"
-              ]
+              ],
+              "defaultThinkingLevel": "max",
+              "thinkingRequired": true
             }
           },
           {
@@ -132,7 +136,7 @@
               "low": null,
               "medium": null,
               "high": null,
-              "xhigh": "max",
+              "xhigh": null,
               "max": "max"
             },
             "input": [
@@ -146,7 +150,9 @@
               "supportsReasoningEffort": true,
               "supportedReasoningEfforts": [
                 "max"
-              ]
+              ],
+              "defaultThinkingLevel": "max",
+              "thinkingRequired": true
             }
           },
           {
@@ -154,7 +160,17 @@
             "name": "Kimi K2.7 Code",
             "reasoning": true,
             "thinkingLevelMap": {
-              "off": null
+              "off": null,
+              "minimal": null,
+              "medium": null,
+              "high": null
+            },
+            "compat": {
+              "defaultThinkingLevel": "low",
+              "thinkingRequired": true,
+              "thinkingLevelLabels": {
+                "low": "on"
+              }
             },
             "input": [
               "text",
@@ -174,7 +190,17 @@
             "name": "Kimi K2.7 Code HighSpeed",
             "reasoning": true,
             "thinkingLevelMap": {
-              "off": null
+              "off": null,
+              "minimal": null,
+              "medium": null,
+              "high": null
+            },
+            "compat": {
+              "defaultThinkingLevel": "low",
+              "thinkingRequired": true,
+              "thinkingLevelLabels": {
+                "low": "on"
+              }
             },
             "input": [
               "text",

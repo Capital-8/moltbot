@@ -53,8 +53,6 @@ export function resolveMoonshotAlwaysThinkingEffort(
   return { effort: readEfforts(facts.compat)?.at(-1) };
 }
 
-const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
 export function isNativeMoonshotBaseUrl(baseUrl: string | undefined): boolean {
   return [MOONSHOT_BASE_URL, MOONSHOT_CN_BASE_URL].some(
     (official) => baseUrl === official || baseUrl === `${official}/`,
@@ -85,21 +83,9 @@ export function isMoonshotAlwaysThinkingModel(
   );
 }
 
-export function resolveThinkingProfile(context: ProviderDefaultThinkingPolicyContext) {
-  const always = resolveMoonshotAlwaysThinkingEffort(
-    withMoonshotThinkingFacts(context.modelId, context),
-  );
-  if (always) {
-    const effortLevel = EFFORT_LEVELS.find((level) => level === always.effort);
-    const level = effortLevel
-      ? { id: effortLevel, label: effortLevel }
-      : { id: "low" as const, label: "on" };
-    return {
-      levels: [level],
-      defaultLevel: level.id,
-      preserveWhenCatalogReasoningFalse: true,
-    };
-  }
+// Rows that always think own their profile (compat.defaultThinkingLevel); other Moonshot models
+// switch thinking on and off.
+export function resolveThinkingProfile() {
   return {
     levels: [
       { id: "off" as const, label: "off" },

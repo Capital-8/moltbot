@@ -143,26 +143,16 @@ describe("moonshot provider plugin", () => {
         config: { thinkingConfig: { thinkingBudget: -1 } },
         reasoning_effort: "max",
       });
-      expect(provider.resolveThinkingProfile?.({ ...ref, reasoning: true })).toEqual({
-        levels: [{ id: "max", label: "max" }],
-        defaultLevel: "max",
-        preserveWhenCatalogReasoningFalse: true,
-      });
       expect(provider.isModernModelRef?.(ref)).toBe(true);
     },
   );
 
-  it("reads always-max thinking from a catalog row with no bundled entry", async () => {
+  it("sends always-max thinking for a catalog row with no bundled entry", async () => {
     const facts = {
       thinkingLevelMap: { off: null, low: null, high: null, xhigh: "max", max: "max" },
       compat: { supportedReasoningEfforts: ["max"] },
     };
     const ref = { provider: "moonshot", modelId: "kimi-future" };
-    expect(provider.resolveThinkingProfile?.({ ...ref, reasoning: true, ...facts })).toEqual({
-      levels: [{ id: "max", label: "max" }],
-      defaultLevel: "max",
-      preserveWhenCatalogReasoningFalse: true,
-    });
     const captured = createCapturedThinkingConfigStream();
     const wrapped = provider.wrapStreamFn?.({
       ...ref,

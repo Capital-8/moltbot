@@ -67,6 +67,9 @@
             },
             "compat": {
               "supportedReasoningEfforts": ["low", "high", "max"],
+              "defaultThinkingLevel": "high",
+              "adaptiveThinking": true,
+              "thinkingRequired": true,
               "codeMode": "preferred"
             }
           },
@@ -94,6 +97,9 @@
             },
             "compat": {
               "supportedReasoningEfforts": ["low", "high", "max"],
+              "defaultThinkingLevel": "high",
+              "adaptiveThinking": true,
+              "thinkingRequired": true,
               "codeMode": "preferred"
             }
           },
@@ -114,7 +120,10 @@
             "contextWindow": 1048576,
             "maxTokens": 131072,
             "compat": {
-              "supportedReasoningEfforts": ["low", "high", "max"]
+              "supportedReasoningEfforts": ["low", "high", "max"],
+              "defaultThinkingLevel": "high",
+              "adaptiveThinking": true,
+              "thinkingRequired": true
             }
           },
           {
@@ -134,7 +143,10 @@
             "contextWindow": 1048576,
             "maxTokens": 131072,
             "compat": {
-              "supportedReasoningEfforts": ["low", "high", "max"]
+              "supportedReasoningEfforts": ["low", "high", "max"],
+              "defaultThinkingLevel": "high",
+              "adaptiveThinking": true,
+              "thinkingRequired": true
             }
           },
           {

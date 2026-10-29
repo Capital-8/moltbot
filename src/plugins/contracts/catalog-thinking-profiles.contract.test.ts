@@ -12,10 +12,24 @@ const EXPECTED: Record<string, { levels: string[]; defaultLevel: string }> = {
   "deepseek/deepseek-v4-flash": deepSeekV4(),
   "deepseek/deepseek-v4-flash-vision-exp": deepSeekV4(),
   "deepseek/deepseek-v4-pro": deepSeekV4(),
+  "kimi/k3": kimiK3(true),
+  "kimi/k3-256k": kimiK3(true),
+  "kimi/k3.1-pro": kimiK3(false),
+  "kimi/k3.1-pro-highspeed": kimiK3(false),
   "mistral/mistral-medium-3-5": mistralReasoning(),
   "mistral/mistral-small-2603": mistralReasoning(),
   "mistral/mistral-small-latest": mistralReasoning(),
+  "moonshot/kimi-k2.7-code": { levels: ["low:on"], defaultLevel: "low" },
+  "moonshot/kimi-k2.7-code-highspeed": { levels: ["low:on"], defaultLevel: "low" },
+  "moonshot/kimi-k3": { levels: ["max"], defaultLevel: "max" },
+  "moonshot/kimi-k3.1-pro": { levels: ["max"], defaultLevel: "max" },
+  "moonshot/kimi-k3.1-pro-highspeed": { levels: ["max"], defaultLevel: "max" },
 };
+
+function kimiK3(off: boolean) {
+  const levels = ["minimal", "low", "medium", "adaptive", "high", "xhigh", "max"];
+  return { levels: off ? ["off", ...levels] : levels, defaultLevel: "high" };
+}
 
 function mistralReasoning() {
   return {
@@ -65,7 +79,9 @@ it("resolves every row that owns its thinking profile to its recorded profile", 
       return [
         `${row.provider}/${row.id}`,
         {
-          levels: profile.levels.map(({ id }) => id).filter((id) => id !== "ultra"),
+          levels: profile.levels
+            .filter(({ id }) => id !== "ultra")
+            .map(({ id, label }) => (label === id ? id : `${id}:${label}`)),
           defaultLevel: profile.defaultLevel,
         },
       ];
