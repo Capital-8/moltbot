@@ -167,9 +167,9 @@ try {
     }
     udid = created;
   });
-  await phase("logging-policy", () => command("xcrun", ["simctl", "logverbose", udid, "disable"]));
   await phase("boot", () => command("xcrun", ["simctl", "boot", udid]));
   await phase("ready", () => command("xcrun", ["simctl", "bootstatus", udid, "-b"], 600_000));
+  await phase("logging-policy", () => command("xcrun", ["simctl", "logverbose", udid, "disable"]));
   await phase("headroom", async () => {
     proof.headroom = await waitForIOSSimulatorHeadroom(controller.signal);
     if (proof.headroom.status !== "ready") {
