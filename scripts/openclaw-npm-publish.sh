@@ -67,7 +67,8 @@ if [[ -n "${publish_target}" ]]; then
     echo "error: npm publish tarball package/package.json is malformed or has no valid package identity: ${publish_target}" >&2
     exit 2
   fi
-  IFS=$'\t' read -r package_name tarball_package_version <<< "${tarball_package_identity}"
+  package_name="${tarball_package_identity%%$'\t'*}"
+  tarball_package_version="${tarball_package_identity#*$'\t'}"
   if [[ "${tarball_package_version}" != "${package_version}" ]]; then
     echo "error: npm publish tarball version mismatch: expected ${package_version}, got ${tarball_package_version}" >&2
     exit 2
