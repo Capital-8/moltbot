@@ -388,7 +388,12 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
       return false;
     }
     const preparedFindings = pauseNotice
-      ? { text: pauseNotice.acknowledgment, events: [], isCurrent: () => true }
+      ? {
+          text: pauseNotice.acknowledgment,
+          events: [],
+          representedChildren: [],
+          isCurrent: () => true,
+        }
       : await readChildCompletionFindings(completionRows.filter(needsRequesterSettleFindings));
     if (await retireReplacedStore()) {
       return false;
@@ -609,10 +614,12 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
               dispatchAccepted = true;
               params.onAccepted?.();
             },
+            // Omitted failures remain recoverable; settling the whole cohort
+            // does not certify diagnostics absent from this bounded input.
             onInputCommitted: pauseNotice
               ? undefined
               : sourceReceiptAdmission.observeFailureHandoff(
-                  settledBatch,
+                  preparedFindings.representedChildren,
                   isSourceSessionEffectsAllowed,
                 ),
             onBeforeDispatch: async () => {

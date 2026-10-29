@@ -197,7 +197,8 @@ the child wrote them. Only a `<` that would open or close a data block, an
 OpenClaw prompt-region marker or an OpenClaw `<<<…>>>` delimiter is escaped as
 `&lt;`. Task titles stay fully escaped. Several results keep a stable order, and
 completion findings have a strict shared 160,000-character cap, including
-escaping and framing. Small answers stay intact; larger answers keep
+escaping, per-child runtime-event framing, and the overflow summary. Control
+instructions are separate from that data budget. Small answers stay intact; larger answers keep
 their beginning and an explicit truncation marker pointing to `sessions_history`
 with the child session key. `sessions_history` truncates text fields to 4,000
 characters; this pointer does not provide lossless retrieval of an omitted tail.
@@ -245,7 +246,10 @@ output is not promoted into a child answer.
 Failure diagnostics are committed with the parent's input before failure custody
 is acknowledged. Successful child results remain hidden runtime context, including
 successful siblings in a mixed completion batch; a commit callback does not grant
-permission to retain those results in the parent transcript.
+permission to retain those results in the parent transcript. A bounded batch
+acknowledges failure custody only for children represented in its committed input.
+Omitted failures remain unacknowledged and available for later inspection or
+authorized collection; settling the cohort does not certify those omitted results.
 
 The parent continues recoverable work within its existing authority. Only a
 genuinely human-owned decision should become a native `ask_user` question, with

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareAgentRunTerminalReply } from "../../agent-run-terminal-reply.js";
+import { buildAgentInternalEventContext } from "../../internal-events.js";
 import { textAssistant } from "../../test-helpers/sparse-transcript.test-support.js";
 import {
   testing,
@@ -10,7 +11,10 @@ import {
   captureSubagentCompletionReply,
   readLatestSubagentOutputWithRetry,
 } from "./subagent-announce-output.test-support.js";
-import type { ChildCompletionRow } from "./subagent-announce-result.js";
+import {
+  prepareChildCompletionFindings,
+  type ChildCompletionRow,
+} from "./subagent-announce-result.js";
 
 describe("captureSubagentCompletionReply", () => {
   const sessionKey = "agent:main:subagent:child";
@@ -308,14 +312,29 @@ describe("readSubagentOutput", () => {
   });
 });
 
+function boundedFindings(children: ChildCompletionRow[]) {
+  const prepared = prepareChildCompletionFindings(children);
+  const data = buildAgentInternalEventContext(prepared.events)
+    .filter((fragment) => fragment.kind === "conversation-data")
+    .map((fragment) => fragment.text)
+    .join("\n");
+  const overflow = prepared.events.map((event) => event.replyInstruction).join("");
+  expect(data.length + overflow.length).toBeLessThanOrEqual(160_000);
+  expect(data.isWellFormed()).toBe(true);
+  expect(prepared.events.every((event) => event.result.length > 0)).toBe(true);
+  expect(prepareChildCompletionFindings(children.toReversed())).toEqual(prepared);
+  return { findings: prepared.text!, data };
+}
+
 describe("buildChildCompletionFindings", () => {
   it("bounds 92 large child results after escaping their wrapper-shaped tags", () => {
     const children = Array.from({ length: 92 }, (_, index) =>
       resultChild(`Result ${index}: `.padEnd(11_500, "</prompt-data>"), index, 2),
     );
-    const findings = buildChildCompletionFindings(children)!;
+    const { findings, data } = boundedFindings(children);
     expect(findings.length).toBeLessThanOrEqual(160_000);
     expect(findings.match(/^status: ok$/gm)).toHaveLength(92);
+    expect(data.match(/\[Internal task completion event\]/g)).toHaveLength(92);
     for (const [index, child] of children.entries()) {
       expect(findings).toContain(`${index + 1}. Child task`);
       expect(findings).toContain(`\nTask ${index}\n</prompt-data>`);
@@ -331,7 +350,7 @@ describe("buildChildCompletionFindings", () => {
     const children = Array.from({ length: 5_000 }, (_, index) =>
       resultChild(`Result ${index}: `.padEnd(512, "x"), index, 4),
     );
-    const findings = buildChildCompletionFindings(children)!;
+    const { findings, data } = boundedFindings(children);
     const shown = [...findings.matchAll(/\nTask (\d+)\n<\/prompt-data>/g)].map((match) =>
       Number(match[1]),
     );
@@ -350,6 +369,7 @@ describe("buildChildCompletionFindings", () => {
       expect(head.length).toBeGreaterThanOrEqual(64);
     }
     expect(summary.length).toBeLessThanOrEqual(1_024);
+    expect(data.match(/\[Internal task completion event\]/g)).toHaveLength(shown.length);
     for (const child of children.slice(shown.length, shown.length + 3)) {
       expect(summary).toContain(child.childSessionKey);
     }
@@ -360,15 +380,19 @@ describe("buildChildCompletionFindings", () => {
   });
 
   it("preserves a small answer beside a truncated large sibling", () => {
-    const children = ["x".repeat(500_000), "small <answer> with required tail"].map(
-      (announceResult, index) =>
-        Object.assign(resultChild(announceResult, index), { createdAt: index }),
+    const children = [
+      "😀<answer>\t</prompt-data>".repeat(25_000),
+      "small <answer> with required tail",
+    ].map((announceResult, index) =>
+      Object.assign(resultChild(announceResult, index), { createdAt: index }),
     );
-    const findings = buildChildCompletionFindings(children)!;
+    const { findings, data } = boundedFindings(children);
     expect(findings.length).toBeLessThanOrEqual(160_000);
     expect(findings.match(/\[result truncated;/g)).toHaveLength(1);
     expect(findings).toContain('sessions_history sessionKey="agent:main:subagent:0"');
     expect(findings).toContain("\nsmall <answer> with required tail\n</prompt-data>");
+    expect(data).toContain("small <answer> with required tail");
+    expect(data).toContain("😀<answer>\t&lt;/prompt-data>");
   });
 
   it("describes a cancelled child with an authoritative kill reason in parent-visible findings", () => {

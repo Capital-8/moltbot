@@ -8,12 +8,19 @@ import {
   upsertSessionEntryCore,
   loadTranscriptEvents,
 } from "../../config/sessions/session-accessor.js";
+import { createAgentTurnTestContext } from "../../gateway/agent-turn/agent-run-dispatch.test-support.js";
+import {
+  prepareAgentRunUserTurn,
+  releasePreparedAgentRunUserTurn,
+} from "../../gateway/agent-turn/agent-run-user-turn.js";
 import type { NativeSubagentRuntime } from "../../plugins/runtime/types-native-subagent.js";
 import { attachSessionTranscriptRunId } from "../../sessions/transcript-events.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { installSessionToolResultGuard } from "../session-tool-result-guard.js";
 import { SessionManager } from "../sessions/session-manager.js";
 import { loadRequesterSessionEntry } from "../subagents/announce/subagent-announce-delivery.runtime.js";
+import { prepareChildCompletionFindings } from "../subagents/announce/subagent-announce-result.js";
+import { createRequesterSettleReceiptAdmission } from "../subagents/announce/subagent-announce.requester-settle-receipt.js";
 import { subagentRuns } from "../subagents/registry/subagent-registry-memory.js";
 import { mutateSubagentRuns } from "../subagents/registry/subagent-registry-persistence.js";
 import { subscribeSubagentRunChanges } from "../subagents/registry/subagent-registry-publication.js";
@@ -474,6 +481,200 @@ describe("native collector requester ownership", () => {
           } finally {
             warning.mockRestore();
           }
+        },
+      );
+    },
+  );
+
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ])(
+    "leaves omitted failures recoverable until consumed (visible failure=%s, rejected=%s)",
+    async (visibleFailure, rejected) => {
+      await withOpenClawTestState(
+        { scenario: "minimal", env: { OPENCLAW_TEST_READ_SUBAGENT_RUNS_FROM_SQLITE: "1" } },
+        async (state) => {
+          const storePath = resolveSessionStorePathCore(undefined, { agentId: "main" });
+          setRuntimeConfigSnapshot({ session: { store: storePath } });
+          const target = { agentId: "main", sessionKey: key, sessionId: "parent", storePath };
+          const entry = { sessionId: "parent", lifecycleRevision: "revision-2", updatedAt: 1 };
+          await upsertSessionEntryCore(target, entry);
+          const requester = await loadRequesterSessionEntry(key, "main");
+          const failed = (id: string, createdAt: number) => ({
+            ...record(id),
+            createdAt,
+            requesterStorePath: requester.physicalStorePath,
+            execution: {
+              status: "terminal" as const,
+              endedAt: 8,
+              outcome: { status: "error" as const, error: id + " cause" },
+            },
+            collectorCompletion: { status: "failed" as const },
+            completion: { required: false, resultText: id + " saved progress" },
+          });
+          const tail = failed("omitted-tail", 1_000);
+          const visible = failed("visible-failure", 0);
+          const failures = visibleFailure ? [visible, tail] : [tail];
+          for (const child of failures) {
+            subagentRuns.set(child.runId, child);
+          }
+          persistRegistryFixture(new Map(failures.map((child) => [child.runId, child])));
+          // Only the failed sources need native rows. This bounded pure inventory
+          // fills the production prefix without opening hundreds of child runtimes.
+          const healthy = Array.from({ length: 600 }, (_, index) => ({
+            ...record("healthy-" + index),
+            childSessionKey: "agent:main:subagent:healthy-" + index,
+            task: "Healthy " + index,
+            createdAt: index + 1,
+            execution: {
+              status: "terminal" as const,
+              endedAt: 8,
+              outcome: { status: "ok" as const },
+            },
+            announceResult: "HEALTHY_RUNTIME_ONLY".repeat(30),
+          }));
+          const batch = prepareChildCompletionFindings([...healthy, ...failures]);
+          expect(batch.events.some((event) => event.childSessionKey === tail.childSessionKey)).toBe(
+            false,
+          );
+          expect(batch.events[0]?.replyInstruction).toContain("additional child results omitted");
+          expect(batch.events[0]?.replyInstruction).toContain("Inspect remaining children");
+          const admission = createRequesterSettleReceiptAdmission({
+            requester,
+            identity: entry,
+            storeSessionKey: key,
+            storeAgentId: "main",
+            storePaths: () => [requester.physicalStorePath],
+            isSourceCurrent: () => true,
+            readCurrent: () => entry,
+            isStoreCurrent: () => true,
+          });
+          const onInputCommitted = vi.fn(
+            admission.observeFailureHandoff(batch.representedChildren, () => true),
+          );
+          const message = "Continue the OpenClaw runtime event.";
+          const turn = await prepareAgentRunUserTurn({
+            cfg: { session: { store: storePath } },
+            resolvedSessionKey: key,
+            admittedSessionId: "parent",
+            activeSessionAgentId: "main",
+            sessionEntry: entry,
+            assertCurrent: () => {},
+            onUserTurnMediaPersisted: () => {},
+            suppressVisibleSessionEffects: false,
+            requestedPromptPersistenceSuppression: false,
+            canUseInternalRuntimeHandoff: false,
+            message,
+            effectiveTranscriptInputText: message,
+            images: [],
+            offloadedRefs: [],
+            runId: "announce:overflow",
+            client: null,
+            context: createAgentTurnTestContext(),
+            onInputCommitted,
+            inputProvenance: {
+              kind: "inter_session",
+              sourceTool: "subagent_settle",
+              sourceSessionKey: tail.childSessionKey,
+            },
+            request: {
+              message,
+              idempotencyKey: "announce:overflow",
+              deliver: false,
+              expectedExistingSessionId: "parent",
+              internalEvents: batch.events,
+            },
+          });
+          try {
+            expect(turn.recorder).toBeDefined();
+            const write = turn.recorder!.persistApproved(
+              rejected
+                ? {
+                    target: async () => {
+                      throw new Error("Input refused");
+                    },
+                  }
+                : undefined,
+            );
+            if (rejected) {
+              await expect(write).rejects.toThrow("Input refused");
+              expect(onInputCommitted).not.toHaveBeenCalled();
+              expect(await loadTranscriptEvents(target)).toEqual([]);
+            } else {
+              expect(await write).toMatchObject({ appended: true });
+              expect(onInputCommitted).toHaveBeenCalledOnce();
+              await onInputCommitted.mock.results[0]?.value;
+            }
+            const saved = loadSubagentRegistryFromSqlite();
+            expect(saved.get(tail.runId)?.delivery?.failureHandoff).toBeUndefined();
+            expect(Boolean(saved.get(visible.runId)?.delivery?.failureHandoff)).toBe(
+              visibleFailure && !rejected,
+            );
+            const transcript = JSON.stringify(await loadTranscriptEvents(target));
+            expect(transcript).not.toContain("HEALTHY_RUNTIME_ONLY");
+            expect(transcript).not.toContain("omitted-tail saved progress");
+            if (visibleFailure && !rejected) {
+              expect(transcript).toContain("visible-failure cause");
+              expect(transcript).toContain("visible-failure saved progress");
+            }
+          } finally {
+            await releasePreparedAgentRunUserTurn(turn);
+          }
+          if (rejected) {
+            return;
+          }
+          // Reading the omitted result is not custody; the actual collector's
+          // acknowledged tool-result append is the later recovery boundary.
+          const result = await collectResult({ ids: [tail.runId], timeoutSeconds: 0 });
+          expect(readNativeSubagentCollection(result.details).completed).toMatchObject([
+            {
+              runId: tail.runId,
+              error: "omitted-tail cause",
+              result: expect.stringContaining("omitted-tail saved progress"),
+            },
+          ]);
+          expect(
+            loadSubagentRegistryFromSqlite().get(tail.runId)?.delivery?.failureHandoff,
+          ).toBeUndefined();
+          const manager = await SessionManager.openAsync(target, state.sessionsDir());
+          installSessionToolResultGuard(manager);
+          await manager.appendMessageAsync(
+            makeAgentAssistantMessage({
+              content: [
+                {
+                  type: "toolCall",
+                  id: "recover-tail",
+                  name: "agents_wait",
+                  arguments: { ids: [tail.runId] },
+                },
+              ],
+            }),
+          );
+          const committed = committedHandoff([tail.runId]);
+          await manager.appendMessageAsync(
+            copyInternalToolResultState(
+              result,
+              makeTextToolResult(
+                "recover-tail",
+                "agents_wait",
+                JSON.stringify(result.details),
+                false,
+                2,
+              ),
+            ),
+          );
+          await committed;
+          expect(
+            loadSubagentRegistryFromSqlite().get(tail.runId)?.delivery?.failureHandoff,
+          ).toMatchObject({ requesterSessionId: "parent" });
+          expect(JSON.stringify(await loadTranscriptEvents(target))).toContain(
+            "omitted-tail saved progress",
+          );
+          expect(JSON.stringify(await loadTranscriptEvents(target))).not.toContain(
+            "HEALTHY_RUNTIME_ONLY",
+          );
         },
       );
     },

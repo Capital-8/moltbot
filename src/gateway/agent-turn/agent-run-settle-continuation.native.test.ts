@@ -606,7 +606,7 @@ it.each([
     let handoff: Promise<void> | undefined;
     const onInputCommitted = vi.fn<NonNullable<TurnParams["onInputCommitted"]>>((receipt) => {
       handoff = recordSubagentFailureHandoff({
-        entries: [child, healthy],
+        entries: batch.representedChildren,
         requester: receipt,
         assertCurrent: () => {},
       });

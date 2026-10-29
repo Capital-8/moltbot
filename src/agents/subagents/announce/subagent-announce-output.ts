@@ -26,7 +26,10 @@ import type { SubagentRunReadRecord } from "../registry/subagent-registry-read.t
 import { prepareSubagentRunsSnapshotForRunIds } from "../registry/subagent-registry-state.js";
 import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
 import { isRequesterCompletionCohortCurrent } from "../registry/subagent-requester-settle-identity.js";
-import { recordLatestSubagentRun } from "../registry/subagent-run-generation.js";
+import {
+  copySubagentRunRuntimeOwner,
+  recordLatestSubagentRun,
+} from "../registry/subagent-run-generation.js";
 import {
   hasSubagentRunEnded,
   isRetainedUnendedSubagentRun,
@@ -525,7 +528,12 @@ export async function readSubagentRunFinalAnswer(
 export async function readChildCompletionFindings(
   children: SubagentRunRecord[],
   readSubagentRun?: AnnounceRunReader,
-): Promise<PreparedAnnounceResult & { events: AgentInternalEvent[] }> {
+): Promise<
+  PreparedAnnounceResult & {
+    events: AgentInternalEvent[];
+    representedChildren: SubagentRunRecord[];
+  }
+> {
   const readCurrent =
     readSubagentRun ?? (await prepareAnnounceRunReader(children.map((child) => child.runId)));
   const results = await Promise.all(
@@ -548,7 +556,9 @@ export async function readChildCompletionFindings(
   }
   return {
     ...prepareChildCompletionFindings(
-      results.map(({ child, text }) => Object.assign({}, child, { announceResult: text })),
+      results.map(({ child, text }) =>
+        copySubagentRunRuntimeOwner(child, { ...child, announceResult: text }),
+      ),
     ),
     isCurrent,
   };
