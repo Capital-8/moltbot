@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scriptProcessEntrypoints } from "../../scripts/script-process-runtime.test-support.js";
 import {
@@ -18,6 +18,40 @@ import {
 } from "./package-tarball-fixture.js";
 
 const CHECK_SCRIPT = "scripts/check-openclaw-package-tarball.mts";
+
+function completeDeclaredFixtureFiles(root: string, sourceRoot: string, files: readonly string[]) {
+  // Keep the real publication rules while satisfying the checker's literal-entry
+  // contract. These inert files complement the explicit runtime fixture below.
+  for (const declared of files) {
+    if (declared.startsWith("!") || /[*?[\]{}()]/u.test(declared)) {
+      continue;
+    }
+    const relative = declared.replace(/\/$/u, "");
+    if (
+      isAbsolute(relative) ||
+      relative.includes("\\") ||
+      relative.split("/").some((part) => !part || part === "." || part === "..")
+    ) {
+      throw new Error(`Unsafe package fixture declaration: ${declared}`);
+    }
+    const target = join(root, relative);
+    const existing = lstatSync(target, { throwIfNoEntry: false });
+    if (existing) {
+      expect(existing.isFile() || existing.isDirectory()).toBe(true);
+      continue;
+    }
+    const source = lstatSync(join(sourceRoot, relative));
+    expect(source.isFile() || source.isDirectory()).toBe(true);
+    const file = source.isDirectory() ? join(target, "fixture.txt") : target;
+    mkdirSync(dirname(file), { recursive: true });
+    const content = file.endsWith(".json")
+      ? "{}\n"
+      : file.endsWith(".yaml")
+        ? "packages: []\n"
+        : "";
+    writeFileSync(file, content, { flag: "wx" });
+  }
+}
 
 describe("package build metadata publication", () => {
   it.each(["npm", "pnpm"] as const)(
@@ -94,6 +128,7 @@ describe("package build metadata publication", () => {
             files: rootManifest.files,
           },
           beforePack: (packageRoot) => {
+            completeDeclaredFixtureFiles(packageRoot, resolve("."), rootManifest.files);
             withTarball(
               [],
               aiFiles,
@@ -117,6 +152,9 @@ describe("package build metadata publication", () => {
                 includeControlUi: false,
                 includeLifecycleMarker: false,
                 includeWorkspaceTemplates: false,
+                beforePack: (aiRoot) => {
+                  completeDeclaredFixtureFiles(aiRoot, resolve("packages/ai"), aiManifest.files);
+                },
                 packageJson: {
                   ...JSON.parse(AI_RUNTIME_PACKAGE_JSON),
                   type: "module",
