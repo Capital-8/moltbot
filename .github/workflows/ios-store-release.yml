@@ -78,7 +78,7 @@ jobs:
       - name: Resolve cold 1
         run: node scripts/ios-source-packages-proof.mjs sample cold 1
       - name: Time cache producer
-        run: echo "PRODUCER_STARTED_MS=$(node -p Date.now())" >> "$GITHUB_ENV"
+        run: echo "PRODUCER_STARTED_MS=$(node -p 'Date.now()')" >> "$GITHUB_ENV"
       - name: Save diagnostic source package seed
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -95,7 +95,7 @@ jobs:
           rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
           rm -f "$RUNNER_TEMP/ios-release-recovery/source/apps/ios/OpenClaw.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Time restore 1
-        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p Date.now())" >> "$GITHUB_ENV"
+        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p 'Date.now()')" >> "$GITHUB_ENV"
       - name: Restore source package seed 1
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -123,7 +123,7 @@ jobs:
           rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
           rm -f "$RUNNER_TEMP/ios-release-recovery/source/apps/ios/OpenClaw.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Time restore 2
-        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p Date.now())" >> "$GITHUB_ENV"
+        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p 'Date.now()')" >> "$GITHUB_ENV"
       - name: Restore source package seed 2
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -151,7 +151,7 @@ jobs:
           rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
           rm -f "$RUNNER_TEMP/ios-release-recovery/source/apps/ios/OpenClaw.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Time restore 3
-        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p Date.now())" >> "$GITHUB_ENV"
+        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p 'Date.now()')" >> "$GITHUB_ENV"
       - name: Restore source package seed 3
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -179,7 +179,7 @@ jobs:
           rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
           rm -f "$RUNNER_TEMP/ios-release-recovery/source/apps/ios/OpenClaw.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Time restore 4
-        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p Date.now())" >> "$GITHUB_ENV"
+        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p 'Date.now()')" >> "$GITHUB_ENV"
       - name: Restore source package seed 4
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -207,7 +207,7 @@ jobs:
           rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
           rm -f "$RUNNER_TEMP/ios-release-recovery/source/apps/ios/OpenClaw.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - name: Time restore 5
-        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p Date.now())" >> "$GITHUB_ENV"
+        run: echo "CACHE_RESTORE_STARTED_MS=$(node -p 'Date.now()')" >> "$GITHUB_ENV"
       - name: Restore source package seed 5
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -220,6 +220,12 @@ jobs:
           node scripts/ios-source-packages-proof.mjs sample warm 5
       - name: Evaluate package comparison
         run: node scripts/ios-source-packages-proof.mjs report
+      - name: Retain completed package comparison
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-source-packages-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-source-packages-proof
+          retention-days: 14
       - name: Consume restored packages in a clean unsigned archive
         run: |
           set -euo pipefail
