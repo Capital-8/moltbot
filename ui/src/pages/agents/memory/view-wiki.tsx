@@ -1,6 +1,6 @@
 import type { JSX } from "@solidjs/web";
 import { createMemo, Errored, For, Loading, Show } from "solid-js";
-import "../../../components/modal-dialog.ts";
+import "../../../components/modal-dialog.tsx";
 import { i18n } from "../../../i18n/index.ts";
 import { formatUiError } from "../../../lib/format-error.ts";
 import { pathDisplayName } from "../../../lib/path-display.ts";
@@ -141,13 +141,9 @@ export function WikiPreviewOverlay(props: DreamingProps) {
   );
 }
 
-type ImportedInsightItem = WikiImportInsights["clusters"][number]["items"][number];
-
-type WikiPageItem = WikiOverview["clusters"][number]["items"][number];
-
 type WikiInsightCard =
-  | { kind: "import"; item: ImportedInsightItem }
-  | { kind: "wiki"; item: WikiPageItem };
+  | { kind: "import"; item: WikiImportInsights["clusters"][number]["items"][number] }
+  | { kind: "wiki"; item: WikiOverview["clusters"][number]["items"][number] };
 
 function renderInsightList(labelKey: string, entries: string[]) {
   return entries.length > 0 ? (

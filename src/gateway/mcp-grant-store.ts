@@ -119,7 +119,6 @@ export type McpLoopbackRequestContext = {
   execOverrides?: ExecPolicyOverrides & { mode?: ExecMode };
   bashElevated?: ExecElevatedDefaults;
   trigger?: string;
-  continuesConversation?: boolean;
   approvalReviewerDeviceId?: string;
   channelContext?: PluginHookChannelContext;
   senderName?: string;
@@ -180,6 +179,8 @@ type StoredMcpLoopbackClientGrant = McpLoopbackClientGrant & {
   ) => CronCreatorAuthorityGrant;
   /** Retained Cron permission, independent of this grant's other tool authority. */
   cronAuthorityCheck?: () => boolean;
+  /** Exact Cron management scope for construction after native CLI admission. */
+  withCronManagementToolConstruction?: <T>(run: () => T) => T;
   abortSignal?: AbortSignal;
   assertCurrent?: () => void;
   /** Original CLI policy, rebound only to this stored row's exact lifetime. */
@@ -317,6 +318,7 @@ export function mintMcpLoopbackClientGrant(
     memoryAudience: params.memoryAudience,
     cronRequesterGrantIssuer: params.cronRequesterGrantIssuer,
     cronAuthorityCheck: params.cronAuthorityCheck,
+    withCronManagementToolConstruction: params.withCronManagementToolConstruction,
     abortSignal: params.abortSignal,
     assertCurrent: params.assertCurrent,
     bindQuestionAnswerAuthority: params.bindQuestionAnswerAuthority,
@@ -519,6 +521,7 @@ export function resolveMcpLoopbackClientGrant(params: {
       memoryAudience?: MemoryAudience;
       mintCronRequesterGrant?: (signal?: AbortSignal) => CronCreatorAuthorityGrant;
       cronAuthorityCheck?: () => boolean;
+      withCronManagementToolConstruction?: <T>(run: () => T) => T;
       questionAnswerAuthority?: PreparedQuestionAnswerAuthority;
       skillLibraryAuthoring?: SkillLibraryAuthoringCapability;
       bundledTools?: readonly AnyAgentTool[];
@@ -552,6 +555,7 @@ export function resolveMcpLoopbackClientGrant(params: {
     }
   });
   const issueCronRequesterGrant = grant.cronRequesterGrantIssuer;
+  const withCronManagementToolConstruction = grant.withCronManagementToolConstruction;
   // Cached tools and OAuth refreshes must share the prepared store for this
   // grant; cloning on each request would discard refreshed credentials.
   return {
@@ -565,6 +569,14 @@ export function resolveMcpLoopbackClientGrant(params: {
     messageActionTurnCapability: grant.messageActionTurnCapability || undefined,
     memoryAudience: grant.memoryAudience,
     cronAuthorityCheck: grant.cronAuthorityCheck,
+    withCronManagementToolConstruction: withCronManagementToolConstruction
+      ? <T>(run: () => T): T => {
+          if (!isCurrent()) {
+            throw new Error("cron management MCP grant is no longer active");
+          }
+          return withCronManagementToolConstruction(run);
+        }
+      : undefined,
     mintCronRequesterGrant: issueCronRequesterGrant
       ? (signal?: AbortSignal) => {
           if (!isCurrent()) {
