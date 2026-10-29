@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   SessionActorAppend,
   SessionActorOutcome,
@@ -191,7 +191,10 @@ describe("memory actor transcript", () => {
       ...messageInput("assistant-1", "user-1", messageJson),
       view: { loadedVersion: { generation: null, rawSeq: null, updatedAt: null } },
     };
+    using parse = vi.spyOn(JSON, "parse");
     const first = committed(await metadata("metadata", input));
+    // Provenance, input admission, and the detached result decode; reload reuses the envelope.
+    expect(parse.mock.calls.filter(([json]) => json === messageJson).length).toBeLessThanOrEqual(3);
     const result = metadataResult(first);
     assert(result.reload?.ok && result.reload.value.kind === "full");
     expect(result.reload.value.snapshot.eventJson?.at(-1)).toContain(`"message":${messageJson}}`);
