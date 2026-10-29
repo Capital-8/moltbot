@@ -444,16 +444,20 @@ it("keeps recovery context when an older cursor excludes the successful boundary
 it.each(["source ID", "tool identity"])(
   "publishes a bounded unavailable source with oversized %s in the resident transcript",
   (oversized) => {
-    const messages = [1, 2, 3].map((seq) => ({
-      role: "assistant",
-      content: `Message ${seq}`,
-      __openclaw: { id: `source-${seq}`, seq },
-      ...(seq === 2
-        ? oversized === "source ID"
-          ? { __openclaw: { id: "z".repeat(4000), seq } }
-          : { role: "toolResult", toolName: "z".repeat(4000), toolCallId: "call" }
-        : {}),
-    }));
+    const messages = [1, 2, 3].map((seq) =>
+      Object.assign(
+        {
+          role: "assistant",
+          content: `Message ${seq}`,
+          __openclaw: { id: `source-${seq}`, seq },
+        },
+        seq === 2
+          ? oversized === "source ID"
+            ? { __openclaw: { id: "z".repeat(4000), seq } }
+            : { role: "toolResult", toolName: "z".repeat(4000), toolCallId: "call" }
+          : {},
+      ),
+    );
     const page = prepareChatHistoryResponsePage(
       {
         messages,
