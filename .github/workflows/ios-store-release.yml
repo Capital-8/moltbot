@@ -56,7 +56,13 @@ jobs:
           source_dir="$RUNNER_TEMP/ios-release-recovery/source"
           mkdir -p "$(dirname "$source_dir")"
           git worktree add --detach "$source_dir" "$GITHUB_SHA"
-          ln -s "$GITHUB_WORKSPACE/node_modules" "$source_dir/node_modules"
+          git ls-files package.json '**/package.json' | while IFS= read -r manifest; do
+            relative="$(dirname "$manifest")/node_modules"
+            if [[ -d "$GITHUB_WORKSPACE/$relative" ]]; then
+              mkdir -p "$source_dir/$(dirname "$relative")"
+              ln -s "$GITHUB_WORKSPACE/$relative" "$source_dir/$relative"
+            fi
+          done
           cd "$source_dir"
           version="$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')"
           /bin/bash scripts/ios-release-prepare.sh --version "$version" --revision 0 --build-number 1 --team-id FWJYW4S8P8
