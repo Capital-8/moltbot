@@ -15,16 +15,14 @@ import {
   resolveLlamaCppModelCacheDir,
 } from "./defaults.js";
 import { resolveManagedLlamaCppProviderConfig } from "./managed-provider-config.js";
-import {
-  inspectLlamaServerRuntime,
-  type LlamaServerRuntimeFacts,
-} from "./managed-server-inspection.js";
+import { inspectLlamaServerRuntime } from "./managed-server-inspection.js";
 import {
   ensureLlamaCppModel,
   prepareManagedLlamaServer,
   reconcileManagedLlamaServer as reconcileLocalService,
 } from "./managed-server.js";
 import { resolveLlamaCppMediaModels } from "./media-config.js";
+import { formatLlamaServerRuntimeError } from "./runtime-error.js";
 
 type AcquireLocalService = OpenClawPluginApi["runtime"]["llm"]["acquireLocalService"];
 type LocalServiceAwareOptions = EmbeddingProviderCreateOptions & {
@@ -120,7 +118,7 @@ export async function createLlamaCppEmbeddingProvider(
       dimensions === undefined ? vector : vector.slice(0, dimensions),
     );
   };
-  let runtimeFacts: LlamaServerRuntimeFacts | undefined;
+  let runtimeFacts: Awaited<ReturnType<typeof inspectLlamaServerRuntime>> | undefined;
   const refreshFacts = async (loadError?: string) => {
     runtimeFacts = await inspectLlamaServerRuntime({
       baseUrl,
@@ -134,8 +132,9 @@ export async function createLlamaCppEmbeddingProvider(
       await refreshFacts();
       return value;
     } catch (error) {
-      await refreshFacts(error instanceof Error ? error.message : String(error));
-      throw error;
+      const failure = formatLlamaServerRuntimeError(error);
+      await refreshFacts(failure.message);
+      throw failure;
     }
   };
   const wrapped: EmbeddingProvider = {
