@@ -3,9 +3,14 @@ import {
   compareCloudProfiles,
   hasProviderBrandIcon,
   providerDisplayLabel,
+  resolveProviderIconName,
 } from "./provider-icon-data.ts";
 
 describe("model provider labels", () => {
+  it("uses the Particle brand mark instead of a fallback letter", () => {
+    expect(resolveProviderIconName("particle")).toBe("particle");
+  });
+
   it.each([
     ["constructor", "Constructor"],
     ["__proto__", "Proto"],
