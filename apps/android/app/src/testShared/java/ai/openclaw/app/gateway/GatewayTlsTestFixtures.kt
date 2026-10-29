@@ -39,6 +39,7 @@ import org.bouncycastle.asn1.x509.V3TBSCertificateGenerator
 import org.bouncycastle.asn1.x509.Validity
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import java.io.IOException
 import java.security.AlgorithmParameters
@@ -48,6 +49,7 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.Signature
+import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
@@ -65,8 +67,9 @@ import javax.net.ssl.SSLSocketFactory
 internal data class GatewayTlsTestFixture(
   val socketFactory: SSLSocketFactory,
   val leaf: X509Certificate,
-  val blockedIntermediateSpki: String? = null,
+  val blockedIntermediate: X509Certificate? = null,
 ) {
+  val blockedIntermediateSpki: String? = blockedIntermediate?.let { tlsTestSha256(it.publicKey.encoded) }
   val fingerprint: String = tlsTestSha256(leaf.encoded)
   val wrongFingerprint: String = fingerprint.replaceRange(0, 1, if (fingerprint.first() == '0') "1" else "0")
 }
@@ -136,7 +139,7 @@ internal fun gatewayTlsTestFixture(
     }
   val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, password) }
   val context = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, null) }
-  return GatewayTlsTestFixture(context.socketFactory, leaf, if (blocklisted) intermediate?.let { tlsTestSha256(it.publicKey.encoded) } else null)
+  return GatewayTlsTestFixture(context.socketFactory, leaf, if (blocklisted) intermediate else null)
 }
 
 /** Observes the production client's raw chain without replacing its trust or hostname policy. */
@@ -203,6 +206,26 @@ internal class GatewayTlsTestObservation {
         listener.onFailure(webSocket, t, response)
       }
     }
+
+  // The native platform rejects this key during TLS, before OkHttp sees a peer chain.
+  // Keep this independent from the pinned-path assertion of OkHttp's own gate below.
+  fun assertPlatformBlocklisted(
+    error: Throwable,
+    fixture: GatewayTlsTestFixture,
+  ) {
+    val intermediate = checkNotNull(fixture.blockedIntermediate)
+    val expectedMessage = "Certificate blocklisted by public key: $intermediate"
+    assertTrue(
+      "Conscrypt must reject the exact verified incident certificate key; original failure:\n${error.stackTraceToString()}",
+      error.tlsTestCauses().any { cause ->
+        cause is CertificateException &&
+          cause.message == expectedMessage &&
+          cause.stackTrace.any { it.className == "com.android.org.conscrypt.TrustManagerImpl" && it.methodName == "checkBlocklist" }
+      },
+    )
+    assertFalse(hostnameAccepted.get())
+    assertTrue(peerCertificates.get().isEmpty())
+  }
 
   fun assertBlocklisted(
     error: Throwable,

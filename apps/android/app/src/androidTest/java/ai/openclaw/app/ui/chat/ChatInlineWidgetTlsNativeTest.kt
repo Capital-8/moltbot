@@ -83,7 +83,9 @@ class ChatInlineWidgetTlsNativeTest {
           } else {
             assertEquals(502, response.statusCode)
             val failure = withTimeout(8_000) { observation.failure.await() }
-            if (case.blocklisted) {
+            if (case == TlsCase.SYSTEM_BLOCKLISTED) {
+              observation.assertPlatformBlocklisted(failure, fixture)
+            } else if (case.blocklisted) {
               observation.assertBlocklisted(failure, fixture)
             } else if (case == TlsCase.SYSTEM_WRONG_HOST) {
               assertTrue("TLS must reach hostname validation", observation.peerCertificates.get().isNotEmpty())
