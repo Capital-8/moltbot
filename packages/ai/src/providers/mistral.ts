@@ -567,9 +567,12 @@ export const streamSimpleMistral: StreamFunction<"mistral-conversations", Simple
     : undefined;
   const reasoning = clampedReasoning === "off" ? undefined : clampedReasoning;
   const shouldUseReasoning = model.reasoning && reasoning !== undefined;
+  const compat: unknown = model.compat;
   const supportsReasoningEffort =
-    (model.compat as { supportsReasoningEffort?: boolean } | undefined)?.supportsReasoningEffort ===
-    true;
+    typeof compat === "object" &&
+    compat !== null &&
+    "supportsReasoningEffort" in compat &&
+    compat.supportsReasoningEffort === true;
 
   return streamMistral(model, context, {
     ...base,
