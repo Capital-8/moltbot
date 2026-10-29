@@ -99,9 +99,6 @@
     "extensions/deepinfra/provider-static-catalog.ts": [
       "deepseek-ai/deepseek-v4-flash"
     ],
-    "extensions/deepseek/models.ts": [
-      "deepseek-flash"
-    ],
     "extensions/deepseek/provider-policy-api.ts": [
       "deepseek-v4-flash",
       "deepseek-v4-pro"
