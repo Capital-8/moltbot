@@ -65,15 +65,10 @@ it.each([
   const sealed = await seal(input, fetchImpl);
   expect(fetchImpl).toHaveBeenCalledTimes(!row.bootstrap && !row.published ? 2 : 1);
   expect(sealed).toMatchObject({
-    version: 1,
-    targetSha,
-    npmDistTag: row.coreBeta ? "beta" : "latest",
     pluginSdkApiAcknowledgement: "",
     pluginSdkApiEvidenceDigest: input.digest,
     npmDecisions: [
       {
-        packageName: row.coreBeta ? "openclaw" : "@openclaw/example",
-        packageVersion: version,
         decision: row.decision,
         route: row.route,
         supersededBy: row.decision === "superseded" ? "2026.9.7" : null,

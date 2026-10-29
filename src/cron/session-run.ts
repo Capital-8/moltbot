@@ -18,11 +18,12 @@ import {
   finalizeCronPromptForResolvedTools,
   resolveCronDeliveryContext,
 } from "./isolated-agent/run-delivery-trace.js";
+import { CronOperatorSourceError } from "./operator-source-error.js";
 import { appendCronJobScratchPrompt, buildCronCommandBody } from "./run-prompt.js";
 import { isCronScratchEffectivelyEmpty } from "./scratch-contract.js";
 import { readCronScratchSnapshot } from "./scratch-read.js";
 import type { CronServiceDeps } from "./service/state.js";
-import { resolveCronJobsStorePathFromConfig } from "./store.js";
+import { resolveCronJobsStorePathFromConfigAsync } from "./store.js";
 import type { CronResolvedDeliveryState } from "./types.js";
 
 type SessionRun = NonNullable<CronServiceDeps["runSessionEvent"]>;
@@ -139,7 +140,7 @@ export async function runCronSessionTurn(
       params.sessionPreparation?.scratch ??
       (
         await readCronScratchSnapshot(
-          resolveCronJobsStorePathFromConfig(params.cfg),
+          await resolveCronJobsStorePathFromConfigAsync(params.cfg),
           { kind: "job", jobId: job.id, createdAtMsFallback: job.createdAtMs },
           {},
           { assertCurrent, signal: params.abortSignal },
@@ -178,6 +179,7 @@ export async function runCronSessionTurn(
       abortSignal: params.abortSignal,
       scheduledAutomation: {
         job,
+        occurrence: params.occurrence,
         operatorAuthority,
         controlUiAdmin,
         admissionSource: params.admissionSource,
@@ -321,6 +323,16 @@ export async function runCronSessionTurn(
           }
         : {}),
       ...(result.nextCheckMs !== undefined ? { nextCheck: { delayMs: result.nextCheckMs } } : {}),
+    };
+  } catch (error) {
+    if (!(error instanceof CronOperatorSourceError)) {
+      throw error;
+    }
+    return {
+      status: "error",
+      error: error.message,
+      errorClassification: { kind: "permanent" },
+      executionStarted: false,
     };
   } finally {
     if (!params.sessionPreparation) {
