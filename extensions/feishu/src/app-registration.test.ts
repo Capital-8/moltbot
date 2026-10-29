@@ -285,17 +285,12 @@ describe("Feishu app registration", () => {
   // over-cap: body > 16 MiB, no Content-Length. The bounded reader cancels
   // through the real SSRF guard and rejects before full buffering.
   it("rejects Feishu API responses that exceed the 16 MiB JSON body cap", async () => {
-    let streamState:
-      | {
-          bytesPulled: () => number;
-          canceled: () => boolean;
-        }
-      | undefined;
+    let streamState: ReturnType<typeof writeOversizedJson> | undefined;
     await withRegistrationServer(
       (_req, res) => {
         streamState = writeOversizedJson(
           res,
-          FEISHU_JSON_MAX_BYTES * 2,
+          FEISHU_JSON_MAX_BYTES,
           '{"device_code":"dev","padding":"',
         );
       },
@@ -303,6 +298,7 @@ describe("Feishu app registration", () => {
         await expect(beginAppRegistration("feishu")).rejects.toThrow(
           /feishu\.api: JSON response exceeds \d+ bytes/,
         );
+        await expect(streamState?.clientClosed).resolves.toBeUndefined();
       },
     );
 

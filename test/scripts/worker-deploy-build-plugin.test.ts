@@ -18,6 +18,7 @@ import { createWorkerBundleProducer } from "../../src/gateway/worker-environment
 import {
   WORKER_BUNDLE_ARTIFACT_PATHS,
   WORKER_BUNDLE_CHUNK_PATH_PATTERN,
+  WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH,
 } from "../../src/shared/worker-bundle-hash.js";
 import { createFixtureLifetime } from "../helpers/fixture-lifetime.js";
 import { runNodeScript } from "../helpers/run-node-script.js";
@@ -40,29 +41,32 @@ const fail = (message: string): never => {
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 describe("worker deploy build plugin", () => {
-  it.each(["escaped.mjs", "worker/extra.mjs", "worker/native.node", "worker/runtime.wasm"])(
-    "rejects an unstaged emitted %s before publishing the worker graph",
-    (fileName) => {
-      const plugin = createWorkerDeployBuildPlugin();
-      expect(() =>
-        plugin.generateBundle.call(
-          { error: fail },
-          {},
-          {
-            "worker/worker.mjs": { type: "chunk", fileName: "worker/worker.mjs", isEntry: true },
-            [fileName]: { type: fileName.endsWith(".mjs") ? "chunk" : "asset", fileName },
-          },
-        ),
-      ).toThrow(`Worker deploy artifact emits unstaged runtime asset ${fileName}.`);
-    },
-  );
+  it.each([
+    "escaped.mjs",
+    "worker/extra.mjs",
+    "worker/native.node",
+    "worker/runtime.wasm",
+    "worker/unowned.exe",
+  ])("rejects an unstaged emitted %s before publishing the worker graph", (fileName) => {
+    const plugin = createWorkerDeployBuildPlugin();
+    expect(() =>
+      plugin.generateBundle.call(
+        { error: fail },
+        {},
+        {
+          "worker/worker.mjs": { type: "chunk", fileName: "worker/worker.mjs", isEntry: true },
+          [fileName]: { type: fileName.endsWith(".mjs") ? "chunk" : "asset", fileName },
+        },
+      ),
+    ).toThrow(`Worker deploy artifact emits unstaged runtime asset ${fileName}.`);
+  });
 
   describe("portable output", () => {
     const fixtureDirs = useAutoCleanupTempDirTracker(afterAll);
     const fixtureLifetime = createFixtureLifetime();
-    const workerEntryNames = WORKER_BUNDLE_ARTIFACT_PATHS.map(
-      (artifact) => `worker/${artifact.replace(/\.mjs$/u, "")}`,
-    );
+    const workerEntryNames = WORKER_BUNDLE_ARTIFACT_PATHS.filter((artifact) =>
+      artifact.endsWith(".mjs"),
+    ).map((artifact) => `worker/${artifact.replace(/\.mjs$/u, "")}`);
     let preparedDist: string;
     let preparedArchive: string;
 
@@ -174,6 +178,7 @@ export { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";`;
           chunks.every(
             (file) =>
               file === "worker/worker.mjs" ||
+              file === `worker/${WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH}` ||
               (file.startsWith("worker/") && WORKER_BUNDLE_CHUNK_PATH_PATTERN.test(file.slice(7))),
           ),
         ).toBe(true);
@@ -212,6 +217,16 @@ export { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";`;
           const relocated = path.join(root, "dist", "worker");
           fs.mkdirSync(relocated, { recursive: true });
           await tar.extract({ file: preparedArchive, cwd: relocated });
+          expect(
+            fs.readFileSync(path.join(relocated, WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH)),
+          ).toEqual(
+            fs.readFileSync(
+              path.resolve(
+                "node_modules/@openclaw/fs-safe/dist",
+                WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH,
+              ),
+            ),
+          );
           const result = await fixtureLifetime.track(
             runNodeScript(
               [
@@ -303,6 +318,16 @@ console.log("relocated exec authorization persisted");
             JSON.stringify({ name: "openclaw", version: "0.0.0", type: "module" }),
           );
           await tar.extract({ file: preparedArchive, cwd: relocated });
+          expect(
+            fs.readFileSync(path.join(relocated, WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH)),
+          ).toEqual(
+            fs.readFileSync(
+              path.resolve(
+                "node_modules/@openclaw/fs-safe/dist",
+                WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH,
+              ),
+            ),
+          );
           fs.writeFileSync(
             path.join(pluginRoot, "package.json"),
             JSON.stringify({
@@ -778,7 +803,12 @@ export async function createAttachedBrowserToolRuntime(params) {
 
     const transformed = plugin.transform.call({ error: fail }, source, nativePath);
 
-    expect(transformed).toBeNull();
+    const { optionalDependencies } = JSON.parse(
+      fs.readFileSync(path.resolve("node_modules/@openclaw/fs-safe/package.json"), "utf8"),
+    );
+    expect(transformed).toBe(
+      source.replace('require("../package.json")', JSON.stringify({ optionalDependencies })),
+    );
   });
 
   it.each<{
@@ -845,6 +875,7 @@ export async function createAttachedBrowserToolRuntime(params) {
           "web-tree-sitter",
           "tree-sitter-bash",
           "@silvia-odwyer/photon-node",
+          "@openclaw/fs-safe",
         ]) {
           fs.mkdirSync(path.join(rootDir, "node_modules", path.dirname(name)), { recursive: true });
           fs.symlinkSync(

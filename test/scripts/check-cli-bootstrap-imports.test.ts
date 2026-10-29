@@ -43,6 +43,7 @@ const workerDeployArtifactNames = [
   "worker-native-lifecycle.worker.mjs",
   "worker.mjs",
   "workspace-rsync-receiver.mjs",
+  "windows-security-helper.exe",
 ];
 
 function makeTempRoot(): string {
@@ -377,18 +378,20 @@ describe("check-cli-bootstrap-imports", () => {
     ]);
   });
 
-  it("rejects a missing native lifecycle worker artifact", () => {
-    const root = makeTempRoot();
-    const missingArtifact = "worker-native-lifecycle.worker.mjs";
-    for (const artifact of workerDeployArtifactNames) {
-      if (artifact !== missingArtifact) {
-        writeFixture(root, `dist/worker/${artifact}`, "export {};\n");
+  it.each(["worker-native-lifecycle.worker.mjs", "windows-security-helper.exe"])(
+    "rejects a missing %s worker artifact",
+    (missingArtifact) => {
+      const root = makeTempRoot();
+      for (const artifact of workerDeployArtifactNames) {
+        if (artifact !== missingArtifact) {
+          writeFixture(root, `dist/worker/${artifact}`, "export {};\n");
+        }
       }
-    }
-    expect(collectWorkerDeployArtifactErrors({ rootDir: root })).toEqual([
-      `Worker deploy artifact dist/worker/${missingArtifact} is missing. Run pnpm build first.`,
-    ]);
-  });
+      expect(collectWorkerDeployArtifactErrors({ rootDir: root })).toEqual([
+        `Worker deploy artifact dist/worker/${missingArtifact} is missing. Run pnpm build first.`,
+      ]);
+    },
+  );
 });
 
 function createGatewayBuildFixture() {

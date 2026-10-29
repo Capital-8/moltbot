@@ -330,14 +330,25 @@ describe("Codex app-server terminal settlement", () => {
             params?: { threadId?: string };
           },
       );
+    const allowNativeToolPreflight = async (since = 0) => {
+      let nextRequest = since;
+      for (let read = 0; read < 2; read += 1) {
+        const request = await waitForHarnessRequest(
+          physical,
+          "configRequirements/read",
+          nextRequest,
+        );
+        nextRequest = physical.writes.length;
+        physical.send({ id: request.id, result: { requirements: null } });
+      }
+    };
     try {
       const initialize = await waitForHarnessRequest(physical, "initialize");
       physical.send({
         id: initialize.id,
         result: { userAgent: `openclaw/${CODEX_APP_SERVER_VERSION} (macOS; test)` },
       });
-      const firstRequirements = await waitForHarnessRequest(physical, "configRequirements/read");
-      physical.send({ id: firstRequirements.id, result: { requirements: null } });
+      await allowNativeToolPreflight();
       const firstThread = await waitForHarnessRequest(physical, "thread/start");
       physical.send({ id: firstThread.id, result: threadStartResult("thread-settlement") });
       const warmupTurn = await waitForHarnessRequest(physical, "turn/start");
@@ -355,24 +366,14 @@ describe("Codex app-server terminal settlement", () => {
       const firstStart = physical.writes.length;
       firstRun = runCodexAppServerAttempt(firstParams);
       void firstRun.then(firstSettled, firstSettled);
-      const firstRequirementsAgain = await waitForHarnessRequest(
-        physical,
-        "configRequirements/read",
-        firstStart,
-      );
-      physical.send({ id: firstRequirementsAgain.id, result: { requirements: null } });
+      await allowNativeToolPreflight(firstStart);
       const firstTurn = await waitForHarnessRequest(physical, "turn/start", firstStart);
       physical.send({ id: firstTurn.id, result: turnStartResult("turn-settlement") });
       expect(isCodexAppServerLiveThreadClaimed(physical.client, "thread-settlement")).toBe(true);
 
       const siblingStart = physical.writes.length;
       siblingRun = runCodexAppServerAttempt(siblingParams);
-      const siblingRequirements = await waitForHarnessRequest(
-        physical,
-        "configRequirements/read",
-        siblingStart,
-      );
-      physical.send({ id: siblingRequirements.id, result: { requirements: null } });
+      await allowNativeToolPreflight(siblingStart);
       const siblingThread = await waitForHarnessRequest(physical, "thread/start", siblingStart);
       physical.send({ id: siblingThread.id, result: threadStartResult("thread-sibling") });
       const siblingTurn = await waitForHarnessRequest(physical, "turn/start", siblingStart);

@@ -444,17 +444,12 @@ describe("FeishuStreamingSession", () => {
   });
 
   it("rejects oversized streaming tenant-token JSON before buffering the full body", async () => {
-    let streamState:
-      | {
-          bytesPulled: () => number;
-          canceled: () => boolean;
-        }
-      | undefined;
+    let streamState: ReturnType<typeof writeOversizedJson> | undefined;
     const deps = await createStreamingFetch(({ url, res }) => {
       if (url.pathname.includes("/auth/")) {
         streamState = writeOversizedJson(
           res,
-          FEISHU_JSON_MAX_BYTES * 2,
+          FEISHU_JSON_MAX_BYTES,
           '{"code":0,"msg":"ok","tenant_access_token":"token","padding":"',
         );
         return;
@@ -475,6 +470,7 @@ describe("FeishuStreamingSession", () => {
     await expect(session.start("chat_id", "open_id")).rejects.toThrow(
       /feishu\.streaming-card\.token: JSON response exceeds \d+ bytes/,
     );
+    await expect(streamState?.clientClosed).resolves.toBeUndefined();
     expect(streamState?.canceled()).toBe(true);
     expect(streamState?.bytesPulled()).toBeLessThan(FEISHU_JSON_MAX_BYTES * 2);
     console.log(
@@ -545,12 +541,7 @@ describe("FeishuStreamingSession", () => {
   });
 
   it("rejects oversized streaming card-create JSON before buffering the full body", async () => {
-    let streamState:
-      | {
-          bytesPulled: () => number;
-          canceled: () => boolean;
-        }
-      | undefined;
+    let streamState: ReturnType<typeof writeOversizedJson> | undefined;
     const deps = await createStreamingFetch(({ url, res }) => {
       if (url.pathname.includes("/auth/")) {
         writeJson(res, {
@@ -563,7 +554,7 @@ describe("FeishuStreamingSession", () => {
       }
       streamState = writeOversizedJson(
         res,
-        FEISHU_JSON_MAX_BYTES * 2,
+        FEISHU_JSON_MAX_BYTES,
         '{"code":0,"msg":"ok","tenant_access_token":"token","padding":"',
       );
     });
@@ -587,6 +578,7 @@ describe("FeishuStreamingSession", () => {
     await expect(session.start("chat_id", "open_id")).rejects.toThrow(
       /feishu\.streaming-card\.create: JSON response exceeds \d+ bytes/,
     );
+    await expect(streamState?.clientClosed).resolves.toBeUndefined();
     expect(streamState?.canceled()).toBe(true);
     expect(streamState?.bytesPulled()).toBeLessThan(FEISHU_JSON_MAX_BYTES * 2);
     console.log(
