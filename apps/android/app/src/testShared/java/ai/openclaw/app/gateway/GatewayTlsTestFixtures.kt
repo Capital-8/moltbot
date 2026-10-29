@@ -208,7 +208,10 @@ internal class GatewayTlsTestObservation {
     error: Throwable,
     fixture: GatewayTlsTestFixture,
   ) {
-    assertTrue("TLS and the production hostname verifier must accept before OkHttp's gate", hostnameAccepted.get())
+    assertTrue(
+      "TLS and the production hostname verifier must accept before OkHttp's gate; original failure:\n${error.stackTraceToString()}",
+      hostnameAccepted.get(),
+    )
     val chain = peerCertificates.get()
     assertEquals(fixture.fingerprint, chain.firstOrNull()?.let { tlsTestSha256(it.encoded) })
     assertTrue("The blocklisted intermediate must be in the actual raw peer chain", chain.any { tlsTestSha256(it.publicKey.encoded) == fixture.blockedIntermediateSpki })
