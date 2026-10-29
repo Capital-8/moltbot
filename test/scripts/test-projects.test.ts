@@ -166,7 +166,7 @@ describe("test runtime prerequisites", () => {
 
   it("keeps Gateway worker runtime selection rooted at the repository for src/gateway/setup-inference.first-signin.integration.test.ts", () => {
     const file = "src/gateway/setup-inference.first-signin.integration.test.ts";
-    const config = "test/vitest/vitest.gateway-database-workers.config.ts";
+    const config = "test/vitest/vitest.gateway-server-isolated.config.ts";
     expect(listVitestRuntimeConsumerFiles([config])).toContain(file);
     expect(
       listVitestRuntimeConsumerFiles(["test/vitest/vitest.gateway-methods.config.ts"]),
