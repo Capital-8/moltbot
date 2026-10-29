@@ -22,8 +22,10 @@ export const MISTRAL_MODEL_TRANSPORT_PATCH = {
   maxTokensField: "max_tokens",
 } as const;
 
-export function resolveMistralCompatPatch(model: { id?: string }) {
-  const reasoningEffortMap = resolveMistralReasoningEffortMap(model.id);
+export function resolveMistralCompatPatch(model: {
+  thinkingLevelMap?: Partial<Record<string, string | null>>;
+}) {
+  const reasoningEffortMap = resolveMistralReasoningEffortMap(model.thinkingLevelMap);
   return {
     ...MISTRAL_MODEL_TRANSPORT_PATCH,
     supportsReasoningEffort: reasoningEffortMap !== undefined,
@@ -31,7 +33,9 @@ export function resolveMistralCompatPatch(model: { id?: string }) {
   };
 }
 
-export function applyMistralModelCompat<T extends { compat?: unknown; id?: string }>(model: T): T {
+export function applyMistralModelCompat<
+  T extends { compat?: unknown; thinkingLevelMap?: Partial<Record<string, string | null>> },
+>(model: T): T {
   const compat = asOptionalObjectRecord(model.compat);
   const patch = resolveMistralCompatPatch(model);
   if (Object.entries(patch).every(([key, value]) => compat?.[key] === value)) {

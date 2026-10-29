@@ -315,7 +315,13 @@ describe("Mistral provider", () => {
       await runSimpleMistralFixture(
         context,
         { reasoning },
-        { ...makeMistralModel(), id: modelId, reasoning: true },
+        {
+          ...makeMistralModel(),
+          id: modelId,
+          reasoning: true,
+          // Catalog rows that accept reasoning_effort say so; others use promptMode.
+          compat: { supportsReasoningEffort: key === "reasoningEffort" },
+        },
       );
       expect(payload()[key]).toBe(value);
       expect(payload()).not.toHaveProperty(absentKey);
