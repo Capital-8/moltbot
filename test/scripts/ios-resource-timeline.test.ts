@@ -104,6 +104,7 @@ describe("iOS resource timeline workload boundary", () => {
         preload,
         `
       import childProcess from "node:child_process";
+      import assert from "node:assert/strict";
       import { writeFileSync } from "node:fs";
       import { syncBuiltinESMExports } from "node:module";
       let now = 0, hostObservations = 0;
@@ -127,6 +128,9 @@ describe("iOS resource timeline workload boundary", () => {
         }
         if (args.includes("/usr/sbin/sysctl")) stdout = "1";
         if (args.includes("/bin/ps")) {
+          assert.deepEqual(args, ["-n", "10", "/bin/ps", "-axo", "pid=,ppid=,time=,rss=,state=,ucomm="]);
+          assert.equal(_options.timeout, 2_000);
+          assert.equal(_options.killSignal, "SIGKILL");
           processProbeTimes.push(now);
           if (processProbeTimes.length === 4) error = new Error("probe unavailable");
           else if (processProbeTimes.length === 6) error = Object.assign(new Error("probe timeout"), { killed: true });
@@ -148,6 +152,9 @@ describe("iOS resource timeline workload boundary", () => {
               row(89, 80, 0.001, 1, "S", runtime + "/usr/libexec/private-non-ascii-é"),
               row(101, 80, 0.001, 1, "S", runtime + "/usr/libexec/" + "private-oversize-".repeat(8)),
               row(102, 80, 0.001, 1, "S", "/private/app-container/duetexpertd"),
+              row(103, 80, 0.6, 1024, "S", "CoreSpotlightSer"),
+              row(104, 80, 0.6, 1024, "S", "com.apple.WebKit"),
+              row(105, 80, 0.001, 1, "S", "privatekernel"),
               ...Array.from({ length: 8 }, (_, i) => row(90 + i, 1, 0.1 + i / 100, 2048, "S", "/usr/libexec/cfprefsd")),
             ].join("\\n");
           }
@@ -175,15 +182,15 @@ describe("iOS resource timeline workload boundary", () => {
       expect(result.status).toBe(23);
       expect(result.stderr).toBe("");
       expect(JSON.parse(readFileSync(complete, "utf8"))).toEqual([
-        0, 90_000, 150_000, 210_000, 270_000, 330_000,
+        0, 95_000, 115_000, 135_000, 155_000, 175_000,
       ]);
       const raw = readFileSync(output, "utf8");
       expect(raw).not.toMatch(
-        /private-api-token|private-runtime|private-device-token|private-container-token|private-app-token|private-non-ascii|private-oversize|app-container|iOS_private|RuntimeRoot|\/usr\/|\/Applications\//u,
+        /private-api-token|private-runtime|private-device-token|private-container-token|private-app-token|private-non-ascii|private-oversize|privatekernel|app-container|iOS_private|RuntimeRoot|\/usr\/|\/Applications\//u,
       );
       const records = recordsAt(output);
       const samples = records.filter((record) => record.type === "sample");
-      expect(records[0]).toMatchObject({ intervalMs: 15_000, processSampleIntervalMs: 60_000 });
+      expect(records[0]).toMatchObject({ intervalMs: 20_000, processSampleIntervalMs: 20_000 });
       expect(samples).toHaveLength(24);
       expect(samples.map((sample) => sample.host.memory.freeBytes)).toEqual(
         Array.from({ length: 24 }, (_, index) => (index + 1) * 16_384),
@@ -201,15 +208,15 @@ describe("iOS resource timeline workload boundary", () => {
         ]),
       ).toEqual([
         [[null], null],
-        [[100], 90_000],
-        [[100], 60_000],
-        [[], 60_000],
+        [[100], 95_000],
+        [[100], 20_000],
+        [[], 20_000],
         [[null], null],
-        [[], 60_000],
+        [[], 20_000],
       ]);
-      for (const index of [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19, 20, 21, 22, 23]) {
+      for (let index = 6; index < samples.length; index++) {
         expect(samples[index]).toMatchObject({
-          probes: { ps: { wallMs: 0, outcome: index < 18 ? "not-due" : "disabled-after-timeout" } },
+          probes: { ps: { wallMs: 0, outcome: "disabled-after-timeout" } },
           processes: [],
           processSummary: null,
           processIntervalMs: null,
@@ -226,17 +233,27 @@ describe("iOS resource timeline workload boundary", () => {
         });
       }
       expect(samples[1].processes.map((row: { pid: number }) => row.pid)).not.toContain(83);
+      for (const [pid, role] of [
+        [103, "CoreSpotlightService"],
+        [104, "other"],
+      ] as const) {
+        expect(samples[1].processes.find((row: { pid: number }) => row.pid === pid)).toMatchObject({
+          role,
+          origin: "kernel-name",
+          parentRole: "launchd_sim",
+        });
+      }
       expect(samples[1].processSummary).toMatchObject({
-        count: 21,
+        count: 24,
         runnableCount: 2,
         uninterruptibleCount: 1,
       });
       const groups = samples[1].processSummary.groups;
       for (const [role, count, cpuDeltaMs, origin] of [
-        ["CoreSpotlightService", 2, 45_900, "simulator-runtime"],
-        ["modelcatalogd", 1, 90, "simulator-runtime"],
+        ["CoreSpotlightService", 2, 48_450, "simulator-runtime"],
+        ["modelcatalogd", 1, 100, "simulator-runtime"],
         ["launchd_sim", 1, 0, "xcode"],
-        ["duetexpertd", 1, 36_000, "simulator-runtime"],
+        ["duetexpertd", 1, 38_000, "simulator-runtime"],
       ]) {
         expect(groups).toContainEqual({ role, count, cpuDeltaMs, origin, cpuObservedCount: count });
       }

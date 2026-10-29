@@ -11,8 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const intervalMs = 15_000;
-const processSampleIntervalMs = 60_000;
+const intervalMs = 20_000;
+const processSampleIntervalMs = 20_000;
 const maxOutputBytes = 4 * 1024 * 1024;
 const qualificationPhases = [
   "source-head",
@@ -180,6 +180,13 @@ const roles = new Set([
   "OpenClaw",
   "OpenClawUITests-Runner",
 ]);
+// ps ucomm reads the kernel's 16-character name without requesting process arguments.
+// Attribute only prefixes that identify one fixed role; collisions remain unknown.
+const kernelRoles = new Map();
+for (const role of roles) {
+  const name = role.slice(0, 16);
+  kernelRoles.set(name, kernelRoles.has(name) ? "other" : role);
+}
 
 /** Callers supply fixed phase labels, never test names, paths, or application content. */
 export function markIosResourcePhase(label) {
@@ -218,16 +225,20 @@ function processRows(output, previous, elapsedMs) {
       (Number(day) * 86_400 + clock.split(":").reduce((s, n) => s * 60 + Number(n), 0)) * 1_000;
     const cpuDeltaMs = delta(cpuMs, previous.get(Number(pid)));
     const executable = command.trim();
-    const basename = path.basename(executable);
-    const origin =
-      (executable.startsWith("/Library/Developer/CoreSimulator/") ||
-        executable.startsWith(
-          "/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-",
-        ) ||
-        executable.startsWith(
-          "/private/var/run/com.apple.security.cryptexd/mnt/com.apple.watchOS.SimulatorRuntime-",
-        )) &&
-      executable.includes("/Contents/Resources/RuntimeRoot/")
+    const kernelName = !executable.includes("/");
+    const basename = kernelName
+      ? (kernelRoles.get(executable) ?? "other")
+      : path.basename(executable);
+    const origin = kernelName
+      ? "kernel-name"
+      : (executable.startsWith("/Library/Developer/CoreSimulator/") ||
+            executable.startsWith(
+              "/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-",
+            ) ||
+            executable.startsWith(
+              "/private/var/run/com.apple.security.cryptexd/mnt/com.apple.watchOS.SimulatorRuntime-",
+            )) &&
+          executable.includes("/Contents/Resources/RuntimeRoot/")
         ? "simulator-runtime"
         : /^\/Applications\/Xcode(?:_[^/]+)?\.app\//u.test(executable)
           ? "xcode"
@@ -452,7 +463,7 @@ function startTimeline(output) {
     } else if (performance.now() < nextProcessAt) {
       probeStatus.ps = { wallMs: 0, outcome: "not-due" };
     } else {
-      const processOutput = await probe("/bin/ps", ["-axo", "pid=,ppid=,time=,rss=,state=,comm="]);
+      const processOutput = await probe("/bin/ps", ["-axo", "pid=,ppid=,time=,rss=,state=,ucomm="]);
       // Intentional skips retain the CPU baseline; earlier probes may delay the next observation.
       const processAt = performance.now();
       processIntervalMs = previousProcesses.size ? Math.round(processAt - previousProcessAt) : null;
