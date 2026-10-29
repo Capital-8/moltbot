@@ -5,6 +5,10 @@ import { publishSubagentRunChanges } from "../agents/subagents/registry/subagent
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import { patchSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import {
+  createSessionRowDeltaDiffer,
+  prepareSessionRowDeltaFields,
+} from "./session-row-delta-fields.js";
 import { prepareSessionRowPublication } from "./session-row-presentation.js";
 import {
   createTestProjection,
@@ -49,7 +53,7 @@ it.each(["spawner", "ancestor"])(
         for (const status of ["pending", "in_progress", "delivered"] as const) {
           subagentRuns.set(run.runId, { ...run, delivery: { status } });
           publishSubagentRunChanges([child, parent], [run.runId]);
-          expect((await read()).failureHandedOff).toBe(false);
+          expect(await read()).not.toHaveProperty("failureHandedOff");
         }
         subagentRuns.set(run.runId, {
           ...run,
@@ -69,18 +73,38 @@ it.each(["spawner", "ancestor"])(
           status: "failed",
           lastRunError: "Synthetic cause",
         });
-        expect((await read()).failureHandedOff).toBe(true);
+        const handedOff = await read();
+        expect(handedOff.failureHandedOff).toBe(true);
         expect((await read("dashboard")).failureHandedOff).toBe(true);
         expect(JSON.stringify(await read())).not.toContain("requesterSessionKey");
         seedRow(consumer, { sessionId: "parent", lifecycleRevision: "parent-reset", updatedAt: 3 });
-        expect((await read()).failureHandedOff).toBe(false);
+        const reset = await read();
+        expect(reset).not.toHaveProperty("failureHandedOff");
+        const differ = createSessionRowDeltaDiffer();
+        expect(
+          differ(
+            prepareSessionRowDeltaFields(handedOff),
+            prepareSessionRowDeltaFields(reset),
+            reset,
+          ),
+        ).toMatchObject({ remove: ["failureHandedOff"] });
         seedRow(consumer, { sessionId: "parent", lifecycleRevision: "parent-1", updatedAt: 4 });
+        const restored = await read();
+        expect(restored.failureHandedOff).toBe(true);
         await patchSessionEntryCore({ agentId: "main", sessionKey: child, storePath }, () => ({
           lastRunId: "new-own-error",
           updatedAt: 4,
         }));
-        expect(await read()).toMatchObject({
-          failureHandedOff: false,
+        const nextRun = await read();
+        expect(nextRun).not.toHaveProperty("failureHandedOff");
+        expect(
+          differ(
+            prepareSessionRowDeltaFields(restored),
+            prepareSessionRowDeltaFields(nextRun),
+            nextRun,
+          ),
+        ).toMatchObject({ remove: ["failureHandedOff"] });
+        expect(nextRun).toMatchObject({
           status: "failed",
           lastRunError: "Synthetic cause",
         });

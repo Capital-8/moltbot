@@ -84,7 +84,7 @@ vi.mock("./subagent-announce.runtime.js", async (importOriginal) => ({
 
 // mock-isolation: Requester settlement uses the fixture session map and delivery receipt, without transport or session-store access.
 vi.mock("./subagent-announce-delivery.js", () => ({
-  deliverSubagentAnnouncement: (params: Record<string, unknown>) => deliverSpy(params),
+  deliverSubagentAnnouncement: (params: Parameters<typeof deliverSpy>[0]) => deliverSpy(params),
   loadRequesterSessionEntry: (sessionKey: string) => ({
     cfg: getRuntimeConfig(),
     entry: sessionStore[sessionKey],

@@ -7,6 +7,7 @@ import {
   stripInlineDirectiveTagsForDelivery,
 } from "../../../utils/directive-tags.js";
 import { prepareTerminalAssistantReply } from "../../assistant-terminal-reply.js";
+import type { AgentInternalEvent } from "../../internal-events.js";
 import { wrapPromptDataBlock } from "../../sanitize-for-prompt.js";
 import { extractStoredAssistantText } from "../../tools/chat-history-text.js";
 import { resolveSubagentCompletionResultText } from "../completion/subagent-completion-result.js";
@@ -177,9 +178,10 @@ export type ChildCompletionRow = Pick<
   >;
 };
 
-export function buildChildCompletionFindings(
-  children: Array<ChildCompletionRow>,
-): string | undefined {
+export function prepareChildCompletionFindings(children: Array<ChildCompletionRow>): {
+  text: string | undefined;
+  events: AgentInternalEvent[];
+} {
   const sorted = children.toSorted((a, b) => {
     if (a.createdAt !== b.createdAt) {
       return a.createdAt - b.createdAt;
@@ -230,6 +232,7 @@ export function buildChildCompletionFindings(
     };
     const resultBlock = wrapPromptDataBlock(result) || "Child result: (no output)";
     sections.push({
+      child,
       result,
       childSessionKey: child.childSessionKey,
       resultBlock,
@@ -255,7 +258,7 @@ export function buildChildCompletionFindings(
   }
 
   if (sections.length === 0) {
-    return undefined;
+    return { text: undefined, events: [] };
   }
 
   const heading = "Child completion results:\n\n";
@@ -299,9 +302,35 @@ export function buildChildCompletionFindings(
     }
     remaining -= section.resultBlock.length - section.minimumChars;
   }
-  return [
-    heading,
-    ...visible.map(({ header, resultBlock }) => `${header}\n${resultBlock}`),
-    ...(summary ? [summary] : []),
-  ].join("\n\n");
+  return {
+    text: [
+      heading,
+      ...visible.map(({ header, resultBlock }) => `${header}\n${resultBlock}`),
+      ...(summary ? [summary] : []),
+    ].join("\n\n"),
+    events: visible.map(({ child, resultBlock }, index) => ({
+      type: "task_completion",
+      source: "subagent",
+      childSessionKey: child.childSessionKey,
+      childSessionId: child.execution.transcriptTarget?.sessionId,
+      announceType: "subagent task",
+      taskLabel: truncateUtf16WithEllipsis(
+        child.taskName || child.label || child.task,
+        MAX_CHILD_COMPLETION_FIELD_CHARS,
+      ),
+      status:
+        child.endedReason === SUBAGENT_ENDED_REASON_KILLED
+          ? "unknown"
+          : (child.execution.outcome?.status ?? "unknown"),
+      statusLabel: describeSubagentOutcome(child),
+      result: resultBlock,
+      replyInstruction: index === 0 ? summary : "",
+    })),
+  };
+}
+
+export function buildChildCompletionFindings(
+  children: Array<ChildCompletionRow>,
+): string | undefined {
+  return prepareChildCompletionFindings(children).text;
 }

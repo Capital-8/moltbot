@@ -242,6 +242,11 @@ run, not a later turn in the child session. If optional progress cannot be read,
 the parent still receives the cause with a progress-unavailable notice. Raw tool
 output is not promoted into a child answer.
 
+Failure diagnostics are committed with the parent's input before failure custody
+is acknowledged. Successful child results remain hidden runtime context, including
+successful siblings in a mixed completion batch; a commit callback does not grant
+permission to retain those results in the parent transcript.
+
 The parent continues recoverable work within its existing authority. Only a
 genuinely human-owned decision should become a native `ask_user` question, with
 a recommended choice and free-text input. A nested agent returns such a blocker

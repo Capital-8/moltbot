@@ -9,6 +9,7 @@ import {
   withSessionManagerWriteAssertion,
 } from "../../agents/sessions/session-manager-write-admission.js";
 import { SessionManager } from "../../agents/sessions/session-manager.js";
+import { readChildCompletionFindings } from "../../agents/subagents/announce/subagent-announce-output.js";
 import { recordSubagentFailureHandoff } from "../../agents/subagents/registry/subagent-failure-handoff.js";
 import { subagentRuns } from "../../agents/subagents/registry/subagent-registry-memory.js";
 import {
@@ -501,6 +502,59 @@ it("keeps the committed child target and later owner metadata through input pers
   });
 });
 
+it.each([false, true])(
+  "keeps healthy completion results runtime-only (private=%s)",
+  async (privateCompletion) => {
+    const target = {
+      agentId: "main",
+      sessionKey: "agent:main:healthy-completion",
+      sessionId: "healthy-parent",
+      storePath: fixture.storePath(),
+    };
+    await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
+    const onInputCommitted = vi.fn();
+    const params = makeTurnParams(
+      target,
+      "Continue the OpenClaw runtime event.",
+      "announce:healthy-completion",
+      {
+        privateCompletion: privateCompletion ? true : undefined,
+        onInputCommitted,
+        inputProvenance: {
+          kind: "inter_session",
+          sourceSessionKey: "agent:main:subagent:healthy",
+          sourceTool: "subagent_announce",
+        },
+        request: {
+          deliver: false,
+          expectedExistingSessionId: target.sessionId,
+          internalEvents: [
+            {
+              type: "task_completion",
+              source: "subagent",
+              childSessionKey: "agent:main:subagent:healthy",
+              announceType: "completion",
+              taskLabel: "healthy child",
+              status: "ok",
+              statusLabel: "completed",
+              result: "HEALTHY_RUNTIME_ONLY",
+              replyInstruction: "Review the result.",
+            },
+          ],
+        },
+      },
+    );
+    await withTurn(params, async (recorder) => {
+      expect(await recorder.persistApproved()).toMatchObject({ appended: true });
+      expect(onInputCommitted).toHaveBeenCalledOnce();
+      expect(JSON.stringify(await loadTranscriptEvents(target))).not.toContain(
+        "HEALTHY_RUNTIME_ONLY",
+      );
+      expect(params.request.internalEvents?.[0]?.result).toBe("HEALTHY_RUNTIME_ONLY");
+    });
+  },
+);
+
 it.each([
   [false, false],
   [true, false],
@@ -517,13 +571,32 @@ it.each([
       requesterSessionKey: sessionKey,
       requesterStorePath: path.join(state.agentDir(), "openclaw-agent.sqlite"),
       completionRequesterSessionId: sessionId,
+      completion: {
+        required: true,
+        resultText: "Saved partial progress: found the failing request.",
+      },
       execution: {
         status: "terminal",
         endedAt: 8,
         outcome: { status: "error", error: "Provider unavailable" },
       },
     });
-    persistRegistryFixture(new Map([[child.runId, child]]));
+    const healthy = createSubagentStoreRunFixture({
+      ...child,
+      runId: "healthy-sibling-run",
+      childSessionKey: "agent:main:subagent:healthy-sibling",
+      execution: { status: "terminal", endedAt: 8, outcome: { status: "ok" } },
+      completion: { required: true, resultText: "HEALTHY_RUNTIME_ONLY" },
+    });
+    subagentRuns.set(child.runId, child);
+    subagentRuns.set(healthy.runId, healthy);
+    persistRegistryFixture(
+      new Map([
+        [child.runId, child],
+        [healthy.runId, healthy],
+      ]),
+    );
+    const batch = await readChildCompletionFindings([child, healthy]);
     const provenance = {
       kind: "inter_session" as const,
       sourceSessionKey: child.childSessionKey,
@@ -533,7 +606,7 @@ it.each([
     let handoff: Promise<void> | undefined;
     const onInputCommitted = vi.fn<NonNullable<TurnParams["onInputCommitted"]>>((receipt) => {
       handoff = recordSubagentFailureHandoff({
-        entries: [child],
+        entries: [child, healthy],
         requester: receipt,
         assertCurrent: () => {},
       });
@@ -546,20 +619,7 @@ it.each([
       request: {
         expectedExistingSessionId: sessionId,
         deliver: false,
-        internalEvents: [
-          {
-            type: "task_completion",
-            source: "subagent",
-            childSessionKey: child.childSessionKey,
-            childSessionId: "child-session-id",
-            announceType: "completion",
-            taskLabel: "child task",
-            status: "error",
-            statusLabel: "failed: Provider unavailable",
-            result: "Saved partial progress: found the failing request.",
-            replyInstruction: "Recover the delegated task.",
-          },
-        ],
+        internalEvents: batch.events,
       },
     });
     await withTurn(params, async (recorder) => {
@@ -630,6 +690,15 @@ it.each([
         },
       ]);
       expect(JSON.stringify(messages)).toContain("found the failing request.");
+      expect(JSON.stringify(committedEvents)).not.toContain("HEALTHY_RUNTIME_ONLY");
+      expect(
+        batch.events.some(
+          (event) => event.status === "ok" && event.result.includes("HEALTHY_RUNTIME_ONLY"),
+        ),
+      ).toBe(true);
+      expect(
+        loadSubagentRegistryFromSqlite().get(healthy.runId)?.delivery?.failureHandoff,
+      ).toBeUndefined();
       const manager = await SessionManager.openAsync(target, state.sessionsDir());
       const contextEntered = createDeferred();
       const releaseContext = createDeferred();

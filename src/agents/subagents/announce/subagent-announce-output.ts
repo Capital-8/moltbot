@@ -17,6 +17,7 @@ import { readSessionTranscriptRunId } from "../../../sessions/transcript-events.
 import { isSilentAssistantTranscriptMessage } from "../../../shared/chat-message-content.js";
 import { isContractToolCallBlock, readToolCallName } from "../../../shared/tool-block-contract.js";
 import { sleep } from "../../../utils/sleep.js";
+import type { AgentInternalEvent } from "../../internal-events.js";
 import { extractStoredAssistantText } from "../../tools/chat-history-text.js";
 import { resolveSubagentChildAgentId } from "../registry/subagent-child-owner-match.js";
 import { subagentRuns } from "../registry/subagent-registry-memory.js";
@@ -35,6 +36,7 @@ import { isFailedTerminalSubagentRun } from "../subagent-failure.js";
 import type { SubagentRunOutcome } from "../subagent-run-outcome.types.js";
 import {
   buildChildCompletionFindings,
+  prepareChildCompletionFindings,
   readSubagentRunAnnounceResultUsing,
   readSubagentRunFinalAnswerUsing,
   SubagentAnnouncePreparationConflictError,
@@ -523,7 +525,7 @@ export async function readSubagentRunFinalAnswer(
 export async function readChildCompletionFindings(
   children: SubagentRunRecord[],
   readSubagentRun?: AnnounceRunReader,
-): Promise<PreparedAnnounceResult> {
+): Promise<PreparedAnnounceResult & { events: AgentInternalEvent[] }> {
   const readCurrent =
     readSubagentRun ?? (await prepareAnnounceRunReader(children.map((child) => child.runId)));
   const results = await Promise.all(
@@ -545,7 +547,7 @@ export async function readChildCompletionFindings(
     );
   }
   return {
-    text: buildChildCompletionFindings(
+    ...prepareChildCompletionFindings(
       results.map(({ child, text }) => Object.assign({}, child, { announceResult: text })),
     ),
     isCurrent,

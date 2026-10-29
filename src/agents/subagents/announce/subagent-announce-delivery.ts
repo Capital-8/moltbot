@@ -27,7 +27,7 @@ import {
   buildAgentInternalEventContext,
   collectAgentInternalEventMedia,
   formatGeneratedMediaDeliveredForPrompt,
-  resolveAcpPromptBody,
+  resolveFailureHandoffTranscriptBody,
   type AgentInternalEvent,
 } from "../../internal-events.js";
 import { RUNTIME_EVENT_USER_PROMPT } from "../../internal-runtime-context.js";
@@ -268,7 +268,7 @@ async function deliverSubagentAnnouncementBound(
         input: {
           // Active steering has the same custody contract as a fresh Gateway turn.
           text: params.onInputCommitted
-            ? resolveAcpPromptBody(transcriptMessage, internalEvents)
+            ? resolveFailureHandoffTranscriptBody(transcriptMessage, internalEvents)
             : transcriptMessage,
           idempotencyKey: `${directIdempotencyKey}:active-wake`,
           provenance,

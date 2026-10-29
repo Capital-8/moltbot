@@ -1,5 +1,10 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it } from "vitest";
+import {
+  buildAgentInternalEventContext,
+  resolveFailureHandoffTranscriptBody,
+} from "../../internal-events.js";
+import { RUNTIME_EVENT_USER_PROMPT } from "../../internal-runtime-context.js";
 import { completionReader, visibleCompletion } from "./subagent-announce-fixtures.test-support.js";
 import {
   registryRuntimeMock,
@@ -48,12 +53,17 @@ describe("maybeWakeRequesterAfterAllChildrenSettled results", () => {
     });
     expect(call.requireVisibleReply).toBeUndefined();
     expect(quietChild.requesterTurnRunId).toBe("quiet-cancellation-owner");
-    const message = String(call.triggerMessage);
+    const message = call.triggerMessage;
     expect(message).toContain("settled");
     expect(message).toContain("social findings");
     expect(message).toContain("network findings");
     expect(message).not.toContain("NO_REPLY");
     expect(message).toContain("continue any unfinished work");
+    const events = call.internalEvents;
+    expect(JSON.stringify(buildAgentInternalEventContext(events))).toContain("social findings");
+    expect(resolveFailureHandoffTranscriptBody(RUNTIME_EVENT_USER_PROMPT, events)).toBe(
+      RUNTIME_EVENT_USER_PROMPT,
+    );
   });
 
   it("includes all six child outcomes when a successful completion has no output", async () => {
@@ -84,7 +94,7 @@ describe("maybeWakeRequesterAfterAllChildrenSettled results", () => {
     expect(await wakeRequester(wakeParams({ settledEntry: children[5] }))).toBe(true);
 
     expect(deliverSpy).toHaveBeenCalledOnce();
-    const message = String(deliveredCallArg().triggerMessage);
+    const message = deliveredCallArg().triggerMessage;
     const results = Array.from(
       message.matchAll(
         /Child task[^\n]*\n<prompt-data>\n([^\n]+)\n<\/prompt-data>\nstatus: ([^\n]+)\nChild result[^\n]*\n<prompt-data>\n([^\n]+)\n<\/prompt-data>/g,
@@ -100,5 +110,11 @@ describe("maybeWakeRequesterAfterAllChildrenSettled results", () => {
       ["child 5", "timeout", "(no output)"],
     ]);
     expect(message).not.toContain("stale output");
+    const events = deliveredCallArg().internalEvents;
+    expect(JSON.stringify(buildAgentInternalEventContext(events))).toContain("blocked fetch");
+    const retained = resolveFailureHandoffTranscriptBody(RUNTIME_EVENT_USER_PROMPT, events);
+    expect(retained).toContain("timeout");
+    expect(retained).not.toContain("blocked fetch");
+    expect(retained).not.toContain("stale output");
   });
 });

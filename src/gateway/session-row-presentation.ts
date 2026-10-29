@@ -503,7 +503,9 @@ export function prepareProjectedSessionPresentation(
       childActivity,
       preparedFacts,
     });
-    row.failureHandedOff = failureHandedOff;
+    if (failureHandedOff) {
+      row.failureHandedOff = true;
+    }
     row.childOwnerSessionKeys = [...childOwnerSessionKeys];
     row.fastMode = presentFastMode(row.fastMode);
     row.effectiveFastMode = presentFastMode(row.effectiveFastMode);
