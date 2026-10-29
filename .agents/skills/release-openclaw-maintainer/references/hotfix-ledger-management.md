@@ -47,8 +47,37 @@ Send `Accept: application/json` and an identifying User-Agent, e.g.
 4. **Apply/verify:** follow the approved backport flow; record destination commits
    and proof. Update the observed head and review stale assessments rather than
    merely replacing their SHA. Keep deferred/blocked work for the next owner.
-5. **Handoff:** link the release ID, assessed SHA, scan/selection evidence, and any
-   unsynced decisions. Archive inactive releases rather than deleting history.
+5. **Checkpoint:** after every release-branch change and immediately before
+   handoff, complete the release-owner checkpoint below. A branch push, local
+   candidate, or old assessment is not a checkpoint receipt.
+6. **Handoff:** link the release ID, assessed SHA, checkpoint receipt,
+   scan/selection evidence, and unresolved decisions. Archive inactive releases
+   rather than deleting history.
+
+## Enforced release-owner checkpoint
+
+The release owner must complete this checkpoint after every branch-head change
+and again at handoff. The manager rejects a handoff without it; do not publish,
+handoff, or claim the ledger current while any item remains unsynchronized.
+
+1. Resolve the configured release ref from the remote and record its exact SHA.
+   GET the release record, then PATCH `observedHeadSha` with its current
+   `expectedRevision`. A remote/ref mismatch or 409 stops the checkpoint.
+2. List every assessment for the release, including stale records. Reassess each
+   stale or newly relevant identity against the observed head using actual commit
+   ancestry, destination lineage, diff/coverage evidence, and applicable release
+   proof. Updating only `assessedSha` is not reassessment.
+3. Revision-check each assessment write and record one explicit disposition:
+   proposed/queued (`needed` plus notes), included (`already_present` plus exact
+   destination or ancestry evidence), deferred (`needed` or `not_affected` with
+   `applicabilityReason: deferred` and an owner), or blocked (`handling: blocked`
+   plus the blocker and owner). Preserve genuine release-only identities; never
+   infer a canonical main commit from titles or PR-number similarity.
+4. Re-read the release and assessments. The receipt records the remote ref and
+   SHA, release revision, assessment revisions/counts by disposition, remaining
+   stale count, unresolved decisions, mutation request IDs, and rollback/export
+   evidence. Completion requires the stored head to match the remote head and no
+   unexplained stale assessment or unsynchronized decision.
 
 ## Manager opportunity intake
 
@@ -135,3 +164,11 @@ Keep unpublished GHSA details/private refs in the approved security record unles
 this ledger is approved for that audience and material. Public evidence gets only
 the permitted opaque pending/cleared status. A public dashboard would need a
 sanitized view, never raw records, exports, or audit history.
+
+The lineage projection intentionally omits releases whose `disclosure` is
+`unknown`; those records can describe an unpublished branch or preparation state.
+Do not change disclosure merely to make `/v2/lineage` display them. For an
+operator-private checkpoint, use the authenticated `/v2/releases` and
+`/v2/applications` records plus scoped local release evidence, and share only the
+checkpoint summary with the release owner. Promote a release into the public
+lineage projection only through the release/disclosure owner's normal decision.
