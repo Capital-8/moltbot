@@ -491,6 +491,137 @@ describe("Telegram QA transport adapter", () => {
     }
   });
 
+  it("quarantines retired native replies and correlates recovery after reset", async () => {
+    let onUpdate: ((update: unknown) => Promise<void>) | undefined;
+    mocks.userbotStart.mockImplementation(async (params) => {
+      onUpdate = params.onUpdate;
+      return {
+        assertHealthy: mocks.userbotAssertHealthy,
+        close: mocks.userbotClose,
+        send: mocks.userbotSend,
+      };
+    });
+    mocks.userbotSend
+      .mockResolvedValueOnce({ messageId: 10, senderId: 100, chatId: -100123 })
+      .mockResolvedValueOnce({ messageId: 20, senderId: 100, chatId: -100123 });
+    const state = createQaBusState();
+    const adapter = await createTelegramQaTransportAdapter({
+      adapterOptions: {},
+      messages: state,
+    } as never);
+    const transport = createQaStateBackedTransportAdapter(state, adapter);
+    const readMessages = await prepareMessageReader(adapter);
+    const partial = "TELEGRAM-VISIBLE-PARTIAL-BEFORE-FAILURE";
+    const recovery = `${partial}
+
+Synthetic terminal recovery`;
+    const update = {
+      kind: "message",
+      chatId: -100123,
+      messageId: 11,
+      replyToMessageId: 10,
+      senderId: 200,
+      timestamp: 100_000,
+      text: partial,
+      entities: [],
+    };
+    try {
+      await transport.sendInbound({
+        conversation: { id: "recovery-room", kind: "group" },
+        senderId: "primary",
+        text: "first attempt",
+      });
+      await onUpdate?.(update);
+      await transport.reset();
+      const current = await transport.sendInbound({
+        conversation: { id: "recovery-room", kind: "group" },
+        senderId: "primary",
+        text: "second attempt",
+      });
+      await onUpdate?.({ ...update, kind: "edit", text: recovery });
+      await onUpdate?.({ ...update, kind: "edit", messageId: 12, text: recovery });
+      const currentUpdate = { ...update, messageId: 21, replyToMessageId: 20 };
+      await onUpdate?.(currentUpdate);
+      // TDLib edit updates can omit reply_to; correlation must keep the original target.
+      const { replyToMessageId: _omitted, ...recoveryEdit } = currentUpdate;
+      await onUpdate?.({ ...recoveryEdit, kind: "edit", text: recovery });
+      expect(readMessages()).toEqual([{ ...currentUpdate, kind: "edit", text: recovery }]);
+      expect(readMessages(current.id)).toEqual(readMessages());
+      expect(readMessages("unknown-inbound")).toEqual([]);
+      expect(
+        state.getSnapshot().messages.filter((message) => message.direction === "outbound"),
+      ).toMatchObject([{ text: recovery, replyToId: current.id }]);
+    } finally {
+      await transport.cleanup?.();
+      await transport.cleanupAfterGatewayStop?.();
+      state.reset(true);
+    }
+  });
+
+  it("drains admitted observer writes and quarantines updates arriving during reset", async () => {
+    let onUpdate: ((update: unknown) => Promise<void>) | undefined;
+    mocks.userbotStart.mockImplementation(async (params) => {
+      onUpdate = params.onUpdate;
+      return {
+        assertHealthy: mocks.userbotAssertHealthy,
+        close: mocks.userbotClose,
+        send: mocks.userbotSend,
+      };
+    });
+    mocks.userbotSend.mockResolvedValue({ messageId: 10, senderId: 100, chatId: -100123 });
+    const state = createQaBusState();
+    const gate = Promise.withResolvers<void>();
+    const addOutboundMessage = vi.fn(
+      async (input: Parameters<typeof state.addOutboundMessage>[0]) => {
+        await gate.promise;
+        return state.addOutboundMessage(input);
+      },
+    );
+    const adapter = await createTelegramQaTransportAdapter({
+      adapterOptions: {},
+      messages: { ...state, addOutboundMessage },
+    } as never);
+    const transport = createQaStateBackedTransportAdapter(state, adapter);
+    const readMessages = await prepareMessageReader(adapter);
+    const update = {
+      kind: "message",
+      chatId: -100123,
+      messageId: 11,
+      senderId: 200,
+      timestamp: 100_000,
+      text: "late",
+      entities: [],
+    };
+    try {
+      await transport.sendInbound({
+        conversation: { id: "recovery-room", kind: "group" },
+        senderId: "primary",
+        text: "first",
+      });
+      const pending = onUpdate!(update);
+      expect(addOutboundMessage).toHaveBeenCalledTimes(1);
+      const resetting = transport.reset();
+      await onUpdate!({ ...update, messageId: 12 });
+      gate.resolve();
+      await Promise.all([pending, resetting]);
+      expect(state.getSnapshot().messages).toEqual([]);
+      await transport.sendInbound({
+        conversation: { id: "recovery-room", kind: "group" },
+        senderId: "primary",
+        text: "second",
+      });
+      await onUpdate!({ ...update, kind: "edit" });
+      await onUpdate!({ ...update, kind: "edit", messageId: 12 });
+      expect(readMessages()).toEqual([]);
+      expect(addOutboundMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      gate.resolve();
+      await transport.cleanup?.();
+      await transport.cleanupAfterGatewayStop?.();
+      state.reset(true);
+    }
+  });
+
   it("filters other updates and resets diagnostics and native observations", async () => {
     let onUpdate: ((update: unknown) => Promise<void>) | undefined;
     mocks.userbotStart.mockImplementation(async (params) => {
