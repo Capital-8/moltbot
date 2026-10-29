@@ -34,6 +34,7 @@ it(
       });
       const sharedPath = state.statePath("state", "openclaw.sqlite");
       fs.mkdirSync(path.dirname(sharedPath), { recursive: true });
+      let originalPlacements: Record<string, SQLOutputValue>[];
       {
         using db = new DatabaseSync(sharedPath);
         db.exec(stateV21Schema());
@@ -46,10 +47,11 @@ it(
             "state,owner_epoch,attached_session_ids_json,created_at_ms,updated_at_ms,state_changed_at_ms) " +
             "VALUES ('historical-image','synthetic','sandbox',?,'provision-image','destroyed',7,'[]',1,2,2)",
         ).run(original);
-        seedHistoricalPlacements(db);
+        originalPlacements = seedHistoricalPlacements(db);
       }
       const agentPath = state.statePath("agents", "main", "agent", "openclaw-agent.sqlite");
       fs.mkdirSync(path.dirname(agentPath), { recursive: true });
+      let originalInputs: Record<string, SQLOutputValue>[];
       let expectedInputs: Record<string, SQLOutputValue>[];
       {
         using db = new DatabaseSync(agentPath);
@@ -74,7 +76,8 @@ it(
             '{"historical":"evidence-only"}',
           );
         }
-        expectedInputs = db.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all();
+        originalInputs = db.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all();
+        expectedInputs = structuredClone(originalInputs);
         for (const row of expectedInputs) {
           if (row.state === "queued") {
             row.state = "interrupted";
@@ -150,6 +153,49 @@ it(
         expect(agent.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all()).toEqual(
           expectedInputs,
         );
+        agent.close();
+        db.close();
+        // The CLI has exited and all local readers are closed before restoring its real backups.
+        for (const [pathname, version] of [
+          [sharedPath, 21],
+          [agentPath, 24],
+        ] as const) {
+          const directory = path.dirname(pathname);
+          const backup = fs.readdirSync(directory).find((name) => {
+            if (
+              !name.startsWith(path.basename(pathname) + ".pre-startup-migration-") ||
+              !name.endsWith(".bak") ||
+              name.endsWith(".scoped.bak")
+            ) {
+              return false;
+            }
+            using archived = new DatabaseSync(path.join(directory, name), { readOnly: true });
+            return archived.prepare("PRAGMA user_version").get()?.user_version === version;
+          });
+          expect(backup).toBeDefined();
+          for (const suffix of ["-wal", "-shm", "-journal"]) {
+            fs.rmSync(pathname + suffix, { force: true });
+          }
+          fs.copyFileSync(path.join(directory, backup!), pathname);
+          using restored = new DatabaseSync(pathname, { readOnly: true });
+          expect(restored.prepare("PRAGMA user_version").get()?.user_version).toBe(version);
+          expect(
+            restored.prepare("SELECT schema_version FROM schema_meta").get()?.schema_version,
+          ).toBe(version);
+        }
+        using restoredAgent = new DatabaseSync(agentPath, { readOnly: true });
+        expect(
+          restoredAgent.prepare("SELECT * FROM session_pending_inputs ORDER BY seq").all(),
+        ).toEqual(originalInputs);
+        using restoredShared = new DatabaseSync(sharedPath, { readOnly: true });
+        expect(
+          restoredShared
+            .prepare("SELECT * FROM worker_session_placements ORDER BY session_id")
+            .all(),
+        ).toEqual(originalPlacements);
+        expect(
+          restoredShared.prepare("SELECT profile_snapshot_json FROM worker_environments").get(),
+        ).toEqual({ profile_snapshot_json: original });
       }
     });
   },

@@ -370,7 +370,6 @@ const runtimeConsumers = [
     "src/gateway/gateway-active-memory.test.ts",
     "src/gateway/gateway-concurrent-streams.test.ts",
     "src/gateway/gateway.sessions-send-recovery.test.ts",
-    "src/gateway/gateway.historical-imports.test.ts",
   ].map((file) => ({
     file,
     configs: ["test/vitest/vitest.gateway-core.config.ts", "test/vitest/vitest.gateway.config.ts"],

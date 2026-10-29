@@ -174,7 +174,6 @@ export function waitForCliProcessStderrMarker(
 
 export async function runCliProcessChild(params: {
   nodeArgs: string[];
-  /** Explicit Node executable; omission inherits the test runner runtime. */
   nodeExecutable?: string;
   /** Preserve the launch policy of fixtures migrated from direct child_process calls. */
   nodeArgsPolicy?: "vitest" | "caller";
@@ -190,10 +189,7 @@ export async function runCliProcessChild(params: {
 }): Promise<CliProcessChildResult> {
   const timeoutMs = params.timeoutMs ?? CLI_PROCESS_DEADLOCK_GUARD_MS;
   const executable = params.nodeExecutable ?? process.execPath;
-  const childRuntime = process.versions.bun && params.nodeExecutable === undefined ? "bun" : "node";
-  const reports = shouldEnableNodeDiagnosticReports(childRuntime)
-    ? createFixtureLifetime()
-    : undefined;
+  const reports = shouldEnableNodeDiagnosticReports() ? createFixtureLifetime() : undefined;
   let unjoinedWork = false;
   if (reports) {
     (params.onTestFinished ?? onTestFinished)(async () => {
@@ -205,7 +201,7 @@ export async function runCliProcessChild(params: {
   const reportDir = reports?.createTempDir("openclaw-cli-report-");
   // CLI children use the test runner's V8 policy without inheriting its preloads.
   const nodeArgs =
-    childRuntime === "bun"
+    process.versions.bun && params.nodeExecutable === undefined
       ? params.nodeArgs
       : [
           ...(params.nodeArgsPolicy === "caller" ? [] : resolveVitestNodeArgs(params.env)),

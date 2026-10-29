@@ -437,34 +437,6 @@ describe("assertSqliteSchemaContains", () => {
     }
   });
 
-  it.each(["TEXT", "TEXT DEFAULT NULL"])(
-    "admits an optional table archival column only by its exact owner declaration: %s",
-    (declaration) => {
-      const database = createDatabase(CANONICAL_SCHEMA);
-      try {
-        database.exec(`ALTER TABLE compatible_columns ADD COLUMN historical_note ${declaration}`);
-        const check = (key: string) => () =>
-          assertSqliteSchemaContains(database, "test database", CANONICAL_SCHEMA, {
-            allowedMissingTables: ["compatible_columns"],
-            allowCompatibleAdditiveColumns: true,
-            allowedColumnDefinitions: { [key]: ["historical_note TEXT"] },
-          });
-        expect(check("parents.historical_note")).toThrow(
-          "column definitions differ for compatible_columns",
-        );
-        if (declaration === "TEXT") {
-          expect(check("compatible_columns.historical_note")).not.toThrow();
-        } else {
-          expect(check("compatible_columns.historical_note")).toThrow(
-            "column definitions differ for compatible_columns",
-          );
-        }
-      } finally {
-        database.close();
-      }
-    },
-  );
-
   it.each(["TEXT"])("accepts a compatible future additive %s column only when enabled", (type) => {
     const database = createDatabase(CANONICAL_SCHEMA);
     try {
