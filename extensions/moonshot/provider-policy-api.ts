@@ -5,9 +5,6 @@ import manifest from "./openclaw.plugin.json" with { type: "json" };
 export const MOONSHOT_BASE_URL = "https://api.moonshot.ai/v1";
 export const MOONSHOT_CN_BASE_URL = "https://api.moonshot.cn/v1";
 
-export const KIMI_K2_7_CODE_MODEL_ID = "kimi-k2.7-code";
-export const KIMI_K2_7_CODE_HIGHSPEED_MODEL_ID = "kimi-k2.7-code-highspeed";
-
 type MoonshotThinkingFacts = Pick<ProviderDefaultThinkingPolicyContext, "thinkingLevelMap"> & {
   compat?: object | null;
 };
