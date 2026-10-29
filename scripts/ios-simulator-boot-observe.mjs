@@ -23,6 +23,12 @@ const proof = {
   totalMemoryBytes: os.totalmem(),
   runtimeIdentifier,
   deviceType,
+  inheritedLoggingOverrides: [
+    "SIMCTL_CHILD_OS_ACTIVITY_MODE",
+    "SIMCTL_CHILD_OS_ACTIVITY_DT_MODE",
+    "SIMCTL_CHILD_OS_LOG_DT_HOOK_MODE",
+    "SIMCTL_CHILD_IDE_DISABLED_OS_ACTIVITY_DT_MODE",
+  ].map((name) => ({ name, present: Object.hasOwn(process.env, name) })),
   status: "failed",
   phases: [],
   cleanupConfirmed: false,
@@ -81,6 +87,37 @@ async function phase(label, action) {
     save();
   }
 }
+async function loggingStatus(bin, args) {
+  const probeStarted = performance.now();
+  try {
+    const text = await command(bin, args, 5_000);
+    // System-level fixed flags only; subsystem/process names and raw config stay private.
+    const line = /^System mode = ([A-Z_ ]+)$/mu.exec(text)?.[1];
+    const tokens = line?.match(/[A-Z_]+/gu) ?? [];
+    const allowed = new Set([
+      "DEFAULT",
+      "OFF",
+      "INFO",
+      "DEBUG",
+      "PERSIST_DEFAULT",
+      "PERSIST_OFF",
+      "PERSIST_INFO",
+      "PERSIST_DEBUG",
+      "STREAM_LIVE",
+      "STREAM_DEFAULT",
+    ]);
+    return {
+      outcome:
+        line && tokens.length && tokens.every((token) => allowed.has(token))
+          ? "recognized"
+          : "unrecognized",
+      flags: tokens.filter((token) => allowed.has(token)),
+      ms: Math.round(performance.now() - probeStarted),
+    };
+  } catch {
+    return { outcome: "unavailable", ms: Math.round(performance.now() - probeStarted) };
+  }
+}
 save();
 try {
   const xcode = await command("xcodebuild", ["-version"]);
@@ -95,6 +132,7 @@ try {
     throw new Error("different-runtime-image");
   }
   proof.runtimeBuild = runtime.buildversion;
+  proof.hostLogging = await loggingStatus("sudo", ["-n", "/usr/bin/log", "config", "--status"]);
   await phase("baseline", () => sleep(20_000, undefined, { signal: controller.signal }));
   await phase("create", async () => {
     createAttempted = true;
@@ -120,6 +158,14 @@ try {
   });
   // One ordinary collector interval permits the fixed postgate census, even with no timeout.
   await phase("headroom-passed", () => sleep(25_000, undefined, { signal: controller.signal }));
+  proof.simulatorLogging = await loggingStatus("xcrun", [
+    "simctl",
+    "spawn",
+    udid,
+    "log",
+    "config",
+    "--status",
+  ]);
   proof.status = "passed";
 } catch {
   proof.failedStage = stage;
