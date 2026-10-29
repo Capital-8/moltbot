@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "probedAt": "2026-10-29T13:29:18.339Z",
+  "provider": "kimi",
+  "model": "k3.1-pro",
+  "envVar": "KIMI_API_KEY",
+  "row": {
+    "api": "anthropic-messages",
+    "baseUrl": "https://api.kimi.com/coding/",
+    "headers": {
+      "User-Agent": "claude-code/0.1.0"
+    },
+    "apiKey": {
+      "source": "env",
+      "provider": "default",
+      "id": "KIMI_API_KEY"
+    },
+    "models": [
+      {
+        "id": "k3.1-pro",
+        "name": "Kimi K3.1 Pro",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "thinkingLevelMap": {
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "compat": {
+          "supportedReasoningEfforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "supportsReasoningEffort": true
+        }
+      }
+    ]
+  },
+  "turns": [
+    {
+      "level": "off",
+      "error": "LLM request rejected: K3\\.1 Pro does not support disabled thinking mode\\. Please enable thinking and try again\\, or choose another model\\. | 400",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3.1-pro",
+            "max_tokens": 32000,
+            "stream": true,
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 400,
+          "error": "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"K3.1 Pro does not support disabled thinking mode. Please enable thinking and try again, or choose another model.\"},\"type\":\"error\"}"
+        }
+      ]
+    },
+    {
+      "level": "minimal",
+      "model": "k3.1-pro",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 2765,
+        "output": 50,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 2815,
+        "cost": {
+          "total": 0
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3.1-pro",
+            "max_tokens": 33024,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 1024
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "low",
+      "model": "k3.1-pro",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 457,
+        "output": 62,
+        "cacheRead": 2304,
+        "cacheWrite": 0,
+        "total": 2823,
+        "cost": {
+          "total": 0
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3.1-pro",
+            "max_tokens": 34048,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 2048
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "medium",
+      "model": "k3.1-pro",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 461,
+        "output": 46,
+        "cacheRead": 2304,
+        "cacheWrite": 0,
+        "total": 2811,
+        "cost": {
+          "total": 0
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3.1-pro",
+            "max_tokens": 40192,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 8192
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "high",
+      "model": "k3.1-pro",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 459,
+        "output": 271,
+        "cacheRead": 2304,
+        "cacheWrite": 0,
+        "total": 3034,
+        "cost": {
+          "total": 0
+        }
+      },
+      "reply": "Hello! How can I help?",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3.1-pro",
+            "max_tokens": 48384,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 16384
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "xhigh",
+      "error": "Thinking level \"xhigh\" is not supported for probe-kimi/k3.1-pro. Use one of: off, minimal, low, medium, high, ultra.",
+      "requests": []
+    },
+    {
+      "level": "max",
+      "error": "Thinking level \"max\" is not supported for probe-kimi/k3.1-pro. Use one of: off, minimal, low, medium, high, ultra.",
+      "requests": []
+    }
+  ]
+}

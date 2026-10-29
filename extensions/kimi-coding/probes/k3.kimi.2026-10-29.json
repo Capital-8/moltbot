@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "probedAt": "2026-10-29T13:27:47.404Z",
+  "provider": "kimi",
+  "model": "k3",
+  "envVar": "KIMI_API_KEY",
+  "row": {
+    "api": "anthropic-messages",
+    "baseUrl": "https://api.kimi.com/coding/",
+    "headers": {
+      "User-Agent": "claude-code/0.1.0"
+    },
+    "apiKey": {
+      "source": "env",
+      "provider": "default",
+      "id": "KIMI_API_KEY"
+    },
+    "models": [
+      {
+        "id": "k3",
+        "name": "Kimi K3",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "cost": {
+          "input": 3,
+          "output": 15,
+          "cacheRead": 0.3,
+          "cacheWrite": 0
+        },
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "thinkingLevelMap": {
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "compat": {
+          "supportedReasoningEfforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "codeMode": "preferred",
+          "supportsReasoningEffort": true
+        }
+      }
+    ]
+  },
+  "turns": [
+    {
+      "level": "off",
+      "model": "k3",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 12112,
+        "output": 8,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 12120,
+        "cost": {
+          "total": 0.036456
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3",
+            "max_tokens": 32000,
+            "stream": true,
+            "thinking": {
+              "type": "disabled"
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "minimal",
+      "model": "k3",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 7831,
+        "output": 50,
+        "cacheRead": 4352,
+        "cacheWrite": 0,
+        "total": 12233,
+        "cost": {
+          "total": 0.0255486
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3",
+            "max_tokens": 33024,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 1024
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "low",
+      "model": "k3",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 399,
+        "output": 37,
+        "cacheRead": 11776,
+        "cacheWrite": 0,
+        "total": 12212,
+        "cost": {
+          "total": 0.005284799999999999
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3",
+            "max_tokens": 34048,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 2048
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "medium",
+      "model": "k3",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 403,
+        "output": 50,
+        "cacheRead": 11776,
+        "cacheWrite": 0,
+        "total": 12229,
+        "cost": {
+          "total": 0.0054918
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3",
+            "max_tokens": 40192,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 8192
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "high",
+      "model": "k3",
+      "usage": {
+        "usageReport": {
+          "state": "available"
+        },
+        "input": 408,
+        "output": 52,
+        "cacheRead": 11776,
+        "cacheWrite": 0,
+        "total": 12236,
+        "cost": {
+          "total": 0.0055368
+        }
+      },
+      "reply": "OK",
+      "requests": [
+        {
+          "url": "https://api.kimi.com/coding/v1/messages",
+          "params": {
+            "model": "k3",
+            "max_tokens": 48384,
+            "stream": true,
+            "thinking": {
+              "type": "enabled",
+              "budget_tokens": 16384
+            }
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "level": "xhigh",
+      "error": "Thinking level \"xhigh\" is not supported for probe-kimi/k3. Use one of: off, minimal, low, medium, high, ultra.",
+      "requests": []
+    },
+    {
+      "level": "max",
+      "error": "Thinking level \"max\" is not supported for probe-kimi/k3. Use one of: off, minimal, low, medium, high, ultra.",
+      "requests": []
+    }
+  ]
+}
