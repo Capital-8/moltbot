@@ -828,7 +828,7 @@ require_proof_publication_hosted_state() (
 )
 
 prepare_publish_for_proof() {
-  local pr="$1" proof head lease observation
+  local pr="$1" proof head lease observation publication_baseline
   local PREP_PUBLICATION_PURPOSE=proof PREP_PUBLICATION_PR="$pr" PREP_PUBLICATION_REVIEW_SNAPSHOT=""
   local PREP_PROOF_HOSTED_HEAD="" PREP_PROOF_REVIEW_OID="" PREP_PROOF_PENDING_FINDINGS=""
   enter_worktree "$pr" false true || return 1
@@ -850,6 +850,12 @@ prepare_publish_for_proof() {
   case "${OPENCLAW_PR_PUSH_MODE:-auto}" in auto|git) ;; *) echo "Proof publication requires exact Git transport." >&2; return 1 ;; esac
   [ "${OPENCLAW_ALLOW_UNSIGNED_GIT_PUSH:-}" != 1 ] || { echo "Unsigned publication is unavailable for proof." >&2; return 1; }
   pr_git verify-commit "$head" >/dev/null 2>&1 || return 1
+  # Reconciliation may advance the transport lease to HEAD. Keep signature
+  # admission anchored to the review's original lease, including on a no-op.
+  publication_baseline=$(require_proof_publication_review "$pr" proof-publication-baseline) || return 1
+  verify_prep_commit_range_signed "$PREP_PROOF_HOSTED_HEAD" "$head" "$publication_baseline" || {
+    echo "Proof publication requires a signed correction range from the reviewed hosted head." >&2; return 1;
+  }
   resolve_prep_publication_target "$pr" "$head" || return 1
   lease="$PREP_PUBLICATION_LEASE_SHA"
   [ "$PREP_PUBLICATION_HEAD_SHA" = "$head" ] &&

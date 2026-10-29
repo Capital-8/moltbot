@@ -911,6 +911,55 @@ process.exit(result.status??1);
     },
   );
 
+  it.each(
+    [false, true].flatMap((baseline) => [false, true].map((signed) => ({ baseline, signed }))),
+  )(
+    "reconciles an externally published correction range, baseline=$baseline, signed=$signed",
+    ({ baseline, signed }) => {
+      const f = proofFixture(false, baseline);
+      f.prepGit(
+        "-c",
+        `commit.gpgsign=${signed}`,
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "Intermediate correction",
+      );
+      f.prepGit("commit", "--allow-empty", "-qm", "Signed correction tip");
+      const head = f.prepGit("rev-parse", "HEAD");
+      f.prepGit("verify-commit", head);
+      f.review.pr.headSha = head;
+      f.review.correction.proofPublication.headSha = head;
+      f.writeReview();
+      f.git(f.repo, "update-ref", "refs/heads/topic", head);
+      const before = f.snapshot([
+        "review.json",
+        "correction-review.json",
+        "correction-incoming-review.json",
+      ]);
+      const result = f.run("prepare-publish-for-proof");
+      expect(result.error).toBeUndefined();
+      expect(result.signal).toBeNull();
+      expectExit(result, signed ? 0 : 1);
+      f.expectSnapshot(before);
+      expect(f.git(f.repo, "rev-parse", "topic")).toBe(head);
+      f.expectAbsent("prep.env", "gates.env");
+      if (signed) {
+        expect(result.stdout).toContain("Remote branch already at local prep HEAD; skipping push.");
+        const receipt = f.readLocal("prepare-push-result.env").toString();
+        expect(receipt).toContain(`PUSHED_FROM_SHA=${f.incoming}\n`);
+        expect(receipt).toContain(`PUSH_PREP_HEAD_SHA=${head}\n`);
+        expect(receipt).toContain("PUSH_PURPOSE=proof\n");
+      } else {
+        expect(result.stderr).toContain("requires a signed correction range");
+        expect(result.stderr).toContain(
+          "its process group and every notification-pipe holder exited.",
+        );
+        f.expectAbsent("prepare-push-result.env");
+      }
+    },
+  );
+
   it.each(["before CAS", "after CAS", "lock race"] as const)(
     "preserves pending proof through successor %s",
     (phase) => {
