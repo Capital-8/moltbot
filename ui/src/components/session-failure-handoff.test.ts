@@ -30,6 +30,7 @@ it("keeps inherited diagnostics without red attention across tree, team and save
     status: "failed",
     lastRunError: "Synthetic provider cause",
     failureHandedOff: true,
+    hasActiveSubagentRun: true,
     spawnedBy: parent.key,
   };
   child.endedAt = 2;
@@ -38,7 +39,7 @@ it("keeps inherited diagnostics without red attention across tree, team and save
     { subagentParentKey: parent.key, subagentSessions: [child], subagentSessionsHydrated: true },
     1,
   );
-  expect(runtime.children).toMatchObject({ failed: 1, attentionFailed: 0 });
+  expect(runtime.children).toMatchObject({ failed: 1, attentionFailed: 0, waiting: 0 });
   expect(runtime.childError).toBeUndefined();
   const launch = {
     name: "sessions_spawn",
@@ -103,18 +104,42 @@ it("keeps inherited diagnostics without red attention across tree, team and save
 it.each([false, true])(
   "renders diagnostics without inherited red when handed off=%s",
   (handedOff) => {
-    const runtime = {
-      known: true,
-      connected: true,
-      children: {
-        running: 0,
-        queued: 0,
-        waiting: 0,
-        failed: 1,
-        attentionFailed: handedOff ? 0 : 1,
-      },
-      childError: handedOff ? undefined : "Child provider unavailable",
+    const parent: GatewaySessionRow = { key: "agent:main:parent", kind: "direct", updatedAt: 1 };
+    const failed: GatewaySessionRow = {
+      key: "agent:main:subagent:failed",
+      kind: "direct",
+      updatedAt: 2,
+      spawnedBy: parent.key,
+      status: "failed",
+      endedAt: 2,
+      failureHandedOff: handedOff,
+      hasActiveSubagentRun: handedOff,
+      lastRunError: "Child provider unavailable",
     };
+    const waiting: GatewaySessionRow = {
+      key: "agent:main:subagent:waiting",
+      kind: "direct",
+      updatedAt: 2,
+      spawnedBy: parent.key,
+      status: "done",
+      endedAt: 2,
+      hasActiveSubagentRun: true,
+    };
+    const runtime = projectProgressCardRuntime(
+      parent,
+      {
+        subagentParentKey: parent.key,
+        subagentSessions: [failed, waiting],
+        subagentSessionsHydrated: true,
+      },
+      1,
+      true,
+    );
+    expect(runtime.children).toMatchObject({
+      failed: 1,
+      waiting: 1,
+      attentionFailed: handedOff ? 0 : 1,
+    });
     const progress = mountSolid(() =>
       createComponent(ProgressRuntime, { runtime, sessionStatus: "done" }),
     );
@@ -122,6 +147,7 @@ it.each([false, true])(
       String(!handedOff),
     );
     expect(progress.container.textContent).toContain("1 failed");
+    expect(progress.container.textContent).toContain("1 waiting");
     expect(progress.container.textContent?.includes("Child provider unavailable")).toBe(!handedOff);
     const row = {
       ...projectSidebarSession({ key: "agent:main:parent" }),

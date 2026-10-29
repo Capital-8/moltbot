@@ -12,6 +12,7 @@ import {
 } from "../../agents/bash-tools.exec-approval-output.js";
 import type { ExecElevatedDefaults } from "../../agents/bash-tools.exec-types.js";
 import { runAgentHarnessBeforeMessageWriteHook } from "../../agents/harness/hook-helpers.js";
+import { resolveAcpPromptBody } from "../../agents/internal-events.js";
 import type { RuntimeContextFragment } from "../../agents/internal-runtime-context.js";
 import type { ReplyExpectation } from "../../agents/reply-completion.js";
 import {
@@ -232,7 +233,12 @@ export async function prepareAgentRunUserTurn(params: {
 
     let message = params.message;
     const runtimeContextFragments = params.client?.internal?.runtimeContextFragments;
-    let effectiveTranscriptInputText = params.effectiveTranscriptInputText;
+    // Receipt consumers need the event payload, not just its synthetic trigger.
+    // Keep diagnostics in this input commit; the later runtime-context carrier
+    // can fail without stranding a durable handoff with no failure data.
+    let effectiveTranscriptInputText = params.onInputCommitted
+      ? resolveAcpPromptBody(params.effectiveTranscriptInputText, params.request.internalEvents)
+      : params.effectiveTranscriptInputText;
     let execApprovalContinuationPromptRange: ExecApprovalContinuationPromptRange | undefined;
     if (execApprovalFollowupRuntimeHandoff?.resultText !== undefined) {
       const continuation = buildExecApprovalContinuationPrompt(

@@ -27,6 +27,7 @@ import {
   buildAgentInternalEventContext,
   collectAgentInternalEventMedia,
   formatGeneratedMediaDeliveredForPrompt,
+  resolveAcpPromptBody,
   type AgentInternalEvent,
 } from "../../internal-events.js";
 import { RUNTIME_EVENT_USER_PROMPT } from "../../internal-runtime-context.js";
@@ -265,7 +266,10 @@ async function deliverSubagentAnnouncementBound(
     createCompletionUserTurnTranscriptRecorder = (sessionId) => {
       const recorder = createUserTurnTranscriptRecorder({
         input: {
-          text: transcriptMessage,
+          // Active steering has the same custody contract as a fresh Gateway turn.
+          text: params.onInputCommitted
+            ? resolveAcpPromptBody(transcriptMessage, internalEvents)
+            : transcriptMessage,
           idempotencyKey: `${directIdempotencyKey}:active-wake`,
           provenance,
         },

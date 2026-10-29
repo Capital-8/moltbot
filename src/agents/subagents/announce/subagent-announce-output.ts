@@ -360,11 +360,10 @@ async function prepareAnnounceRunReader(runIds: string[]): Promise<AnnounceRunRe
   };
 }
 
-export async function readSubagentRunAnnounceResult(
+async function readSubagentRunResultWithProgress(
   child: SubagentRunRecord,
-  readSubagentRun?: AnnounceRunReader,
+  readCurrent: AnnounceRunReader,
 ): Promise<PreparedAnnounceResult> {
-  const readCurrent = readSubagentRun ?? (await prepareAnnounceRunReader([child.runId]));
   const prepared = await readSubagentRunAnnounceResultUsing(child, {
     readSubagentRun: readCurrent,
     findTranscriptEvent,
@@ -425,8 +424,37 @@ export async function readSubagentRunAnnounceResult(
     progress =
       text || (toolCalls ? `${toolCalls} tool call(s) made without visible output.` : undefined);
   }
-  const pending = buildSubagentSessionListReadIndex(Date.now(), [child.childSessionKey])
-    .listDescendantRunsForRequester(child.childSessionKey)
+  return {
+    text:
+      [
+        prepared.text,
+        progress ? "Saved partial progress (not a completed result):\n" + progress : undefined,
+        progressUnavailable ? "Saved partial progress unavailable." : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n\n") || undefined,
+    isCurrent: prepared.isCurrent,
+  };
+}
+
+export async function readSubagentRunAnnounceResult(
+  child: SubagentRunRecord,
+  readSubagentRun?: AnnounceRunReader,
+): Promise<PreparedAnnounceResult> {
+  const readCurrent = readSubagentRun ?? (await prepareAnnounceRunReader([child.runId]));
+  const prepared = await readSubagentRunResultWithProgress(child, readCurrent);
+  if (!isFailedTerminalSubagentRun(child)) {
+    return prepared;
+  }
+  const descendants = buildSubagentSessionListReadIndex(Date.now(), [
+    child.childSessionKey,
+  ]).listDescendantRunsForRequester(child.childSessionKey);
+  // A collector's completion is readiness, not durable consumption. Keep its
+  // public ID recoverable even after completion cleanup, without waking it.
+  const unconsumedFailures = descendants.filter(
+    (run) => run.collect && isFailedTerminalSubagentRun(run) && !run.delivery?.failureHandoff,
+  );
+  const pending = descendants
     .filter((run) =>
       hasSubagentRunEnded(run)
         ? run.cleanupCompletedAt === undefined && !run.collectorCompletion
@@ -436,17 +464,46 @@ export async function readSubagentRunAnnounceResult(
       runId: run.swarmRunId ?? run.runId,
       mode: run.collect ? "collector" : "announcing",
     }));
+  const readFailures = unconsumedFailures.length
+    ? await prepareAnnounceRunReader(unconsumedFailures.map((run) => run.runId))
+    : undefined;
+  const failures = await Promise.all(
+    unconsumedFailures.map(async (run) => {
+      const current = readFailures?.(run.runId);
+      if (!current) {
+        throw new SubagentAnnouncePreparationConflictError(
+          "A failed collector changed during parent handoff.",
+        );
+      }
+      // Read each selected descendant once, not its subtree recursively. The
+      // existing transcript window and findings formatter bound retained output.
+      const result = await readSubagentRunResultWithProgress(current, readFailures!);
+      return { child: current, text: result.text, isCurrent: result.isCurrent };
+    }),
+  );
   const text = [
     prepared.text,
-    progress ? `Saved partial progress (not a completed result):\n${progress}` : undefined,
-    progressUnavailable ? "Saved partial progress unavailable." : undefined,
     pending.length
-      ? `Pending delegated runs (not completed): ${JSON.stringify(pending)}`
+      ? "Pending delegated runs (not completed): " + JSON.stringify(pending)
+      : undefined,
+    failures.length
+      ? [
+          "Failed collectors awaiting consumption (run IDs): " +
+            JSON.stringify(failures.map(({ child: run }) => run.swarmRunId ?? run.runId)),
+          buildChildCompletionFindings(
+            failures.map(({ child: run, text: result }) =>
+              Object.assign({}, run, { announceResult: result }),
+            ),
+          ),
+        ].join("\n")
       : undefined,
   ]
     .filter(Boolean)
     .join("\n\n");
-  return { text: text || undefined, isCurrent: prepared.isCurrent };
+  return {
+    text: text || undefined,
+    isCurrent: () => prepared.isCurrent() && failures.every((result) => result.isCurrent()),
+  };
 }
 
 /** The complete final answer recorded by this run, or undefined when retention removed it. */

@@ -311,7 +311,7 @@ export function projectProgressCardRuntime(
         children.queued++;
       } else if (isSessionRunStateActive(row)) {
         children.running++;
-      } else if (row.hasActiveSubagentRun) {
+      } else if (isUnfinishedSubagent(row)) {
         children.waiting++;
       } else if (row.endedAt !== undefined && row.endedAt >= updatedAt) {
         // A newer authored snapshot has already had a chance to reconcile this
