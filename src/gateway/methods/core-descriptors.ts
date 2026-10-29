@@ -1,7 +1,8 @@
 import type { CoreGatewayMethodSpecRow } from "./core-descriptor-types.js";
 import { cronListShareKey, modelsListShareKey, operatorReadShareKey } from "./read-share-keys.js";
 
-// Canonical append-only method table; derived lookup and dispatch policy lives in core-method-policy.ts.
+// Advertised method order is append-only; unadvertised rows allocate no advertised position.
+// Lookup and dispatch policy are derived in core-method-policy.ts.
 const CONTROL_PLANE_WRITE = { controlPlaneWrite: true } as const;
 const SIDECAR_CONTROL_PLANE_WRITE = { startup: true, controlPlaneWrite: true } as const;
 const UNADVERTISED = { advertise: false } as const;
@@ -247,7 +248,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   // Params-aware plus state-aware: the handler permits write-scoped cwd only
   // inside configured agent workspaces; execNode and other privileged modes stay admin.
   ["sessions.create", "sessions-create", "dynamic", "<=2026.7", { startup: true }],
-  ["sessions.recover", "sessions-recover", "operator.write", "2026.8", { startup: true }],
   ["sessions.send", "sessions-messaging", "operator.write", "<=2026.7", { startup: true }],
   ["sessions.abort", "sessions-abort", "operator.write", "<=2026.7", { startup: true }],
   // Dynamic mutation scope policy, including write-scoped model overrides, lives

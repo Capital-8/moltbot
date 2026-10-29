@@ -82,7 +82,9 @@ it("fences retained receipts by original admission and exact physical requester"
           "main",
           "receipt-test",
           () => {
-            if (!sourceActive) throw new Error("Original requester revoked");
+            if (!sourceActive) {
+              throw new Error("Original requester revoked");
+            }
           },
         );
         const replacement = prepareSystemAgentRunAdmission(
@@ -98,7 +100,9 @@ it("fences retained receipts by original admission and exact physical requester"
             agentId: "main",
             sessionKey: target.sessionKey,
           });
-          if (!identity) throw new Error("Missing native caller");
+          if (!identity) {
+            throw new Error("Missing native caller");
+          }
           const saved = vi.fn((next: WorkSnapshot) => {
             work = next;
           });
@@ -123,7 +127,9 @@ it("fences retained receipts by original admission and exact physical requester"
               ),
           );
           expect(sink).toBeTypeOf("function");
-          if (!sink) throw new Error("No retained receipt sink");
+          if (!sink) {
+            throw new Error("No retained receipt sink");
+          }
           const requester =
             mode === "missing"
               ? undefined
@@ -174,7 +180,9 @@ it("fences retained receipts by original admission and exact physical requester"
               });
           }
           const destinationBefore = await destination?.read();
-          if (mode === "source-revoked") sourceActive = false;
+          if (mode === "source-revoked") {
+            sourceActive = false;
+          }
           const invoke = () =>
             withPluginRuntimeGatewayRequestScope(
               { context: gateway, isWebchatConnect: () => false },
@@ -203,7 +211,9 @@ it("fences retained receipts by original admission and exact physical requester"
             }
           }
           const actual = await reader.read();
-          if (destination) expect(await destination.read()).toEqual(destinationBefore);
+          if (destination) {
+            expect(await destination.read()).toEqual(destinationBefore);
+          }
           if (mode === "current") {
             expect(saved).toHaveBeenCalledOnce();
             expect(actual).toMatchObject({
@@ -227,7 +237,9 @@ it("fences retained receipts by original admission and exact physical requester"
             if (mode.startsWith("config-switch")) {
               expect(saved).toHaveBeenCalledOnce();
               expect(work).toMatchObject({ coverage: { kind: "unavailable" } });
-            } else expect(saved, mode).not.toHaveBeenCalled();
+            } else {
+              expect(saved, mode).not.toHaveBeenCalled();
+            }
             expect(actual, mode).toEqual(original);
           }
         } finally {

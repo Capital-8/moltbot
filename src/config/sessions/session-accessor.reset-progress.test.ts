@@ -119,9 +119,11 @@ it.each([
       expect(readSessionProgressCard(reader, sessionKey)).toEqual(cleared ? null : before);
     }
     const workAfter = readSessionProgressAggregate(database.db, sessionKey)?.work;
-    if (rollback) expect(workAfter).toEqual(workBefore);
-    else if (cleared) expect(workAfter).toMatchObject({ generation: 1, revision: 2, record: null });
-    else
+    if (rollback) {
+      expect(workAfter).toEqual(workBefore);
+    } else if (cleared) {
+      expect(workAfter).toMatchObject({ generation: 1, revision: 2, record: null });
+    } else {
       expect(workAfter).toMatchObject({
         generation: 1,
         revision: 2,
@@ -130,6 +132,7 @@ it.each([
           steps: [{ step: "old", status: "in_progress" }],
         },
       });
+    }
     expect(await boards.getSnapshot({ sessionKey })).toEqual(boardBefore);
     expect((await readBoardHtml(boards, { sessionKey }, "widget"))?.html).toBe("<p>kept</p>");
     expect(readCard()).toEqual(cleared ? null : before);

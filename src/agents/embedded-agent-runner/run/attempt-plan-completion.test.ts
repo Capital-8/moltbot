@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { observeInternalNativeInvocation } from "../../../../packages/agent-core/src/internal-hooks.js";
 import type { ProgressCardPutResult } from "../../../../packages/gateway-protocol/src/index.js";
 import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
 import { setRuntimeConfigSnapshot } from "../../../config/runtime-snapshot.js";
@@ -15,6 +16,7 @@ import { createMockPluginRegistry } from "../../../plugins/hooks.test-helpers.js
 import { createReplyOperation, type ReplyOperation } from "../../../sessions/session-controller.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
 import { createOpenClawCodingToolsInternal } from "../../agent-tools.js";
+import { installSessionToolResultGuard } from "../../session-tool-result-guard.js";
 import {
   createAssistant,
   createAssistantResultStream,
@@ -151,7 +153,10 @@ it.each([
       agentId: "main",
       sessionKey: "agent:main:main",
       progressWorkOwner: workOwner,
-      progressWorkTarget: { ...workOwner, storePath: "/private/test.sqlite", env: {} },
+      progressWorkTarget: captureSessionTranscriptTargetBinding({
+        ...workOwner,
+        storePath: "/private/test.sqlite",
+      }),
       readProgressCardWork: () => completionCheck.work,
       onProgressCardWorkSaved: (snapshot) => {
         completionCheck.work = snapshot;
@@ -276,6 +281,7 @@ it("keeps the real finalizer quiet after a same-process preserve-tail reset", as
       toolCallId: "plan",
       processGeneration: getAgentRunLifecycleGeneration(),
     };
+    installSessionToolResultGuard(manager, { runId: source.runId });
     await manager.appendMessageAsync(
       makeAgentAssistantMessage({
         turnId: source.turnId,
@@ -285,14 +291,20 @@ it("keeps the real finalizer quiet after a same-process preserve-tail reset", as
         ],
       }),
     );
-    await manager.appendMessageAsync({
-      role: "toolResult",
+    const nativeResult = {
+      role: "toolResult" as const,
       toolCallId: source.toolCallId,
       toolName: "progress_card",
-      content: [{ type: "text", text: "Saved" }],
+      content: [{ type: "text" as const, text: "Saved" }],
       isError: false,
       timestamp: 1,
+    };
+    observeInternalNativeInvocation(nativeResult, {
+      ...source,
+      toolName: "progress_card",
+      qualification: "managed-progress",
     });
+    await manager.appendMessageAsync(nativeResult);
     const reader = captureProgressWorkReader({ target, assertCurrent() {} });
     const steps = [{ step: "Finish retained work", status: "pending" as const }];
     await progressCardStore.put(
@@ -328,7 +340,7 @@ it("keeps the real finalizer quiet after a same-process preserve-tail reset", as
     });
     const completionCheck: EmbeddedRunCompletionCheck = {
       work: await current.read(),
-      refresh: current.read,
+      refresh: () => current.read(),
       checked: false,
     };
     expect(completionCheck.work).toMatchObject({
@@ -373,28 +385,32 @@ it.each([
     checked: state === "consumed check",
   };
   if (completionCheck.work.kind === "retained") {
-    if (state === "unavailable coverage")
+    if (state === "unavailable coverage") {
       completionCheck.work.coverage = {
         kind: "unavailable",
         reason: "Lifecycle history unavailable",
       };
+    }
     const record = completionCheck.work.state.record!;
-    if (state === "persisted waiting")
+    if (state === "persisted waiting") {
       record.disposition = {
         kind: "waiting",
         source: record.source,
         receipt: { kind: "media", runId: "accepted-media", taskId: "task" },
         resumeCondition: "Native delivery",
       };
-    if (state === "paused work")
+    }
+    if (state === "paused work") {
       record.disposition = {
         kind: "paused-blocked",
         source: record.source,
         reason: "Approval",
         resumeCondition: "User decision",
       };
-    if (state === "failed refresh")
+    }
+    if (state === "failed refresh") {
       completionCheck.refresh = async () => ({ kind: "unavailable", reason: "Owner replaced" });
+    }
   }
   const { session } = await createTestSession();
   const prepared = prepare({
@@ -471,7 +487,10 @@ it.each([
   const progress = createProgressCardTool({
     agentSessionKey: "agent:main:main",
     workOwner,
-    workTarget: { ...workOwner, storePath: "/private/test.sqlite", env: {} },
+    workTarget: captureSessionTranscriptTargetBinding({
+      ...workOwner,
+      storePath: "/private/test.sqlite",
+    }),
     readWork: () => completionCheck.work,
     onWorkSaved: (snapshot) => {
       completionCheck.work = snapshot;

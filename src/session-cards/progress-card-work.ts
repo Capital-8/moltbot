@@ -88,27 +88,37 @@ function nonempty(value: string): string {
   return normalized;
 }
 function validateRecord(record: unknown): asserts record is WorkRecord {
-  if (!Check(RecordSchema, record))
+  if (!Check(RecordSchema, record)) {
     throw new ProgressCardInputError("Invalid retained work record");
+  }
   for (const value of [
     ...Object.values(record.owner),
     ...Object.values(record.source),
     record.scope,
   ]) {
-    if (value !== null) nonempty(value);
+    if (value !== null) {
+      nonempty(value);
+    }
   }
   const steps = normalizeProgressCardInput({ plan: record.steps }).steps;
-  if (!steps || !isDeepStrictEqual(steps, record.steps))
+  if (!steps || !isDeepStrictEqual(steps, record.steps)) {
     throw new ProgressCardInputError("Invalid retained work steps");
+  }
   const unresolved = steps.some((step) => step.status !== "completed");
-  if (unresolved === (record.disposition.kind === "completed"))
+  if (unresolved === (record.disposition.kind === "completed")) {
     throw new ProgressCardInputError("Work disposition does not match its obligations");
-  if (record.disposition.kind === "paused-blocked") nonempty(record.disposition.reason);
-  if (record.disposition.kind === "paused-blocked" || record.disposition.kind === "waiting")
+  }
+  if (record.disposition.kind === "paused-blocked") {
+    nonempty(record.disposition.reason);
+  }
+  if (record.disposition.kind === "paused-blocked" || record.disposition.kind === "waiting") {
     nonempty(record.disposition.resumeCondition);
+  }
 }
 export function decodeProgressWorkRecord(json: string | null): WorkRecord | null {
-  if (json === null) return null;
+  if (json === null) {
+    return null;
+  }
   const value: unknown = JSON.parse(json);
   validateRecord(value);
   return value;
@@ -117,11 +127,16 @@ export function presentSessionProgress(
   sessionKey: string,
   state: ProgressAggregate | undefined,
 ): ProgressCard | null {
-  if (!state) return null;
+  if (!state) {
+    return null;
+  }
   const steps = state.checklist === "work" ? state.work?.record?.steps : state.steps;
-  if (state.checklist === "work" && !state.work?.record)
+  if (state.checklist === "work" && !state.work?.record) {
     throw new ProgressCardInputError("Progress display has no retained work");
-  if (!state.markdown && !steps?.length) return null;
+  }
+  if (!state.markdown && !steps?.length) {
+    return null;
+  }
   return {
     sessionKey,
     revision: state.revision,
@@ -141,8 +156,9 @@ export function assertProgressWorkFence(
         current.generation !== expected.generation ||
         current.revision !== expected.revision
       : expected !== null
-  )
+  ) {
     throw new ProgressCardInputError("Retained work changed before commit");
+  }
 }
 
 /** The storage owners supply current custody; this reducer never interprets prose or grants it. */
@@ -152,8 +168,9 @@ export function reconcileSessionProgress(
   now: number,
 ): ProgressAggregate {
   const command = input.workCommand;
-  if (!Check(OwnerSchema, command.owner) || !Check(SourceSchema, command.source))
+  if (!Check(OwnerSchema, command.owner) || !Check(SourceSchema, command.source)) {
     throw new ProgressCardInputError("Invalid work custody");
+  }
   const normalized = normalizeProgressCardInput({ markdown: input.markdown, plan: input.steps });
   const previous = current?.work;
   const fingerprint = createHash("sha256")
@@ -179,11 +196,13 @@ export function reconcileSessionProgress(
       JSON.stringify([command.source.runId, command.source.turnId, command.source.toolCallId]),
     )
     .digest("hex");
-  if (previous?.record && !isDeepStrictEqual(previous.record.owner, command.owner))
+  if (previous?.record && !isDeepStrictEqual(previous.record.owner, command.owner)) {
     throw new ProgressCardInputError("Retained work belongs to another session incarnation");
+  }
   if (previous?.lastCommand?.id === id) {
-    if (previous.lastCommand.fingerprint !== fingerprint)
+    if (previous.lastCommand.fingerprint !== fingerprint) {
       throw new ProgressCardInputError("Work command identity was reused");
+    }
     return current!;
   }
   assertProgressWorkFence(previous, command.expected);
@@ -193,9 +212,12 @@ export function reconcileSessionProgress(
   switch (command.kind) {
     case "begin":
     case "replace": {
-      if (command.kind === "begin" && old && old.disposition.kind !== "completed")
+      if (command.kind === "begin" && old && old.disposition.kind !== "completed") {
         throw new ProgressCardInputError("Use explicit replacement for unfinished work");
-      if (!normalized.steps) throw new ProgressCardInputError("New work needs a nonempty plan");
+      }
+      if (!normalized.steps) {
+        throw new ProgressCardInputError("New work needs a nonempty plan");
+      }
       generation += 1;
       record = {
         version: 1,
@@ -210,28 +232,38 @@ export function reconcileSessionProgress(
       break;
     }
     case "retire":
-      if (!previous) throw new ProgressCardInputError("No retained work to retire");
+      if (!previous) {
+        throw new ProgressCardInputError("No retained work to retire");
+      }
       record = null;
       break;
     case "observe-wait":
     case "reconcile": {
-      if (!old || old.disposition.kind === "completed")
+      if (!old || old.disposition.kind === "completed") {
         throw new ProgressCardInputError("Terminal work requires explicit begin or replacement");
-      if (command.kind === "observe-wait" && old.disposition.kind !== "actionable") return current!;
+      }
+      if (command.kind === "observe-wait" && old.disposition.kind !== "actionable") {
+        return current!;
+      }
       const steps = normalized.steps ?? old.steps;
       // Labels are the existing plan identity. Renaming/removing unresolved scope is replacement,
       // not an implicit completion. Completed steps stay available to avoid repeating effects.
       const counts = new Map<string, number>();
-      for (const step of steps) counts.set(step.step, (counts.get(step.step) ?? 0) + 1);
+      for (const step of steps) {
+        counts.set(step.step, (counts.get(step.step) ?? 0) + 1);
+      }
       const omittedCompleted: ProgressCardStep[] = [];
       for (const step of old.steps) {
         const count = counts.get(step.step) ?? 0;
-        if (count) counts.set(step.step, count - 1);
-        else if (step.status === "completed") omittedCompleted.push(step);
-        else
+        if (count) {
+          counts.set(step.step, count - 1);
+        } else if (step.status === "completed") {
+          omittedCompleted.push(step);
+        } else {
           throw new ProgressCardInputError(
             "Reconcile every unresolved step or explicitly replace the task",
           );
+        }
       }
       record = {
         ...old,
@@ -252,7 +284,9 @@ export function reconcileSessionProgress(
       break;
     }
   }
-  if (record) validateRecord(record);
+  if (record) {
+    validateRecord(record);
+  }
   const changed = generation !== previous?.generation || !isDeepStrictEqual(old ?? null, record);
   const work: ProgressWorkState = {
     generation,
@@ -291,8 +325,9 @@ export function reconcileSessionProgress(
     checklist: next.checklist,
     steps: presentSessionProgress(command.owner.sessionKey, next)?.steps,
   };
-  if (!isDeepStrictEqual(before, after))
+  if (!isDeepStrictEqual(before, after)) {
     next = { ...next, revision: next.revision + 1, updatedAt: now };
+  }
   return next;
 }
 
@@ -303,9 +338,12 @@ export function transferProgressWork(
   next: ProgressOwner,
 ): ProgressAggregate {
   const work = state.work;
-  if (!work?.record) return state;
-  if (!isDeepStrictEqual(work.record.owner, previous))
+  if (!work?.record) {
+    return state;
+  }
+  if (!isDeepStrictEqual(work.record.owner, previous)) {
     throw new ProgressCardInputError("Progress work reset source changed");
+  }
   return {
     ...state,
     work: {
@@ -317,7 +355,9 @@ export function transferProgressWork(
 }
 
 export function retireProgressWork(state: ProgressAggregate, now: number): ProgressAggregate {
-  if (!state.work?.record) return state;
+  if (!state.work?.record) {
+    return state;
+  }
   return {
     ...state,
     ...(state.checklist === "work"

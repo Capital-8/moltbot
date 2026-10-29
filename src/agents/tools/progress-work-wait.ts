@@ -48,14 +48,16 @@ export function captureProgressWorkWait() {
     !assertCurrent ||
     caller.agentId !== binding.owner.agentId ||
     caller.sessionKey !== binding.owner.sessionKey
-  )
+  ) {
     return undefined;
+  }
   const memory = isIncognitoSessionKey(binding.owner.sessionKey)
     ? captureMemoryExactSessionReader(binding.target, assertCurrent)
     : undefined;
   const observed = binding.read();
-  if (observed.kind !== "retained" || observed.state.record?.disposition.kind !== "actionable")
+  if (observed.kind !== "retained" || observed.state.record?.disposition.kind !== "actionable") {
     return undefined;
+  }
   const expected = { generation: observed.state.generation, revision: observed.state.revision };
   const source = {
     runId: instance.runId,
@@ -77,7 +79,9 @@ export function captureProgressWorkWait() {
     };
     try {
       assertCurrent();
-      if (!isCaptured()) return;
+      if (!isCaptured()) {
+        return;
+      }
       if (receipt.kind === "media") {
         if (
           !requester ||
@@ -86,11 +90,14 @@ export function captureProgressWorkWait() {
           requester.sessionId !== binding.owner.sessionId ||
           requester.lifecycleRevision !== binding.owner.lifecycleRevision ||
           !sameSessionTranscriptStorageEnvironment(requester.env, binding.target.env)
-        )
+        ) {
           return;
+        }
         if (isIncognitoSessionKey(binding.owner.sessionKey)) {
           const requesterMemory = captureMemoryExactSessionReader(requester, assertCurrent);
-          if (!memory?.source || !requesterMemory?.source) return;
+          if (!memory?.source || !requesterMemory?.source) {
+            return;
+          }
           memory.assertCurrent();
           requesterMemory.assertCurrent();
           assertMemoryExactReadSource(memory.source, requesterMemory.source);
@@ -109,11 +116,14 @@ export function captureProgressWorkWait() {
               })
             ).path,
           )
-        )
+        ) {
           return;
+        }
       }
       assertCurrent();
-      if (!isCaptured()) return;
+      if (!isCaptured()) {
+        return;
+      }
       const committed = await callAgentToolGatewayRequest<{ work: WorkSnapshot }>({
         method: "progressCard.reconcileWork",
         params: { sessionKey: binding.owner.sessionKey, agentId: binding.owner.agentId },
@@ -135,7 +145,9 @@ export function captureProgressWorkWait() {
         sessionMutationCommitGuard: assertCurrent,
       });
       assertCurrent();
-      if (isCaptured()) binding.saved(committed.work);
+      if (isCaptured()) {
+        binding.saved(committed.work);
+      }
     } catch {
       try {
         assertCurrent();
@@ -144,7 +156,7 @@ export function captureProgressWorkWait() {
       }
       // Acceptance remains owned by the native producer even when CAS or acknowledgement fails.
       // Retain obligations, never invent a durable waiting receipt or retry the accepted effect.
-      if (isCaptured())
+      if (isCaptured()) {
         binding.saved({
           ...observed,
           coverage: {
@@ -152,6 +164,7 @@ export function captureProgressWorkWait() {
             reason: "Native handoff accepted; retained waiting persistence unavailable",
           },
         });
+      }
     }
   };
 }

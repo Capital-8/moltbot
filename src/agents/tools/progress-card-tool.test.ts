@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runWithAgentToolExecutionContext } from "../../../packages/agent-core/src/tool-execution-context.js";
+import { captureSessionTranscriptTargetBinding } from "../../config/sessions/transcript-target-binding.js";
 import type { WorkSnapshot } from "../../session-cards/progress-card-work-intent.js";
 import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
 import { withGatewayToolCallerIdentity } from "./gateway-caller-context.js";
@@ -160,7 +161,10 @@ it("captures the host fence before dispatch and rejects stale or failed callback
   const tool = createProgressCardTool({
     agentSessionKey: owner.sessionKey,
     workOwner: owner,
-    workTarget: { ...owner, storePath: "/private/test.sqlite", env: {} },
+    workTarget: captureSessionTranscriptTargetBinding({
+      ...owner,
+      storePath: "/private/test.sqlite",
+    }),
     readWork: () => current,
     onWorkSaved: callback,
   });
@@ -181,7 +185,7 @@ it("captures the host fence before dispatch and rejects stale or failed callback
       () =>
         runWithAgentToolExecutionContext(
           {
-            assistantMessage: makeAgentAssistantMessage({ turnId: "turn" }),
+            assistantMessage: makeAgentAssistantMessage({ turnId: "turn", content: [] }),
             toolCall: { type: "toolCall", id: "save", name: "progress_card", arguments: args },
           },
           () => tool.execute("save", args),

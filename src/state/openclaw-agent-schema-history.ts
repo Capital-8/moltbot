@@ -6,6 +6,7 @@ import {
   AGENT_JSON_PREDICATE_SCHEMA_VERSION,
   AGENT_MEMORY_REVISION_SCHEMA_VERSION,
   AGENT_OUTBOX_SEQUENCE_SCHEMA_VERSION,
+  AGENT_PROGRESS_WORK_SCHEMA_VERSION,
   AGENT_STORAGE_SCHEMA_VERSION,
   AGENT_WRITE_LAYOUT_SCHEMA_VERSION,
   AGENT_TRAJECTORY_STORAGE_SCHEMA_VERSION,
@@ -305,12 +306,37 @@ function withLegacyAgentWriteLayout(schema: string): string {
     );
 }
 
+export const PROGRESS_CARD_WORK_COLUMNS = [
+  ["display_kind", "TEXT NOT NULL DEFAULT 'independent'"],
+  ["work_json", "TEXT"],
+  ["work_generation", "INTEGER NOT NULL DEFAULT 0"],
+  ["work_revision", "INTEGER NOT NULL DEFAULT 0"],
+  ["work_command_json", "TEXT"],
+] as const;
+
+/** Historical SQLite images retain the pre-work progress-card layout. */
+function withoutAgentProgressWork(schema: string): string {
+  return schema.replace(
+    /CREATE TABLE IF NOT EXISTS session_progress_cards \([\s\S]*?\n\) STRICT;/u,
+    (table) =>
+      PROGRESS_CARD_WORK_COLUMNS.reduce(
+        (historical, [column, declaration]) =>
+          historical.replace("  " + column + " " + declaration + ",\n", ""),
+        table,
+      ),
+  );
+}
+
 /** Compare historical migration targets against only the representation they support. */
 export function getOpenClawAgentMigrationSchema(targetVersion: number): string {
+  const progressSchemaSql =
+    targetVersion < AGENT_PROGRESS_WORK_SCHEMA_VERSION
+      ? withoutAgentProgressWork(OPENCLAW_AGENT_SCHEMA_SQL)
+      : OPENCLAW_AGENT_SCHEMA_SQL;
   const coldArchiveSchemaSql =
     targetVersion < AGENT_COLD_ARCHIVE_CHUNKS_SCHEMA_VERSION
-      ? withoutAgentColdArchiveChunks(OPENCLAW_AGENT_SCHEMA_SQL)
-      : OPENCLAW_AGENT_SCHEMA_SQL;
+      ? withoutAgentColdArchiveChunks(progressSchemaSql)
+      : progressSchemaSql;
   const revisionSchemaSql =
     targetVersion < AGENT_MEMORY_REVISION_SCHEMA_VERSION
       ? withLegacyAgentMemoryRevisionTriggers(coldArchiveSchemaSql)

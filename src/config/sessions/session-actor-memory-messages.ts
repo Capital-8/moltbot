@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { resolveTimestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { sanitizeTranscriptMessageForStorage } from "./session-accessor.sqlite-transcript-store.js";
 import type {
   TranscriptMessageAppendOptions,
   TranscriptMessageAppendResult,
@@ -209,8 +210,8 @@ export function createSessionActorMemoryMessages(
     const approvedMessage = usesCustody
       ? acceptedMessage
       : input.preparedMessage
-        ? input.preparedMessage.message
-        : input.message;
+        ? sanitizeTranscriptMessageForStorage(input.preparedMessage.message)
+        : sanitizeTranscriptMessageForStorage(input.message);
     if (approvedMessage === undefined) {
       return { result: undefined };
     }

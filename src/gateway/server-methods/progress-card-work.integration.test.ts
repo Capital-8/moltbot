@@ -89,7 +89,9 @@ it("commits work only through current host caller custody, never serialized oper
                     agentId: "main",
                     sessionKey: options.foreign ? "agent:main:foreign" : sessionKey,
                     assertCurrent() {
-                      if (options.fail) throw new Error("source revoked");
+                      if (options.fail) {
+                        throw new Error("source revoked");
+                      }
                     },
                     progressWork: {
                       target,
@@ -174,12 +176,12 @@ it("commits work only through current host caller custody, never serialized oper
       const replaced = await invoke(true, { action: "replace", expected: oldFence, id: "replace" });
       expect(replaced.mock.calls[0]?.[0]).toBe(true);
       const replacement = await progressCardStore.get(sessionKey, "main");
-      for (const note of [false, true]) {
+      for (const noteOnly of [false, true]) {
         const delayed = await invoke(true, {
           action: "reconcile",
           expected: oldFence,
-          id: "delayed-" + note,
-          note,
+          id: "delayed-" + noteOnly,
+          note: noteOnly,
         });
         expect(delayed.mock.calls[0]?.[0]).toBe(false);
         expect(await progressCardStore.get(sessionKey, "main")).toEqual(replacement);
@@ -196,7 +198,9 @@ it("commits work only through current host caller custody, never serialized oper
           id: "concurrent-b",
         }),
       ]);
-      expect(concurrent.map((reply) => reply.mock.calls[0]?.[0]).sort()).toEqual([false, true]);
+      expect(concurrent.map((reply) => reply.mock.calls[0]?.[0])).toEqual(
+        expect.arrayContaining([false, true]),
+      );
       await upsertSessionEntryCore(
         { agentId: "main", sessionKey },
         { sessionId: "new-incarnation", updatedAt: 2 },

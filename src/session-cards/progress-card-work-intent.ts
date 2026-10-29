@@ -47,19 +47,24 @@ export type WorkSnapshot =
   | { kind: "unavailable"; reason: string };
 
 export function normalizeProgressWorkIntent(value: unknown): ProgressWorkIntent | undefined {
-  if (value === undefined) return undefined;
-  if (!Check(ProgressWorkIntentSchema, value))
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Check(ProgressWorkIntentSchema, value)) {
     throw new ProgressCardInputError("Invalid explicit work intent");
-  const normalize = (value: string) =>
-    normalizeProgressCardInput({ plan: [{ step: value, status: "pending" }] }).steps![0]!.step;
-  if (value.action === "begin" || value.action === "replace")
+  }
+  const normalize = (step: string) =>
+    normalizeProgressCardInput({ plan: [{ step, status: "pending" }] }).steps![0]!.step;
+  if (value.action === "begin" || value.action === "replace") {
     return { ...value, scope: normalize(value.scope) };
-  if (value.action === "paused-blocked")
+  }
+  if (value.action === "paused-blocked") {
     return {
       ...value,
       reason: normalize(value.reason),
       resumeCondition: normalize(value.resumeCondition),
     };
+  }
   return value;
 }
 
@@ -73,11 +78,18 @@ export function progressWorkCommandForIntent(
     ...custody,
     display: "replace" as const,
   };
-  if (custody.acceptedWait) return { ...custody, kind: "observe-wait", ...custody.acceptedWait };
-  if (!intent && !steps) return undefined;
-  if (!intent && custody.expected === null)
+  if (custody.acceptedWait) {
+    return { ...custody, kind: "observe-wait", ...custody.acceptedWait };
+  }
+  if (!intent && !steps) {
+    return undefined;
+  }
+  if (!intent && custody.expected === null) {
     return { ...base, kind: "begin", scope: steps![0]!.step };
-  if (!intent) return { ...base, kind: "reconcile" };
+  }
+  if (!intent) {
+    return { ...base, kind: "reconcile" };
+  }
   switch (intent.action) {
     case "begin":
     case "replace":
@@ -109,4 +121,5 @@ export function progressWorkCommandForIntent(
           : {}),
       };
   }
+  return undefined;
 }

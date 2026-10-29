@@ -1,8 +1,22 @@
+import {
+  observeInternalNativeInvocation,
+  retainInternalNativeInvocation,
+} from "../../packages/agent-core/src/internal-hooks.js";
+import {
+  getAgentToolExecutionContext,
+  getAgentToolAssistantTurnId,
+} from "../../packages/agent-core/src/tool-execution-context.js";
+import { getAgentRunLifecycleGeneration } from "../infra/agent-run-registry.js";
 import { PluginHostObject } from "../plugins/plugin-instance-owned-values.js";
-import { resolveCoreToolFacts, TOOL_CALL_RAW_TOOL_NAME } from "./tool-catalog.js";
+import { getPluginToolMeta } from "../plugins/tool-metadata.js";
+import { getChannelAgentToolMeta } from "./channel-tool-metadata.js";
+import { isAsyncStartedToolResult } from "./embedded-agent-tool-results.js";
+import { resolveCoreToolFacts } from "./tool-catalog.js";
 import { normalizeToolPolicyName } from "./tool-policy-shared.js";
+import type { AnyAgentTool } from "./tools/common.js";
+import { getProgressCardCommittedSource } from "./tools/progress-card-tool-outcome.js";
 
-type AgentToolReplaySafety = "bounded-read" | "dispatcher";
+type AgentToolReplaySafety = "bounded-read" | "managed-progress";
 
 /** Private source-instance metadata survives only the host's canonical tool copies. */
 class ToolReplaySafety extends PluginHostObject {
@@ -71,27 +85,6 @@ export function isAgentToolReplaySafe(
 }
 
 /**
- * Classify one concrete tool instance for an explicitly restart-safe turn.
- * Unlike blind name-only replay, an owner declaration is sufficient because
- * the host filters the concrete registered instance before execution.
- */
-export function isAgentToolRestartSafe(
-  tool: { name?: string },
-  options?: { declaredReplaySafe?: (tool: { name?: string }) => boolean | undefined },
-): boolean {
-  const declaredReplaySafe = options?.declaredReplaySafe?.(tool);
-  if (declaredReplaySafe !== undefined) {
-    return declaredReplaySafe;
-  }
-  // Tool Search can dispatch only into the catalog built after this filter.
-  // Do not infer safety for other dispatchers or name-only interrupted calls.
-  return (
-    isAgentToolReplaySafe(tool) ||
-    (tool.name === TOOL_CALL_RAW_TOOL_NAME && ToolReplaySafety.get(tool) === "dispatcher")
-  );
-}
-
-/**
  * Name-only tool events are safe only when one concrete registered instance
  * owns the name. Duplicate/shadowed names fail closed.
  */
@@ -121,4 +114,47 @@ export function collectSideEffectToolOwners(
     }
   }
   return owners;
+}
+
+/** Capture concrete source policy at implementation entry, before awaited tool work. */
+export function captureAgentToolInvocation(tool: AnyAgentTool, runId: string | undefined) {
+  const execution = getAgentToolExecutionContext();
+  const turnId = getAgentToolAssistantTurnId();
+  const pluginOwned = getPluginToolMeta(tool) !== undefined;
+  const channelOwned = getChannelAgentToolMeta(tool) !== undefined;
+  const policy = ToolReplaySafety.get(tool);
+  const processGeneration = getAgentRunLifecycleGeneration();
+  const toolName = tool.name;
+  const toolCallId = execution?.toolCall.id;
+  const matched = execution?.toolCall.name === toolName;
+  return (result: object, successful: boolean): void => {
+    const committed = getProgressCardCommittedSource(result);
+    // Raw result objects can be reused or returned from inner invocations.
+    retainInternalNativeInvocation(result, undefined);
+    if (!runId || !turnId || !toolCallId || !matched) {
+      return;
+    }
+    // Repeat-safe plugin declarations do not prove read-only or settled work.
+    // Only the concrete native owner may supply bounded-read/committed-progress facts.
+    const qualification =
+      !successful || pluginOwned || channelOwned || isAsyncStartedToolResult(result)
+        ? "unqualified"
+        : policy === "managed-progress" &&
+            committed?.runId === runId &&
+            committed.turnId === turnId &&
+            committed.toolCallId === toolCallId &&
+            committed.processGeneration === processGeneration
+          ? "managed-progress"
+          : policy === "bounded-read"
+            ? "read"
+            : "unqualified";
+    observeInternalNativeInvocation(result, {
+      runId,
+      turnId,
+      toolCallId,
+      toolName,
+      processGeneration,
+      qualification,
+    });
+  };
 }

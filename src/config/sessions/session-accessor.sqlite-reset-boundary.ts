@@ -16,7 +16,7 @@ import { buildSessionResetBoundaryEvent } from "./session-reset-boundary-event.j
 import { resolveResetBoundaryHeaderCwd } from "./transcript-header.js";
 import type { InternalSessionEntry } from "./types.js";
 
-/** Transcript reset and prior-task retirement share the owning guarded transaction. */
+/** The guarded reset transaction retires or transfers prior work according to lifecycle intent. */
 export function appendSessionResetBoundary(
   database: OpenClawAgentDatabase,
   scope: ResolvedTranscriptScope,

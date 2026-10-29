@@ -4,12 +4,24 @@ import type { ProgressCard } from "../../../packages/gateway-protocol/src/index.
 // The execution wrapper records the raw result before presentation or serialization.
 // Keep semantic card state private: revisions must still acknowledge unchanged refreshes.
 const outcomes = new WeakMap<object, string>();
+const committedSources = new WeakMap<
+  object,
+  import("../../session-cards/progress-card-work.js").WorkSource
+>();
+
+export function getProgressCardCommittedSource(result: object) {
+  return committedSources.get(result);
+}
 
 export function recordProgressCardToolOutcome<T extends object>(
   result: T,
   card: ProgressCard | null,
   work?: import("../../session-cards/progress-card-work-intent.js").WorkSnapshot,
+  source?: import("../../session-cards/progress-card-work.js").WorkSource,
 ): T {
+  if (source) {
+    committedSources.set(result, Object.freeze({ ...source }));
+  }
   outcomes.set(
     result,
     stableStringify({

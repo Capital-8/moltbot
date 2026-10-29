@@ -1,3 +1,4 @@
+import { copyInternalNativeInvocationStorage } from "../../../packages/agent-core/src/internal-hooks.js";
 import type { TranscriptEntryAnchor } from "../../config/sessions/session-accessor.js";
 import type {
   SessionTranscriptContextVersion,
@@ -5,8 +6,8 @@ import type {
   TranscriptWriteSnapshot,
 } from "../../config/sessions/session-accessor.sqlite-contract.js";
 import type { SessionActorAppendCommitted } from "../../config/sessions/session-actor-contract.js";
+import { prepareTranscriptNativeInvocation } from "../../config/sessions/transcript-event-media.js";
 import { normalizeTranscriptJsonValue } from "../../config/sessions/transcript-json.js";
-import { persistCodeModeCheckpoint } from "../code-mode-checkpoint.js";
 import { isIndexedSessionEntry } from "./session-manager-codec.js";
 import type {
   AppendPersistenceOptions,
@@ -80,13 +81,13 @@ export function adoptCommittedMessagePayload(
 }
 
 export function canonicalizeSessionEntry<T extends SessionEntry>(entry: T): T {
-  const sourceMessage = entry.type === "message" ? entry.message : undefined;
   const canonicalEntry = normalizeTranscriptJsonValue(entry, "");
   if (!isIndexedSessionEntry(canonicalEntry) || canonicalEntry.type !== entry.type) {
     throw new Error(`Invalid session transcript entry: ${entry.type}`);
   }
-  if (canonicalEntry.type === "message" && sourceMessage) {
-    canonicalEntry.message = persistCodeModeCheckpoint(canonicalEntry.message, sourceMessage);
+  if (canonicalEntry.type === "message" && entry.type === "message") {
+    copyInternalNativeInvocationStorage(entry.message, canonicalEntry.message, canonicalEntry.id);
+    canonicalEntry.message = prepareTranscriptNativeInvocation(canonicalEntry.message);
   }
   // SAFETY: Manager-built envelopes retain T's checked discriminant; the codec validates their JSON storage shape.
   return shareSessionSystemPrompt(canonicalEntry) as T;

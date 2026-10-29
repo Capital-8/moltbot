@@ -31,7 +31,7 @@ type ProgressCardDatabase = Pick<
 >;
 type StoredProgressCardRow = Selectable<ProgressCardDatabase["session_progress_cards"]>;
 
-// Reads run in the transcript/progress workers; the native reset path only clears rows.
+// Reads stay in transcript/progress workers or the existing lifecycle writer transaction.
 function selectProgressCard(
   db: EngineConnection,
   sessionKey: string,
@@ -104,16 +104,18 @@ function rowToProgressCard(row: StoredProgressCardRow): ProgressCard | null {
     row.display_kind !== undefined &&
     row.display_kind !== "work" &&
     row.display_kind !== "independent"
-  )
+  ) {
     throw new ProgressCardInputError("Invalid progress display selection");
+  }
   const steps =
     row.display_kind === "work"
       ? decodeProgressWorkRecord(row.work_json)?.steps
       : row.steps_json
         ? readStoredSteps(row.steps_json)
         : undefined;
-  if (row.display_kind === "work" && !steps)
+  if (row.display_kind === "work" && !steps) {
     throw new ProgressCardInputError("Progress display has no retained work");
+  }
   if (!row.markdown && !steps?.length) {
     return null;
   }
@@ -197,7 +199,7 @@ export function prepareSessionProgressCardWrite(input: ProgressCardWrite) {
   };
 }
 
-/** The progress-card worker owns writes; native lifecycle reset uses the separate clearer. */
+/** Progress workers own ordinary writes; carry/retire/reset stay in lifecycle writer transactions. */
 export function writePreparedSessionProgressCard(
   db: EngineConnection,
   sessionKey: string,
@@ -212,8 +214,9 @@ export function writePreparedSessionProgressCard(
         input.managedWork.intent,
         input.steps,
       );
-      if (workCommand)
+      if (workCommand) {
         return writeManagedSessionProgress(db, sessionKey, { ...input, workCommand });
+      }
       assertProgressWorkFence(current, input.managedWork.expected);
       // A host note/clear replaces only presentation; return the retained committed work.
       assertWorkOwner(db, sessionKey, input.managedWork.owner);
@@ -223,11 +226,12 @@ export function writePreparedSessionProgressCard(
       });
       return { card: "card" in display ? display.card : null, work: current };
     }
-    if (input.workCommand)
+    if (input.workCommand) {
       return writeManagedSessionProgress(db, sessionKey, {
         ...input,
         workCommand: input.workCommand,
       });
+    }
     const kysely = getNodeSqliteKysely<ProgressCardDatabase>(db);
     const { markdown, steps, stepsJson } = input;
     if (!markdown && !steps) {
@@ -286,25 +290,32 @@ export function readSessionProgressAggregate(
   db: EngineConnection,
   sessionKey: string,
 ): ProgressAggregate | undefined {
-  if (!tableExists(db, "session_progress_cards")) return undefined;
+  if (!tableExists(db, "session_progress_cards")) {
+    return undefined;
+  }
   const row = selectProgressCard(db, sessionKey);
-  if (!row) return undefined;
+  if (!row) {
+    return undefined;
+  }
   if (
     row.display_kind !== undefined &&
     row.display_kind !== "work" &&
     row.display_kind !== "independent"
-  )
+  ) {
     throw new ProgressCardInputError("Invalid progress display selection");
+  }
   if (
     (row.work_generation !== undefined &&
       (!Number.isSafeInteger(row.work_generation) || row.work_generation < 0)) ||
     ((row.work_json || row.work_command_json) && !(row.work_generation > 0))
-  )
+  ) {
     throw new ProgressCardInputError("Invalid retained work fence");
+  }
   let work: ProgressWorkState | undefined;
   if (row.work_generation > 0) {
-    if (!Number.isSafeInteger(row.work_revision) || row.work_revision < 1)
+    if (!Number.isSafeInteger(row.work_revision) || row.work_revision < 1) {
       throw new ProgressCardInputError("Invalid retained work fence");
+    }
     const last: unknown = row.work_command_json ? JSON.parse(row.work_command_json) : undefined;
     let lastCommand: ProgressWorkState["lastCommand"];
     if (last !== undefined) {
@@ -315,8 +326,9 @@ export function readSessionProgressAggregate(
         typeof command.fingerprint !== "string" ||
         command.id.length !== 64 ||
         command.fingerprint.length !== 64
-      )
+      ) {
         throw new ProgressCardInputError("Invalid retained work command");
+      }
       lastCommand = { id: command.id, fingerprint: command.fingerprint };
     }
     work = {
@@ -355,9 +367,10 @@ function assertWorkOwner(db: EngineConnection, sessionKey: string, owner: Progre
     owner.sessionKey !== sessionKey ||
     node?.current_session_id !== owner.sessionId ||
     (entry?.lifecycleRevision ?? null) !== owner.lifecycleRevision ||
-    entry?.archived === true
-  )
+    entry?.archivedAt !== undefined
+  ) {
     throw new ProgressCardInputError("Work owner incarnation is no longer current");
+  }
 }
 
 function writeManagedSessionProgress(
@@ -406,7 +419,9 @@ export function carrySessionProgressWorkForReset(
   next: ProgressOwner,
 ): void {
   const state = readSessionProgressAggregate(db, previous.sessionKey);
-  if (!state?.work?.record) return;
+  if (!state?.work?.record) {
+    return;
+  }
   persistProgressAggregate(db, previous.sessionKey, transferProgressWork(state, previous, next));
 }
 
@@ -415,6 +430,8 @@ export function retireSessionProgressWorkForIncarnation(
   owner: ProgressOwner,
 ): void {
   const state = readSessionProgressAggregate(db, owner.sessionKey);
-  if (!state?.work?.record || isDeepStrictEqual(state.work.record.owner, owner)) return;
+  if (!state?.work?.record || isDeepStrictEqual(state.work.record.owner, owner)) {
+    return;
+  }
   persistProgressAggregate(db, owner.sessionKey, retireProgressWork(state, Date.now()));
 }

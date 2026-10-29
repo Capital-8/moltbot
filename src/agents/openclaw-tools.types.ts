@@ -33,8 +33,6 @@ export type OpenClawSharedToolsOptions = {
   /** Complete model-discoverable catalog, prepared by the current host. */
   installedSkills?: readonly InstalledSkill[];
   skillsSnapshot?: SkillSnapshot;
-  /** Restrict mixed tool owners to reads before the recovery surface is filtered. */
-  forceRestartSafeTools?: boolean;
   /**
    * Overrides the originating-channel sender for blocking questions. An actual
    * harness prompt reservation retains delivery ownership.
@@ -106,10 +104,10 @@ export type OpenClawSharedToolsOptions = {
   disableMessageTool?: boolean;
   swarmCollector?: boolean;
   swarmOutputSchema?: Record<string, unknown>;
-  /** Host-only observation after a canonical progress-card replacement commits. */
   progressWorkTarget?: import("../config/sessions/transcript-target-binding.js").CapturedSessionTranscriptTargetBinding;
   progressWorkOwner?: import("../session-cards/progress-card-work.js").ProgressOwner;
   readProgressCardWork?: () => import("../session-cards/progress-card-work-intent.js").WorkSnapshot;
+  /** Host-only observation after a canonical progress-card replacement commits. */
   onProgressCardWorkSaved?: (
     snapshot: import("../session-cards/progress-card-work-intent.js").WorkSnapshot,
   ) => void;

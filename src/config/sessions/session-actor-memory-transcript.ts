@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { copyInternalNativeInvocationStorage } from "../../../packages/agent-core/src/internal-hooks.js";
 import {
   decodeMetadataAppendEvent,
   sessionMetadataAppendNeedsReload,
@@ -20,7 +21,6 @@ import {
   applySessionGoalOperation,
   prepareSessionTurnGoalMessage,
 } from "./goals-operation-policy.js";
-import { assertAcceptedRecoveryNotice } from "./recovery-notice.js";
 import { resolveSqliteSessionKey } from "./session-accessor.sqlite-scope-helpers.js";
 import type { TranscriptMessageAppendResult } from "./session-accessor.types.js";
 import type { SessionActorAppend, SessionActorAppendCommitted } from "./session-actor-contract.js";
@@ -46,6 +46,10 @@ import {
 import { SessionTranscriptWriterClaimReboundError } from "./session-transcript-writer-claim-error.js";
 import type { SessionTurnCommitted, SessionTurnPlan } from "./session-turn.types.js";
 import { resolveSessionWorkStartError } from "./session-work-start.js";
+import {
+  prepareTranscriptNativeInvocation,
+  stripTranscriptNativeInvocation,
+} from "./transcript-event-media.js";
 import { selectSessionTranscriptTreePathNodes } from "./transcript-tree.js";
 import { mergeSessionEntry } from "./types.js";
 
@@ -143,13 +147,15 @@ export function createSessionActorMemoryTranscript(options: {
       if (input.message.validateTurn && !rebasePrepared(input, event.parentId)) {
         throw new SqliteTranscriptMutationConflictError(input.scope.sessionId);
       }
+      copyInternalNativeInvocationStorage(input.message, event.message, event.id);
+      const preparedMessage = prepareTranscriptNativeInvocation(event.message);
       const appended = appendMessage({
         ...input.options,
         expectedMutationAt: input.message.validateTurn
           ? undefined
           : input.options.expectedMutationAt,
-        message: event.message,
-        messageJson: input.message.messageJson,
+        message: preparedMessage,
+        messageJson: JSON.stringify(preparedMessage),
         eventId: event.id,
         parentId: event.parentId,
         now: Date.parse(event.timestamp),
@@ -262,7 +268,7 @@ export function createSessionActorMemoryTranscript(options: {
         const before = version();
         const appended = appendMessage({
           message,
-          messageJson: append.input.messageJson,
+          messageJson: JSON.stringify(stripTranscriptNativeInvocation(message)),
           cwd: append.input.cwd,
           custody: append.input.pendingInput,
           fresh: append.input.freshMessageCheck
@@ -398,27 +404,6 @@ export function createSessionActorMemoryTranscript(options: {
               !state.hot.transcript.anchors.some((anchor) => anchor.entryId === predicate.entryId)
             ) {
               throw new Error(predicate.errorMessage);
-            }
-          } else if (predicate?.kind === "recovery-notice") {
-            const anchor = state.hot.transcript.anchors.find(
-              (candidate) => candidate.entryId === predicate.anchor.entryId,
-            );
-            const local = anchor && state.events.find((event) => event.rawSeq === anchor.rawSeq);
-            assertAcceptedRecoveryNotice({
-              sessionKey: state.hot.target.sessionKey,
-              entry,
-              predicate,
-              anchor,
-              localMessage: isRecord(local?.event) ? local.event.message : undefined,
-              message: append.message,
-            });
-            if (
-              predicate.priorEntryId &&
-              !state.hot.transcript.anchors.some(
-                (candidate) => candidate.entryId === predicate.priorEntryId,
-              )
-            ) {
-              throw new Error("background result no longer owns the active transcript");
             }
           } else if (predicate) {
             const latest = selectSessionTranscriptTreePathNodes(tree(), tree().leafId).findLast(

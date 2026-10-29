@@ -312,7 +312,6 @@ describe.skipIf(!connection)("PostgreSQL agent-owned memory search admission", (
         });
         expect(stages).toEqual(["transaction", "commit"]);
         expect(tryLock()).toEqual({ locked: 1 });
-        // A second publication must consume the committed definition without reinstalling DDL.
         expect(
           captureStatements(() =>
             admitAgentEngineSearchExtensions(db, paths, () => {
@@ -469,7 +468,7 @@ describe.skipIf(!connection)("PostgreSQL vector decoder migration", () => {
         expect(db.prepare("SELECT schema_version FROM schema_meta").get()).toEqual({
           schema_version: agentEngineSchema.version,
         });
-        // Exercise both warm and cold function plans: EXPLAIN also counts catalog reads.
+        // Exercise both warm and cold function plans against the same TOAST-read bound.
         for (const cold of [false, true]) {
           if (cold) {
             db.close();

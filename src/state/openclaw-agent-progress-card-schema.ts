@@ -1,22 +1,16 @@
 import { isPostgresSqlConnection, type EngineConnection } from "../infra/sql-connection.js";
 import {
   AGENT_PROGRESS_CARD_SCHEMA_SQL,
+  PROGRESS_CARD_WORK_COLUMNS,
   SESSION_PROGRESS_CARDS_TABLE,
 } from "./openclaw-agent-schema-history.js";
 import { tableExists, readTableColumns } from "./openclaw-state-db-schema-helpers.js";
 
 export {
   AGENT_PROGRESS_CARD_SCHEMA_SQL,
+  PROGRESS_CARD_WORK_COLUMNS,
   SESSION_PROGRESS_CARDS_TABLE,
 } from "./openclaw-agent-schema-history.js";
-
-export const PROGRESS_CARD_WORK_COLUMNS = [
-  ["display_kind", "TEXT NOT NULL DEFAULT 'independent'"],
-  ["work_json", "TEXT"],
-  ["work_generation", "INTEGER NOT NULL DEFAULT 0"],
-  ["work_revision", "INTEGER NOT NULL DEFAULT 0"],
-  ["work_command_json", "TEXT"],
-] as const;
 
 const postgresProgressTable = /CREATE TABLE "session_progress_cards" \([\s\S]*?\n\);/u;
 

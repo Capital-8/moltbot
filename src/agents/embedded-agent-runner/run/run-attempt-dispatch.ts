@@ -361,10 +361,10 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
       const retained = captureProgressWorkReader({
         target: preparedSessionTarget.target,
         operation: params.replyOperation,
-        assertCurrent: preparedSessionTarget.assertOuterCurrent,
+        assertCurrent: () => preparedSessionTarget.assertOuterCurrent(),
         signal: params.abortSignal,
       });
-      completionCheck.refresh = retained.read;
+      completionCheck.refresh = () => retained.read();
       completionCheck.work = await retained.read();
       preparedSessionTarget.assertCurrent();
     }
@@ -637,8 +637,6 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
       disableMessageTool: params.disableMessageTool,
       swarmCollector: params.swarmCollector,
       swarmOutputSchema: params.swarmOutputSchema,
-      forceRestartSafeTools: params.forceRestartSafeTools,
-      forceCodeModeTools: params.forceCodeModeTools,
       codeModeOverride: params.codeModeOverride,
       disableToolSearch: params.disableToolSearch,
       compactionForbidden: params.disableCompactionRecovery,

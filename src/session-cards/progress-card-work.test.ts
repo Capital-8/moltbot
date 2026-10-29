@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.js";
 import { assertOpenClawAgentSchemaContains } from "../state/openclaw-agent-db-schema-helpers.js";
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "../state/openclaw-agent-schema.js";
-import { readSessionProgressCard, writeSessionProgressCard } from "./progress-card-store.js";
 
 const key = "agent:main:retained-work";
 const owner = {
@@ -55,7 +54,10 @@ it("keeps a single canonical plan while public replacement removes displayed ste
 import { createMemorySessionActorOwner } from "../config/sessions/session-actor-memory.js";
 import { readSessionActorStorageResult } from "../config/sessions/session-actor-storage-result.js";
 import {
+  readSessionProgressCard,
+  writeSessionProgressCard,
   readSessionProgressAggregate,
+  readSessionProgressWork,
   clearSessionProgressCardForReset,
 } from "./progress-card-store.js";
 import type { ProgressCardWrite } from "./progress-card-values.js";
@@ -125,7 +127,7 @@ async function fixture(
       },
     });
   } finally {
-    await memory.close();
+    memory.close();
   }
 }
 const initial = (): ProgressCardWrite => ({
@@ -156,7 +158,9 @@ for (const mode of ["sql", "memory"] as const) {
     mode + " rejects absent-work retirement without poisoning later begin (legacy=%s)",
     (legacy) =>
       fixture(mode, async (api) => {
-        if (legacy) await api.write({ markdown: "Legacy display only", steps });
+        if (legacy) {
+          await api.write({ markdown: "Legacy display only", steps });
+        }
         const card = await api.card();
         await expect(
           api.write({
@@ -364,7 +368,9 @@ it.each([false, true])(
     db.exec(
       "DROP TABLE session_progress_cards; CREATE TABLE session_progress_cards(session_key TEXT NOT NULL PRIMARY KEY, markdown TEXT, steps_json TEXT, revision INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY (session_key) REFERENCES session_nodes(session_key) ON DELETE CASCADE) STRICT;",
     );
-    if (partial) db.exec("ALTER TABLE session_progress_cards ADD COLUMN work_json TEXT;");
+    if (partial) {
+      db.exec("ALTER TABLE session_progress_cards ADD COLUMN work_json TEXT;");
+    }
     db.prepare(
       "INSERT INTO session_nodes(session_key,current_session_id,entry_json,updated_at) VALUES (?,?,?,1)",
     ).run(key, owner.sessionId, JSON.stringify({ sessionId: owner.sessionId }));
@@ -466,7 +472,6 @@ it("does not turn an invalid retained fence into absent work", () => {
   expect(() => readSessionProgressAggregate(db, key)).toThrow("Invalid retained work fence");
 });
 
-// Only explicit admitted reconciliation changes the observation basis.
 it.each(["sql", "memory"] as const)(
   "%s advances the source only on explicit reconciliation",
   (mode) =>
@@ -491,4 +496,67 @@ it.each(["sql", "memory"] as const)(
       await api.write({ workCommand: command });
       expect((await api.work())?.revision).toBe(2);
     }),
+);
+
+it.each([0, 1_700_000_000_000])(
+  "SQL denies archivedAt=%s retained-work access without changing saved state",
+  (archivedAt) => {
+    using db = new DatabaseSync(":memory:");
+    db.exec(OPENCLAW_AGENT_SCHEMA_SQL);
+    const entry = { sessionId: owner.sessionId, updatedAt: 1 };
+    db.prepare(
+      "INSERT INTO session_nodes(session_key,current_session_id,entry_json,updated_at) VALUES (?,?,?,1)",
+    ).run(key, owner.sessionId, JSON.stringify(entry));
+    writeSessionProgressCard(db, key, initial());
+    expect(readSessionProgressWork(db, owner)).toMatchObject({
+      generation: 1,
+      revision: 1,
+      record: { steps },
+    });
+    const saved = db.prepare("SELECT * FROM session_progress_cards WHERE session_key=?").get(key);
+    const display = readSessionProgressCard(db, key);
+    db.prepare("UPDATE session_nodes SET entry_json=? WHERE session_key=?").run(
+      JSON.stringify({ ...entry, archivedAt }),
+      key,
+    );
+    const resumedSteps = [steps[0]!, { ...steps[1]!, status: "in_progress" as const }];
+    const writes: ProgressCardWrite[] = [
+      {
+        steps: resumedSteps,
+        workCommand: reconcile(1, "archive-reconcile", { display: "replace" }),
+      },
+      {
+        markdown: "Uncommitted managed note",
+        managedWork: { owner, source, expected: { generation: 1, revision: 1 } },
+      },
+      { managedWork: { owner, source, expected: { generation: 1, revision: 1 } } },
+    ];
+    const denied = [
+      () => readSessionProgressWork(db, owner),
+      ...writes.map((input) => () => writeSessionProgressCard(db, key, input)),
+    ];
+    for (const operation of denied) {
+      expect(operation).toThrow("Work owner incarnation is no longer current");
+      expect(
+        db.prepare("SELECT * FROM session_progress_cards WHERE session_key=?").get(key),
+      ).toEqual(saved);
+      expect(readSessionProgressCard(db, key)).toEqual(display);
+    }
+    db.prepare("UPDATE session_nodes SET entry_json=? WHERE session_key=?").run(
+      JSON.stringify(entry),
+      key,
+    );
+    for (const input of writes.slice(1)) {
+      writeSessionProgressCard(db, key, input);
+      expect(readSessionProgressWork(db, owner)).toMatchObject({ revision: 1, record: { steps } });
+    }
+    expect(readSessionProgressCard(db, key)).toBeNull();
+    writeSessionProgressCard(db, key, writes[0]!);
+    expect(readSessionProgressWork(db, owner)).toMatchObject({
+      generation: 1,
+      revision: 2,
+      record: { steps: resumedSteps },
+    });
+    expect(readSessionProgressCard(db, key)).toMatchObject({ revision: 4, steps: resumedSteps });
+  },
 );

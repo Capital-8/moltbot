@@ -286,8 +286,9 @@ function prepareStream(
               activeSession.pendingMessageCount > 0 ||
               activeSession.agent.hasQueuedMessages() ||
               !hasCurrentRegistration()
-            )
+            ) {
               return;
+            }
             // This is a same-prompt follow-up, not a replay or draft rewind.
             // Retain every completed effect and consume the check across retries.
             completionCheck.checked = true;

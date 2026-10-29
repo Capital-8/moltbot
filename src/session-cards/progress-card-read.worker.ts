@@ -15,7 +15,9 @@ export function readProgressInWorker(
       (database) => readSessionProgressWork(database.db, request.owner),
       options,
     );
-    if (!result.found) throw new Error("Retained work physical owner is unavailable");
+    if (!result.found) {
+      throw new Error("Retained work physical owner is unavailable");
+    }
     return { kind: "session-progress-work" as const, work: result.value };
   }
   const result = withOpenClawAgentDatabaseReadOnly(

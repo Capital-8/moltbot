@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
+import { buildAnthropicRequest } from "../../../packages/ai/src/transports/anthropic-messages.js";
 import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
 import {
   resetSessionEntryLifecycle,
@@ -45,13 +46,30 @@ import { resetSubagentRegistryForTests } from "../subagents/registry/subagent-re
 import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
 import { createQueuedAssistantStream } from "../test-helpers/assistant-event-stream.test-support.js";
 import { runEmbeddedAgent } from "./run.js";
+import {
+  expectNativeProvenanceRun,
+  installNativeProvenanceHooks,
+} from "./run.progress-retention-provenance.test-support.js";
 import { captureProgressWorkReader } from "./run/progress-work.js";
 import * as progressWork from "./run/progress-work.js";
 import { clearEmbeddedSessionPromptStates } from "./session-prompt-state.js";
-
-// External provider I/O is scripted; admission, tool assembly, Gateway dispatch,
-// SQL persistence and finalization are production code, including the second run.
+// Script provider I/O and explicit hostile-hook/storage-failure/lifecycle injections;
+// native admission, persistence and finalization remain the behavior under test.
 it.each([
+  "provenance-sql",
+  "provenance-plugin",
+  "provenance-plugin-repeatable-mutation",
+  "provenance-plugin-async",
+  "provenance-memory",
+  "provenance-rename",
+  "provenance-native-failure",
+  "provenance-extension-rename",
+  "provenance-extension-id",
+  "provenance-extension-error",
+  "provenance-extension-role",
+  "provenance-generation",
+  "plugin-search",
+  "plugin-search-memory",
   "sql",
   "retry",
   "memory",
@@ -71,15 +89,22 @@ it.each([
   await withOpenClawTestState(
     { label: "progress-retention", scenario: "minimal" },
     async (state) => {
+      const provenance = mode.startsWith("provenance-");
+      const pluginSearch = mode.startsWith("plugin-search") || mode.startsWith("provenance-plugin");
+      let pluginCalls = 0;
       const nativeMedia = mode.startsWith("media");
-      const memoryMode = mode === "memory" || mode === "media-memory";
+      const memoryMode =
+        mode === "memory" ||
+        mode === "media-memory" ||
+        mode === "provenance-memory" ||
+        mode === "plugin-search-memory";
       const resave = mode.endsWith("resave");
       const persistenceFailure = mode.startsWith("media-failure");
       const nativeChild = mode.startsWith("child");
       const settleChildWork = nativeChild ? observeRootWork() : undefined;
       const allowedTools = [
         "progress_card",
-        "read",
+        pluginSearch ? "search" : "read",
         "image_generate",
         ...(nativeChild ? ["sessions_spawn", "sessions_yield", "agents_wait"] : []),
       ];
@@ -106,7 +131,20 @@ it.each([
           channels: [],
           channelConfigs: {},
           providerAuthChoices: [],
-          contracts: { imageGenerationProviders: ["scripted-image"] },
+          contracts: {
+            imageGenerationProviders: ["scripted-image"],
+            ...(pluginSearch ? { tools: ["search"] } : {}),
+          },
+          ...(pluginSearch
+            ? {
+                toolMetadata: {
+                  search: {
+                    replaySafe: !mode.startsWith("plugin-search") && mode !== "provenance-plugin",
+                    sideEffecting: true,
+                  },
+                },
+              }
+            : {}),
         },
       });
       let mediaCalls = 0;
@@ -124,7 +162,24 @@ it.each([
       await fs.writeFile(readPath, "Verification remains pending.");
       const firstContexts: string[] = [];
       const toolResults: Array<Parameters<StreamFn>[1]["messages"][number]> = [];
-      const stream: StreamFn = (model, context) => {
+      const stream: StreamFn = async (model, context) => {
+        if (provenance) {
+          if (model.api !== "anthropic-messages") {
+            throw new Error("Unexpected fixture provider");
+          }
+          const wire = await buildAnthropicRequest(
+            { ...model, api: "anthropic-messages" },
+            context,
+            undefined,
+            "provider",
+            false,
+            false,
+          );
+          const serialized = JSON.stringify(wire.params.messages);
+          expect(serialized).not.toContain("nativeInvocation");
+          expect(serialized).not.toContain("processGeneration");
+          expect(serialized).not.toContain("sourceEntryId");
+        }
         if (nativeChild && context.systemPrompt?.includes("# Subagent Context")) {
           childCalls++;
           const events = createAssistantMessageEventStream();
@@ -153,19 +208,24 @@ it.each([
             events.push({ type: "done", reason: paused ? "toolUse" : "stop", message });
             events.end();
           };
-          if (paused) queueMicrotask(finish);
-          else finishChild = finish;
+          if (paused) {
+            queueMicrotask(finish);
+          } else {
+            finishChild = finish;
+          }
           return events;
         }
-        const index = requests[turn]++;
-        if (index === 0) firstContexts[turn] = JSON.stringify(context.messages);
+        const index = (requests[turn] = (requests[turn] ?? 0) + 1) - 1;
+        if (index === 0) {
+          firstContexts[turn] = JSON.stringify(context.messages);
+        }
         toolResults.push(...context.messages.filter((m) => m.role === "toolResult"));
         const args =
           turn === 0 && index < 3
             ? index === 0
               ? { plan }
               : index === 1
-                ? { path: readPath }
+                ? { path: mode === "provenance-native-failure" ? readPath + ".missing" : readPath }
                 : { markdown: "Published; CI and merge remain authorized." }
             : mode === "child-collector" && turn === 2 && index === 0
               ? { ids: [childRunId], awaitResults: true }
@@ -222,7 +282,9 @@ it.each([
                         : nativeMedia && turn === 1 && index === 0
                           ? "image_generate"
                           : turn === 0 && index === 1
-                            ? "read"
+                            ? pluginSearch
+                              ? "search"
+                              : "read"
                             : "progress_card",
                   arguments: args,
                 },
@@ -238,7 +300,20 @@ it.each([
       const bridgeKey = "__retention_provider_" + path.basename(state.root);
       Object.defineProperty(globalThis, bridgeKey, {
         configurable: true,
-        value: { stream, generateImage },
+        value: {
+          stream,
+          generateImage,
+          search: async () => {
+            pluginCalls++;
+            return {
+              content: [{ type: "text", text: "Native plugin effect finished" }],
+              details: {
+                finished: true,
+                ...(mode === "provenance-plugin-async" ? { async: true, status: "started" } : {}),
+              },
+            };
+          },
+        },
       });
       await fs.writeFile(
         fixture.runtimeSource,
@@ -248,8 +323,15 @@ it.each([
           JSON.stringify(bridgeKey) +
           "].stream }); api.registerImageGenerationProvider({ id: 'scripted-image', defaultModel: 'image', models: ['image'], capabilities: { generate: { maxCount: 1 }, edit: { enabled: false } }, isConfiguredAsync: async () => true, generateImage: globalThis[" +
           JSON.stringify(bridgeKey) +
-          "].generateImage }); } };",
+          "].generateImage }); " +
+          (pluginSearch
+            ? "api.registerTool({ name: 'search', description: 'Synthetic side-effecting plugin search', parameters: { type: 'object', properties: { path: { type: 'string' } } }, execute: globalThis[" +
+              JSON.stringify(bridgeKey) +
+              "].search });"
+            : "") +
+          " } };",
       );
+      const provenanceHooks = provenance ? installNativeProvenanceHooks(mode) : undefined;
       const network = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
         throw new Error("Unexpected network I/O");
       });
@@ -337,7 +419,7 @@ it.each([
                 isDispatchAvailable: () => true,
               });
               gateway.createAgentTurnFacade = nativeRuntime.createAgentTurnFacade;
-              gateway.recoveryRuntime = nativeRuntime.recovery;
+              gateway.lifecycleRuntime = nativeRuntime.lifecycle;
               gateway.getGatewayMethodRegistry = () => methods;
             }
             let waitingWrites = 0;
@@ -361,7 +443,9 @@ it.each([
                       }),
                     });
                   }
-                  if (persistenceFailure) throw new Error("Waiting persistence unavailable");
+                  if (persistenceFailure) {
+                    throw new Error("Waiting persistence unavailable");
+                  }
                   if (mode === "media-replacement") {
                     await put(
                       key,
@@ -379,7 +463,9 @@ it.each([
                     );
                   }
                   const committed = await put(key, input, agent);
-                  if (mode === "media-ack") throw new Error("Waiting commit acknowledgement lost");
+                  if (mode === "media-ack") {
+                    throw new Error("Waiting commit acknowledgement lost");
+                  }
                   return committed;
                 }
                 return put(key, input, agent);
@@ -388,7 +474,15 @@ it.each([
               for (
                 turn = 0;
                 turn <
-                (mode === "retry" ? 2 : mode === "child-collector" ? 3 : nativeChild ? 2 : 4);
+                (provenance
+                  ? 1
+                  : pluginSearch || mode === "retry"
+                    ? 2
+                    : mode === "child-collector"
+                      ? 3
+                      : nativeChild
+                        ? 2
+                        : 4);
                 turn++
               ) {
                 if (mode === "child-collector" && turn === 2) {
@@ -473,10 +567,13 @@ it.each([
                       (r) => r.role === "toolResult" && r.toolName === "agents_wait",
                     );
                     expect(collected).toMatchObject({ isError: false });
-                    if (!collected || collected.role !== "toolResult")
+                    if (!collected || collected.role !== "toolResult") {
                       throw new Error("Missing native collection");
+                    }
                     const payload = collected.content.find((part) => part.type === "text");
-                    if (payload?.type !== "text") throw new Error("Missing collection result");
+                    if (payload?.type !== "text") {
+                      throw new Error("Missing collection result");
+                    }
                     expect(JSON.parse(payload.text)).toMatchObject({
                       completed: [
                         { runId: childRunId, status: "done", result: "Private child finished" },
@@ -547,15 +644,17 @@ it.each([
                         },
                       },
                     });
-                    if (persistenceFailure || mode === "media-replacement")
+                    if (persistenceFailure || mode === "media-replacement") {
                       expect(snapshot).toMatchObject({ coverage: { kind: "unavailable" } });
-                    if (mode === "media-replacement")
+                    }
+                    if (mode === "media-replacement") {
                       expect(snapshot).toMatchObject({
                         state: {
                           generation: 2,
                           record: { scope: "Replacement before waiting commit" },
                         },
                       });
+                    }
                     expect(waitingWrites).toBe(1);
                     expect(mediaCalls).toBe(1);
                   }
@@ -569,20 +668,22 @@ it.each([
                     await vi.waitFor(
                       () => {
                         const current = subagentRuns.get(child.runId);
-                        if (current?.execution.status === "terminal" && childCalls === 0)
+                        if (current?.execution.status === "terminal" && childCalls === 0) {
                           throw new Error(
                             "Private child ended before provider entry: " + JSON.stringify(current),
                           );
+                        }
                         expect(childCalls).toBe(1);
                       },
                       { timeout: 10000 },
                     );
-                    if (mode === "child-paused")
+                    if (mode === "child-paused") {
                       await vi.waitFor(
                         () =>
                           expect(subagentRuns.get(child.runId)?.pauseReason).toBe("sessions_yield"),
                         { timeout: 10000 },
                       );
+                    }
                     const work = await captureProgressWorkReader({
                       target: captureSessionTranscriptTargetBinding(target),
                       assertCurrent() {},
@@ -619,7 +720,7 @@ it.each([
                       },
                       coverage: { kind: "unavailable" },
                     });
-                    if (mode !== "child-fire")
+                    if (mode !== "child-fire") {
                       expect(work).toMatchObject({
                         state: {
                           record: {
@@ -633,6 +734,7 @@ it.each([
                           },
                         },
                       });
+                    }
                     expect(child.collect === true).toBe(mode === "child-collector");
                     console.log(
                       "RETENTION_NATIVE_CHILD",
@@ -645,6 +747,62 @@ it.each([
                         work,
                       }),
                     );
+                  }
+                  if (provenance) {
+                    await expectNativeProvenanceRun({
+                      mode,
+                      runId,
+                      target,
+                      workspace: state.workspaceDir,
+                      hooks: provenanceHooks!,
+                      pluginOwned: pluginSearch,
+                    });
+                    expect(pluginCalls).toBe(pluginSearch ? 1 : 0);
+                    expect(network).not.toHaveBeenCalled();
+                    return;
+                  }
+                  if (pluginSearch) {
+                    expect(pluginCalls).toBe(1);
+                    expect(toolResults).toContainEqual(
+                      expect.objectContaining({
+                        role: "toolResult",
+                        toolName: "search",
+                        isError: false,
+                      }),
+                    );
+                    const work = await captureProgressWorkReader({
+                      target: captureSessionTranscriptTargetBinding(target),
+                      assertCurrent() {},
+                    }).read();
+                    const hydration = transcriptHydration.prepareSessionTranscriptHydration(
+                      captureSessionTranscriptTargetBinding(target),
+                      { maxBytes: 262_144, maxEvents: 256 },
+                    );
+                    const history = await hydration.read();
+                    hydration.assertCurrent();
+                    expect(history.kind).toBe("bounded");
+                    expect(JSON.stringify(history)).not.toContain("nested-tool");
+                    console.log(
+                      "RETENTION_DIRECT_PLUGIN",
+                      JSON.stringify({ turn, pluginCalls, requests: requests[turn], work }),
+                    );
+                    expect
+                      .soft(work)
+                      .toMatchObject({ kind: "retained", coverage: { kind: "unavailable" } });
+                    expect.soft(requests[turn]).toBe(turn === 0 ? 4 : 1);
+                    expect(work).toMatchObject({
+                      state: { record: { steps: plan, disposition: { kind: "actionable" } } },
+                    });
+                    expect(
+                      result.payloads?.some((payload) =>
+                        payload.text?.includes("Published; verification and landing remain."),
+                      ),
+                    ).toBe(true);
+                    if (turn === 1) {
+                      expect(network).not.toHaveBeenCalled();
+                      return;
+                    }
+                    continue;
                   }
                   const card = await progressCardStore.get(sessionKey, "main");
                   expect(card?.markdown).toBe("Published; CI and merge remain authorized.");
@@ -678,7 +836,9 @@ it.each([
                   admission.close();
                 }
               }
-              if (nativeChild || mode === "retry") return;
+              if (nativeChild || mode === "retry") {
+                return;
+              }
               expect(firstContexts[1]).toContain("Retained task context");
               expect(firstContexts[1]).toContain("Verify CI and merge");
               expect(firstContexts[1]).toContain("bounded-no-handoff");
@@ -695,8 +855,9 @@ it.each([
               });
               const before = await captured.read();
               expect(before.kind).toBe("retained");
-              if (before.kind !== "retained" || !before.state.record)
+              if (before.kind !== "retained" || !before.state.record) {
                 throw new Error("Missing task");
+              }
               const previous = before.state;
               for (const transition of ["replace", "reset"] as const) {
                 const prepare = transcriptHydration.prepareSessionTranscriptHydration;
@@ -782,12 +943,14 @@ it.each([
             } finally {
               waitingFault.mockRestore();
               if (nativeChild) {
-                for (const child of subagentRuns.values())
-                  if (child.requesterSessionKey === sessionKey)
+                for (const child of subagentRuns.values()) {
+                  if (child.requesterSessionKey === sessionKey) {
                     await markSubagentRunTerminated({
                       runId: child.runId,
                       reason: "private fixture cleanup",
                     });
+                  }
+                }
                 finishChild?.();
                 execution.beginClose();
                 await vi.waitFor(() => expect(execution.hasPendingWork).toBe(false), {
@@ -808,8 +971,11 @@ it.each([
         );
       } finally {
         // Failure cleanup revokes this private provider before releasing it; no completion wake escapes the fixture.
-        if (finishMedia && turn < 2) rotateAgentRunRegistryLifecycleGeneration();
+        if (finishMedia && turn < 2) {
+          rotateAgentRunRegistryLifecycleGeneration();
+        }
         finishMedia?.();
+        provenanceHooks?.restore();
         network.mockRestore();
         clearEmbeddedSessionPromptStates([sessionId]);
         Reflect.deleteProperty(globalThis, bridgeKey);

@@ -8,10 +8,7 @@ import {
   presentSessionProgress,
   reconcileSessionProgress,
 } from "./progress-card-work.js";
-import type {
-  SessionActorMemoryProgressCard,
-  SessionActorProgressCardCommand,
-} from "./session-actor-progress-card-contract.js";
+import type { SessionActorProgressCardCommand } from "./session-actor-progress-card-contract.js";
 
 export function readSessionActorProgressCard(
   context: SessionActorMemoryStorageContext,
@@ -66,9 +63,10 @@ export function executeSessionActorProgressCardCommand(
       owner.sessionKey !== sessionKey ||
       owner.sessionId !== entry?.sessionId ||
       owner.lifecycleRevision !== (entry?.lifecycleRevision ?? null) ||
-      entry?.archived === true
-    )
+      entry?.archivedAt !== undefined
+    ) {
       throw new ProgressCardInputError("Work owner incarnation is no longer current");
+    }
   }
   if (workCommand) {
     state.progressCard = reconcileSessionProgress(
@@ -81,7 +79,9 @@ export function executeSessionActorProgressCardCommand(
       work: state.progressCard.work,
     };
   }
-  if (managed) assertProgressWorkFence(state.progressCard?.work, managed.expected);
+  if (managed) {
+    assertProgressWorkFence(state.progressCard?.work, managed.expected);
+  }
   const input = normalizeProgressCardWrite(command.input);
   const current = state.progressCard;
   if (!input.markdown && !input.steps) {

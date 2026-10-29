@@ -89,7 +89,9 @@ export const progressCardHandlers: GatewayRequestHandlers = {
       return;
     }
     const session = resolveProgressCardSession(params, context, respond);
-    if (!session) return;
+    if (!session) {
+      return;
+    }
     if (
       caller.agentId !== session.agentId ||
       caller.sessionKey !== session.sessionKey ||
@@ -120,13 +122,15 @@ export const progressCardHandlers: GatewayRequestHandlers = {
       // configuration routes an identical session incarnation to another store.
       const selected = captureGatewaySessionStoreScope(session.sessionKey, session.agentId);
       const env = captureSessionTranscriptStorageEnvironment(process.env);
-      if (!sameSessionTranscriptStorageEnvironment(custody.target.env, env))
+      if (!sameSessionTranscriptStorageEnvironment(custody.target.env, env)) {
         throw new Error("Retained work storage environment changed");
+      }
       if (isIncognitoSessionKey(session.sessionKey)) {
         const original = captureMemoryExactSessionReader(custody.target, assertCurrent);
         const current = captureMemoryExactSessionReader({ ...selected, env }, assertCurrent);
-        if (!original?.source || !current?.source)
+        if (!original?.source || !current?.source) {
           throw new Error("Retained memory owner unavailable");
+        }
         original.assertCurrent();
         current.assertCurrent();
         assertMemoryExactReadSource(original.source, current.source);
@@ -141,8 +145,9 @@ export const progressCardHandlers: GatewayRequestHandlers = {
           { ...selected, env },
           invocation.signal,
         );
-        if (!sameSessionTranscriptStorePath(original.path, current.path))
+        if (!sameSessionTranscriptStorePath(original.path, current.path)) {
           throw new Error("Retained work physical requester changed");
+        }
       }
       assertCurrent();
       const { target: _target, ...managedWork } = custody;
@@ -166,7 +171,9 @@ export const progressCardHandlers: GatewayRequestHandlers = {
         undefined,
       );
     } catch (error) {
-      if (error instanceof SessionMutationAuthorizationChangedError) throw error;
+      if (error instanceof SessionMutationAuthorizationChangedError) {
+        throw error;
+      }
       respond(
         false,
         undefined,

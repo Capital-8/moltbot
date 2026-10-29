@@ -6,8 +6,8 @@ import {
   patchSessionEntryCore,
 } from "../../../config/sessions/session-accessor.js";
 import { readSessionEntryInWorker } from "../../../config/sessions/session-entry-read-runtime.js";
-import { composeSessionSourceAssertion } from "../../../config/sessions/session-source-authority.js";
 import {
+  composeSessionSourceAssertion,
   sessionEntryCommitGuardOptions,
   type SessionSourceAssertion,
 } from "../../../config/sessions/session-source-authority.js";
@@ -221,20 +221,23 @@ export function captureAttemptSessionTarget(input: {
   sessionId: string;
 }) {
   const { target, assertActiveRun } = input;
-  if (!target?.agentId || !target.sessionId || !target.sessionKey || !target.storePath)
+  if (!target?.agentId || !target.sessionId || !target.sessionKey || !target.storePath) {
     return undefined;
+  }
   const assertTargetCurrent = () => {
     if (
       input.promptState.sessionId !== input.sessionId ||
       (["agentId", "sessionId", "sessionKey", "storePath", "threadId"] as const).some(
         (field) => input.promptState.sessionTarget?.[field] !== input.selectedPromptTarget?.[field],
       )
-    )
+    ) {
       throw new Error("Session target changed during the outer run");
+    }
   };
   const assertAttemptCurrent = () => {
-    if (!input.isAttemptCurrent())
+    if (!input.isAttemptCurrent()) {
       throw new Error("Session target preparation outlived its attempt");
+    }
     assertTargetCurrent();
   };
   return {
@@ -253,8 +256,10 @@ export function captureAttemptSessionTarget(input: {
       assertAttemptCurrent();
       try {
         assertSource();
-      } catch {
-        throw new Error("Session target preparation outlived its attempt");
+      } catch (cause) {
+        throw new Error(`Session target preparation outlived its attempt: ${String(cause)}`, {
+          cause,
+        });
       }
       // Source callbacks can retire this attempt or replace its selected target.
       assertAttemptCurrent();
