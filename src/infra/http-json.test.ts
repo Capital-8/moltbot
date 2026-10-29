@@ -74,7 +74,7 @@ it.each<Writer>(["plain", "private", "framed", "bare", "committed"])(
     expect(res.headersSent).toBe(writer === "committed");
     expect(res.statusCode).toBe(writer === "framed" ? 200 : 202);
     expect(res.getHeader("Content-Type")).toBe(
-      writer === "framed" ? undefined : contentType(writer),
+      writer === "framed" || writer === "committed" ? undefined : contentType(writer),
     );
     expect(res.getHeader("Cache-Control")).toBe(writer === "private" ? "no-store" : undefined);
     res.destroy();
