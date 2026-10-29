@@ -1783,12 +1783,11 @@ const config = {
     // The full-tree audit still checks their actual test consumers.
     "src/agents/embedded-agent-runner/delivery-evidence.ts": ["exports"],
     "src/agents/embedded-agent-runner/message-visibility.ts": ["exports"],
-    // Transcript and queue tests verify exact input provenance and durable delivery custody.
-    "src/config/sessions/session-accessor.sqlite-active-events.ts": ["exports"],
+    // Queue tests verify durable delivery custody at their storage owners.
     "src/infra/outbound/delivery-queue-storage.ts": ["exports"],
     "src/infra/session-delivery-queue-storage.ts": ["exports"],
-    // Skill-diet tests exercise selection and rewrite safety independently of the scheduler.
-    "src/skills/workshop/skill-diet.ts": ["exports"],
+    // Self-hold tests stamp admission refusals through the owner; the full-tree audit checks this seam.
+    "src/gateway/agent-turn/agent-admission-refusal.ts": ["exports"],
     // Context propagation tests construct the live delivery facts; production keeps them internal.
     "src/gateway/session-send-delivery.ts": ["types"],
     // Diagnostic fixtures reset owner-private state; the full-tree audit checks these consumers.

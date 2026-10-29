@@ -1,7 +1,7 @@
 import type { ErrorShape } from "../../../packages/gateway-protocol/src/index.js";
 import { readPreparedRuntimeSelfHold } from "../../agents/prepared-model-runtime-admission.js";
 
-export type AgentAdmissionStage =
+type AgentAdmissionStage =
   | "runtime-preparation"
   | "subagent-preparation"
   | "input-preparation"
