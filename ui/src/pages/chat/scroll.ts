@@ -1,6 +1,7 @@
 import { pruneMapToMaxSize } from "../../../../src/infra/map-size.ts";
 import { resolveScrollBehavior } from "../../lib/scroll-behavior.ts";
 import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
+import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
 import type { RenderLifecycle } from "./render-lifecycle.ts";
 import { getSessionCacheValue, setSessionCacheValue } from "./session-cache.ts";
 
@@ -13,6 +14,17 @@ const MAX_CACHED_TRANSCRIPT_SCROLL_PANES = 8;
 export type ChatSessionScrollPosition = {
   scrollTop: number;
   anchorToEnd: boolean;
+  bookmark?: ChatReadingBookmark;
+};
+
+/** Primitive source and geometry facts; never retain the anchored message body. */
+export type ChatReadingBookmark = {
+  sessionId: string;
+  source: string;
+  messageId: string;
+  messageKey: string;
+  rowKey: string | null;
+  offset: number;
 };
 
 const transcriptScrollTopByPane = new Map<string, Map<string, ChatSessionScrollPosition>>();
@@ -62,6 +74,7 @@ export function saveChatSessionScrollPosition(
   setSessionCacheValue(scrollTops, sessionKey, {
     scrollTop: Math.max(0, position.scrollTop),
     anchorToEnd: position.anchorToEnd,
+    ...(position.bookmark && !position.anchorToEnd ? { bookmark: position.bookmark } : {}),
   });
 }
 
@@ -79,6 +92,7 @@ export function captureChatSessionScrollPosition(target: {
 }
 
 export type ChatScrollHost = {
+  chatHistoryPagination: Pick<ChatHistoryPagination, "hasNewer">;
   renderLifecycle: Pick<RenderLifecycle, "afterCommit">;
   chatLastScrollTop: number;
   chatLastScrollHeight?: number;
@@ -109,11 +123,30 @@ const pendingChatScrolls = new WeakMap<ChatScrollHost, PendingChatScroll>();
 
 /** A queued reader command owns the next viewport movement, including geometric follow. */
 export function canAutoFollowChat(host: ChatScrollHost): boolean {
-  return !host.chatFollowLocked && !pendingChatScrolls.get(host)?.manual;
+  return (
+    !host.chatHistoryPagination.hasNewer &&
+    !host.chatFollowLocked &&
+    !pendingChatScrolls.get(host)?.manual
+  );
 }
 
 export function cancelChatScroll(host: ChatScrollHost): void {
   pendingChatScrolls.get(host)?.cancel();
+}
+
+/** A held Latest read owns the same cancellable command as its eventual scroll. */
+export function beginChatScrollIntent(host: ChatScrollHost) {
+  cancelChatScroll(host);
+  const request: PendingChatScroll = {
+    manual: true,
+    cancel: () => {
+      if (pendingChatScrolls.get(host) === request) {
+        pendingChatScrolls.delete(host);
+      }
+    },
+  };
+  pendingChatScrolls.set(host, request);
+  return { isCurrent: () => pendingChatScrolls.get(host) === request, cancel: request.cancel };
 }
 
 function queueChatScroll(
@@ -168,11 +201,12 @@ function queueChatScroll(
       const effectiveForce = force && !host.chatHasAutoScrolled;
       const shouldStick =
         manualScroll ||
-        effectiveForce ||
-        (!host.chatFollowLocked &&
-          (options.source === "resize" ||
-            host.chatUserNearBottom ||
-            distanceFromBottom < NEAR_BOTTOM_THRESHOLD));
+        (!host.chatHistoryPagination.hasNewer &&
+          (effectiveForce ||
+            (!host.chatFollowLocked &&
+              (options.source === "resize" ||
+                host.chatUserNearBottom ||
+                distanceFromBottom < NEAR_BOTTOM_THRESHOLD))));
 
       if (!shouldStick) {
         if (contentChanged || (options.source === "resize" && contentGrew)) {
@@ -196,7 +230,7 @@ function queueChatScroll(
       }
       host.chatFollowLocked = false;
       host.chatUserNearBottom = true;
-      host.chatNewMessagesBelow = false;
+      host.chatNewMessagesBelow = Boolean(host.chatHistoryPagination.hasNewer);
       // A return issued at an already-clamped end produces no native scroll event.
       // Settle it here; an actual smooth journey waits for its final position event.
       if (manualScroll && distanceFromBottom <= CHAT_TRANSCRIPT_END_THRESHOLD_PX) {
@@ -249,13 +283,21 @@ export function handleChatScroll(host: ChatScrollHost, event: Event): void {
   updateChatScrollPosition(host, container);
 }
 
-export function handleChatScrollTakeover(host: ChatScrollHost, towardEnd = false): void {
+export function handleChatScrollTakeover(
+  host: ChatScrollHost,
+  towardEnd = false,
+  source?: "bookmark",
+): void {
   cancelChatScroll(host);
   const container = host.chatScrollElement?.();
   if (container) {
     // Intent can stop a smooth scroll without moving a pixel. Retire queued
     // follow work and publish reader policy even without a native scroll event.
-    updateChatScrollPosition(host, container, towardEnd ? "toward-end" : "reader");
+    updateChatScrollPosition(
+      host,
+      container,
+      source === "bookmark" ? "restored-reader" : towardEnd ? "toward-end" : "reader",
+    );
   }
 }
 
@@ -272,7 +314,7 @@ export function lockChatScroll(host: ChatScrollHost): void {
 function updateChatScrollPosition(
   host: ChatScrollHost,
   container: HTMLElement,
-  takeover: false | "reader" | "toward-end" = false,
+  takeover: false | "reader" | "toward-end" | "restored-reader" = false,
 ): void {
   const scrollTop = Math.max(0, container.scrollTop);
   const delta = scrollTop - host.chatLastScrollTop;
@@ -287,11 +329,17 @@ function updateChatScrollPosition(
     // A measured arrival clears the affordance even when maintenance must not
     // change the reader's follow policy.
     if (distanceFromBottom <= CHAT_TRANSCRIPT_END_THRESHOLD_PX) {
-      host.chatNewMessagesBelow = false;
+      host.chatNewMessagesBelow = Boolean(host.chatHistoryPagination.hasNewer);
     }
     return;
   }
-  if (isUserScrollUp && distanceFromBottom > CHAT_TRANSCRIPT_END_THRESHOLD_PX) {
+  // A detached window's physical bottom is still history. Unlocking follow here
+  // would jump past the held source as its next newer page commits.
+  if (
+    takeover === "restored-reader" ||
+    host.chatHistoryPagination.hasNewer ||
+    (isUserScrollUp && distanceFromBottom > CHAT_TRANSCRIPT_END_THRESHOLD_PX)
+  ) {
     // Taking control before initial history settles must retire its queued
     // force-scroll. Otherwise that delayed commit can overwrite the viewport.
     host.chatHasAutoScrolled = true;
@@ -309,8 +357,9 @@ function updateChatScrollPosition(
   host.chatUserNearBottom = !host.chatFollowLocked && distanceFromBottom < NEAR_BOTTOM_THRESHOLD;
 
   host.chatNewMessagesBelow =
-    container.scrollHeight - container.clientHeight > CHAT_TRANSCRIPT_END_THRESHOLD_PX &&
-    distanceFromBottom > CHAT_TRANSCRIPT_END_THRESHOLD_PX;
+    Boolean(host.chatHistoryPagination.hasNewer) ||
+    (container.scrollHeight - container.clientHeight > CHAT_TRANSCRIPT_END_THRESHOLD_PX &&
+      distanceFromBottom > CHAT_TRANSCRIPT_END_THRESHOLD_PX);
 }
 
 export function resetChatScroll(host: ChatScrollHost): void {

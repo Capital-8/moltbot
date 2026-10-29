@@ -8,7 +8,11 @@ import type { PresentationValue } from "../../../lib/presentation.ts";
 import { listen } from "../../../lib/reactive/listener.ts";
 import { resolveScrollBehavior } from "../../../lib/scroll-behavior.ts";
 import type { AssistantMessageExpansionState } from "../chat-message-recovery.ts";
-import type { ChatSessionScrollPosition, ChatScrollToEndOptions } from "../scroll.ts";
+import type {
+  ChatReadingBookmark,
+  ChatSessionScrollPosition,
+  ChatScrollToEndOptions,
+} from "../scroll.ts";
 import { SIDEBAR_GEOMETRY_COMMIT_EVENT } from "../sidebar-layout.ts";
 import { ChatMessageEntryAnimations } from "./chat-message-entry.ts";
 import { ChatMessageReveal } from "./chat-message-reveal.ts";
@@ -17,15 +21,14 @@ import {
   type TranscriptAnnouncement,
 } from "./chat-transcript-announcement.ts";
 import { TranscriptEndAnchor } from "./chat-transcript-end-anchor.ts";
+import { initialTranscriptRect, createPositionRailGutter } from "./chat-transcript-geometry.ts";
 import {
-  initialTranscriptRect,
-  isTranscriptRangeCommitted,
-  createPositionRailGutter,
-} from "./chat-transcript-geometry.ts";
-import { reconcileTranscriptHeaderMargin } from "./chat-transcript-header.ts";
+  reconcileTranscriptHeaderMargin,
+  syncTranscriptRowsAndHeader,
+} from "./chat-transcript-header.ts";
 import { TranscriptInitialRange } from "./chat-transcript-initial-range.ts";
 import {
-  reconcileChatTranscriptInteractionResize,
+  applyTranscriptInteractionResize,
   resolveChatTranscriptInteractionAnchor,
 } from "./chat-transcript-interaction-anchor.ts";
 import { TranscriptLayoutOwner } from "./chat-transcript-layout-owner.ts";
@@ -50,6 +53,8 @@ import {
 import { TranscriptRowRefs } from "./chat-transcript-row-refs.ts";
 import {
   applyPendingScrollOffset,
+  completeTranscriptLayout,
+  canFollowTranscriptEnd,
   type TranscriptScrollRestoreHost,
 } from "./chat-transcript-scroll-restore.ts";
 import {
@@ -171,6 +176,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   private focusedRowKey: string | null = null;
   private readonly announcement = new TranscriptAnnouncementState();
   private readonly mcpAppUnmountGate: ReturnType<typeof createMcpAppUnmountGate>;
+  private readonly bookmarkState: { bookmark?: ChatReadingBookmark; pending: boolean };
 
   constructor(
     // Native geometry and touch-held history must commit before paint.
@@ -178,7 +184,9 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     initialOffset: number | null = null,
     onInitialOffsetSettled?: (position: ChatSessionScrollPosition) => void,
     private readonly callbacks: TranscriptCallbacks = {},
+    bookmark?: ChatReadingBookmark,
   ) {
+    this.bookmarkState = { bookmark, pending: false };
     this.initialRange = new TranscriptInitialRange(
       initialOffset,
       () => this.virtualizer,
@@ -365,7 +373,10 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       this.offsetState.syncNativeOffset?.();
       this.invalidate();
     }
-    if (!this.initialRange.pending || (this.layout.ready && this.rowKeys.length === 0)) {
+    if (
+      !this.bookmarkState.bookmark &&
+      (!this.initialRange.pending || (this.layout.ready && this.rowKeys.length === 0))
+    ) {
       applyPendingScrollOffset(this.scrollRestoreHost);
       if (this.initialRange.pending) {
         this.initialRange.finish();
@@ -415,6 +426,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   }
 
   dispose(): void {
+    this.bookmarkState.bookmark = undefined;
     this.disconnect();
     // Temporary disconnect preserves restoration facts; terminal disposal releases their owner.
     Object.assign(this.layout, { rows: [], rowLayout: undefined });
@@ -577,12 +589,20 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   }
 
   get isPositionSettled(): boolean {
-    return this.layout.ready && !this.initialRange.pending && !this.offsetState.pendingScrollOffset;
+    return (
+      this.layout.ready &&
+      !this.bookmarkState.bookmark &&
+      !this.initialRange.pending &&
+      !this.offsetState.pendingScrollOffset
+    );
+  }
+
+  captureBookmark() {
+    return this.prependAnchor.bookmark(this.scrollElement);
   }
 
   private canAutoFollow(): boolean {
-    const command = this.offsetState.scrollCommand;
-    return (!command || command.target === "end") && (this.callbacks.canFollowEnd?.() ?? true);
+    return canFollowTranscriptEnd(this.bookmarkState, this.offsetState, this.callbacks);
   }
 
   scrollToEnd({ source = "manual", behavior = "auto" }: ChatScrollToEndOptions = {}): boolean {
@@ -610,6 +630,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   }
 
   cancelScroll(): void {
+    this.bookmarkState.bookmark = undefined;
     this.endAnchor.clear();
     this.prependAnchor.clear();
     if (this.offsetState.scrollCommand === null && !this.offsetState.pendingScrollOffset) {
@@ -698,81 +719,56 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   }
 
   private reconcileInteractionResize(sidebarCommitTarget?: EventTarget | null): void {
-    if (
-      reconcileChatTranscriptInteractionResize(
-        this.offsetState.pendingInteractionAnchor,
-        sidebarCommitTarget,
-        this.scrollElement,
-        this.virtualizer,
-      )
-    ) {
-      this.offsetState.pendingInteractionAnchor = null;
-    }
+    applyTranscriptInteractionResize(
+      this.offsetState,
+      sidebarCommitTarget,
+      this.scrollElement,
+      this.virtualizer,
+    );
   }
 
   private syncRows(nextKeys: readonly string[]): void {
     this.rowKeys = nextKeys;
     this.rowIndexesByKey = new Map(this.rowKeys.map((key, index) => [key, index]));
-    // The header margin must land in the same setOptions as the key change:
-    // the edge-key re-anchor uses absolute offsets, so a prepend that also
-    // removes the header (exhausted history) compensates in one adjustment.
-    const scrollMargin =
-      this.virtualizer.options.scrollMargin + this.headerHeight - this.appliedHeaderHeight;
-    this.appliedHeaderHeight = this.headerHeight;
-    this.virtualizer.setOptions({
-      ...this.virtualizer.options,
-      count: nextKeys.length,
-      getItemKey: (index) => nextKeys[index]!,
-      rangeExtractor: (range) => this.initialRange.extract(range),
-      scrollMargin,
-    });
+    this.appliedHeaderHeight = syncTranscriptRowsAndHeader(
+      this.virtualizer,
+      nextKeys,
+      this.initialRange,
+      this.headerHeight,
+      this.appliedHeaderHeight,
+    );
   }
 
   private queueLayout(): void {
     if (
       (this.initialRange.measuring && this.rowKeys.length) ||
-      this.offsetState.scrollCommand?.target === "message"
+      this.offsetState.scrollCommand?.target === "message" ||
+      this.bookmarkState.bookmark
     ) {
       this.renderer.queueAfterCommit(this.completeLayout);
     }
   }
 
-  private readonly completeLayout = () => {
-    if (!this.connected || this.virtualizer.scrollElement !== this.scrollElement) {
-      return;
-    }
-    this.messageReveal.complete(
-      this.threadInnerElement,
-      this.offsetState,
-      this.virtualizer,
-      this.messageRowKeysById,
-      this.rowIndexesByKey,
-    );
-    if (!this.initialRange.measuring || !this.rowKeys.length || !this.scrollElement?.clientHeight) {
-      return;
-    }
-    const measured = this.presentation.measureRows();
-    if ((this.initialRange.pending && this.initialRange.extend(this.scrollElement)) || measured) {
-      this.invalidate();
-      return;
-    }
-    if (this.offsetState.pendingScrollOffset) {
-      applyPendingScrollOffset(this.scrollRestoreHost);
-      return;
-    }
-    if (
-      (this.initialRange.pending || this.offsetState.scrollCommand?.target === "end") &&
-      this.canAutoFollow() &&
-      !(this.offsetState.pendingInteractionAnchor || this.offsetState.touchActive)
-    ) {
-      const behavior = this.offsetState.scrollCommand?.behavior ?? "instant";
-      this.scrollToEnd({ source: "auto", behavior });
-      this.offsetState.syncNativeOffset?.();
-    }
-    if (isTranscriptRangeCommitted(this.threadInnerElement, this.virtualizer)) {
-      this.initialRange.complete();
-      this.renderer.syncInitialPosition();
-    }
-    this.invalidate();
-  };
+  private readonly completeLayout = () =>
+    completeTranscriptLayout({
+      bookmarkState: this.bookmarkState,
+      isConnected: () => this.connected,
+      scrollElement: this.scrollElement,
+      threadInnerElement: this.threadInnerElement,
+      rowCount: this.rowKeys.length,
+      callbacks: this.callbacks,
+      prependAnchor: this.prependAnchor,
+      rowIndexesByKey: this.rowIndexesByKey,
+      offsetState: this.offsetState,
+      initialRange: this.initialRange,
+      virtualizer: this.virtualizer,
+      messageReveal: this.messageReveal,
+      messageRowKeysById: this.messageRowKeysById,
+      presentation: this.presentation,
+      renderer: this.renderer,
+      scrollRestoreHost: this.scrollRestoreHost,
+      canAutoFollow: () => this.canAutoFollow(),
+      scrollToEnd: (options) => this.scrollToEnd(options),
+      invalidate: this.invalidate,
+    });
 }

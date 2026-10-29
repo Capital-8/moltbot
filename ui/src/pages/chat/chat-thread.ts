@@ -19,8 +19,10 @@ import { resetWorkingProgress } from "./chat-progress.ts";
 import { activeChatReasoning } from "./chat-reasoning.ts";
 import { buildChatItems, type BuildChatItemsProps } from "./chat-thread-build.ts";
 import { collectOwnedCanvasPreviews, stripOwnedCanvasShortcodes } from "./chat-thread-canvas.ts";
+import { retireChatGroupingSources } from "./chat-thread-grouping.ts";
 import type { ChatInputOrderState } from "./chat-thread-inputs.ts";
 import { sanitizeStreamText } from "./chat-thread-items.ts";
+import { retireCoalescedMessageSources } from "./chat-tool-activity-coalesce.ts";
 import { getOrCreateSessionCacheValue, setSessionCacheValue } from "./session-cache.ts";
 
 type CachedChatItems = {
@@ -67,7 +69,27 @@ const expansionMapVersions = new WeakMap<ReadonlyMap<string, unknown>, number>()
 const expansionListeners = new WeakMap<ReadonlyMap<string, unknown>, Set<() => void>>();
 const explicitToolExpansions = new WeakMap<ReadonlyMap<string, unknown>, Set<string>>();
 
-export function resetChatThreadState(paneId?: string): void {
+export function resetChatThreadState(
+  paneId?: string,
+  retiredMessages: readonly unknown[] = [],
+): void {
+  const sources = [...retiredMessages];
+  const panes = paneId ? [chatItemsByPane.get(paneId)] : [...chatItemsByPane.values()];
+  for (const sessions of panes) {
+    for (const projections of sessions?.values() ?? []) {
+      for (const view of ["visible", "unfiltered"] as const) {
+        for (const item of projections[view]?.items ?? []) {
+          if (item.kind === "message") {
+            sources.push(item.message);
+          } else if (item.kind === "group") {
+            sources.push(...item.messages.map((entry) => entry.message));
+          }
+        }
+      }
+    }
+  }
+  // Coalesced and Canvas projections can own grouping keys distinct from raw rows.
+  retireChatGroupingSources([...sources, ...retireCoalescedMessageSources(sources)]);
   if (paneId) {
     chatItemsByPane.delete(paneId);
     return;

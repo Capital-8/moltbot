@@ -73,6 +73,28 @@ it("deduplicates byte-different live-event and history projections of one transc
   expectPrepend([historyProjection], [liveEventProjection], [liveEventProjection]);
 });
 
+it("keeps the page order around live sources already admitted inside an empty raw window", () => {
+  const [first, second, third, fourth, fifth] = [1, 2, 3, 4, 5].map((seq) =>
+    nativeHistoryMessage(seq),
+  );
+  expectPrepend(
+    [first, { ...second }, third, { ...fourth }, fifth],
+    [second, fourth],
+    [first, second, third, fourth, fifth],
+  );
+  const retained = prependUniqueNativeMessages([first, { ...second }, third], [second]);
+  expect(retained[1]).toBe(second);
+  expectPrepend(retained, [second, third, fourth], [first, second, third, fourth]);
+  const fragments = ["a", "b"].map((part) =>
+    Object.assign({}, second, { content: part, openclawStreamFallback: { itemId: part } }),
+  );
+  expectPrepend(
+    [first, ...fragments.map((message) => ({ ...message })), third, { ...fourth }, fifth],
+    [...fragments, fourth],
+    [first, ...fragments, third, fourth, fifth],
+  );
+});
+
 it.each([0, 50])("bounds prepend serialization with %i overlapping rows", (overlap) => {
   const text = "Synthetic history content. ".repeat(300);
   const page = (start: number) =>

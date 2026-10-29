@@ -25,6 +25,7 @@ import type {
 } from "./chat-header-viewers-snapshot.ts";
 import type { ChatHistoryCursor, ChatHistoryPagination } from "./chat-history-pagination.ts";
 import { trimmedChatHistoryPagination } from "./chat-history-pagination.ts";
+import { prepareChatHistorySegment, selectChatHistoryResidency } from "./chat-history-window.ts";
 import type { ChatSessionStateSnapshot } from "./chat-session-state-snapshot.ts";
 import type { ChatHistoryState, ChatTranscriptMetadata } from "./chat-transcript-metadata.ts";
 import { createTranscriptMemo } from "./components/chat-transcript-memo.ts";
@@ -398,6 +399,20 @@ export function applyChatCacheSnapshot(
   },
   snapshot: ChatSessionSnapshot,
 ): void {
+  const pagination = {
+    ...snapshot.pagination,
+    segments: snapshot.pagination.segments ?? [
+      prepareChatHistorySegment(
+        snapshot.messages,
+        snapshot.pagination,
+        snapshot.pagination.newerCursor,
+      ),
+    ],
+  };
+  state.chatHistoryPagination = selectChatHistoryResidency(
+    snapshot.messages,
+    pagination,
+  ).pagination;
   reduceChatSessionProjection(
     state,
     { type: "snapshotLoaded", messages: snapshot.messages },
@@ -410,7 +425,6 @@ export function applyChatCacheSnapshot(
       }),
     },
   );
-  state.chatHistoryPagination = snapshot.pagination;
   state.currentSessionId = snapshot.sessionId;
   state.chatDisplayedLeafEntryId = snapshot.displayedLeafEntryId;
   setChatHistoryCursor(state, snapshot.deltaCursor);
@@ -426,6 +440,11 @@ export function appendChatMessageToCache(
   const cacheKey = resolveChatSnapshotKey(host, target);
   const existing = getSessionCacheValue(cache, cacheKey);
   if (!existing) {
+    return;
+  }
+  // A live tail receipt cannot bridge the newer gap of a detached cached page.
+  // Keep its legal window; explicit tail admission acquires those rows.
+  if (existing.snapshot.pagination.hasNewer) {
     return;
   }
   if (eventClaim) {
@@ -451,9 +470,13 @@ export function appendChatMessageToCache(
         envelope: eventClaim,
       }).messages.slice()
     : [...existing.snapshot.messages, message];
+  const { segments: _segments, ...pagination } = existing.snapshot.pagination;
   const snapshot = {
     ...existing.snapshot,
     messages,
+    // Appended durable rows extend a contiguous tail, not its old response
+    // segment. Restore prepares fresh membership and reopens any trimmed edge.
+    pagination,
   };
   if (eventClaim) {
     cacheChatSessionSnapshot(cache, host, target, snapshot);
@@ -659,7 +682,14 @@ function serializedArrayItemWeight(value: unknown): number | null {
 }
 
 function samePagination(left: ChatHistoryPagination, right: ChatHistoryPagination): boolean {
-  if (left.hasMore !== right.hasMore || left.totalMessages !== right.totalMessages) {
+  if (
+    left.hasMore !== right.hasMore ||
+    left.totalMessages !== right.totalMessages ||
+    left.hasNewer !== right.hasNewer ||
+    left.newerCursor !== right.newerCursor ||
+    left.needsNewerBoundary !== right.needsNewerBoundary ||
+    JSON.stringify(left.segments) !== JSON.stringify(right.segments)
+  ) {
     return false;
   }
   if (left.hasMore && right.hasMore) {

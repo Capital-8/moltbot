@@ -1,0 +1,150 @@
+import { expect, it } from "vitest";
+import {
+  hasSessionProjectionAcceptedFinal,
+  reduceSessionProjection,
+  type SessionProjectionState,
+} from "./session-projection.js";
+import {
+  assistant,
+  delta,
+  persist,
+  projection,
+  savedReply,
+  savedUser,
+  terminal,
+} from "./session-projection.test-support.js";
+
+const admit = (state: SessionProjectionState, messages: readonly unknown[] = []) =>
+  reduceSessionProjection(state, { type: "residencyChanged", messages });
+
+it("releases a settled durable primary while preserving payload-free replay facts", () => {
+  const message = savedReply("large body ".repeat(2_000), "primary", 1, { runId: "run-1" });
+  let state = terminal(projection(), { message });
+  state = persist(state, message);
+  state = admit(state);
+  expect(state.messages).toHaveLength(0);
+  expect(state.runs["run-1"]?.message).toBeUndefined();
+  expect(JSON.stringify(state.runs)).not.toContain("large body");
+  expect(hasSessionProjectionAcceptedFinal(state.runs["run-1"], message)).toBe(true);
+  expect(terminal(state, { message })).toBe(state);
+});
+
+it("keeps the primary receipt after it rolls out of the recent-final ring", () => {
+  const primary = assistant("primary");
+  let state = terminal(projection(), { message: primary });
+  for (let index = 0; index < 40; index += 1) {
+    state = terminal(state, { message: assistant(`secondary-${index}`) });
+  }
+  state = admit(state);
+  expect(state.runs["run-1"]?.message).toBeUndefined();
+  expect(hasSessionProjectionAcceptedFinal(state.runs["run-1"], primary)).toBe(true);
+  expect(hasSessionProjectionAcceptedFinal(state.runs["run-1"], assistant("secondary-39"))).toBe(
+    true,
+  );
+  expect(hasSessionProjectionAcceptedFinal(state.runs["run-1"], assistant("secondary-0"))).toBe(
+    false,
+  );
+  expect(terminal(state, { message: primary })).toBe(state);
+});
+
+it("does not turn an evicted identified empty terminal into an unkeyed recovery", () => {
+  const empty = savedReply("", "primary", 1);
+  let state = admit(terminal(projection(), { message: empty }));
+  expect(state.runs["run-1"]?.message).toBeUndefined();
+  const conflicting = savedReply("different", "other", 2);
+  expect(terminal(state, { message: conflicting })).toBe(state);
+  const recovered = savedReply("recovered", "primary", 1);
+  state = terminal(state, { message: recovered });
+  expect(state.runs["run-1"]?.message).toBe(recovered);
+  expect(hasSessionProjectionAcceptedFinal(state.runs["run-1"], recovered)).toBe(true);
+});
+
+it("records the inherited stream primary when a terminal omits its message", () => {
+  const stream = assistant("inherited stream");
+  const state = admit(terminal(delta(projection(), "run-1", stream)));
+  expect(state.runs["run-1"]?.message).toBeUndefined();
+  expect(hasSessionProjectionAcceptedFinal(state.runs["run-1"], stream)).toBe(true);
+  expect(terminal(state, { message: stream })).toBe(state);
+  expect(terminal(state, { status: "yielded", message: assistant("different status") })).toBe(
+    state,
+  );
+});
+
+it("preserves semantic fences across pure retirement and ignored replay", () => {
+  const message = savedReply("settled", "primary", 1);
+  const state = terminal(projection(), { message });
+  const before = state.runs["run-1"];
+  const retired = admit(state);
+  expect(before?.revision).toBeDefined();
+  expect(retired.runs["run-1"]?.revision).toBe(before?.revision);
+  expect(retired.runs["run-1"]?.messageRevision).toBe(before?.messageRevision);
+  expect(terminal(retired, { message })).toBe(retired);
+  const advanced = terminal(retired, { seq: 7 });
+  expect(advanced.runs["run-1"]?.revision).not.toBe(before?.revision);
+  expect(advanced.runs["run-1"]?.messageRevision).toBe(before?.messageRevision);
+});
+
+it("advances the message fence only when the effective primary changes", () => {
+  const started = delta(projection(), "active");
+  expect(started.runs.active?.revision).toBeDefined();
+  expect(started.runs.active?.messageRevision).toBeUndefined();
+  const message = assistant("same baseline");
+  const withMessage = delta(started, "active", message, 1);
+  const unchanged = delta(withMessage, "active", message, 2);
+  expect(unchanged.runs.active?.revision).not.toBe(withMessage.runs.active?.revision);
+  expect(unchanged.runs.active?.messageRevision).toBe(withMessage.runs.active?.messageRevision);
+  const replaced = delta(unchanged, "active", assistant("replacement"), 3);
+  expect(replaced.runs.active?.messageRevision).not.toBe(unchanged.runs.active?.messageRevision);
+});
+
+it("pins streaming, error and pending bodies at their existing owners", () => {
+  const active = assistant("still streaming");
+  let state = delta(projection(), "active", active);
+  const failed = assistant("useful partial");
+  state = terminal(state, { runId: "failed", status: "error", message: failed });
+  const pending = { role: "user", content: "pending", idempotencyKey: "pending-run" };
+  state = reduceSessionProjection(state, {
+    type: "sendPending",
+    runId: "pending-run",
+    message: pending,
+  });
+  state = admit(state);
+  expect(state.runs.active?.message).toBe(active);
+  expect(state.runs.failed?.message).toBe(failed);
+  expect(state.messages).toContain(pending);
+});
+
+it("pins both inference bodies until authority confirms or contradicts the match", () => {
+  const original = assistant("selected answer");
+  const prompt = savedUser("request", "prompt", 1, { runId: "run-1" });
+  const candidate = savedReply("selected answer", "candidate", 2, { runId: "run-1" });
+  let state = reduceSessionProjection(terminal(projection(), { message: original }), {
+    type: "messagePersisted",
+    message: original,
+    envelope: { runId: "run-1" },
+  });
+  state = reduceSessionProjection(state, {
+    type: "snapshotLoaded",
+    scope: state.scope,
+    messages: [prompt, candidate],
+  });
+  expect(state.runs["run-1"]?.inferredSnapshotTerminal?.entry.message).toBe(original);
+  state = admit(state);
+  expect(state.messages).toContain(candidate);
+  expect(state.runs["run-1"]?.inferredSnapshotTerminal?.entry.message).toBe(original);
+  const later = savedReply("different later answer", "later", 3, { runId: "run-1" });
+  state = reduceSessionProjection(state, {
+    type: "snapshotLoaded",
+    scope: state.scope,
+    messages: [prompt, candidate, later],
+  });
+  expect(state.messages).toContain(original);
+});
+
+it("does not pin old durable commentary just because its run is still active", () => {
+  const commentary = savedReply("old commentary", "commentary", 1, { runId: "active" });
+  const active = assistant("current baseline");
+  const state = admit(delta(projection([commentary]), "active", active));
+  expect(state.messages).not.toContain(commentary);
+  expect(state.runs.active?.message).toBe(active);
+});

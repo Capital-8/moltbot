@@ -46,6 +46,7 @@ import {
   isChatHistoryLoading,
   isChatHistoryRetrying,
 } from "./chat-history-state.ts";
+import { restoreChatHistoryBookmark } from "./chat-history.ts";
 import { createMobileSheetScrollFades } from "./chat-mobile-scroll-fades.ts";
 import { createChatPaneDiscussionState } from "./chat-pane-discussion-state.ts";
 import { createChatPanePresence } from "./chat-pane-presence.ts";
@@ -83,6 +84,16 @@ export type ChatPaneInputChanges = {
 
 /** Synchronous pane facts and domain resources; Solid owns publication and commits. */
 export abstract class ChatPaneStateOwner {
+  protected bindTranscriptViewport(pageState: NonNullable<ChatPaneStateOwner["state"]>): void {
+    // Task tabs can precede main chat in DOM order; viewport reads and commands
+    // must resolve through the same transcript owner.
+    pageState.chatIsProgrammaticScroll = () => this.transcript.isProgrammaticScroll;
+    pageState.chatIsMaintenanceScroll = () => this.transcript.isMaintenanceScroll;
+    pageState.chatScrollElement = () => this.transcript.scrollElement;
+    pageState.chatScrollToEnd = (options) => this.transcript.scrollToEnd(options);
+    pageState.chatCancelScroll = () => this.transcript.cancelScroll();
+  }
+
   protected readonly mobileScrollFades = createMobileSheetScrollFades();
   readonly presentation = {
     active: false,
@@ -431,12 +442,20 @@ export abstract class ChatPaneStateOwner {
     };
   }
   readonly transcript = createChatTranscript(() => this.paneId, {
+    getSessionId: () => (this.state?.chatLoading ? null : (this.state?.currentSessionId ?? null)),
+    restoreBookmark: (bookmark, isCurrent) => {
+      const state = this.state;
+      return state
+        ? restoreChatHistoryBookmark(state, bookmark, () => this.state === state && isCurrent())
+        : Promise.resolve(false);
+    },
     geometryEventTarget: this.element,
     getComposerFloat: () => (this.usesMobileHost ? this.composerFloat : null),
     getComposerActivityLayout: () => (this.usesMobileHost ? this.composerActivityLayout : null),
     onViewportResize: () => this.chatState.handleTranscriptResize(),
     canFollowEnd: () => this.state !== undefined && canAutoFollowChat(this.state),
-    onReaderScroll: (towardEnd) => this.state && handleChatScrollTakeover(this.state, towardEnd),
+    onReaderScroll: (towardEnd, source) =>
+      this.state && handleChatScrollTakeover(this.state, towardEnd, source),
   });
   protected get progressCards() {
     return sessionProgressCardsForGateway(this.context.gateway);

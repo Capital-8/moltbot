@@ -14,9 +14,11 @@ import { chatThumbnailWeight } from "../../lib/chat/row-display-facts.ts";
 import { collectGarbageForTest } from "../../test-helpers/garbage-collection.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { cacheChatBoardSnapshotAfterHydration } from "./chat-board-snapshot.ts";
+import { makeChatHost } from "./chat-host.test-support.ts";
 import { MAX_CACHED_CHAT_SESSIONS } from "./session-cache.ts";
 import {
   cacheChatSessionSnapshot,
+  applyChatCacheSnapshot,
   observeChatCache,
   readChatSessionSnapshot,
   type ChatMessageCache,
@@ -243,6 +245,63 @@ describe("persistent chat session snapshots", () => {
     vi.stubGlobal("indexedDB", new IDBFactory());
     vi.stubGlobal("localStorage", createStorageMock());
     writer = makeStore();
+  });
+
+  it.each([true, false])(
+    "reopens both detached cache boundaries after store restore (trim: %s)",
+    async (trim) => {
+      const messages = Array.from({ length: trim ? 400 : 80 }, (_, index) => ({
+        role: "assistant",
+        content: `message-${index + 81}`,
+        __openclaw: { id: `source-${index + 81}`, seq: index + 81 },
+      }));
+      await seed({
+        messages,
+        sessionId: "session-1",
+        pagination: {
+          hasMore: true,
+          hasNewer: true,
+          ...(trim
+            ? { olderCursor: "before-81", newerCursor: "after-480" }
+            : { needsBoundary: true, needsNewerBoundary: true }),
+        },
+      });
+      const restored = await readSnapshot();
+      assert(restored);
+      expect(restored.messages).toEqual(messages.slice(-80));
+      expect(restored.pagination).toMatchObject({
+        hasMore: true,
+        needsBoundary: true,
+        hasNewer: true,
+        needsNewerBoundary: true,
+      });
+      expect(restored.pagination.segments).toBeUndefined();
+      const host = makeChatHost();
+      applyChatCacheSnapshot(host, restored);
+      expect(host.chatMessages).toEqual(restored.messages);
+      expect(host.chatHistoryPagination).toMatchObject({
+        hasMore: true,
+        needsBoundary: true,
+        hasNewer: true,
+        needsNewerBoundary: true,
+      });
+      expect(host.chatHistoryPagination.newerCursor).toBeUndefined();
+    },
+  );
+
+  it("preserves authoritative empty coverage through store read and cache application", async () => {
+    await seed({
+      messages: [],
+      sessionId: null,
+      pagination: { hasMore: false, completeSnapshot: true },
+    });
+    const restored = await readSnapshot();
+    assert(restored);
+    const host = makeChatHost();
+    applyChatCacheSnapshot(host, restored);
+    expect(host.chatMessages).toEqual([]);
+    expect(host.chatHistoryPagination).toMatchObject({ hasMore: false, completeSnapshot: true });
+    expect(host.chatHistoryPagination.hasNewer).toBeUndefined();
   });
 
   afterEach(async () => {

@@ -47,3 +47,22 @@ export function reconcileChatTranscriptInteractionResize(
   scrollElement.scrollTop += row.getBoundingClientRect().top - anchor.top;
   return true;
 }
+
+/** Retire the pending interaction only after its owning geometry commit applies. */
+export function applyTranscriptInteractionResize(
+  state: { pendingInteractionAnchor: ChatTranscriptInteractionAnchor | null },
+  sidebarCommitTarget: EventTarget | null | undefined,
+  scrollElement: HTMLDivElement | null,
+  virtualizer: Virtualizer<HTMLDivElement, HTMLElement>,
+): void {
+  if (
+    reconcileChatTranscriptInteractionResize(
+      state.pendingInteractionAnchor,
+      sidebarCommitTarget,
+      scrollElement,
+      virtualizer,
+    )
+  ) {
+    state.pendingInteractionAnchor = null;
+  }
+}

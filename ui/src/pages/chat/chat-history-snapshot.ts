@@ -1,3 +1,7 @@
+import {
+  readSessionMessageIdentity,
+  reduceSessionProjection,
+} from "@openclaw/gateway-client/browser";
 import { asSafeIntegerInRange } from "@openclaw/normalization-core/number-coercion";
 import { normalizeNullableString } from "@openclaw/normalization-core/string-coerce";
 import type {
@@ -13,15 +17,27 @@ import type { ChatMetadataResult } from "../../lib/chat/chat-metadata-cache.ts";
 import {
   nativeHistoryMessageIdentity,
   nativeHistoryMessageSourceIdentity,
+  prependUniqueNativeMessages,
 } from "../../lib/chat/history-message-identity.ts";
 import {
   isUiSelectedGlobalSessionKey,
   resolveUiSelectedSessionAgentId,
 } from "../../lib/sessions/session-key.ts";
 import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
+import {
+  chatHistoryWindowBoundary,
+  extendChatHistoryWindow,
+  selectChatHistoryResidency,
+} from "./chat-history-window.ts";
 import { projectChatSessionStateSnapshot } from "./chat-session-state-snapshot.ts";
 import type { ChatHistorySessions, ChatState } from "./chat-state-contract.ts";
 import type { ChatHistoryState } from "./chat-transcript-metadata.ts";
+import {
+  getChatSessionProjection,
+  publishChatSessionProjection,
+  publishChatSessionProjectionMessages,
+  retireChatSubmissionDisplay,
+} from "./history-merge.ts";
 import type { ChatHistoryRunObservation } from "./run-lifecycle.ts";
 import {
   cacheChatSessionSnapshot,
@@ -43,6 +59,7 @@ export type ChatHistoryResult = {
   offset?: number;
   nextOffset?: number;
   olderCursor?: string;
+  newerCursor?: string;
   hasMore?: boolean;
   totalMessages?: number;
   completeSnapshot?: boolean;
@@ -106,9 +123,12 @@ export function resolveChatHistoryPagination(
   const validTotal = asSafeIntegerInRange(result?.totalMessages ?? totalMessages, { min: 0 });
   const nextOffset = asSafeIntegerInRange(result?.nextOffset, { min: 1 });
   const olderCursor = normalizeNullableString(result?.olderCursor);
+  const newerCursor = normalizeNullableString(result?.newerCursor);
+  const newer = newerCursor ? { newerCursor, hasNewer: true as const } : {};
   if (result?.hasMore === true || olderCursor) {
     return {
       hasMore: true,
+      ...newer,
       ...(olderCursor ? { olderCursor } : {}),
       ...(nextOffset !== undefined ? { nextOffset } : {}),
       ...(validTotal !== undefined ? { totalMessages: validTotal } : {}),
@@ -116,6 +136,7 @@ export function resolveChatHistoryPagination(
   }
   return {
     hasMore: false,
+    ...newer,
     ...(validTotal !== undefined ? { totalMessages: validTotal } : {}),
     ...(result?.completeSnapshot === true ? { completeSnapshot: true as const } : {}),
   };
@@ -148,9 +169,14 @@ export function reconcileHistoryTail(options: {
   previousMessages: unknown[];
   previousPagination: ChatHistoryPagination;
   previousSessionId: string | null;
-}): { messages: unknown[]; pagination: ChatHistoryPagination } | null {
+}): { messages: unknown[]; pagination: ChatHistoryPagination; retainedCoverage?: true } | null {
   if (!options.previousSessionId || options.previousSessionId !== options.nextSessionId) {
     return null;
+  }
+  if (options.previousPagination.hasNewer) {
+    // A background tail refresh is not contiguous with a detached reader.
+    // Latest explicitly resets this window; never stitch across the newer gap.
+    return { messages: options.previousMessages, pagination: options.previousPagination };
   }
   const previousByIdentity = new Map<string, unknown[]>();
   for (const message of options.previousMessages) {
@@ -212,6 +238,7 @@ export function reconcileHistoryTail(options: {
       : undefined;
   return {
     messages: [...prefix, ...messages],
+    retainedCoverage: true,
     pagination: {
       ...options.previousPagination,
       ...(unavailable ? { needsBoundary: true as const } : {}),
@@ -225,12 +252,137 @@ export function reopenChatHistoryBoundary(
   state: ChatState,
   boundary: string,
   pagination: ChatHistoryPagination,
+  direction: "older" | "newer" = "older",
 ): void {
-  if (nativeHistoryMessageSourceIdentity(state.chatMessages[0]) !== boundary) {
+  const held = chatHistoryWindowBoundary(
+    state.chatMessages,
+    state.chatHistoryPagination,
+    direction,
+  );
+  if (nativeHistoryMessageSourceIdentity(held) !== boundary) {
     throw new Error(t("chat.thread.earlierInterrupted"));
   }
-  state.chatHistoryPagination = pagination;
+  const previous = state.chatHistoryPagination;
+  const segments = previous.segments?.map((segment, index, all) =>
+    direction === "older" && index === 0
+      ? {
+          ...segment,
+          hasOlder: pagination.hasMore,
+          olderCursor: pagination.hasMore ? pagination.olderCursor : undefined,
+        }
+      : direction === "newer" && index === all.length - 1
+        ? {
+            ...segment,
+            hasNewer: Boolean(pagination.hasNewer),
+            newerCursor: pagination.newerCursor,
+          }
+        : segment,
+  );
+  state.chatHistoryPagination =
+    direction === "older"
+      ? {
+          ...pagination,
+          segments,
+          newerCursor: previous.newerCursor,
+          hasNewer: previous.hasNewer,
+          needsNewerBoundary: previous.needsNewerBoundary,
+        }
+      : {
+          ...previous,
+          segments,
+          newerCursor: pagination.newerCursor,
+          hasNewer: pagination.hasNewer,
+          needsNewerBoundary: undefined,
+        };
   commitCurrentChatHistorySnapshot(state);
+}
+
+/** Accept producer receipts before applying the resident display budget. */
+export function admitChatHistoryPage(
+  state: ChatState,
+  result: ChatHistoryResult,
+  direction: "older" | "newer" | "around",
+): "messages" | "coverage" | false {
+  const messages = result.messages ?? [];
+  const projection = getChatSessionProjection(state);
+  const pendingRunIds = projection.entries.flatMap((entry) =>
+    entry.pending && entry.identity?.role === "user" && entry.pendingRunId
+      ? [entry.pendingRunId]
+      : [],
+  );
+  if (pendingRunIds.length) {
+    const adopted = reduceSessionProjection(projection, {
+      type: "snapshotLoaded",
+      scope: projection.scope,
+      messages: messages.filter((message) => {
+        const identity = readSessionMessageIdentity(message);
+        return (
+          identity?.role === "user" &&
+          !identity.isImported &&
+          (identity.id !== null || identity.sequence !== null)
+        );
+      }),
+    });
+    const remaining = new Set(
+      adopted.entries.filter((entry) => entry.pending).map((entry) => entry.pendingRunId),
+    );
+    retireChatSubmissionDisplay(
+      state,
+      new Set(pendingRunIds.filter((runId) => !remaining.has(runId))),
+    );
+  }
+  const previous = state.chatMessages;
+  const previousPagination = state.chatHistoryPagination;
+  const next =
+    direction === "around"
+      ? messages
+      : direction === "older"
+        ? prependUniqueNativeMessages(messages, previous)
+        : prependUniqueNativeMessages(previous, messages);
+  const pagination = resolveChatHistoryPagination(
+    result,
+    state.chatHistoryPagination.totalMessages,
+  );
+  const movement = direction === "around" ? "tail" : direction;
+  const coverage = extendChatHistoryWindow(
+    state.chatHistoryPagination,
+    previous,
+    messages,
+    pagination,
+    result.newerCursor,
+    movement,
+  );
+  state.chatHistoryPagination = selectChatHistoryResidency(
+    next,
+    coverage,
+    movement,
+    state.readTranscriptAnchorSource?.(),
+  ).pagination;
+  if (direction === "around") {
+    publishChatSessionProjection(
+      state,
+      reduceSessionProjection(projection, { type: "residencyChanged", messages: next }),
+    );
+  } else {
+    publishChatSessionProjectionMessages(state, next);
+  }
+  commitCurrentChatHistorySnapshot(state);
+  if (state.chatMessages.some((message) => !previous.includes(message))) {
+    return "messages";
+  }
+  const admitted = state.chatHistoryPagination;
+  // Rejected pages cannot advance navigation. Hidden pages can still certify
+  // a new edge, even when no displayed body enters the resident window.
+  return admitted.hasMore !== previousPagination.hasMore ||
+    (admitted.hasMore &&
+      previousPagination.hasMore &&
+      (admitted.olderCursor !== previousPagination.olderCursor ||
+        admitted.needsBoundary !== previousPagination.needsBoundary)) ||
+    admitted.hasNewer !== previousPagination.hasNewer ||
+    admitted.newerCursor !== previousPagination.newerCursor ||
+    admitted.needsNewerBoundary !== previousPagination.needsNewerBoundary
+    ? "coverage"
+    : false;
 }
 
 export function commitCurrentChatHistorySnapshot(

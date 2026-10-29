@@ -4,7 +4,10 @@ import type { AgentActivityItem } from "../../../../packages/gateway-protocol/sr
 import type { ChatItem } from "../../lib/chat/chat-types.ts";
 import { readPreparedActivity } from "../../lib/chat/tool-call-grouping.ts";
 import { extractToolCardsCached } from "../../lib/chat/tool-cards.ts";
-import { coalesceToolActivityMessages } from "./chat-tool-activity-coalesce.ts";
+import {
+  coalesceToolActivityMessages,
+  retireCoalescedMessageSources,
+} from "./chat-tool-activity-coalesce.ts";
 
 type Fields = Record<string, unknown>;
 function result(id: string) {
@@ -112,4 +115,25 @@ it.each([true, false])("retains durable outcomes over stale live (raw=%s)", (has
   for (const rows of orders) {
     expect(outcomes(rows)).toEqual([activity()]);
   }
+});
+
+it("retires memo dependencies without changing a peer's published bundles", () => {
+  const first = invocation("retired");
+  const second = invocation("retained");
+  const initial = messages([...first.items(), ...second.items()]);
+  retireCoalescedMessageSources([first.output]);
+  expect(extractToolCardsCached(initial[0])[0]).toMatchObject({
+    callId: "retired",
+    completed: true,
+  });
+  expect(extractToolCardsCached(initial[1])[0]).toMatchObject({
+    callId: "retained",
+    completed: true,
+  });
+  const rebuilt = messages([...first.items(), ...second.items()]);
+  expect(sameReferences(rebuilt, initial)).toEqual([false, true]);
+  expect(extractToolCardsCached(rebuilt[0])[0]).toMatchObject({
+    callId: "retired",
+    completed: true,
+  });
 });

@@ -1,6 +1,14 @@
+import { createSessionProjection, reduceSessionProjection } from "@openclaw/gateway-client/browser";
 import { expectDefined } from "@openclaw/normalization-core/expect";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect, it } from "vitest";
+import { admitChatHistoryPage } from "../../../ui/src/pages/chat/chat-history-snapshot.ts";
+import { prepareChatHistorySegment } from "../../../ui/src/pages/chat/chat-history-window.ts";
+import { makeChatHost } from "../../../ui/src/pages/chat/chat-host.test-support.ts";
+import {
+  getChatSessionProjection,
+  publishChatSessionProjection,
+} from "../../../ui/src/pages/chat/history-merge.ts";
 import { captureRuntimeConfigAsyncReader } from "../../config/config.js";
 import {
   appendTranscriptEvent,
@@ -206,6 +214,80 @@ it("terminates an ordinary all-hidden tail without manufacturing a continuation"
       undefined,
       undefined,
     ]);
+  });
+});
+
+it("consumes a sparse empty tail's raw cursor after an earlier live receipt is admitted", async () => {
+  await withHistoryState(async () => {
+    const { read } = await seedHistory([
+      { role: "user", content: "Earlier question" },
+      { role: "user", content: "Late user receipt" },
+      makeMessage("Visible reply before the hidden suffix"),
+      ...Array.from({ length: 300 }, () => makeMessage("x".repeat(1024), { display: false })),
+    ]);
+    const tail = await read({ limit: 1, maxBytes: 1024 });
+    expect(tail).toMatchObject({ messages: [], hasMore: true });
+    expect(tail.newerCursor).toBeUndefined();
+    const cursor = expectDefined(
+      typeof tail.olderCursor === "string" ? tail.olderCursor : undefined,
+      "sparse raw older cursor",
+    );
+    const receiptPage = await read({ messageId: "message-1", limit: 1 });
+    expect(messageIds(receiptPage)).toEqual(["message-1"]);
+    const receipt = expectDefined(
+      Array.isArray(receiptPage.messages) ? receiptPage.messages[0] : undefined,
+      "durable user receipt",
+    );
+    const pagination = { hasMore: true as const, olderCursor: cursor };
+    const live = reduceSessionProjection(createSessionProjection(), {
+      type: "messagePersisted",
+      message: receipt,
+    });
+    const host = makeChatHost({
+      sessionKey: scope.sessionKey,
+      currentSessionId: scope.sessionId,
+      chatHistoryPagination: {
+        ...pagination,
+        segments: [prepareChatHistorySegment([], pagination)],
+      },
+    });
+    publishChatSessionProjection(host, live);
+    publishChatSessionProjection(host, getChatSessionProjection(host));
+    expect(host.chatMessages).toEqual([receipt]);
+    expect(host.chatHistoryPagination).toMatchObject({ hasMore: true, olderCursor: cursor });
+    expect(host.chatHistoryPagination.segments?.flatMap((segment) => segment.sources)).toEqual([
+      "id:message-1",
+    ]);
+
+    const older = await read({ cursor, limit: 80, maxBytes: 256 * 1024 });
+    expect(messageIds(older)).toEqual(["message-0", "message-1", "message-2"]);
+    expect(older.olderCursor).toBeUndefined();
+    const messages = expectDefined(
+      Array.isArray(older.messages) ? older.messages : undefined,
+      "older messages",
+    );
+    const result = {
+      messages,
+      newerCursor: typeof older.newerCursor === "string" ? older.newerCursor : undefined,
+    };
+    expect(admitChatHistoryPage(host, result, "older")).toBe("messages");
+    const expected = ["message-0", "message-1", "message-2"];
+    expect(host.chatMessages.map(readChatHistoryMessageId)).toEqual(expected);
+    expect(host.chatHistoryPagination.hasMore).toBe(false);
+    expect(host.chatHistoryPagination.hasNewer).toBeUndefined();
+    expect(host.chatHistoryPagination.segments?.[0]?.sources).toEqual(
+      expected.map((id) => `id:${id}`),
+    );
+    expect(host.chatHistoryPagination.segments?.at(-1)).toMatchObject({
+      sources: [],
+      olderCursor: cursor,
+      hasOlder: true,
+      hasNewer: false,
+    });
+    expect(admitChatHistoryPage(host, result, "older")).toBe(false);
+    expect(host.chatMessages.map(readChatHistoryMessageId)).toEqual(expected);
+    expect(host.chatHistoryPagination.hasMore).toBe(false);
+    expect(host.chatHistoryPagination.hasNewer).toBeUndefined();
   });
 });
 

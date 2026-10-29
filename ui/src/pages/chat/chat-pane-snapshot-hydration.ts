@@ -4,6 +4,10 @@ import { projectChatFields } from "./chat-field-projection.ts";
 import { chatHistoryRequests, type InitialChatSnapshotHydration } from "./chat-history-state.ts";
 import { ChatPaneReplyNavigation } from "./chat-pane-reply-navigation.ts";
 import {
+  retireChatTranscriptSources,
+  readChatTranscriptAnchorSource,
+} from "./chat-pane-transcript-residency.ts";
+import {
   applyChatCacheSnapshot,
   cacheChatSessionSnapshot,
   readChatSessionSnapshot,
@@ -13,6 +17,16 @@ import {
 import { snapshotStoreGeneration } from "./session-snapshot-invalidation-events.ts";
 
 export abstract class ChatPaneSnapshotHydration extends ChatPaneReplyNavigation {
+  protected retireTranscriptMessageSources(messages: readonly unknown[]): void {
+    this.retireReplyMessages();
+    retireChatTranscriptSources(this.paneId, this.transcript, this.state, messages);
+  }
+  protected readTranscriptAnchorSource(): string | null {
+    return this.visuallyPresented
+      ? readChatTranscriptAnchorSource(this.state, this.transcript)
+      : null;
+  }
+
   protected hydrateStoredChatSnapshot(
     state: NonNullable<ChatPaneSnapshotHydration["state"]>,
     sessionKey: string,

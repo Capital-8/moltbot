@@ -22,6 +22,7 @@ function fixture(request = vi.fn(), last = 4) {
     client: createGatewayBrowserClientFixture({ request }),
     sessions: {} as SessionCapability,
   });
+  result.state.currentSessionId = "reply-session";
   result.state.chatMessages = pair(last);
   result.state.chatHistoryPagination = {
     hasMore: true,
@@ -65,34 +66,37 @@ it.each([true, false])(
       __openclaw: { id: sourceId, seq: 1 },
     };
     const request = vi.fn();
-    if (found) {
-      request.mockResolvedValueOnce(page(pair(4), 6, true, 4));
+    request.mockResolvedValueOnce({
+      messages: found ? [target] : [],
+      sessionId: "reply-session",
+      ...(found ? {} : { windowReset: true }),
+    });
+    if (!found) {
+      request.mockResolvedValueOnce({
+        ...page(pair(4), 4, true, 2),
+        sessionId: "reply-session",
+      });
     }
-    request.mockResolvedValueOnce(
-      page([found ? target : nativeHistoryMessage(1), nativeHistoryMessage(2)], found ? 6 : 4),
-    );
     const { pane, state } = fixture(request, found ? 6 : 4);
     const messageId = found ? sourceId : "missing-message";
     vi.spyOn(pane, "updateComplete", "get").mockReturnValue(Promise.resolve(true));
     const revealMessage = vi.spyOn(pane.transcript, "revealMessage").mockReturnValue(true);
-    pane.openReplyMessage(messageId);
+    void pane.openReplyMessage(messageId);
     if (found) {
       expect(pane.currentReplyNavigationId(state.sessionKey)).toBe(sourceId);
       await vi.waitFor(() => expect(revealMessage).toHaveBeenCalledWith(sourceId));
-      for (const [index, offset] of [2, 4].entries()) {
-        expect(request).toHaveBeenNthCalledWith(
-          index + 1,
-          "chat.history",
-          {
-            sessionKey: state.sessionKey,
-            limit: 1000,
-            maxBytes: 3 * 1024 * 1024,
-            toolResultMaxChars: 2_000,
-            cursor: `older-${offset}`,
-          },
-          { signal: expect.any(AbortSignal) },
-        );
-      }
+      expect(request).toHaveBeenCalledExactlyOnceWith(
+        "chat.history",
+        {
+          sessionKey: state.sessionKey,
+          sessionId: "reply-session",
+          messageId: sourceId,
+          limit: 1,
+          maxBytes: 256 * 1024,
+          toolResultMaxChars: 2_000,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     } else {
       await vi.waitFor(() => expect(state.lastError).toBe("The original message is unavailable."));
       expect(revealMessage).not.toHaveBeenCalled();
@@ -106,7 +110,7 @@ it("abandons reply navigation when the pane switches sessions", async () => {
   const request = vi.fn(() => deferred.promise);
   const { pane, state } = fixture(request);
   const revealMessage = vi.spyOn(pane.transcript, "revealMessage");
-  pane.openReplyMessage(sourceId);
+  void pane.openReplyMessage(sourceId);
   await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
   state.sessionKey = "agent:main:other";
   pane.resetOlderMessagesViewport();
@@ -116,4 +120,51 @@ it("abandons reply navigation when the pane switches sessions", async () => {
   expect(pane.currentReplyNavigationId(state.sessionKey)).toBeNull();
   expect(revealMessage).not.toHaveBeenCalled();
   expect(request).toHaveBeenCalledOnce();
+});
+
+it.each(["session", "agent", "connection"])(
+  "retires a held reply reset across a successor %s",
+  async (successor) => {
+    const deferred = createDeferred<ReturnType<typeof page>>();
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [], windowReset: true })
+      .mockImplementationOnce(() => deferred.promise);
+    const { pane, state } = fixture(request);
+    const reveal = vi.spyOn(pane.transcript, "revealMessage");
+    if (successor === "agent") {
+      state.sessionKey = "global";
+      state.assistantAgentId = "main";
+    }
+    const navigation = pane.openReplyMessage(sourceId);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    if (successor === "session") {
+      state.sessionKey = "agent:main:other";
+    } else if (successor === "agent") {
+      state.assistantAgentId = "other";
+    } else {
+      state.connectionEpoch += 1;
+    }
+    state.lastError = "successor error";
+    deferred.resolve(page(pair(4)));
+    await navigation;
+    expect(state.lastError).toBe("successor error");
+    expect(reveal).not.toHaveBeenCalled();
+  },
+);
+
+it("makes a reply lookup superseded by same-session history visibly retryable", async () => {
+  const deferred = createDeferred<ReturnType<typeof page>>();
+  const request = vi
+    .fn()
+    .mockImplementationOnce(() => deferred.promise)
+    .mockResolvedValueOnce({ ...page(pair(4)), sessionId: "reply-session" });
+  const { pane, state } = fixture(request);
+  const navigation = pane.openReplyMessage(sourceId);
+  await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+  const { loadChatHistory } = await import("./chat-history.ts");
+  await loadChatHistory(state, { deferBranches: true, supersedeInFlight: true });
+  deferred.resolve(page([]));
+  await navigation;
+  expect(state.lastError).toBe("History refreshed before this page loaded. Try again.");
 });

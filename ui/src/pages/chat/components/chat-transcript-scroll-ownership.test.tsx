@@ -4,7 +4,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { makeChatHost } from "../chat-host.test-support.ts";
 import { stubAnimationFrames } from "../chat-view.test-helpers.ts";
-import { handleChatScroll, handleChatScrollTakeover } from "../scroll.ts";
+import { canAutoFollowChat, handleChatScroll, handleChatScrollTakeover } from "../scroll.ts";
 import {
   configureNativeKeyTarget,
   nativeControlNavigationCases,
@@ -42,7 +42,7 @@ function contentRow(key: string, label = key): TestContentRow {
 function createPolicyTranscript(paneId: string) {
   const policy = makeChatHost({ chatHasAutoScrolled: true });
   const transcript = makeTranscript(() => paneId, {
-    canFollowEnd: () => !policy.chatFollowLocked,
+    canFollowEnd: () => canAutoFollowChat(policy),
     onReaderScroll: (towardEnd) => handleChatScrollTakeover(policy, towardEnd),
   });
   return {

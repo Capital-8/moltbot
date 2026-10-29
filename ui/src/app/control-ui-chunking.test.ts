@@ -89,6 +89,38 @@ describe("Control UI build chunking", () => {
         .some((chunk) => owner in chunk.modules),
     ).toBe(true);
   });
+  it("keeps destructive history actions outside the eager cancellation owner", async () => {
+    const actions = modulePath("../pages/chat/chat-history-actions.ts");
+    const runtime = modulePath("../pages/chat/chat-history-actions.runtime.ts");
+    const entry = "\0history-action-fixture";
+    const sources = new Map([
+      [entry, `export { cancel, clear } from ${JSON.stringify(actions)};`],
+      [
+        actions,
+        `export const cancel = () => true; export const clear = () => import(${JSON.stringify(runtime)});`,
+      ],
+      [runtime, "export const clear = () => 'completed';"],
+    ]);
+    const result = await buildFixture(entry, sources);
+    if (Array.isArray(result) || !("output" in result)) {
+      throw new Error("Expected one in-memory build");
+    }
+    const chunks = result.output.filter((asset) => asset.type === "chunk");
+    const eager = chunks.find((chunk) => actions in chunk.modules)!;
+    const cold = chunks.find((chunk) => runtime in chunk.modules)!;
+    const closure = new Set<string>();
+    const visit = (file: string) => {
+      if (!closure.has(file)) {
+        closure.add(file);
+        chunks.find((chunk) => chunk.fileName === file)?.imports.forEach(visit);
+      }
+    };
+    visit(chunks.find((chunk) => chunk.isEntry)!.fileName);
+    expect(closure.has(eager.fileName)).toBe(true);
+    expect(closure.has(cold.fileName)).toBe(false);
+    expect(eager.dynamicImports).toContain(cold.fileName);
+  });
+
   it("keeps optional parsing and device signing outside the eager graph", async () => {
     const zod = modulePath("../../node_modules/zod/index.js");
     const json5 = modulePath("../../node_modules/json5/dist/index.mjs");

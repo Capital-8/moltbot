@@ -106,6 +106,11 @@ export abstract class ChatPaneLayoutRender extends ChatPaneHeaderLayout {
   private toolIcons?: PluginToolIcons;
   private readonly attachmentCatalog = new PaneAttachmentCatalog();
 
+  protected override retireTranscriptMessageSources(messages: readonly unknown[]): void {
+    this.attachmentCatalog.dispose();
+    super.retireTranscriptMessageSources(messages);
+  }
+
   override dispose(): void {
     this.attachmentCatalog.dispose();
     super.dispose();

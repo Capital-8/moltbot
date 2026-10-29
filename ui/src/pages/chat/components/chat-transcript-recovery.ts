@@ -16,18 +16,13 @@ import { createTranscriptMemo } from "./chat-transcript-memo.ts";
 
 const expansionPrunes = createTranscriptMemo<void>();
 
-export function projectTranscriptRecovery(
+export function pruneTranscriptRecovery(
   expandedAssistantMessages: Map<string, AssistantMessageExpansionState>,
   props: Pick<
     ChatThreadProps,
-    | "fullMessageAgentId"
-    | "messages"
-    | "toolMessages"
-    | "pendingInputs"
-    | "sessionKey"
-    | "loadFullAssistantMessage"
+    "fullMessageAgentId" | "messages" | "toolMessages" | "pendingInputs"
   >,
-) {
+): void {
   if (expandedAssistantMessages.size > 0) {
     expansionPrunes(
       expandedAssistantMessages,
@@ -45,7 +40,24 @@ export function projectTranscriptRecovery(
           ...(props.pendingInputs ?? []).map((input) => input.message),
         ]),
     );
+  } else {
+    expansionPrunes(expandedAssistantMessages, [], () => {});
   }
+}
+
+export function projectTranscriptRecovery(
+  expandedAssistantMessages: Map<string, AssistantMessageExpansionState>,
+  props: Pick<
+    ChatThreadProps,
+    | "fullMessageAgentId"
+    | "messages"
+    | "toolMessages"
+    | "pendingInputs"
+    | "sessionKey"
+    | "loadFullAssistantMessage"
+  >,
+) {
+  pruneTranscriptRecovery(expandedAssistantMessages, props);
   const recoveryKey = (id: string) => messageRecoveryKey(props.fullMessageAgentId, id);
   const expand = (messageId: string) => {
     const key = recoveryKey(messageId);

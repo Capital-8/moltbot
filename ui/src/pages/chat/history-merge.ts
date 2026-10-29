@@ -27,7 +27,11 @@ import {
   resolveUiSelectedSessionAgentId,
   resolveUiConversationIdentity,
 } from "../../lib/sessions/session-key.ts";
-import type { ChatHistoryCursor } from "./chat-history-pagination.ts";
+import {
+  type ChatHistoryResidencyOwner,
+  projectResidentChatHistory,
+  publishResidentChatMessages,
+} from "./chat-history-window.ts";
 import { matchesCompactionOperation } from "./chat-progress.ts";
 import { reconcileChatReasoning, type ChatReasoningHost } from "./chat-reasoning.ts";
 import { persistedSteerTargetRunId } from "./stream-causal-boundary.ts";
@@ -38,6 +42,7 @@ const chatSessionProjections = new WeakMap<
   {
     projection?: SessionProjectionState;
     runId?: string;
+    readerSource?: string | null;
   }
 >();
 // Display ownership outlives active-state cleanup. It is not the foreground
@@ -50,11 +55,11 @@ const CHAT_PROJECTION_SCOPE_KEYS = [
   "activeLeafEntryId",
 ] as const;
 
-type ChatSessionProjectionOwner = ChatComposerScope &
+type ChatSessionProjectionOwner = ChatHistoryResidencyOwner &
+  ChatComposerScope &
   ChatReasoningHost & {
     sessionKey: string;
     chatMessages: unknown[];
-    chatHistoryCursor?: ChatHistoryCursor;
     chatSubmissions?: ApplicationChatSubmissions;
     currentSessionId?: string | null;
     chatDisplayedLeafEntryId?: string | null;
@@ -295,6 +300,23 @@ export function publishChatSessionProjection(
   let projection = incomingProjection;
   const current = chatSessionProjections.get(owner);
   const previous = current?.projection;
+  const readerSource =
+    previous && !chatProjectionScopeChanged(previous.scope, projection.scope)
+      ? owner.readTranscriptAnchorSource?.()
+      : null;
+  if (
+    owner.chatHistoryPagination?.segments &&
+    (previous?.messages !== projection.messages || current?.readerSource !== readerSource)
+  ) {
+    const admitted = projectResidentChatHistory(
+      projection,
+      owner.chatHistoryPagination,
+      readerSource,
+      owner.lastLocalTerminalReconcile?.runId,
+    );
+    projection = admitted.projection;
+    owner.chatHistoryPagination = admitted.pagination;
+  }
   if (
     retainPairingQr &&
     previous &&
@@ -341,6 +363,7 @@ export function publishChatSessionProjection(
   chatSessionProjections.set(owner, {
     projection,
     runId: retainedRunId,
+    readerSource,
   });
   reconcileChatReasoning(owner, projection, current?.projection?.messages);
   // Run-only transitions share the transcript array. Preserve their ownership
@@ -348,12 +371,7 @@ export function publishChatSessionProjection(
   if (current?.projection?.messages === projection.messages) {
     return;
   }
-  if (
-    owner.chatMessages.length !== projection.messages.length ||
-    owner.chatMessages.some((message, index) => message !== projection.messages[index])
-  ) {
-    owner.chatMessages = [...projection.messages];
-  }
+  publishResidentChatMessages(owner, previous, projection);
 }
 
 /** A retired connection cannot lend pairing credentials to its replacement's history. */
@@ -651,6 +669,7 @@ export function reduceChatSessionProjection(
   options: {
     scope?: SessionProjectionScope;
     runActive?: boolean;
+    messageReceipt?: { accepted: boolean };
   } = {},
 ): SessionProjectionState {
   const scope = options.scope ?? readChatSessionProjectionScope(owner);
@@ -691,6 +710,11 @@ export function reduceChatSessionProjection(
     });
   }
   projection = reduceSessionProjection(projection, { ...preparedEvent, scope });
+  if (options.messageReceipt && preparedEvent.type === "messagePersisted") {
+    // Persistence acceptance precedes residency filtering. Stream cleanup must
+    // not depend on whether the accepted durable row remains on screen.
+    options.messageReceipt.accepted = projection.messages.includes(preparedEvent.message);
+  }
   if (event.type === "snapshotLoaded") {
     projection = admitRetainedSteerProjection(owner, projection);
   }

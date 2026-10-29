@@ -92,9 +92,9 @@ export function prependUniqueNativeMessages(messages: unknown[], current: unknow
       incomingSources.add(source);
     }
   }
-  const overlappingSources = new Set<string>();
+  const overlappingSources = new Map<string, number>();
   const duplicateCounts = new Map<string, number>();
-  for (const message of current) {
+  for (const [index, message] of current.entries()) {
     const source = nativeHistoryMessageSourceIdentity(message);
     if (!source || !incomingSources.has(source)) {
       continue;
@@ -103,22 +103,38 @@ export function prependUniqueNativeMessages(messages: unknown[], current: unknow
     // content comparison; keep counts local so hydrated projections stay fresh.
     const identity = nativeHistoryMessageIdentity(message);
     if (identity) {
-      overlappingSources.add(source);
+      overlappingSources.set(source, index + 1);
       duplicateCounts.set(identity, (duplicateCounts.get(identity) ?? 0) + 1);
     }
   }
-  const uniqueMessages = messages.filter((message) => {
+  const insertions = new Map<number, unknown[]>();
+  let after = 0;
+  for (const message of messages) {
     const source = nativeHistoryMessageSourceIdentity(message);
-    if (!source || !overlappingSources.has(source)) {
-      return true;
-    }
-    const identity = nativeHistoryMessageIdentity(message);
+    const overlap = source ? overlappingSources.get(source) : undefined;
+    const identity = overlap !== undefined ? nativeHistoryMessageIdentity(message) : null;
     const remaining = identity ? (duplicateCounts.get(identity) ?? 0) : 0;
-    if (!identity || remaining === 0) {
-      return true;
+    if (overlap !== undefined && identity && remaining > 0) {
+      duplicateCounts.set(identity, remaining - 1);
+      after = Math.max(after, overlap);
+      continue;
     }
-    duplicateCounts.set(identity, remaining - 1);
-    return false;
-  });
-  return [...uniqueMessages, ...current];
+    // Live receipts may already occupy an interior source of this server page.
+    // Insert disjoint sources after that observed group, keeping current objects
+    // and the existing extra-occurrence policy for overlapping projections.
+    const position = source && overlap === undefined ? after : 0;
+    const queued = insertions.get(position) ?? [];
+    queued.push(message);
+    insertions.set(position, queued);
+  }
+  const merged: unknown[] = [];
+  for (let index = 0; index <= current.length; index += 1) {
+    for (const message of insertions.get(index) ?? []) {
+      merged.push(message);
+    }
+    if (index < current.length) {
+      merged.push(current[index]);
+    }
+  }
+  return merged;
 }

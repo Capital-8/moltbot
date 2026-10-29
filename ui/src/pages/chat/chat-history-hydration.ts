@@ -43,6 +43,7 @@ import {
   readRunProjections,
   applyHistoryRun,
 } from "./chat-history-stream.ts";
+import { extendChatHistoryWindow } from "./chat-history-window.ts";
 import { loadChatLiveTools } from "./chat-live-tools.ts";
 import { applyChatPendingInputs } from "./chat-pending-inputs.ts";
 import { isChatRunRecoveryStatus, reconcileChatRunStartup } from "./chat-run-startup.ts";
@@ -318,6 +319,18 @@ export async function hydrateChatHistory(
         })
       : null;
     const authoritativeMessages = reconciledHistory?.messages ?? visibleMessages;
+    state.chatHistoryPagination =
+      reconciledHistory && previousPagination.hasNewer
+        ? previousPagination
+        : extendChatHistoryWindow(
+            previousPagination,
+            previousTerminalMessages,
+            visibleMessages,
+            nextPagination,
+            res.newerCursor,
+            "tail",
+            reconciledHistory?.retainedCoverage ? reconciledHistory.pagination : undefined,
+          );
     const scope = readChatSessionProjectionScope(state, {
       sessionKey,
       agentId: requestAgentId,
@@ -348,7 +361,6 @@ export async function hydrateChatHistory(
     if (hasActiveLeafEntryId) {
       state.chatDisplayedLeafEntryId = nextDisplayedLeafEntryId;
     }
-    state.chatHistoryPagination = reconciledHistory?.pagination ?? nextPagination;
     delete requests.windowReset;
     state.currentSessionId = nextSessionId;
     applyChatPendingInputs(state, res.pendingInputs, {

@@ -214,7 +214,11 @@ describe("rewind composer ownership", () => {
       const response = createDeferred<{ editorText: string }>();
       const history = createDeferred<ChatHistoryResult>();
       const requestedHistory = createDeferred();
-      const canonical = { role: "assistant", content: "retained prefix" };
+      const canonical = {
+        role: "assistant",
+        content: "retained prefix",
+        __openclaw: { id: "canonical", seq: 1 },
+      };
       const state = createRewindHost(response.promise, "main", () => {
         requestedHistory.resolve();
         return history.promise;

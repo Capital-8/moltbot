@@ -32,6 +32,7 @@ import {
   acceptsHistoryResult,
   type InitialChatHistoryReceipt,
 } from "./chat-history-state.ts";
+import { chatHistoryWindowBoundary } from "./chat-history-window.ts";
 import type { ChatHistorySessions, ChatState } from "./chat-state-contract.ts";
 import type { ChatHistoryState } from "./chat-transcript-metadata.ts";
 import type { ChatHistoryRunObservation } from "./run-lifecycle.ts";
@@ -64,10 +65,10 @@ export function captureChatHistoryRun(
     : undefined;
 }
 
-// Keep startup small, then amortize older-history reads and prepend work across
-// larger pages. The Gateway owns the response byte and single-message limits.
-const CHAT_HISTORY_OLDER_PAGE_LIMIT = 1000;
-const CHAT_HISTORY_OLDER_PAGE_MAX_BYTES = 3 * 1024 * 1024;
+// Directional pages fit the reloadable resident window. Source groups and the
+// Gateway's hard byte/fetchable-message contract still own individual replies.
+const CHAT_HISTORY_OLDER_PAGE_LIMIT = 80;
+const CHAT_HISTORY_OLDER_PAGE_MAX_BYTES = 256 * 1024;
 
 export function attachHistoryActivity<Result extends ChatHistoryResponse>(result: Result): Result {
   if (isHistoryCursor(result) && result.kind === "reset") {
@@ -368,7 +369,9 @@ export function chatHistoryOlderSelector(state: ChatState): OlderHistorySelector
   const pagination = state.chatHistoryPagination;
   if (pagination.hasMore) {
     if (pagination.needsBoundary) {
-      const messageId = nativeHistoryMessageSourceId(state.chatMessages[0]);
+      const messageId = nativeHistoryMessageSourceId(
+        chatHistoryWindowBoundary(state.chatMessages, pagination, "older"),
+      );
       const sessionId = state.currentSessionId?.trim();
       if (messageId && sessionId) {
         return { messageId, sessionId };

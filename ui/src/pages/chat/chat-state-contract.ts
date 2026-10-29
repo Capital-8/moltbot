@@ -114,6 +114,10 @@ export type ChatState = StreamCausalBoundaryState & {
   chatBranchesConnectionEpoch?: number | null;
   /** Reports transcript loading edges; see CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT. */
   transcriptLoadingChanged?: () => void;
+  /** Release dormant derived sources synchronously at canonical body retirement. */
+  transcriptMessagesRetired?: (messages: readonly unknown[]) => void;
+  readTranscriptAnchorSource?: () => string | null;
+  beforeHistoryTailRestore?: () => void;
   /** Reports transient read recovery to the shell connection indicator. */
   historyRecoveryChanged?: () => void;
 } & ToolStreamState;

@@ -34,9 +34,10 @@ export function createRefreshChatPane(client?: GatewayBrowserClient) {
 
 export type TestChatPane = Omit<BaseTestChatPane, "loadOlderMessages"> & {
   loadOlderMessages: (readerIntent?: boolean) => Promise<boolean>;
+  loadNewerMessages: () => Promise<boolean>;
   stagedOlder: { page: unknown; load: Promise<void> | null };
   replyMessageStatus: (messageId: string) => string | undefined;
-  openReplyMessage: (messageId: string) => void;
+  openReplyMessage: (messageId: string) => Promise<void>;
   currentReplyNavigationId: (sessionKey: string) => string | null;
   visuallyPresented: boolean;
 };

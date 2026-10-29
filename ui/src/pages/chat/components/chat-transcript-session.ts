@@ -6,8 +6,9 @@ import type { ApplicationContext } from "../../../app/context.ts";
 import { cancelLayout, scheduleLayout } from "../../../lib/layout-frame.ts";
 import type { PresentationValue } from "../../../lib/presentation.ts";
 import type { AssistantMessageExpansionState } from "../chat-message-recovery.ts";
-import type { ChatSessionScrollPosition } from "../scroll.ts";
+import type { ChatReadingBookmark, ChatSessionScrollPosition } from "../scroll.ts";
 import type { ChatMessageEntryAnimations } from "./chat-message-entry.ts";
+import { flushMessageOverflowMeasurements } from "./chat-message-overflow.ts";
 import type { TranscriptAnnouncement } from "./chat-transcript-announcement.ts";
 import { readConnectedTranscriptRows } from "./chat-transcript-geometry.ts";
 import type {
@@ -27,12 +28,14 @@ export type ChatTranscriptPendingScrollOffset = {
 };
 
 export type TranscriptCallbacks = {
+  getSessionId?: () => string | null;
+  restoreBookmark?: (bookmark: ChatReadingBookmark, isCurrent: () => boolean) => Promise<boolean>;
   /** Sidebar commits originate on the pane element, separate from its state owner. */
   geometryEventTarget?: HTMLElement;
   getComposerFloat?: () => HTMLElement | null;
   getComposerActivityLayout?: () => ComposerActivityLayout | null;
   onViewportResize?: () => void;
-  onReaderScroll?: (towardEnd?: boolean) => void;
+  onReaderScroll?: (towardEnd?: boolean, source?: "bookmark") => void;
   /** The pane owns reader intent; geometry-only follow must honor that policy. */
   canFollowEnd?: () => boolean;
 };
@@ -104,6 +107,7 @@ export function createTranscriptPresentation(
   beforeMeasure: () => void,
 ) {
   const readConnectedRows = (): (() => boolean) | null => {
+    flushMessageOverflowMeasurements();
     const apply = readConnectedTranscriptRows(scrollElement(), virtualizer, rowElements());
     return apply
       ? () => {

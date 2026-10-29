@@ -124,7 +124,7 @@ it("requests the configured default agent for the global workspace alias", async
 });
 
 it("rewinds cached history and restores only valid composer attachments", async () => {
-  const kept = message("assistant", "kept prefix");
+  const kept = message("assistant", "kept prefix", { id: "kept", seq: 1 });
   const result = {
     editorText: "@Alex edit this",
     editorAttachments: [
@@ -173,10 +173,19 @@ it("invalidates a rewind's source cache without changing the newly selected draf
 
 it("reconciles committed rewind history without overwriting a replacement draft", async () => {
   const pending = createDeferred<SessionsRewindResult>();
-  const canonical = message("assistant", "canonical history after rewind");
+  const canonical = message("assistant", "canonical history after rewind", {
+    id: "canonical",
+    seq: 1,
+  });
   const state = rewindState({ messages: [canonical] }, pending.promise);
+  const issued = createDeferred();
+  state.sessions.rewind.mockImplementation(() => {
+    issued.resolve();
+    return pending.promise;
+  });
   state.chatMessages = [message("assistant", "stale history")];
   const loading = rewind(state);
+  await issued.promise;
   state.connectionEpoch += 2;
   state.chatMessage = "new connection draft";
   const attachments = [
@@ -216,7 +225,7 @@ it("retries branch metadata after a reconnect read fails", async () => {
 it("rejects in-flight history after switching branches on the same session", async () => {
   const pending = createDeferred<ChatHistoryResult>();
   const old = message("assistant", "private old branch");
-  const next = message("assistant", "selected branch");
+  const next = message("assistant", "selected branch", { id: "selected", seq: 1 });
   const state = withSessions({ messages: [next] }, { switchBranch: vi.fn().mockResolvedValue({}) });
   state.sessionKey = "agent:main:branches";
   state.chatMessages = [old];
@@ -233,10 +242,20 @@ it("rejects in-flight history after switching branches on the same session", asy
 
 it("reconciles a committed branch switch after a same-client reconnect", async () => {
   const pending = createDeferred<object>();
-  const next = message("assistant", "selected branch after reconnect");
-  const state = withSessions({ messages: [next] }, { switchBranch: vi.fn(() => pending.promise) });
+  const next = message("assistant", "selected branch after reconnect", { id: "selected", seq: 1 });
+  const issued = createDeferred();
+  const state = withSessions(
+    { messages: [next] },
+    {
+      switchBranch: vi.fn(() => {
+        issued.resolve();
+        return pending.promise;
+      }),
+    },
+  );
   state.chatMessages = [message("assistant", "stale branch")];
   const loading = switchChatHistoryBranch(state, "stale-leaf");
+  await issued.promise;
   state.connectionEpoch += 2;
   pending.resolve({});
   await expect(loading).resolves.toBe(false);
@@ -325,10 +344,19 @@ it("clears live projection ownership after history access is denied", async () =
 });
 
 it("materializes live commentary when history replaces active tool activity", async () => {
-  const result = { role: "toolResult", toolCallId: "call-1", content: "tool output", timestamp: 3 };
+  const result = {
+    role: "toolResult",
+    toolCallId: "call-1",
+    content: "tool output",
+    timestamp: 3,
+    __openclaw: { id: "tool-result", seq: 2 },
+  };
   const state = createState({
     ...activeHistory("run-live"),
-    messages: [{ role: "user", content: "do it", timestamp: 1 }, result],
+    messages: [
+      { role: "user", content: "do it", timestamp: 1, __openclaw: { id: "user", seq: 1 } },
+      result,
+    ],
   });
   state.chatRunId = "run-live";
   state.settings = { ...state.settings, chatPersistCommentary: false };

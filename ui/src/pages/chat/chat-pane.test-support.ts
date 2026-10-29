@@ -141,6 +141,9 @@ export type TestChatPane = HTMLElement &
     loadCatalogSession: ChatPaneRuntime["loadCatalogSession"];
     prependUniqueCatalogMessages: (messages: unknown[]) => unknown[];
     loadOlderMessages: (readerIntent?: boolean) => Promise<boolean>;
+    readTranscriptAnchorSource: () => string | null;
+    retireTranscriptMessageSources: (messages: readonly unknown[]) => void;
+    retireTranscriptReads: (keepLiveTools?: boolean) => void;
     resetOlderMessagesViewport: () => void;
     readReplyMessage: (messageId: string) => unknown;
     hasOlderMessages: () => boolean;
@@ -229,6 +232,11 @@ export function createTestChatPane(
   };
   state.updateSidebarActivePanel = () => {};
   pane.state = state;
+  // This lightweight host skips start(); bind the same transcript custody
+  // callbacks so page adoption exercises the real pane lifetime owners.
+  state.readTranscriptAnchorSource = () => pane.readTranscriptAnchorSource();
+  state.transcriptMessagesRetired = (messages) => pane.retireTranscriptMessageSources(messages);
+  state.beforeHistoryTailRestore = () => pane.retireTranscriptReads();
   pane.chatState.attach(state);
   pane.connectedClient = client;
   pane.connectionGeneration = 4;

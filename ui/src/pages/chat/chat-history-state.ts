@@ -416,7 +416,11 @@ export function readChatTranscriptAttachmentSource(state: ChatState) {
     connectionEpoch: state.connectionEpoch,
     messages: state.chatMessages,
     pagination: state.chatHistoryPagination,
-    coverage: known ? (state.chatHistoryPagination.hasMore ? "partial" : "complete") : "unknown",
+    coverage: known
+      ? state.chatHistoryPagination.hasMore || state.chatHistoryPagination.hasNewer
+        ? "partial"
+        : "complete"
+      : "unknown",
     loading: isChatHistoryLoading(load),
     error: load.phase === "failed" ? load.message : undefined,
   } as const;
