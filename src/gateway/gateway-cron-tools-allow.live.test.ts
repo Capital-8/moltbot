@@ -151,7 +151,9 @@ describeLive("cron tool allowlists through live harnesses", () => {
               "--tools",
               cap,
               "--message",
-              `${instruction} Reply with the file contents. If the requested tool is unavailable, reply exactly NO_TOOLS. An exec/wait wrapper with no callable tools does not provide file access.`,
+              // Codex code_mode_only models hide allowlisted dynamic tools behind the
+              // code-mode exec wrapper; name that route so allowed caps stay reachable.
+              `${instruction} If it is not directly callable, find it in the code-mode exec wrapper's ALL_TOOLS and call it through tools. Reply with the file contents. Reply exactly NO_TOOLS only when the tool is in neither place.`,
             ])) as CronJob;
             expect(updated.payload).toMatchObject({ toolsAllow: cap ? [cap] : [] });
 
@@ -239,7 +241,12 @@ describeLive("cron tool allowlists through live harnesses", () => {
             } else {
               const toolName = cap === "bash" ? "exec" : "read";
               const call = calls.find((entry) => entry.name === toolName);
-              expect(call, `${runtime} cap ${cap}: expected ${toolName} call`).toBeDefined();
+              expect(
+                call,
+                `${runtime} cap ${cap}: expected ${toolName} call; calls=${JSON.stringify(
+                  calls.map((entry) => entry.name),
+                )} assistants=${JSON.stringify(assistants)}`,
+              ).toBeDefined();
               const result = results.find((entry) => entry.toolCallId === call?.id);
               expect(result).toMatchObject({ toolName, isError: false });
               expect(JSON.stringify(result?.content)).toContain(marker);
