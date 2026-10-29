@@ -229,6 +229,7 @@ patchedDependencies:
   ghostty-web@0.4.0: eb0a0b91bbf843ba8dceeade968072a6c7a6be402fdd1e80d466e54241b62fa6
   matrix-js-sdk@42.4.0: 12d9bb9bdc53b7b96d8d887d0bea6b3072d1fef488b51102caec19fb651c8e92
   vitest@5.0.5: c7225d77fb8a242bd88070b9787737119caea3ba29fdccb38419b9fe4c196e92
+  zod@3.25.76: 2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d
 
 importers:
 
@@ -10437,7 +10438,7 @@ snapshots:
       '@lit/context': 1.1.6
       lit: 3.3.3
       signal-utils: 0.21.1(signal-polyfill@0.2.2)
-      zod: 3.25.76
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
     transitivePeerDependencies:
       - signal-polyfill
 
@@ -10447,8 +10448,8 @@ snapshots:
       '@preact/signals-core': 1.14.4
       date-fns: 4.4.0
       lit: 3.3.3
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
+      zod-to-json-schema: 3.25.2(zod@3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d))
 
   '@agentclientprotocol/claude-agent-acp@0.79.0(@anthropic-ai/sdk@0.127.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(supports-color@10.2.2)(zod@4.6.7))':
     dependencies:
@@ -11528,7 +11529,7 @@ snapshots:
       eventemitter3: 5.0.4
       lodash.transform: 4.6.0
       uuid: 14.0.2
-      zod: 3.25.76
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
 
   '@discordjs/voice@0.19.2(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)':
     dependencies:
@@ -18461,15 +18462,15 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)):
     dependencies:
-      zod: 3.25.76
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
 
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
 
-  zod@3.25.76: {}
+  zod@3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d): {}
 
   zod@4.6.7: {}
 

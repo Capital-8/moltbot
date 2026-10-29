@@ -10,6 +10,7 @@ import YAML from "yaml";
 import { pnpmLockfileDocuments } from "./lib/pnpm-lockfile-documents.mjs";
 
 const ALLOWED_PATCHED_DEPENDENCIES = new Map([
+  ["zod@3.25.76", "patches/zod@3.25.76.patch"],
   ["@discord/embedded-app-sdk@2.5.0", "patches/@discord__embedded-app-sdk@2.5.0.patch"],
   ["@openclaw/proxyline@0.3.12", "patches/@openclaw__proxyline@0.3.12.patch"],
   ["chrome-devtools-mcp@1.9.0", "patches/chrome-devtools-mcp@1.9.0.patch"],

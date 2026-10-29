@@ -144,3 +144,4 @@ patchedDependencies:
   "@awesome.me/webawesome@3.13.0": patches/@awesome.me__webawesome@3.13.0.patch
   "@openclaw/proxyline@0.3.12": patches/@openclaw__proxyline@0.3.12.patch
   ghostty-web@0.4.0: patches/ghostty-web@0.4.0.patch
+  zod@3.25.76: patches/zod@3.25.76.patch
