@@ -52,7 +52,7 @@ status snapshots about one PR usually ends in an outcome claim.
 ## 2. Choose subject pages
 
 For each group, find candidate pages with `knowledge_grep` and
-`knowledge_lookup`, and read their State and Timeline. Ignore withdrawn pages and
+`knowledge_lookup`, and read their State. Ignore withdrawn pages and
 fixture pages.
 
 - The **primary subject** is what the claim asserts something about; list it
@@ -80,7 +80,7 @@ superseded claims cannot be relinked.
 ## 3. Create missing pages and relink to them
 
 Linking every claim to the nearest existing page can bury a real subject in a
-broad page's Timeline. Create a page when:
+broad page. Create a page when:
 
 - a discrete subject (a feature, project, tool or substantial PR) has roughly
   five or more claims, or has its own design, proof and outcome history; or
@@ -88,11 +88,11 @@ broad page's Timeline. Create a page when:
   has no page, and has identity evidence (for example the PR author shown by
   `gh pr view`).
 
-Do not create a page for a single mention or a one-off fix that a Timeline entry
+Do not create a page for a single mention or a one-off fix that a dated claim
 covers. Use `knowledge_save_page` with the ontology `type`, aliases, and the
 identity evidence as `source`. Person pages use `identity.status: partial` unless
-the identity is fully established. Write a short State that cites the claims and
-a dated Timeline. Link the new page from its parent page.
+the identity is fully established. Write a short State that cites the claims; its
+Timeline is derived from them. Link the new page from its parent page.
 
 Then relink the group's claims, including the snapshots step 4 will supersede.
 The new page becomes each claim's primary subject. Keep the broad page the
@@ -148,7 +148,7 @@ decision, a preference, a landed or released change, a new capability, a
 resolved open question, or page text that later claims show to be wrong.
 
 - Collapse a series of progress snapshots into its outcome. Snapshots (CI runs,
-  open PRs, local commits) are at most dated Timeline entries, never State.
+  open PRs, local commits) are at most dated event claims, never State.
 - Check mutable status live before writing it as current (for example
   `gh pr view` for merge state) and say when you checked. A merge is not a
   deployment, and a deployment is not proof that a given Gateway runs the code.

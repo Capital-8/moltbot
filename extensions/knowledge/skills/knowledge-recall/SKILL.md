@@ -49,7 +49,8 @@ because they appeared in an answer.
 
 Use knowledge_chronicle_day for a day/week, knowledge_chronicle_since for an
 occurrence range, knowledge_timeline for an entity's dated records or a chosen
-timeField, and knowledge_chronicle_last_seen for latest dated context. Resolve
+timeField (group: "source" gives the entity's Timeline: one row per source with
+its note), and knowledge_chronicle_last_seen for latest dated context. Resolve
 an entity to a stable page ID first. Dated mentions do not prove attendance.
 For keyword/inventory queries add since/until and timeField to knowledge_grep
 or knowledge_records. occurred_at answers when something happened; recorded_at
