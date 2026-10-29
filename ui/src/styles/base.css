@@ -38,6 +38,7 @@
   --chat-send-foreground: var(--primary-foreground);
   --chat-composer-surface: var(--popover);
   --chat-user-surface: var(--accent-subtle);
+  --chat-session-link-surface: color-mix(in srgb, var(--accent-subtle) 72%, var(--bg-muted));
   --session-hovercard-surface: color-mix(in srgb, var(--card) 94%, black 6%);
   --session-hovercard-attribution-surface: color-mix(in srgb, var(--text) 6%, transparent);
 

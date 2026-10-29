@@ -25,6 +25,12 @@ const ACCENT_CSS_VARIABLES = [
   "--focus-glow",
 ] as const;
 
+const CANVAS_LINK_SURFACES = [
+  "--inline-code-bg",
+  "--bg-muted",
+  "--chat-session-link-surface",
+] as const;
+
 let participantPaletteValue: ReturnType<typeof prepareParticipantPalette> | undefined;
 let participantPaletteKey = "";
 const participantPaletteListeners = createChangeListeners();
@@ -99,9 +105,12 @@ export function syncControlUiSystemChrome(paletteChanged = false, chatShell?: bo
   const canvas = resolveThemeColor(computedStyle, "--bg-content");
   const accent = resolveThemeColor(computedStyle, "--accent");
   const mode = root.dataset.themeMode === "light" ? "light" : "dark";
-  const link = computedStyle.getPropertyValue("--link").trim();
-  const linkHover = computedStyle.getPropertyValue("--link-hover").trim();
-  const nextParticipantKey = JSON.stringify([canvas, accent, link, linkHover, mode]);
+  const link = computedStyle.getPropertyValue("--accent").trim();
+  const linkHover = computedStyle.getPropertyValue("--accent-hover").trim();
+  const surfaceColors = CANVAS_LINK_SURFACES.map((property) =>
+    computedStyle.getPropertyValue(property).trim(),
+  );
+  const nextParticipantKey = JSON.stringify([canvas, accent, link, linkHover, mode, surfaceColors]);
   if (
     nextParticipantKey !== participantPaletteKey &&
     /^#[\da-f]{6}$/iu.test(canvas) &&
@@ -113,6 +122,12 @@ export function syncControlUiSystemChrome(paletteChanged = false, chatShell?: bo
       participantPaletteValue = prepareParticipantPalette(
         { mode, background: hexToOklch(canvas), accent: hexToOklch(accent) },
         links,
+        [
+          hexToOklch(canvas),
+          ...CANVAS_LINK_SURFACES.map((property) =>
+            hexToOklch(resolveThemeColor(computedStyle, property, canvas) || canvas),
+          ),
+        ],
       );
       root.style.setProperty("--chat-canvas-link", participantPaletteValue.canvasLinks.normal);
       root.style.setProperty("--chat-canvas-link-hover", participantPaletteValue.canvasLinks.hover);

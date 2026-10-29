@@ -1,4 +1,8 @@
-export function resolveThemeColor(styles: CSSStyleDeclaration, property: string): string {
+export function resolveThemeColor(
+  styles: CSSStyleDeclaration,
+  property: string,
+  background?: string,
+): string {
   const value = styles.getPropertyValue(property).trim();
   if (!value || /^#[\da-f]{6}$/iu.test(value)) {
     return value.toLowerCase();
@@ -11,6 +15,10 @@ export function resolveThemeColor(styles: CSSStyleDeclaration, property: string)
   }
   // Custom themes use modern color functions; terminal OSC colors and Mermaid
   // require concrete #rrggbb values. A painted pixel resolves either syntax.
+  if (background) {
+    context.fillStyle = background;
+    context.fillRect(0, 0, 1, 1);
+  }
   context.fillStyle = value;
   context.fillRect(0, 0, 1, 1);
   return `#${Array.from(context.getImageData(0, 0, 1, 1).data)

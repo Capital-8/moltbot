@@ -105,28 +105,34 @@ function luminance(color: Oklch): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function linkContrast(foreground: Oklch, background: Oklch): number {
+function linkContrast(foreground: Oklch, backgrounds: readonly Oklch[]): number {
   const first = luminance(foreground);
-  const second = luminance(background);
-  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+  return Math.min(
+    ...backgrounds.map((background) => {
+      const second = luminance(background);
+      return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+    }),
+  );
 }
 
 /** Keep readable ink intact; otherwise move L only, fitting C at the gamut boundary. */
-function readableLinkColor(foreground: Oklch, background: Oklch): Oklch {
-  if (linkContrast(foreground, background) >= 7) {
+function readableLinkColor(foreground: Oklch, backgrounds: readonly Oklch[]): Oklch {
+  if (linkContrast(foreground, backgrounds) >= 4.5) {
     return foreground;
   }
+  // CSS compositing and sRGB rasterization need a small margin at the AA boundary.
+  const targetContrast = 4.6;
   const ends = [0, 1].map((l) => fitSrgb({ ...foreground, l }));
   const candidates: Oklch[] = [];
   for (const end of ends) {
-    if (linkContrast(end, background) < 7.01) {
+    if (linkContrast(end, backgrounds) < targetContrast) {
       continue;
     }
     let near = foreground.l;
     let far = end.l;
     for (let index = 0; index < 24; index += 1) {
       const l = (near + far) / 2;
-      if (linkContrast(fitSrgb({ ...foreground, l }), background) >= 7.01) {
+      if (linkContrast(fitSrgb({ ...foreground, l }), backgrounds) >= targetContrast) {
         far = l;
       } else {
         near = l;
@@ -134,10 +140,10 @@ function readableLinkColor(foreground: Oklch, background: Oklch): Oklch {
     }
     candidates.push(fitSrgb({ ...foreground, l: far }));
   }
-  // Imported midtone canvases may not admit 7:1 even with black or white.
+  // A custom theme's combined surfaces may not admit one 4.5:1 ink.
   if (candidates.length === 0) {
     return ends.reduce((best, color) =>
-      linkContrast(color, background) > linkContrast(best, background) ? color : best,
+      linkContrast(color, backgrounds) > linkContrast(best, backgrounds) ? color : best,
     );
   }
   return candidates.reduce((best, color) =>
@@ -148,26 +154,27 @@ function readableLinkColor(foreground: Oklch, background: Oklch): Oklch {
 export function prepareParticipantPalette(
   palette: ParticipantPalette,
   links: { normal: Oklch; hover: Oklch },
+  canvasBackgrounds: readonly Oklch[],
 ) {
-  const linkStyle = (background: Oklch) => {
-    const normal = readableLinkColor(links.normal, background);
-    const hover = readableLinkColor(links.hover, background);
+  const linkStyle = (backgrounds: readonly Oklch[]) => {
+    const normal = readableLinkColor(links.normal, backgrounds);
+    const hover = readableLinkColor(links.hover, backgrounds);
     return {
-      normal: normal === links.normal ? "var(--link)" : css(normal),
-      hover: hover === links.hover ? "var(--link-hover)" : css(hover),
+      normal: css(normal),
+      hover: css(hover),
     };
   };
   // One prepared string per identity in this palette; streamed tokens only read it.
   const identityStyles = new Map<number | null, string>();
   return {
-    canvasLinks: linkStyle(palette.background),
+    canvasLinks: linkStyle(canvasBackgrounds),
     style(identityHue: number | null): string {
       const prepared = identityStyles.get(identityHue);
       if (prepared !== undefined) {
         return prepared;
       }
       const colors = participantColors(palette, identityHue);
-      const ink = linkStyle(colors.bubble);
+      const ink = linkStyle([colors.bubble]);
       const style = `--chat-participant-surface: ${css(colors.bubble)}; --chat-sender-name-color: ${css(colors.name)}; --chat-participant-link: ${ink.normal}; --chat-participant-link-hover: ${ink.hover}`;
       identityStyles.set(identityHue, style);
       return style;

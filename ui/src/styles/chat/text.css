@@ -896,10 +896,7 @@
   max-width: min(28em, 100%);
   padding: 0.08em 0.45em;
   padding-inline-start: 1.5em;
-  background: var(
-    --chat-content-surface,
-    color-mix(in srgb, var(--accent-subtle) 72%, var(--bg-muted))
-  );
+  background: var(--chat-content-surface, var(--chat-session-link-surface));
   font-family: var(--font-body);
   font-weight: 600;
   line-height: 1.25;
