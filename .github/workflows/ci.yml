@@ -5379,12 +5379,11 @@ jobs:
           set -euo pipefail
           mlx_proof="$(mktemp -d "$RUNNER_TEMP/openclaw-mlx-tts-proof.XXXXXX")"
           echo "proof-path=$mlx_proof" >> "$GITHUB_OUTPUT"
-          mlx_args=()
+          mlx_args=(--proof-dir "$mlx_proof" --started "$NATIVE_STARTED")
           if [[ "$MLX_NATIVE_PROOF" == "true" ]]; then
             mlx_args+=(--extended)
           fi
-          python3 -I -S scripts/test-macos-mlx-native.py --proof-dir "$mlx_proof" \
-            --started "$NATIVE_STARTED" "${mlx_args[@]}"
+          python3 -I -S scripts/test-macos-mlx-native.py "${mlx_args[@]}"
 
       - name: Upload MLX TTS resolution
         if: ${{ always() && matrix.phase == 'mlx' && steps.mlx-helper.outputs.proof-path != '' }}

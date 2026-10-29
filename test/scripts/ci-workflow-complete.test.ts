@@ -511,6 +511,7 @@ ${ciStep("macos-swift-packages", "Install native asset dependencies").run}
 
   it.each([
     { extended: false, exit: 0 },
+    { extended: false, exit: 1 },
     { extended: true, exit: 0 },
     { extended: true, exit: 1 },
   ])("keeps MLX driver failures and its proof path for %j", (row) => {
@@ -521,7 +522,7 @@ ${ciStep("macos-swift-packages", "Install native asset dependencies").run}
       root,
       `
 python3() {
-  printf '%s\\n' "$*" >> "$TRACE"
+  printf '%s\\n' "$@" >> "$TRACE"
   return "$DRIVER_EXIT"
 }
 ${check.run}
@@ -533,14 +534,21 @@ ${check.run}
       },
     );
     expect(result.status, result.stderr).toBe(row.exit);
-    const commands = readFileSync(path.join(root, "trace"), "utf8");
-    expect(commands).toContain("-I -S scripts/test-macos-mlx-native.py --proof-dir ");
-    expect(commands).toContain("--started 1234");
-    expect(commands.includes("--extended")).toBe(row.extended);
-    expect(commands.includes("--foundation-admission-only")).toBe(false);
     const proof = readFileSync(path.join(root, "outputs"), "utf8")
       .trim()
       .slice("proof-path=".length);
+    const args = readFileSync(path.join(root, "trace"), "utf8").trim().split("\n");
+    expect(args).toEqual([
+      "-I",
+      "-S",
+      "scripts/test-macos-mlx-native.py",
+      "--proof-dir",
+      proof,
+      "--started",
+      "1234",
+      ...(row.extended ? ["--extended"] : []),
+    ]);
+    expect(args.includes("--foundation-admission-only")).toBe(false);
     expect(existsSync(proof)).toBe(true);
     const upload = ciStep("macos-swift-packages", "Upload MLX TTS resolution");
     expect(
