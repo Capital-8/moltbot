@@ -79,11 +79,17 @@ function mergeRemoteModelWithTrustedTransport(
   // Spread keeps an untrusted own `__proto__` key as data instead of invoking
   // Object.prototype's setter while trusted transport fields win explicitly.
   // The hosted schema carries no family; the bundled row keeps the exact id's family.
+  // A hosted row published before a manifest gained a fact does not erase it: bundled
+  // `thinkingLevelMap` and compat keys fill only what the hosted row omits.
   const merged = {
     ...remoteModel,
     ...(trustedModel?.baseUrl ? { baseUrl: trustedModel.baseUrl } : {}),
     ...(trustedModel?.headers ? { headers: trustedModel.headers } : {}),
     ...(trustedModel?.family ? { family: trustedModel.family } : {}),
+    ...(trustedModel?.thinkingLevelMap && !remoteModel.thinkingLevelMap
+      ? { thinkingLevelMap: trustedModel.thinkingLevelMap }
+      : {}),
+    ...(trustedModel?.compat ? { compat: { ...trustedModel.compat, ...remoteModel.compat } } : {}),
   };
   const target = {
     api: merged.api ?? effectiveProvider.api,
