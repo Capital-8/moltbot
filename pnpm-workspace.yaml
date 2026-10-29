@@ -73,7 +73,9 @@ overrides:
   form-data: 4.0.6
   "werift-ice@0.2.2>ip": "npm:neoip@3.1.0"
   ip-address: 10.7.2
-  "mailauth@5.0.3>nodemailer": 10.0.10
+  "mailauth@5.0.3>nodemailer": 10.1.4
+  "mailparser@3.9.28>nodemailer": 10.1.4
+  "baileys@7.0.0-rc14>music-metadata": 11.16.0
   "mailauth@5.0.3>joi": 18.2.9
   # Mailauth pins vulnerable Undici; remove when its direct dependency is fixed.
   "mailauth@5.0.3>undici": 8.10.2
