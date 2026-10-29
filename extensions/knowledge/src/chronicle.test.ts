@@ -266,6 +266,20 @@ it("group source derives an entity Timeline from relationship notes and sourced 
     "private",
     "The launch review took place.",
   );
+  // A superseded note never outranks the current one, even when listed first.
+  await f.put(
+    "rel_0_old",
+    { ...edge("person_alice", "meeting_review", "attended"), lifecycle: "superseded" },
+    "private",
+    "Old note.",
+  );
+  // A past event the review reports keeps its own date and row.
+  await f.put(
+    "event_past",
+    event("2019-01-15", { entities: ["person_alice"], source_page: "meeting_review" }),
+    "private",
+    "Alice founded the team.",
+  );
   await f.put("claim_one", sourced("meeting_review", ["person_alice"]));
   await f.put("claim_two", sourced("meeting_review", ["person_alice"]));
   // A dated article reaches Alice only through its event claim.
@@ -301,7 +315,15 @@ it("group source derives an entity Timeline from relationship notes and sourced 
     ["meeting_review", "2020-05-10", "Alice presented the launch review.", 2, "rel_attended"],
     ["event_loose", "2020-04-01", "Loose event.", undefined, undefined],
     ["event_undated_source", "2020-03-01", "Launch review evidence", undefined, undefined],
+    ["event_past", "2019-01-15", "Alice founded the team.", undefined, undefined],
   ]);
+  const history = await f.service.timeline(
+    { entity: "person_alice", group: "source", eligibility: "include_inactive" },
+    f.owner,
+  );
+  expect(history.items.find((row) => row.record.id === "meeting_review")?.noteRecord).toBe(
+    "rel_attended",
+  );
   // Without a note, the source-event claim speaks for the row.
   const bobby = await f.service.timeline({ entity: "person_bobby", group: "source" }, f.owner);
   expect(bobby.items.map((row) => [row.record.id, row.summary, row.claims])).toStrictEqual([

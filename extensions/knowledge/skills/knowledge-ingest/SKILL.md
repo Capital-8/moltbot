@@ -100,7 +100,9 @@ and enrichment and `knowledge-meeting-ingest` for meeting transcripts.
 8. **Write source notes.** Give each entity the source says something
    substantive about a `discusses` relationship (source → entity) whose body is
    one sentence on what the source says about it
-   ([source notes](references/profiles.md#source-notes)). Reuse an existing
+   ([source notes](references/profiles.md#source-notes)). The note shows on the
+   entity's Timeline only when the source is dated by `occurred_at` or a
+   `source_event` claim. Reuse an existing
    relationship between the pair; reruns add nothing. Make the source page link
    to those entities.
 

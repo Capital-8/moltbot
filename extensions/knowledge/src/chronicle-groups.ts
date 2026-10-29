@@ -1,6 +1,6 @@
 import type { TimelineInput } from "./chronicle-contract.js";
 import type { LoadedRecord } from "./model.js";
-import { recordDate } from "./temporal-query.js";
+import { dateInterval, recordDate } from "./temporal-query.js";
 
 /** One derived entity Timeline row: a dated source, or a dated claim with no dated source. */
 type SourceRow = {
@@ -18,6 +18,13 @@ type Group = {
   event?: LoadedRecord;
   claims: LoadedRecord[];
 };
+
+// Prefer a current note with a body, then any current note, then an inactive one.
+const noteRank = (record: LoadedRecord) =>
+  (record.lifecycle === "active" &&
+  !(record.metadata.expires_at && Date.parse(record.metadata.expires_at) <= Date.now())
+    ? 2
+    : 0) + (record.body.trim() ? 1 : 0);
 
 /** Source grouping answers one entity's occurrence Timeline; reject inputs it cannot honor. */
 export function assertSourceGrouping(input: TimelineInput) {
@@ -37,7 +44,9 @@ export function assertSourceGrouping(input: TimelineInput) {
  * note; a claim naming the entity joins the group of its source page, where a
  * source-event claim dates the row and stands in for a missing note. The row
  * date is the source's own occurrence date, else its source-event date. Claims
- * from an undated source, and dated claims without one, stay individual rows.
+ * from an undated source, dated claims without one, and claims dated outside
+ * the row's date (a past event a later source reports) stay individual rows.
+ * Current notes win over superseded or expired ones.
  * `associated` must be in a stable order so the chosen note is deterministic.
  */
 export function sourceRows(
@@ -62,8 +71,8 @@ export function sourceRows(
       const page = other && other !== entity ? byId.get(other) : undefined;
       if (page?.kind === "page") {
         const found = group(page);
-        // The first relationship with a written body is the note; an empty one still links.
-        if (!found.note?.body.trim()) {
+        // The first current relationship with a written body is the note; an empty one still links.
+        if (noteRank(record) > (found.note ? noteRank(found.note) : -1)) {
           found.note = record;
         }
       }
@@ -88,8 +97,20 @@ export function sourceRows(
       standalone.push(...claims);
       continue;
     }
+    // A claim keeps its own row when its date falls outside the row's date.
+    const row = dateInterval(date);
+    const own = claims.filter((claim) => {
+      const at = recordDate(claim, "occurred_at");
+      if (!at) {
+        return false;
+      }
+      const span = dateInterval(at);
+      return span.end < row.start || span.start > row.end;
+    });
+    standalone.push(...own);
+    const counted = claims.length - own.length;
     const summary = note?.body.trim() || event?.body.trim() || "";
-    rows.push({ record: source, date, summary, claims: claims.length, ...(note ? { note } : {}) });
+    rows.push({ record: source, date, summary, claims: counted, ...(note ? { note } : {}) });
   }
   for (const claim of standalone) {
     const date = recordDate(claim, "occurred_at");

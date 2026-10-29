@@ -45,6 +45,13 @@ like any other ([assertions](assertions.md)). Reuse an existing relationship
 between the pair instead of adding a second. Claims about the entity from the
 same source join the row through `source_page` and need no note of their own.
 
+A row needs a dated source: a meeting's `occurred_at`, or the source's
+`source_event` claim. A note on an undated source shows on no Timeline, so date
+the source when it has a date (publication date, message date), and otherwise
+save what happened as an event claim. An event the source reports from another
+date (a founding, a past launch) is an event claim with its own `occurred_at`;
+it keeps its own row.
+
 ## Retire a written Timeline
 
 Older pages may still have a `## Timeline` section. When you edit such a page, or
@@ -53,10 +60,16 @@ run:
 
 1. Read the derived rows with `knowledge_timeline({entity, group: "source"})`,
    following `nextOffset`.
-2. For each entry whose source has no row with a note, create a `discusses`
-   relationship (source → entity) whose body is the entry's sentence, citing the
-   lines the entry cites. Batch them. An entry with no source page becomes an
-   event claim with `occurred_at` and the entity in `entities`.
+2. Give every entry a record, then check the rows cover them all:
+   - The first entry for a dated source with no note on its row becomes a
+     `discusses` relationship (source → entity) whose body is the entry's
+     sentence, citing the lines the entry cites.
+   - Any other entry becomes an event claim with the entry's date as
+     `occurred_at`, the entity in `entities`, and the source as `source_page`
+     when there is one. That covers a second entry from the same source, an
+     entry dated differently from its source, an undated source and no source.
+   - Batch the writes, then reread the rows. Every entry's date and sentence
+     must appear before you delete anything.
 3. Delete the whole section with `knowledge_edit_body`. Shrinking edits always
    succeed, and revision history keeps the old text.
 

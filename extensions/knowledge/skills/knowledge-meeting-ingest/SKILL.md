@@ -136,7 +136,7 @@ Batch related records ([publish](references/publish.md)).
 Run [verify](references/verify.md) first. Then check:
 
 - **Substance:** required sections have content or a source-grounded reason.
-- **Links:** `knowledge_verify` `expectedLinks` for meeting ↔ each entity, plus
+- **Links:** `knowledge_verify` `expectedLinks` for meeting → each entity, plus
   claim `entities`/`dependencies`, commitment `owner`, and edge
   `from`/`to`/`label`/`source_page`. Every linked entity has an `attended` or
   `discusses` edge with a body for this meeting.
@@ -156,8 +156,9 @@ Run [verify](references/verify.md) first. Then check:
   for related entities. An inversion or impossible place/time is a contradiction;
   never invent transit. Fix and recheck, or record an explicit user waiver as
   WAIVED, not resolved. A waiver covers sequence only. A participant missing from
-  the day's chronicle usually means a missing source-event entity or attendance
-  edge: investigate, don't block. Genuinely ambiguous order is flagged in the report, not blocked.
+  the day's chronicle usually means the meeting's `source_event` claim lacks
+  them in `entities` (an attendance edge alone does not date anyone):
+  investigate, don't block. Genuinely ambiguous order is flagged in the report, not blocked.
 
 **Done when:** all checks pass, or failures are fixed and rechecked.
 
