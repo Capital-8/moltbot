@@ -248,6 +248,7 @@ export async function buildBrowserGatewayConnectPlan({
           "inline-widgets",
           "model-selection-policy",
           "model-wait-status",
+          "ui-agent-github-settings",
           "ui-commands",
           "ultrafast",
           "usage-refreshing",
