@@ -5,6 +5,7 @@ import path from "node:path";
 import { setTimeout as pollDelay } from "node:timers/promises";
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
 import type { QaBusState, QaGatewayChild } from "../../../../extensions/qa-lab/api.js";
+import { withEnvAsync } from "../../../../src/test-utils/env.js";
 import {
   COMPACTION_PROOF_MODEL_ID as MODEL_ID,
   COMPACTION_PROOF_TIMEOUT_MS as CHECKPOINT_TIMEOUT_MS,
@@ -325,20 +326,28 @@ export async function replaceCompactionWriter(
   const before = readCompactionEntry(runtime, gateway, proof);
   assert.equal(before.activeWriterRunId, runId, "Held run did not own the canonical writer");
   const target = targetFor(runtime, gateway, proof);
+  const stateDir = gateway.runtimeEnv.OPENCLAW_STATE_DIR;
+  assert.ok(
+    stateDir && path.isAbsolute(stateDir),
+    "Gateway must have an isolated absolute state dir",
+  );
   const replacementRunId = randomUUID();
-  // This child cannot signal the Gateway's process-local run registry. The real
-  // claim therefore challenges the storage fence independently of chat.abort.
-  const claim = await runtime.claimAgentSessionWriter({
-    sessionId: proof.sessionId,
-    sessionKey: proof.sessionKey,
-    sessionTarget: target,
-    agentId: target.agentId,
-    workspaceDir: gateway.workspaceDir,
-    config: gateway.cfg,
-    runId: replacementRunId,
-    prompt: "QA replacement writer",
-    timeoutMs: CHECKPOINT_TIMEOUT_MS,
-  });
+  // The real claim must use the Gateway's shared state, not this child's outer state.
+  // This child cannot signal the Gateway's process-local run registry, so the claim
+  // challenges the durable storage fence independently of chat.abort.
+  const claim = await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, () =>
+    runtime.claimAgentSessionWriter({
+      sessionId: proof.sessionId,
+      sessionKey: proof.sessionKey,
+      sessionTarget: target,
+      agentId: target.agentId,
+      workspaceDir: gateway.workspaceDir,
+      config: gateway.cfg,
+      runId: replacementRunId,
+      prompt: "QA replacement writer",
+      timeoutMs: CHECKPOINT_TIMEOUT_MS,
+    }),
+  );
   assert.ok(claim, "Replacement did not claim the existing session row");
   assert.equal(claim.expectedWriterRunId, replacementRunId);
   assert.equal(claim.expectedLifecycleRevision, before.lifecycleRevision);
