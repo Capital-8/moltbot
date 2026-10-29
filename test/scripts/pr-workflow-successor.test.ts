@@ -1080,7 +1080,7 @@ process.exit(result.status??1);
         expect(f.git(f.repo, "rev-parse", lockRef)).toBe(trace.replacement);
       } else {
         expect(reached).toBe(phase);
-        expect(result.stderr).toContain(`fixture ${phase} interruption`);
+        expect(result.stderr).toMatch(/^Git read failed$/m);
         expect(f.git(f.repo, "for-each-ref", "--format=%(refname)", lockRef)).toBe("");
       }
       f.expectSnapshot(before);
