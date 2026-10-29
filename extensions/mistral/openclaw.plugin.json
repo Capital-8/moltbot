@@ -103,6 +103,10 @@
                 "xhigh": "high",
                 "max": "high"
             },
+            "compat": {
+              "defaultThinkingLevel": "off",
+              "adaptiveThinking": true
+            },
             "cost": {
               "input": 1.5,
               "output": 7.5,
@@ -126,6 +130,10 @@
                 "xhigh": "high",
                 "max": "high"
             },
+            "compat": {
+              "defaultThinkingLevel": "off",
+              "adaptiveThinking": true
+            },
             "cost": {
               "input": 0.15,
               "output": 0.6,
@@ -148,6 +156,10 @@
                 "high": "high",
                 "xhigh": "high",
                 "max": "high"
+            },
+            "compat": {
+              "defaultThinkingLevel": "off",
+              "adaptiveThinking": true
             },
             "cost": {
               "input": 0.15,

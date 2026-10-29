@@ -12,7 +12,17 @@ const EXPECTED: Record<string, { levels: string[]; defaultLevel: string }> = {
   "deepseek/deepseek-v4-flash": deepSeekV4(),
   "deepseek/deepseek-v4-flash-vision-exp": deepSeekV4(),
   "deepseek/deepseek-v4-pro": deepSeekV4(),
+  "mistral/mistral-medium-3-5": mistralReasoning(),
+  "mistral/mistral-small-2603": mistralReasoning(),
+  "mistral/mistral-small-latest": mistralReasoning(),
 };
+
+function mistralReasoning() {
+  return {
+    levels: ["off", "minimal", "low", "medium", "adaptive", "high", "xhigh", "max"],
+    defaultLevel: "off",
+  };
+}
 
 function deepSeekV4() {
   return {
