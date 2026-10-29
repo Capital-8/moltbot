@@ -92,9 +92,9 @@ describe("iOS resource timeline workload boundary", () => {
     endRecord(output, 127);
   });
 
-  posixIt(
-    "limits process polling and stops it after a timeout while retaining host metrics and sanitized attribution",
-    () => {
+  posixIt.each([false, true])(
+    "stops polling after a timeout and permits one sanitized recovery census (failure=%s)",
+    (recoveryFails) => {
       const root = tempDirs.make("ios-resource-timeline-");
       const output = path.join(root, "timeline.jsonl");
       const complete = path.join(root, "complete");
@@ -105,10 +105,16 @@ describe("iOS resource timeline workload boundary", () => {
         `
       import childProcess from "node:child_process";
       import assert from "node:assert/strict";
+      import fs from "node:fs";
       import { writeFileSync } from "node:fs";
       import { syncBuiltinESMExports } from "node:module";
       let now = 0, hostObservations = 0;
       const processProbeTimes = [];
+      const readFile = fs.readFileSync;
+      fs.readFileSync = (file, ...args) =>
+        typeof file === "string" && file.endsWith("/phase") && hostObservations >= 8
+          ? "qualification-live-chat"
+          : readFile(file, ...args);
       Object.defineProperty(process, "platform", { value: "darwin" });
       Object.defineProperty(performance, "now", { value: () => now });
       globalThis.setTimeout = (callback, delay) => {
@@ -128,12 +134,14 @@ describe("iOS resource timeline workload boundary", () => {
         }
         if (args.includes("/usr/sbin/sysctl")) stdout = "1";
         if (args.includes("/bin/ps")) {
-          assert.deepEqual(args, ["-n", "10", "/bin/ps", "-axo", "pid=,ppid=,time=,rss=,state=,ucomm="]);
+          const command = processProbeTimes.length === 6 ? "comm" : "ucomm";
+          assert.deepEqual(args, ["-n", "10", "/bin/ps", "-axo", "pid=,ppid=,time=,rss=,state=," + command + "="]);
           assert.equal(_options.timeout, 2_000);
           assert.equal(_options.killSignal, "SIGKILL");
           processProbeTimes.push(now);
           if (processProbeTimes.length === 4) error = new Error("probe unavailable");
           else if (processProbeTimes.length === 6) error = Object.assign(new Error("probe timeout"), { killed: true });
+          else if (processProbeTimes.length === 7 && ${JSON.stringify(recoveryFails)}) error = Object.assign(new Error("recovery timeout"), { killed: true });
           else {
             const runtime = "/Library/Developer/CoreSimulator/Volumes/iOS_private/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS.simruntime/Contents/Resources/RuntimeRoot";
             const row = (pid, ppid, rate, rss, state, command) => [pid, ppid, (now * rate / 1_000).toFixed(2), rss, state, command].join(" ");
@@ -155,6 +163,9 @@ describe("iOS resource timeline workload boundary", () => {
               row(103, 80, 0.6, 1024, "S", "CoreSpotlightSer"),
               row(104, 80, 0.6, 1024, "S", "com.apple.WebKit"),
               row(105, 80, 0.001, 1, "S", "privatekernel"),
+              ...(processProbeTimes.length === 7
+                ? [row(106, 80, 10, 1024, "S", runtime + "/usr/libexec/mobileassetd")]
+                : []),
               ...Array.from({ length: 8 }, (_, i) => row(90 + i, 1, 0.1 + i / 100, 2048, "S", "/usr/libexec/cfprefsd")),
             ].join("\\n");
           }
@@ -182,7 +193,7 @@ describe("iOS resource timeline workload boundary", () => {
       expect(result.status).toBe(23);
       expect(result.stderr).toBe("");
       expect(JSON.parse(readFileSync(complete, "utf8"))).toEqual([
-        0, 95_000, 115_000, 135_000, 155_000, 175_000,
+        0, 95_000, 115_000, 135_000, 155_000, 175_000, 235_000,
       ]);
       const raw = readFileSync(output, "utf8");
       expect(raw).not.toMatch(
@@ -213,8 +224,12 @@ describe("iOS resource timeline workload boundary", () => {
         [[], 20_000],
         [[null], null],
         [[], 20_000],
+        [recoveryFails ? [] : [null], null],
       ]);
       for (let index = 6; index < samples.length; index++) {
+        if (index === 8) {
+          continue;
+        }
         expect(samples[index]).toMatchObject({
           probes: { ps: { wallMs: 0, outcome: "disabled-after-timeout" } },
           processes: [],
@@ -255,7 +270,14 @@ describe("iOS resource timeline workload boundary", () => {
         ["launchd_sim", 1, 0, "xcode"],
         ["duetexpertd", 1, 38_000, "simulator-runtime"],
       ]) {
-        expect(groups).toContainEqual({ role, count, cpuDeltaMs, origin, cpuObservedCount: count });
+        expect(groups).toContainEqual({
+          role,
+          count,
+          cpuDeltaMs,
+          cpuLifetimeMs: cpuDeltaMs,
+          origin,
+          cpuObservedCount: count,
+        });
       }
       expect(groups.filter((group: { role: string }) => group.role === "duetexpertd")).toHaveLength(
         1,
@@ -274,6 +296,30 @@ describe("iOS resource timeline workload boundary", () => {
           (group: { cpuObservedCount: number }) => group.cpuObservedCount === 0,
         ),
       ).toBe(true);
+      expect(samples[8]).toMatchObject({
+        processCensus: "after-headroom",
+        phaseAtStart: "qualification-live-chat",
+        probes: { ps: { outcome: recoveryFails ? "timeout" : "ok" } },
+      });
+      if (recoveryFails) {
+        expect(samples[8].processes).toEqual([]);
+        expect(samples[8].processSummary).toBeNull();
+      } else {
+        expect(samples[8].processes[0]).toMatchObject({
+          pid: 106,
+          cpuMs: 2_350_000,
+          cpuDeltaMs: null,
+          cpuPercent: null,
+        });
+        expect(samples[8].processSummary.groups[0]).toMatchObject({
+          role: "mobileassetd",
+          origin: "simulator-runtime",
+          cpuLifetimeMs: 2_350_000,
+          cpuDeltaMs: 0,
+          cpuObservedCount: 0,
+        });
+      }
+      expect(samples.filter((sample) => sample.processCensus)).toHaveLength(1);
       endRecord(output, 23);
     },
   );

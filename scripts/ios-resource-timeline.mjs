@@ -276,7 +276,7 @@ function processRows(output, previous, elapsedMs) {
   return rows;
 }
 
-function processSummary(rows) {
+function processSummary(rows, lifetime = false) {
   const groups = new Map();
   for (const row of rows) {
     const key = `${row.origin}:${row.role}`;
@@ -286,8 +286,10 @@ function processSummary(rows) {
       count: 0,
       cpuObservedCount: 0,
       cpuDeltaMs: 0,
+      cpuLifetimeMs: 0,
     };
     group.count += 1;
+    group.cpuLifetimeMs += row.cpuMs;
     if (row.cpuDeltaMs !== null) {
       group.cpuObservedCount += 1;
       group.cpuDeltaMs += row.cpuDeltaMs;
@@ -299,7 +301,9 @@ function processSummary(rows) {
     runnableCount: rows.filter((row) => row.state.startsWith("R")).length,
     uninterruptibleCount: rows.filter((row) => row.state.startsWith("U")).length,
     // All observed rows contribute, including those outside the top-process display.
-    groups: [...groups.values()].toSorted((a, b) => b.cpuDeltaMs - a.cpuDeltaMs),
+    groups: [...groups.values()].toSorted((a, b) =>
+      lifetime ? b.cpuLifetimeMs - a.cpuLifetimeMs : b.cpuDeltaMs - a.cpuDeltaMs,
+    ),
   };
 }
 
@@ -377,6 +381,7 @@ function startTimeline(output) {
   let previousProcessAt = started;
   let nextProcessAt = started;
   let processSamplingStopped = false;
+  let postHeadroomCensusDone = false;
   const phase = () => {
     try {
       const value = readFileSync(phaseFile, "utf8").trim();
@@ -458,12 +463,24 @@ function startTimeline(output) {
     const diskRows = disks(await probe("/usr/sbin/iostat", ["-Id"]));
     let rows = [];
     let processIntervalMs = null;
-    if (processSamplingStopped) {
+    // A single census after the gate can recover surviving workers' lifetime CPU
+    // without adding more process scans while the simulator is saturated.
+    const postHeadroomCensus =
+      processSamplingStopped &&
+      !postHeadroomCensusDone &&
+      ["qualification-setup-code", "qualification-live-chat", "qualification-reader"].includes(
+        phaseAtStart,
+      );
+    if (processSamplingStopped && !postHeadroomCensus) {
       probeStatus.ps = { wallMs: 0, outcome: "disabled-after-timeout" };
-    } else if (performance.now() < nextProcessAt) {
+    } else if (!postHeadroomCensus && performance.now() < nextProcessAt) {
       probeStatus.ps = { wallMs: 0, outcome: "not-due" };
     } else {
-      const processOutput = await probe("/bin/ps", ["-axo", "pid=,ppid=,time=,rss=,state=,ucomm="]);
+      postHeadroomCensusDone ||= postHeadroomCensus;
+      const processOutput = await probe("/bin/ps", [
+        "-axo",
+        `pid=,ppid=,time=,rss=,state=,${postHeadroomCensus ? "comm" : "ucomm"}=`,
+      ]);
       // Intentional skips retain the CPU baseline; earlier probes may delay the next observation.
       const processAt = performance.now();
       processIntervalMs = previousProcesses.size ? Math.round(processAt - previousProcessAt) : null;
@@ -472,7 +489,7 @@ function startTimeline(output) {
       previousProcesses = new Map(rows.map((row) => [row.pid, row.cpuMs]));
       nextProcessAt = processAt + processSampleIntervalMs;
       // Under contention, ps termination can itself stall. Do not keep adding process scans.
-      processSamplingStopped = probeStatus.ps?.outcome === "timeout";
+      processSamplingStopped ||= probeStatus.ps?.outcome === "timeout";
     }
     if (!active) {
       return;
@@ -482,7 +499,11 @@ function startTimeline(output) {
       Object.keys(cpu).map((key) => [key, delta(cpu[key], previousCpu[key])]),
     );
     const total = Object.values(cpuDeltas).reduce((sum, n) => sum + n, 0);
-    const topCpu = rows.toSorted((a, b) => (b.cpuDeltaMs ?? 0) - (a.cpuDeltaMs ?? 0)).slice(0, 6);
+    const topCpu = rows
+      .toSorted((a, b) =>
+        postHeadroomCensus ? b.cpuMs - a.cpuMs : (b.cpuDeltaMs ?? 0) - (a.cpuDeltaMs ?? 0),
+      )
+      .slice(0, 6);
     const topMemory = rows.toSorted((a, b) => b.rssBytes - a.rssBytes).slice(0, 6);
     const selected = [...new Map([...topCpu, ...topMemory].map((row) => [row.pid, row])).values()];
     samples += 1;
@@ -495,6 +516,7 @@ function startTimeline(output) {
       intervalMs: samples === 1 ? null : Math.round(at - previousAt),
       sampleWallMs: Math.round(performance.now() - at),
       processIntervalMs,
+      ...(postHeadroomCensus ? { processCensus: "after-headroom" } : {}),
       probes: probeStatus,
       host: {
         cpuPercent:
@@ -529,7 +551,8 @@ function startTimeline(output) {
         })),
       },
       processes: selected,
-      processSummary: probeStatus.ps?.outcome === "ok" ? processSummary(rows) : null,
+      processSummary:
+        probeStatus.ps?.outcome === "ok" ? processSummary(rows, postHeadroomCensus) : null,
       collector: overhead(),
     });
     previousAt = at;
