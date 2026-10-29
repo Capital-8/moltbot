@@ -474,6 +474,13 @@ const fingerprints: Readonly<Record<string, CatalogReference>> = {
     [31],
     [],
   ],
+  // agent-v14-progress-card
+  "83673559dc6bba9fdf13d5a9131b030103935b04d7c81620b0a67f43cb49f970": [
+    "agent-v14-progress-card",
+    "cbda56cf07f5a79268f761f3c0478fd5c3a6ddefde2cb72a933d9eef110a17a1",
+    [64],
+    [],
+  ],
   // agent-retired-state-leases
   fdc21b6dc361c491311c11d91fbda296535a9c34dd20f0ab03b949b8a698ded0: [
     "agent-retired-state-leases",
