@@ -432,10 +432,18 @@ push_prep_head_to_pr_branch() {
     local PUSH_REPLACED_HOSTED_ANCESTRY="" PR_HEAD_SHA_AFTER_PUSH=""
     read_prep_publication_result "$result_env_path" || return 1
     if [ "$PUSH_PREP_HEAD_SHA" = "$prep_head_sha" ] && [ "$PUSH_LOCAL_PREP_HEAD_SHA" = "$local_prep_head_sha" ]; then
-      if [ -n "$publication_snapshot" ]; then
-        advance_correction_publication_authority "$pr" "$local_prep_head_sha" "$publication_snapshot" || return 1
+      if [ "${PREP_PUBLICATION_PURPOSE:-qualified}" != proof ] ||
+        { [ "$PUSH_PURPOSE" = proof ] && [ "$PUSH_REVIEW_OID" = "$PREP_PROOF_REVIEW_OID" ] &&
+          [ "$PUSH_PENDING_FINDINGS" = "$PREP_PROOF_PENDING_FINDINGS" ]; }; then
+        if [ -n "$publication_snapshot" ]; then
+          advance_correction_publication_authority "$pr" "$local_prep_head_sha" "$publication_snapshot" || return 1
+        fi
+        return 0
       fi
-      return 0
+      # Reauthorize the same publication without losing its original lease.
+      # A matching commit pair alone cannot attest to the current proof review.
+      pushed_from_sha="$PUSHED_FROM_SHA"
+      replaced_hosted_ancestry="$PUSH_REPLACED_HOSTED_ANCESTRY"
     fi
   fi
 

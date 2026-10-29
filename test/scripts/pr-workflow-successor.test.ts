@@ -595,8 +595,94 @@ describePosix("pending-proof correction publication", () => {
       f.writeReview();
       expectExit(f.run("prepare-gates"), 0);
       expectExit(f.run("prepare-push"), 0);
+      expect(f.readLocal("prepare-push-result.env").toString()).toBe(receipt);
       expect(f.readLocal("prep.env").toString()).toContain(`PREP_HEAD_SHA=${f.head}\n`);
       expect(f.git(f.repo, "rev-parse", "topic")).toBe(f.head);
+    },
+  );
+
+  it.each(["ordinary receipt", "revised evidence", "pending finding"] as const)(
+    "refreshes proof authority for an already published %s",
+    (change) => {
+      const f = proofFixture();
+      expectExit(f.run("prepare-publish-for-proof"), 0);
+      const original = f.readLocal("prepare-push-result.env").toString();
+      const transport = original.replace(/^PUSH_(PURPOSE|REVIEW_OID|PENDING_FINDINGS)=.*\n/gm, "");
+      if (change === "ordinary receipt") {
+        f.writeLocal("prepare-push-result.env", transport);
+      } else if (change === "revised evidence") {
+        f.review.correction.proofPublication.pendingFindings[0].evidence +=
+          " Include the operator-visible result.";
+      } else {
+        f.review.findings.push({ ...f.review.findings[0], id: "R2" });
+        f.review.correction.proofPublication.pendingFindings.push({
+          id: "R2",
+          evidence: "Retain the separate package-bound observation.",
+        });
+      }
+      f.writeReview();
+      const review = f.readLocal("correction-review.json");
+      const retained = f.readLocal("prepare-push-result.env");
+      // Invalid new authority must not consume or rewrite the prior receipt.
+      if (change === "revised evidence") {
+        f.review.correction.proofPublication.pendingFindings = [];
+        f.writeReview();
+        expectExit(f.run("prepare-publish-for-proof"), 1);
+        expect(f.readLocal("prepare-push-result.env")).toEqual(retained);
+        f.writeLocal("correction-review.json", review);
+        const mutation = join(f.root, "receipt-mutation");
+        const marker = join(f.root, "receipt-mutation-reached");
+        writeFileSync(
+          mutation,
+          `#!/usr/bin/env node
+const fs=require('node:fs'),cp=require('node:child_process'),args=process.argv.slice(2);
+if(args.includes('graphql')&&!fs.existsSync(${JSON.stringify(marker)})) {
+ fs.appendFileSync(${JSON.stringify(f.local("prepare-push-result.env"))},'\\n');
+ fs.writeFileSync(${JSON.stringify(marker)},'reached');
+}
+const result=cp.spawnSync(${JSON.stringify(f.env.OPENCLAW_GH_BIN)},args,{stdio:'inherit'});
+process.exit(result.status??1);
+`,
+          { mode: 0o700 },
+        );
+        const refused = f.run("prepare-publish-for-proof", [], { OPENCLAW_GH_BIN: mutation });
+        expectExit(refused, 1);
+        expect(refused.stdout + refused.stderr).toContain("Correction review authority changed");
+        expect(readFileSync(marker, "utf8")).toBe("reached");
+        expect(f.readLocal("prepare-push-result.env").toString()).toBe(`${retained.toString()}\n`);
+        f.writeLocal("prepare-push-result.env", retained);
+      }
+      const realGit = spawnSync("sh", ["-c", "command -v git"], {
+        env: f.env,
+        encoding: "utf8",
+      }).stdout.trim();
+      const proxy = join(f.root, "no-publication");
+      writeFileSync(
+        proxy,
+        `#!/usr/bin/env node
+const fs=require('node:fs'),cp=require('node:child_process'),args=process.argv.slice(2);
+if(args.includes('push')) { fs.writeFileSync(${JSON.stringify(join(f.root, "unexpected-push"))},'push'); process.exit(74); }
+const result=cp.spawnSync(${JSON.stringify(realGit)},args,{stdio:'inherit'});
+process.exit(result.status??1);
+`,
+        { mode: 0o700 },
+      );
+      const result = f.run("prepare-publish-for-proof", [], { OPENCLAW_PR_GIT: proxy });
+      expectExit(result, 0);
+      expect(result.stdout).toContain("Remote branch already at local prep HEAD; skipping push.");
+      expect(existsSync(join(f.root, "unexpected-push"))).toBe(false);
+      expect(f.git(f.repo, "rev-parse", "topic")).toBe(f.head);
+      expect(f.readLocal("correction-review.json")).toEqual(review);
+      const receipt = f.readLocal("prepare-push-result.env").toString();
+      expect(receipt.replace(/^PUSH_(PURPOSE|REVIEW_OID|PENDING_FINDINGS)=.*\n/gm, "")).toBe(
+        transport,
+      );
+      expect(receipt).toContain("PUSH_PURPOSE=proof\n");
+      expect(receipt).toContain(`PUSH_REVIEW_OID=${f.reviewOid()}\n`);
+      expect(receipt).toContain(
+        `PUSH_PENDING_FINDINGS=${change === "pending finding" ? "I1,R2" : "I1"}\n`,
+      );
+      f.expectAbsent("prep.env", "gates.env");
     },
   );
 
