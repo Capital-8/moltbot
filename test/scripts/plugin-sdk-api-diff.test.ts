@@ -527,7 +527,12 @@ if (process.argv.includes("--render-root")) {
       writeFileSync(source, "export type Fixture = uncommitted;\n");
       symlinkSync(resolve("node_modules"), join(repo, "node_modules"), "dir");
       const fakePnpm = join(binDir, "pnpm");
-      writeFileSync(fakePnpm, '#!/bin/sh\nprintf "%s\\n" "$PWD" >> "$PNPM_MARKER"\n');
+      writeFileSync(
+        fakePnpm,
+        `#!/bin/sh
+printf "%s\\n" "$PWD" >> "$PNPM_MARKER"
+`,
+      );
       chmodSync(fakePnpm, 0o755);
       const worktrees = git(repo, ["worktree", "list", "--porcelain"]);
       const child = runCli(repo, runnerTemp, binDir, [

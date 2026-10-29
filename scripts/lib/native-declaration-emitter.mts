@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { API, EmitOnly, type EmitOutputFile } from "typescript/unstable/async";
+import type { API, EmitOutputFile } from "typescript/unstable/async";
 import { createDeclarationInputBoundary, resolveRepoToolBinPath } from "./local-check-runtime.mts";
 import { createDeclarationFileSystem } from "./native-declaration-filesystem.mts";
 import {
@@ -10,6 +10,7 @@ import {
 } from "./native-typescript-diagnostics.mts";
 import { nativeTypeScriptToolchainFiles } from "./native-typescript-toolchain.mts";
 import { resolveInstalledNativeTypeScriptCompiler } from "./native-typescript.mts";
+import { isRecord } from "./record-shared.mjs";
 
 export type NativeDeclaration = {
   code: string;
@@ -26,6 +27,76 @@ type NativeCompilationOptions = {
   assertInput?: (file: string) => string;
   emit?: boolean;
 };
+
+type NativeApiModule = typeof import("typescript/unstable/async");
+type NativeCompiler = {
+  executable: string;
+  packageJson: string;
+  module: NativeApiModule;
+  fakeStat: unknown;
+};
+
+function resolveFakeStat(module: unknown): unknown {
+  return isRecord(module) && isRecord(module.serverFS) ? module.serverFS.fakeStat : undefined;
+}
+
+function resolveTypeScriptPackage(compilerRoot: string) {
+  try {
+    return createRequire(path.join(compilerRoot, "package.json")).resolve(
+      "typescript/package.json",
+    );
+  } catch (error) {
+    if (isRecord(error) && error.code === "MODULE_NOT_FOUND") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Pair a compiler root's executable with that package's own API client; the
+ * client and server speak one release's protocol and filesystem contract.
+ */
+async function resolveNativeCompiler(compilerRoot: string | undefined): Promise<NativeCompiler> {
+  const packageJson = compilerRoot && resolveTypeScriptPackage(compilerRoot);
+  if (compilerRoot && packageJson) {
+    const manifest: unknown = JSON.parse(fs.readFileSync(packageJson, "utf8"));
+    const exports = isRecord(manifest) && isRecord(manifest.exports) ? manifest.exports : {};
+    // Node shares one cache for require(esm) and import(), so linked packages keep
+    // the client and filesystem sentinels from the same module instance.
+    const requireCompiler = createRequire(packageJson);
+    const load = (entry: unknown) =>
+      typeof entry === "string"
+        ? requireCompiler(fs.realpathSync(path.join(path.dirname(packageJson), entry)))
+        : undefined;
+    // TypeScript 7 previews before 2026-10 published the API under unstable/.
+    const entry = exports["./async"] ?? exports["./unstable/async"];
+    if (typeof entry === "string") {
+      const module: NativeApiModule = await load(entry);
+      const fsModule: unknown = await load(exports["./fs"] ?? exports["./unstable/fs"]);
+      return {
+        executable: resolveRepoToolBinPath("tsgo", { cwd: compilerRoot }),
+        packageJson,
+        module,
+        fakeStat: resolveFakeStat(fsModule),
+      };
+    }
+    if (entry !== undefined) {
+      throw new Error(`Unsupported native TypeScript API export: ${packageJson}`);
+    }
+  }
+  // Roots without TypeScript or with TypeScript 6 predate the native API; they keep
+  // the installed compiler.
+  const [module, fsModule] = await Promise.all([
+    import("typescript/unstable/async"),
+    import("typescript/unstable/fs"),
+  ]);
+  return {
+    ...resolveInstalledNativeTypeScriptCompiler(),
+    module,
+    fakeStat: resolveFakeStat(fsModule),
+  };
+}
 
 /** Compile behind one filesystem boundary; callers publish only successful results. */
 export async function compileNativeProject({
@@ -53,15 +124,7 @@ export async function compileNativeProject({
   let api: API | undefined;
   let view: ReturnType<typeof createDeclarationFileSystem> | undefined;
   try {
-    const compiler =
-      compilerRoot === undefined
-        ? resolveInstalledNativeTypeScriptCompiler()
-        : {
-            executable: resolveRepoToolBinPath("tsgo", { cwd: compilerRoot }),
-            packageJson: createRequire(path.join(compilerRoot, "package.json")).resolve(
-              "typescript/package.json",
-            ),
-          };
+    const compiler = await resolveNativeCompiler(compilerRoot);
     // The toolchain owner admits the normalized path while Windows launches
     // retain the native executable's extended-length spelling.
     const binary = compiler.executable;
@@ -86,7 +149,16 @@ export async function compileNativeProject({
         throw new Error(`Invalid declaration package manifest: ${manifestFile}`);
       }
     }
-    api = new API({ cwd: root, tsserverPath: binary, fs: view.filesystem });
+    // Earlier clients forward only the callbacks they know and ignore stat.
+    const compilerFileSystem =
+      compiler.fakeStat === undefined
+        ? view.filesystem
+        : { ...view.filesystem, stat: compiler.fakeStat };
+    api = new compiler.module.API({
+      cwd: root,
+      tsserverPath: binary,
+      fs: compilerFileSystem,
+    });
     const configured = await api.parseConfigFile(config);
     view.assertValid();
     const typeRoots = configured.options.typeRoots?.map(admit);
@@ -148,7 +220,7 @@ export async function compileNativeProject({
     }
     const outputFiles = new Map<string, EmitOutputFile>();
     if (emit) {
-      const result = await project.program.emitToString(EmitOnly.OnlyDts);
+      const result = await project.program.emitToString(compiler.module.EmitOnly.OnlyDts);
       view.assertValid();
       if (result.emitSkipped || result.diagnostics.length) {
         throw new Error(

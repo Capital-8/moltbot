@@ -9372,8 +9372,16 @@ test "$package_manager" = "pnpm@12.1.0"
     const decisionDownloads = workflowStep(summary, "Download release decision attempts");
     const drainDownloads = workflowStep(summary, "Download diagnostic drain attempts");
 
-    expect(decision.needs).toEqual(["resolve_target", "release_execution_plan"]);
-    expect(drain.needs).toEqual(["resolve_target", "release_execution_plan"]);
+    const terminalNeeds = [
+      "resolve_target",
+      "prepare_npm_package",
+      "qualify_npm_package",
+      "prepare_plugin_npm",
+      "prepare_docker_release",
+      "release_execution_plan",
+    ];
+    expect(decision.needs).toEqual(terminalNeeds);
+    expect(drain.needs).toEqual(terminalNeeds);
     expect(decision.if).toBe("always()");
     expect(drain.if).toBe("always()");
     expect(decisionStep.run).toBe(drainStep.run);
@@ -16258,10 +16266,10 @@ wait_for_run plugin-clawhub-new.yml 123 "${expectedSha}" || status=$?
     ).toEqual(["preflight"]);
     expect(
       jobNeeds(workflowJob(INSTALL_SMOKE_REUSABLE_WORKFLOW, "installer_smoke_update_image")),
-    ).toEqual(["preflight"]);
+    ).toEqual(["preflight", "installer_smoke_candidate_payload"]);
     expect(
       jobNeeds(workflowJob(INSTALL_SMOKE_REUSABLE_WORKFLOW, "installer_smoke_nonroot_image")),
-    ).toEqual(["preflight"]);
+    ).toEqual(["preflight", "installer_smoke_candidate_payload"]);
     expect(
       jobNeeds(workflowJob(INSTALL_SMOKE_REUSABLE_WORKFLOW, "installer_smoke_update")),
     ).toEqual(["preflight", "installer_smoke_candidate_payload", "installer_smoke_update_image"]);
