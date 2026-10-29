@@ -29,30 +29,34 @@ Remove the noVNC patch, its registration, and its exact-version guard exception 
 
 Remove the Matrix patch, its registration, and its exact-version guard exception when an upstream release passes `node scripts/run-vitest.mjs extensions/matrix/src/matrix/client/file-sync-store.sdk.test.ts` and the full Matrix QA catalog, including the original DM SAS-to-QR sequence. The regression exercises the real SQLite sync store, SDK cache hydration, and crypto event wiring; it observes crypto input rather than substituting for native verification proof.
 
-`vitest@5.0.1` has one approved exact-version pnpm patch. Vitest 5 bundles the
+`vitest@5.0.5` has one approved exact-version pnpm patch. Vitest 5 bundles the
 runner, and `@vitest/runner@5.0.0` is not published, so no standalone runner
 dependency or patch remains. The published package integrity is
-`sha512-iA95lQbKEkvrtTkdAgnWbXfbipWiiWe/hDl2P5tMi6WFwD76G0NxXAGp/M9EOcYupeGJRr6wppMc7CoA41TQjg==`.
+`sha512-cPODOMF8YnkiiYtDdHo6n4wWmBrOBBbOIYH2d33M4l3CdNn72h+qMmO6uXffUN6A5AZFXNND/d+krS9mgkXRfg==`.
 The patch SHA-256 is
-`90ba2969491e095cc2e92a4d38256dfcf64f85078ec29e1762b9429a00b35901`
-and it changes exactly these eight published files:
+`c7225d77fb8a242bd88070b9787737119caea3ba29fdccb38419b9fe4c196e92`
+and it changes exactly these nine published files:
 
 | Target | Published SHA-256 | Patched SHA-256 |
 | --- | --- | --- |
-| `dist/chunks/cac.fSuRXrAx.js` | `0290aaa6677cb20fb472b7d101e66b879e982d3799e9eb69ae84652cb8ecacd4` | `36e72e47372bc2c77fdaa9725675644db84ce6f34f86ceb8422b2ac7f9c7ec39` |
-| `dist/chunks/index.D4dXTzh9.js` | `70e7ab020f7f03ae96797ad10b46549cd2edb61e4a4d975ba08d10fe41a0bb9e` | `e45d5d5babb300e099fb955b2af65aea5604db6019d9f0bc1b397a323466b063` |
-| `dist/chunks/index.DzobfTyw.js` | `26c9c3d31efea8bb6e5f6f495db89968ba820a26c0676341f3682ec5377d584d` | `a41a0c84d88ab4aaddf92eb7b11234fc4c72bae7386b63c91898e692e1a81a95` |
-| `dist/chunks/index.m3L2HgmY.js` | `f56631635acaf90deb3b99e037afd8a2431ef685781ae3aa1109bb33d1d02702` | `5c0b1653ddd88eff204dccc35289f66eca06ec43878a6ec73bfc601c3e66be71` |
-| `dist/chunks/init-forks.DgHqDQHC.js` | `7e424d9f059e2343698c78c082469198e05cc8b189484dbdd6b5236b21f9b443` | `2f0f61b0e41cbb3d44bfaff0ddb903c047b175c1e0494bd08f95cfd7b9b2848f` |
-| `dist/chunks/plugin.d.CN87HSxv.d.ts` | `a93d72194894d0eb54e7c43bd41167195dcf6a17800ce18fcee1716e1905dda5` | `2491673a5b9de8255f53dd7e573763d35776e1ff42e0096f98ba31b431fd55e8` |
-| `dist/chunks/run.C5UmxDPh.js` | `890fef0254ad442f55902adc9a7d0e639bb9ba5a78ef4fc53a30f10f1aa9f77c` | `6412031b0068dbe300b7af1ba27056be77c914d067cee69b3dc396b7da8df8cd` |
-| `dist/node.d.ts` | `09b5ab06e7b242132974144474b24a0fddde568e0fb20d69215d156d78ac0d7f` | `7ffe96f8dd9ffcdf5f3d67e56c02f509a516072cd523c9dcef596ada77afd06f` |
+| `dist/chunks/cac.CLrZKo1g.js` | `cbe6e023d5b1e5c8de648da0d43242e660d88676b172a022d2b95f22a88b78c0` | `5c429f733a64ee9a0de35db6fe15f5ee10d03ae784f664faf0afe940896ad7fb` |
+| `dist/chunks/cli-api.De07GUeT.js` | `8b75d08fd468ac1428ef5562e43883e2cf1953c8953a7eab95da17b30ed97945` | `39173bec8f75564cd8db538593973cdf101a8321fd2a9c26d9d5edfa6ac3af53` |
+| `dist/chunks/index.1TqnEahn.js` | `4e311af8b4db378a5c3d4e768b5210b0779d2ae0d0ec05f81a72378dbaf25412` | `17c97be7f0b926e164c7d36273677964379959884024a74e72c0b2fed07d3baa` |
+| `dist/chunks/index.CK-t0WMg.js` | `4712d1e9acaefca5d215c21f53007eeae30904768d45a10cd1fd09c01c6fd46e` | `605c675633a59166e5ca9b04108f4b34ca9f3cf2e3cc41a292f8277ec64aaa99` |
+| `dist/chunks/index.aTZaPVhf.js` | `381472b0170386acbc3f7d05b68ef05b3da53dcaa1058d2750d138648cd2933a` | `9fed49edda9cac115628ff4203ca307200ff721786925654044fbe4076be5ad9` |
+| `dist/chunks/init-forks.CRxIPOJR.js` | `ef3f4026f3bc661f0542e379186637000cd2e6721e78733a4d5b5e9d3de46a64` | `03632dcb32e05236d984c58f2c8aed1a3eac7cb945594e9e0bd8bb32b2a18316` |
+| `dist/chunks/plugin.d.C8mmycim.d.ts` | `e1eae7448953ae3951958097b083af35b50f3adc39f0a922baa14de48324ac2f` | `59aed92bfefac4243398514cd6b274dab1ddc8841ed834d63eef6ff29d625bb7` |
+| `dist/chunks/run.BPv-BBRv.js` | `6353810fdd2b6370386dfb80ec4d1415b2a12d83e00f3ebee83cc0304d6e4c6b` | `0d1eb0c41c32a0e3040d108efc634fc405b1a2c437ca3414a284d84929c59199` |
+| `dist/node.d.ts` | `3cbd85d6dc3f7c97d2ced382172f12a115d46352af8d2a71fec05f9b185baf90` | `0b5cd4c6333b41b11f948f96c1b56809beb07d256ac1b24eab644a197dd033ec` |
 
-Vitest 5.0.1 writes replacement cache metadata upstream; the patch uses that
+Vitest 5.0.5 writes replacement cache metadata upstream; the patch uses that
 `writeMetadata` owner and retains the remaining generation and invalidation
-repairs. The patch owns these temporary invariants and removal gates:
+repairs. The split runtime keeps cache integrity initialization with upstream
+`VitestCache._load()`, moved before reporter imports so persisted reporter transforms
+share the checked generation. The patch does not reintroduce the retired `_fsCache` owner.
+The patch owns these temporary invariants and removal gates:
 
-- **Mock resolution (`index.D4dXTzh9.js`):** module fetches join the mocker's
+- **Mock resolution (`index.CK-t0WMg.js`):** module fetches join the mocker's
   serialized resolution before reading its registry, even after the pending-id
   queue is emptied by an in-flight pass. Resolution drains ids queued during a
   pass; failed callers retain their errors without poisoning later callers.
@@ -60,20 +64,20 @@ repairs. The patch owns these temporary invariants and removal gates:
   stock Vitest passes `test/scripts/vitest-mock-resolution.test.ts` and the
   original cold Gateway CI group containing
   `authenticated-request-dispatch.lifetime.test.ts`.
-- **CLI validation (`cac.fSuRXrAx.js`):** public `parseCLI` validates unknown
+- **CLI validation (`cac.CLrZKo1g.js`):** public `parseCLI` validates unknown
   options, required values, and required arguments without executing a command.
   Help/version and `allowUnknownOptions` retain native semantics. Remove this
   hunk when stock Vitest passes the native validation cases in
   `test/scripts/run-vitest-profile.test.ts` and
   `test/scripts/vitest-report-owner.test.ts`.
-- **Filesystem cache generations (`index.DzobfTyw.js`):** persistence remains
+- **Filesystem cache generations (`cli-api.De07GUeT.js`, `index.1TqnEahn.js`):** persistence remains
   disabled until lockfile integrity completes; generation participates in cache
   keys; lock transitions rewrite metadata and reset retained roots, keys, and
   transform temporary markers; invalidation covers the root and selected
-  projects. Remove these hunks when stock Vitest passes the four cache-generation
+  projects. Remove these hunks when stock Vitest passes the five cache-generation
   and invalidation regressions in `test/vitest-performance-config.test.ts`.
-- **Graceful fork shutdown (`index.DzobfTyw.js`,
-  `init-forks.DgHqDQHC.js`, `plugin.d.CN87HSxv.d.ts`, `dist/node.d.ts`):**
+- **Graceful fork shutdown (`index.1TqnEahn.js`,
+  `init-forks.CRxIPOJR.js`, `plugin.d.C8mmycim.d.ts`, `dist/node.d.ts`):**
   built-in fork workers flush a `willExit` response, exit explicitly, and are
   joined before run completion. Deadline and abnormal-exit paths still fail and
   terminate the worker; custom transports remain parent-owned unless they opt
@@ -81,8 +85,8 @@ repairs. The patch owns these temporary invariants and removal gates:
   `test/scripts/vitest-fork-shutdown.test.ts`,
   `test/scripts/run-vitest-state-cleanup.test.ts`, and
   `test/scripts/run-vitest-profile.test.ts`.
-- **File-backed report projects (`index.DzobfTyw.js`,
-  `plugin.d.CN87HSxv.d.ts`):** a Vitest-owned
+- **File-backed report projects (`index.1TqnEahn.js`,
+  `plugin.d.C8mmycim.d.ts`):** a Vitest-owned
   `{ config, root?, namePrefix? }` descriptor loads its config exactly once,
   keeps the file-owned root when omitted, preserves the explicit root when
   supplied, and derives its final name after Vite hooks. A replayed prefix
@@ -92,12 +96,12 @@ repairs. The patch owns these temporary invariants and removal gates:
   `test/scripts/vitest-report-owner.test.ts` without pre-resolving configs or
   injecting captured names and `test/vitest-ui-package-config.test.ts` without
   losing omitted or explicit project roots.
-- **Trailing task updates (`run.C5UmxDPh.js`):** the bundled runner accepts the
+- **Trailing task updates (`run.BPv-BBRv.js`):** the bundled runner accepts the
   exact batching deadline and clears a consumed timer before re-entering the
   throttle, so an early callback can rearm without losing the trailing update.
   Remove this hunk when stock Vitest passes
   `test/scripts/vitest-runner-task-updates.test.ts`.
-- **Fake timer heap order (`index.m3L2HgmY.js`):** refresh removes a timer from
+- **Fake timer heap order (`index.aTZaPVhf.js`):** refresh removes a timer from
   the heap before mutating its ordering key, then reinserts it. Remove this hunk
   when stock Vitest passes `test/scripts/vitest-fake-timers.test.ts` and
   `extensions/telegram/src/probe.response-body-timeout.test.ts`.

@@ -4131,7 +4131,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     "config/ci-budget.md",
     "test/vitest/vitest.tooling.config.ts",
     "package.json",
-    "patches/vitest@5.0.1.patch",
+    "patches/vitest@5.0.5.patch",
     ".github/workflows/ci.yml",
     "apps/ios/fastlane/Fastfile",
     "extensions/matrix/scripts/build.mjs",

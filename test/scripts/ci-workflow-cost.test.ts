@@ -227,8 +227,8 @@ describe("bounded scheduled proof reuse", () => {
 describe("node runtime event scope", () => {
   it.each([
     [["patches/README.md"], false],
-    [["patches/vitest@5.0.1.patch"], true],
-    [["patches/README.md", "patches/vitest@5.0.1.patch"], true],
+    [["patches/vitest@5.0.5.patch"], true],
+    [["patches/README.md", "patches/vitest@5.0.5.patch"], true],
     [["patches/runtime-fixture.md"], true],
     [["crates/openclaw-node-host/SIDECAR_PROTOCOL.md"], false],
     [
@@ -285,12 +285,12 @@ describe("workflow cost admission", () => {
         "scripts/ci-hydrate-testbox-env.sh",
         ".npmrc",
         "packages/fs-safe/package.json",
-        "patches/vitest@5.0.1.patch",
+        "patches/vitest@5.0.5.patch",
         "patches/runtime-fixture.md",
       ]) {
         expect(accepts(path), path).toBe(true);
       }
-      expect(["patches/README.md", "patches/vitest@5.0.1.patch"].some(accepts)).toBe(true);
+      expect(["patches/README.md", "patches/vitest@5.0.5.patch"].some(accepts)).toBe(true);
       expect(workflow.on.workflow_dispatch).toBeDefined();
     },
   );
