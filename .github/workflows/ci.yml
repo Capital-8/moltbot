@@ -5360,6 +5360,47 @@ jobs:
           trap 'rm -rf "$swabble_scratch"' EXIT
           swift test --package-path apps/swabble --scratch-path "$swabble_scratch" --build-system native --disable-index-store -Xswiftc -gline-tables-only --no-parallel
 
+      - name: MLX TTS helper build and tests
+        id: mlx-helper
+        if: ${{ !cancelled() && steps.select-xcode.outcome == 'success' && matrix.phase == 'packages' && env.HISTORICAL_TARGET != 'true' }}
+        run: |
+          set -euo pipefail
+          source .ci-harness/scripts/ci-collect-checks.sh
+          mlx_scratch="$(mktemp -d "$RUNNER_TEMP/openclaw-mlx-tts.XXXXXX")"
+          trap 'rm -rf "$mlx_scratch"' EXIT
+          mlx_proof="$(mktemp -d "$RUNNER_TEMP/openclaw-mlx-tts-proof.XXXXXX")"
+          swift package --package-path apps/macos-mlx-tts --scratch-path "$mlx_scratch" resolve
+          cp apps/macos-mlx-tts/Package.swift apps/macos-mlx-tts/Package.resolved "$mlx_proof/"
+          printf 'source_sha=%s\nrun_id=%s\nrun_attempt=%s\njob=%s\n' \
+            "$(git rev-parse HEAD)" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" > "$mlx_proof/source.txt"
+          shasum -a 256 apps/macos-mlx-tts/Package.swift apps/macos-mlx-tts/Package.resolved > "$mlx_proof/SHA256SUMS"
+          cat "$mlx_proof/source.txt" "$mlx_proof/SHA256SUMS"
+          echo "proof-path=$mlx_proof" >> "$GITHUB_OUTPUT"
+          build_mlx_helper() {
+            swift build --build-system swiftbuild --package-path apps/macos-mlx-tts -c debug \
+              --product openclaw-mlx-tts --build-path "$mlx_scratch" --arch arm64 --jobs 1
+            mlx_bin="$(swift build --build-system swiftbuild --package-path apps/macos-mlx-tts -c debug \
+              --product openclaw-mlx-tts --build-path "$mlx_scratch" --arch arm64 --jobs 1 --show-bin-path)"
+            test -s "$mlx_bin/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
+            swift test --build-system swiftbuild --package-path apps/macos-mlx-tts -c debug \
+              --build-path "$mlx_scratch" --arch arm64 --jobs 1 --filter MLXTTSHelperServiceTests
+          }
+          # Capture the actual resolver output even when a draft's committed lock
+          # is stale; keep that mismatch red while independent helper checks finish.
+          run_check "MLX TTS committed resolution" git diff --exit-code -- apps/macos-mlx-tts/Package.resolved
+          run_check "MLX TTS helper" build_mlx_helper
+          run_check "MLX TTS immutable resolution" shasum -a 256 -c "$mlx_proof/SHA256SUMS"
+          finish_checks
+
+      - name: Upload MLX TTS resolution
+        if: ${{ always() && matrix.phase == 'packages' && steps.mlx-helper.outputs.proof-path != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-mlx-tts-resolution-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.mlx-helper.outputs.proof-path }}
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build Swift tests
         id: swift-test-build
         if: ${{ !cancelled() && steps.select-xcode.outcome == 'success' && steps.macos-native-assets.outcome == 'success' && matrix.phase == 'tests' }}
