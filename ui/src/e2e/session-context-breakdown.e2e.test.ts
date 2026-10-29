@@ -122,7 +122,19 @@ suite.define(() => {
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
       await gateway.waitForRequest("sessions.messages.subscribe");
       const details = await openChatDetails(page);
-      expect(breakdownRequests).toHaveLength(0);
+      // Idle warming may load the code before context is requested.
+      expect(
+        await page
+          .locator(".context-usage__popover, openclaw-chat-context-panel")
+          .filter({ visible: true })
+          .count(),
+      ).toBe(0);
+      expect(
+        await gateway.getRequests("sessions.usage", {
+          key: sessionKey,
+          includeContextWeight: true,
+        }),
+      ).toHaveLength(0);
       expect(
         await details
           .locator('[data-details-group="context"], [data-details-destination="context"]')
