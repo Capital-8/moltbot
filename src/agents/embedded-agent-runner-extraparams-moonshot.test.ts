@@ -39,9 +39,13 @@ beforeEach(() => {
         const wrapped = buildProviderStreamFamilyHooks("moonshot-thinking").wrapStreamFn?.(
           params.context,
         );
+        if (!wrapped) {
+          return params.context.streamFn;
+        }
         // The Moonshot plugin supplies these facts from its catalog rows.
-        return (model, context, options) =>
-          wrapped?.({ ...model, ...MOONSHOT_ROW_FACTS[model.id] }, context, options);
+        const withRowFacts: typeof wrapped = (model, context, options) =>
+          wrapped({ ...model, ...MOONSHOT_ROW_FACTS[model.id] }, context, options);
+        return withRowFacts;
       }
       return params.context.streamFn;
     },
