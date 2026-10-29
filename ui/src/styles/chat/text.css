@@ -1117,9 +1117,9 @@
   width: auto;
   height: auto;
   margin-top: 0.75em;
-  border: 1px solid var(--chat-content-border, var(--border));
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--chat-content-surface, color-mix(in srgb, var(--secondary) 70%, transparent));
+  background: color-mix(in srgb, var(--secondary) 70%, transparent);
   object-fit: contain;
 }
 
@@ -1139,7 +1139,7 @@
   padding: 0.7em 0.8em;
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--chat-content-surface, var(--bg-muted));
+  background: var(--bg-muted);
   color: var(--muted);
 }
 

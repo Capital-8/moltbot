@@ -7,9 +7,9 @@ openclaw-youtube-video {
 
   .card {
     overflow: hidden;
-    border: 1px solid var(--chat-content-border, var(--border));
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 12px);
-    background: var(--chat-content-surface, var(--card));
+    background: var(--card);
   }
   .stage {
     position: relative;
@@ -17,7 +17,7 @@ openclaw-youtube-video {
     min-width: 0;
     min-height: 200px;
     aspect-ratio: 16 / 9;
-    background: var(--chat-content-surface, var(--panel));
+    background: var(--panel);
   }
   .preview,
   iframe {
@@ -31,10 +31,7 @@ openclaw-youtube-video {
   .preview {
     padding: 0;
     color: var(--text-strong);
-    background: var(
-      --chat-content-surface,
-      linear-gradient(145deg, var(--bg-elevated), var(--panel))
-    );
+    background: linear-gradient(145deg, var(--bg-elevated), var(--panel));
     cursor: default;
   }
   a.preview {
@@ -103,13 +100,13 @@ openclaw-youtube-video {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    color: var(--chat-content-link, var(--muted));
+    color: var(--muted);
     font-size: 12px;
     text-decoration: none;
     cursor: pointer;
   }
   .watch:hover {
-    color: var(--chat-content-link-hover, var(--accent));
+    color: var(--text);
   }
   .watch svg,
   .close svg {
@@ -122,7 +119,7 @@ openclaw-youtube-video {
     height: 30px;
     padding: 0;
     place-items: center;
-    border: 1px solid var(--chat-content-border, var(--border));
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--muted);
     background: transparent;

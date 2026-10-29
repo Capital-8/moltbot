@@ -320,7 +320,7 @@
 .chat-image-frame--image > .chat-image-surface {
   display: block;
   aspect-ratio: var(--chat-image-ratio);
-  background: var(--chat-content-surface, color-mix(in srgb, var(--bg-muted) 45%, var(--bg)));
+  background: color-mix(in srgb, var(--bg-muted) 45%, var(--bg));
 }
 
 .chat-image-frame--compact {
@@ -331,11 +331,7 @@
 
 .chat-image-skeleton.skeleton {
   --skeleton-base: transparent;
-  --skeleton-highlight: color-mix(
-    in srgb,
-    var(--chat-content-hover, var(--bg-hover)) 45%,
-    transparent
-  );
+  --skeleton-highlight: color-mix(in srgb, var(--bg-hover) 45%, transparent);
   --skeleton-duration: 2.4s;
 
   position: absolute;
@@ -475,7 +471,7 @@
   max-width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  background: var(--chat-content-surface, var(--bg-muted));
+  background: var(--bg-muted);
 }
 
 .chat-video-preview__content,
@@ -686,7 +682,7 @@
 }
 
 .chat-assistant-attachment-card {
-  --chat-attachment-border: var(--chat-content-border, var(--border-strong));
+  --chat-attachment-border: var(--border-strong);
   --chat-attachment-surface: var(--bg);
   --chat-attachment-action-size: 30px;
 
@@ -696,15 +692,12 @@
   overflow: hidden;
   border: 1px solid var(--chat-attachment-border);
   border-radius: var(--radius-md);
-  background: var(--chat-content-surface, transparent);
+  background: transparent;
   transition: background-color 120ms ease;
 }
 
 .chat-assistant-attachment-card:hover {
-  background-color: var(
-    --chat-content-hover,
-    color-mix(in srgb, var(--media-foreground) 4%, transparent)
-  );
+  background-color: color-mix(in srgb, var(--media-foreground) 4%, transparent);
 }
 
 .chat-assistant-attachment-card[data-openable] {
@@ -712,23 +705,32 @@
 }
 
 :root[data-theme-mode="light"] .chat-assistant-attachment-card:hover {
-  background-color: var(
-    --chat-content-hover,
-    color-mix(in srgb, var(--media-bg) 3%, var(--chat-attachment-surface))
-  );
+  background-color: color-mix(in srgb, var(--media-bg) 3%, var(--chat-attachment-surface));
 }
 
 :root[data-theme-mode="light"] .chat-assistant-attachment-card {
-  --chat-attachment-surface: var(
-    --chat-content-surface,
-    color-mix(in srgb, var(--panel) 98%, white 2%)
-  );
+  --chat-attachment-surface: color-mix(in srgb, var(--panel) 98%, white 2%);
 
   background-color: var(--chat-attachment-surface);
 }
 
 :root[data-theme-mode="light"] .chat-assistant-attachment-card__action:hover {
   background: color-mix(in srgb, var(--media-bg) 6%, transparent);
+}
+
+/* Message attachments keep the raised surface used by sent attachment chips. */
+:root .chat-bubble .chat-assistant-attachment-card {
+  --chat-attachment-surface: var(--chat-composer-surface, var(--popover));
+
+  background: var(--chat-attachment-surface);
+}
+
+.chat-bubble .chat-assistant-attachment-card:hover {
+  background-color: color-mix(in srgb, var(--media-foreground) 4%, var(--chat-attachment-surface));
+}
+
+:root[data-theme-mode="light"] .chat-bubble .chat-assistant-attachment-card:hover {
+  background-color: color-mix(in srgb, var(--media-bg) 3%, var(--chat-attachment-surface));
 }
 
 .chat-assistant-attachment-card--audio,

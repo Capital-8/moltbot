@@ -1352,7 +1352,7 @@ openclaw-chat-video-player {
   width: 12px;
   height: 12px;
   appearance: none;
-  border: 2px solid var(--chat-content-surface, var(--card));
+  border: 2px solid var(--card);
   border-radius: 999px;
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
@@ -1361,10 +1361,18 @@ openclaw-chat-video-player {
 .chat-audio-player__seek::-moz-range-thumb {
   width: 9px;
   height: 9px;
-  border: 2px solid var(--chat-content-surface, var(--card));
+  border: 2px solid var(--card);
   border-radius: 999px;
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.chat-bubble .chat-audio-player__seek::-webkit-slider-thumb {
+  border-color: var(--chat-attachment-surface, var(--card));
+}
+
+.chat-bubble .chat-audio-player__seek::-moz-range-thumb {
+  border-color: var(--chat-attachment-surface, var(--card));
 }
 
 .chat-audio-player__seek:focus-visible {
