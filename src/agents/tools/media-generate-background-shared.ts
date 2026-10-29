@@ -61,6 +61,8 @@ import {
 } from "./media-generate-background-completion.js";
 export type { MediaGenerationTaskHandle } from "./media-generate-background-completion.js";
 
+import { captureProgressWorkWait } from "./progress-work-wait.js";
+
 const log = createSubsystemLogger("agents/tools/media-generate-background-shared");
 const MEDIA_GENERATION_TASK_KEEPALIVE_INTERVAL_MS = 60_000;
 const MEDIA_GENERATION_COMPLETION_HANDOFF_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000] as const;
@@ -215,6 +217,7 @@ async function createMediaGenerationTaskRun(
   if (!sessionKey) {
     return null;
   }
+  const retainWait = captureProgressWorkWait();
   const requesterRunSessionKey = params.requesterRunSessionKey?.trim() || sessionKey;
   const runId = `tool:${params.toolName}:${crypto.randomUUID()}`;
   const assertCurrent = captureMediaGenerationAdmission(params.assertCurrent);
@@ -306,6 +309,7 @@ async function createMediaGenerationTaskRun(
       taskLabel: params.prompt,
     };
     touchMediaGenerationTaskRunContext(handle);
+    await retainWait?.({ kind: "media", runId, taskId: task.taskId }, requesterTranscript);
     return handle;
   } catch (error) {
     // A revoked invocation cannot become an untracked foreground provider call.

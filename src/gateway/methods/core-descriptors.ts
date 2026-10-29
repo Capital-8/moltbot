@@ -529,6 +529,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["sessions.move", "sessions-dispatch", "dynamic", "2026.8", SIDECAR_CONTROL_PLANE_WRITE],
   ["sessions.assignOwner", "sessions-mutations", "operator.write", "2026.8"],
   ["progressCard.get", "progress-card", "operator.read", "2026.8"],
+  ["progressCard.reconcileWork", "progress-card", "operator.write", "2026.10", UNADVERTISED],
   ["progressCard.put", "progress-card", "operator.write", "2026.8"],
   ["tools.github.status", "tools-github", "operator.read", "2026.8"],
   ["tools.github.configure", "tools-github", "operator.admin", "2026.8", CONTROL_PLANE_WRITE],

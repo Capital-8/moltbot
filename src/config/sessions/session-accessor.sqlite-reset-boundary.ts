@@ -1,4 +1,7 @@
-import { clearSessionProgressCardForReset } from "../../session-cards/progress-card-store.js";
+import {
+  clearSessionProgressCardForReset,
+  carrySessionProgressWorkForReset,
+} from "../../session-cards/progress-card-store.js";
 import { emitSessionLifecycleEvent } from "../../sessions/session-lifecycle-events.js";
 import {
   deferOpenClawAgentPostCommitPublication,
@@ -19,6 +22,7 @@ export function appendSessionResetBoundary(
   scope: ResolvedTranscriptScope,
   previousEntry: InternalSessionEntry,
   boundary: SessionResetBoundaryWrite,
+  nextEntry: InternalSessionEntry,
   projection?: {
     scheduleProjectionReconcile?: boolean;
     onProjectionReconcileNeeded?: () => void;
@@ -39,6 +43,19 @@ export function appendSessionResetBoundary(
   });
   if (appendTranscriptEventInTransaction(database, scope, event, projection) === false) {
     throw new Error("Failed to append reset boundary for " + scope.sessionKey);
+  }
+  if (boundary.context === "preserve-tail") {
+    const owner = {
+      agentId: scope.agentId,
+      sessionKey: scope.sessionKey,
+      sessionId: previousEntry.sessionId,
+      lifecycleRevision: previousEntry.lifecycleRevision ?? null,
+    };
+    carrySessionProgressWorkForReset(database.db, owner, {
+      ...owner,
+      sessionId: nextEntry.sessionId,
+      lifecycleRevision: nextEntry.lifecycleRevision ?? null,
+    });
   }
   if (
     boundary.context === "clear" &&
