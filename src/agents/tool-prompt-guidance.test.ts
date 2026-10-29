@@ -53,6 +53,31 @@ describe("tool-gated prompt guidance", () => {
     expect(ordered.indexOf("## alpha guidance")).toBeLessThan(ordered.indexOf("## beta guidance"));
   });
 
+  it("keeps the tool but drops its guidance when prompt injection is disabled", () => {
+    const builder = createTestPluginRegistry();
+    const record = createPluginRecord({
+      id: "quiet",
+      source: "/synthetic/quiet.ts",
+      origin: "global",
+      enabled: true,
+      configSchema: false,
+      contracts: { tools: ["quiet_tool"] },
+    });
+    builder.registry.plugins.push(record);
+    builder
+      .createApi(record, { config: {}, hookPolicy: { allowPromptInjection: false } })
+      .registerTool(() => null, { name: "quiet_tool", promptGuidance: "## quiet guidance" });
+    setActivePluginRegistry(builder.registry);
+
+    expect(builder.registry.tools.map((tool) => tool.names)).toEqual([["quiet_tool"]]);
+    expect(buildAgentSystemPrompt({ workspaceDir: "/w", toolNames: ["quiet_tool"] })).not.toContain(
+      "## quiet guidance",
+    );
+    expect(builder.registry.diagnostics).toMatchObject([
+      { level: "warn", message: expect.stringContaining("allowPromptInjection=false") },
+    ]);
+  });
+
   it("rejects guidance on a registration that does not name its tools", () => {
     const builder = createTestPluginRegistry();
     const record = createPluginRecord({
