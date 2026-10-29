@@ -2801,6 +2801,7 @@ describe("ci workflow guards", () => {
               "OpenClawKit tests",
               "Swabble tests",
             ],
+            mlx: ["MLX TTS helper build and tests"],
           }
         : {
             smoke: [

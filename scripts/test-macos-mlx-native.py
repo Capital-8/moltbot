@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -49,6 +50,194 @@ ACTIVE_TEXT = (
 FRAME_LIMIT = 64 * 1024 * 1024  # The shared Swift frame codec's public limit.
 PCM_LIMIT = 16 * 1024 * 1024
 CACHE_LIMIT = 2 * 1024 * 1024 * 1024  # Includes Hub duplication and both legacy fixtures.
+CAPTURE_LIMIT = 64 * 1024
+CONFIG_URL = f"https://huggingface.co/{MODEL}/resolve/{REVISION}/config.json"
+FOUNDATION_SOURCE = r'''import CryptoKit
+import Darwin
+import Foundation
+
+// Keep Foundation's default auth/cache configuration and HF's delegate/task/move shape.
+final class Probe: NSObject, URLSessionDownloadDelegate, URLSessionDataDelegate, @unchecked Sendable {
+    let mode: String
+    let root: URL
+    let done = DispatchSemaphore(value: 0)
+    var bytes = Data()
+    var failure: String?
+    var result: [String: Any]
+    var redirects = 0
+    var session: URLSession!
+
+    init(mode: String, root: URL) {
+        self.mode = mode
+        self.root = root.resolvingSymlinksInPath()
+        self.result = ["mode": mode, "pid": Int(getpid()), "ok": false, "moved": false]
+        super.init()
+        result["homeRelation"] = relation(URL(fileURLWithPath: NSHomeDirectory()))
+        result["temporaryRelation"] = relation(FileManager.default.temporaryDirectory)
+    }
+
+    func relation(_ url: URL) -> String {
+        let path = url.resolvingSymlinksInPath().path
+        return path == root.path || path.hasPrefix(root.path + "/") ? "owned" : "outside-owned"
+    }
+
+    func allowed(_ url: URL) -> Bool {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme == "https", parts.host == "huggingface.co",
+              parts.user == nil, parts.password == nil, parts.port == nil || parts.port == 443 else { return false }
+        return [
+            "/mlx-community/Soprano-80M-bf16/resolve/b7da048eff3dfd556409a44b78b9c61a9dd4ccfa/config.json",
+            "/api/resolve-cache/models/mlx-community/Soprano-80M-bf16/b7da048eff3dfd556409a44b78b9c61a9dd4ccfa/config.json"
+        ].contains(parts.path)
+    }
+
+    func responseOK(_ response: URLResponse?) -> Bool {
+        guard let response = response as? HTTPURLResponse, let url = response.url, allowed(url) else {
+            failure = "response-identity"
+            return false
+        }
+        result["status"] = response.statusCode
+        var publicURL = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        publicURL.query = nil
+        publicURL.fragment = nil
+        result["url"] = publicURL.string!
+        guard response.statusCode == 200, response.expectedContentLength <= 680 else {
+            failure = "response-status-or-length"
+            return false
+        }
+        return true
+    }
+
+    func identity(_ data: Data) -> Bool {
+        guard data.count == 680 else { failure = "accepted-length"; return false }
+        var blob = Data("blob 680\0".utf8)
+        blob.append(data)
+        let hash = Insecure.SHA1.hash(data: blob).map { String(format: "%02x", $0) }.joined()
+        result["acceptedBytes"] = data.count
+        result["gitBlob"] = hash
+        guard hash == "cfaff3fd177b291ecc244a181dceaa2168ef373a" else {
+            failure = "accepted-identity"
+            return false
+        }
+        return true
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        redirects += 1
+        guard redirects <= 3, let url = request.url, allowed(url) else {
+            failure = "redirect-identity-or-limit"
+            completionHandler(nil)
+            task.cancel()
+            return
+        }
+        completionHandler(request)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        completionHandler(responseOK(response) ? .allow : .cancel)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        // Bound retained data before append; cancellation cannot cap bytes already in flight.
+        guard data.count <= 680 - bytes.count else {
+            failure = "retained-byte-limit"
+            dataTask.cancel()
+            return
+        }
+        bytes.append(data)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard responseOK(downloadTask.response), totalBytesWritten <= 680, totalBytesExpectedToWrite <= 680 else {
+            if failure == nil { failure = "download-progress-limit" }
+            downloadTask.cancel()
+            return
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didFinishDownloadingTo location: URL) {
+        result["callbackRelation"] = relation(location)
+        guard failure == nil, responseOK(downloadTask.response) else { return }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: location.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.size] as? NSNumber)?.intValue == 680 else {
+                failure = "callback-file-size-or-type"
+                return
+            }
+            guard identity(try Data(contentsOf: location)) else { return }
+            // HF moves the framework location inside this callback. Refuse an unowned destination.
+            let temporary = FileManager.default.temporaryDirectory
+            guard relation(temporary) == "owned" else { failure = "unowned-hf-destination"; return }
+            let destination = temporary.appendingPathComponent("hf-download-\(UUID().uuidString).tmp")
+            try FileManager.default.moveItem(at: location, to: destination)
+            result["moved"] = true
+        } catch {
+            failure = "callback-move-or-read"
+            result["errors"] = errors(error as NSError)
+        }
+    }
+
+    func errors(_ error: NSError, depth: Int = 0) -> [[String: Any]] {
+        let domain = error.domain.range(of: "^[A-Za-z0-9_.-]{1,80}$", options: .regularExpression) == nil ? "other" : error.domain
+        var chain: [[String: Any]] = [["domain": domain, "code": error.code]]
+        if depth < 2, let nested = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            chain += errors(nested, depth: depth + 1)
+        }
+        return chain
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            if failure == nil { failure = "native-task" }
+            if result["errors"] == nil { result["errors"] = errors(error as NSError) }
+        }
+        if mode == "data", failure == nil { _ = identity(bytes) }
+        if mode == "download", failure == nil, result["moved"] as? Bool != true { failure = "missing-download-callback" }
+        result["ok"] = failure == nil
+        result["failure"] = failure
+        result["redirects"] = redirects
+        done.signal()
+    }
+
+    func run(_ url: URL) -> Int32 {
+        let original = URLSession(configuration: .default)
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        session = URLSession(configuration: original.configuration, delegate: self, delegateQueue: queue)
+        original.finishTasksAndInvalidate()
+        let task: URLSessionTask = mode == "download" ? session.downloadTask(with: url) : session.dataTask(with: url)
+        task.resume()
+        guard done.wait(timeout: .now() + 25) == .success else {
+            task.cancel()
+            session.invalidateAndCancel()
+            emit(["mode": mode, "pid": Int(getpid()), "ok": false, "failure": "task-deadline"])
+            return 1
+        }
+        session.finishTasksAndInvalidate()
+        emit(result)
+        return result["ok"] as? Bool == true ? 0 : 1
+    }
+}
+
+func emit(_ value: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), data.count <= 4096 else { exit(2) }
+    FileHandle.standardOutput.write(data)
+    FileHandle.standardOutput.write(Data([10]))
+}
+
+let arguments = CommandLine.arguments
+guard arguments.count == 4, ["download", "data"].contains(arguments[1]),
+      let url = URL(string: arguments[3]) else { exit(2) }
+let probe = Probe(mode: arguments[1], root: URL(fileURLWithPath: arguments[2]))
+guard probe.allowed(url) else { exit(2) }
+exit(probe.run(url))
+'''
 METAL_SOURCE = r'''import Darwin
 import Foundation
 import Metal
@@ -119,10 +308,15 @@ class Budget:
         return min(self.work_end, time.monotonic() + seconds)
 
 
+class CaptureCustodyError(RuntimeError):
+    """Diagnostic availability must never hide an unretired owned process."""
+
+
 class Child:
     """Own one process group and all three pipes, including on deadline failure."""
 
-    def __init__(self, argv, cwd, env, framed=False):
+    def __init__(self, argv, cwd, env, framed=False, quiet_limit=None):
+        require(quiet_limit is None or (not framed and 0 < quiet_limit <= CAPTURE_LIMIT), "invalid quiet capture bound")
         self.process = subprocess.Popen(
             [str(x) for x in argv], cwd=cwd, env=env, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, start_new_session=True,
@@ -140,6 +334,9 @@ class Child:
         self.stderr = bytearray()
         self.on_tick = None
         self.discard = False
+        self.quiet_limit = quiet_limit
+        self.capture_overflow = False
+        self.captured_bytes = 0
 
     def pump(self, deadline):
         require(time.monotonic() < deadline, "child phase deadline exhausted")
@@ -152,6 +349,14 @@ class Child:
                 key.fileobj.close()
                 continue
             if self.discard:
+                continue
+            if self.quiet_limit is not None:
+                # Never echo raw diagnostics, including unsolicited Foundation stderr.
+                remaining = max(0, self.quiet_limit - self.captured_bytes)
+                self.capture_overflow |= len(data) > remaining
+                target = self.stdout if key.data == "stdout" else self.stderr
+                target.extend(data[:remaining])
+                self.captured_bytes += min(len(data), remaining)
                 continue
             if key.data == "stdout" and self.framed:
                 self.buffer.extend(data)
@@ -219,6 +424,79 @@ class Child:
         self.selector.close()
 
 
+def sandbox_denials(raw, pid, started, ended, roots):
+    """Allowlist one retired child's bounded log window; raw messages never escape."""
+    require(0 < pid and started <= ended and len(raw) <= CAPTURE_LIMIT, "invalid denial capture")
+    records = []
+    finished = False
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        require(isinstance(event, dict), "invalid denial event")
+        require(not finished, "event after denial completion record")
+        if "finished" in event:
+            finished = True
+            continue
+        timestamp = datetime.fromisoformat(event["timestamp"])
+        require(timestamp.tzinfo is not None, "denial timestamp has no timezone")
+        stamp = timestamp.timestamp()
+        match = re.fullmatch(r"Sandbox: [^\s()]{1,128}\((\d+)\) deny\(\d+\) ([a-z][a-z0-9*-]{0,63})(?: (.*))?", event.get("eventMessage", ""))
+        if not match or int(match[1]) != pid or not started <= stamp <= ended:
+            continue
+        operation, argument = match[2], match[3] or ""
+        allowed = {"mach-lookup", "file-read-data", "file-read-metadata", "file-write-create", "file-write-data", "file-write-mode", "file-write-unlink", "network-outbound", "network-inbound", "network-bind", "system-socket", "ipc-posix-shm-read-data"}
+        record = {"pid": pid, "operation": operation if operation in allowed else "other", "resourceState": "available" if operation in allowed else "unavailable"}
+        if operation == "mach-lookup" and re.fullmatch(r"com\.apple\.[A-Za-z0-9_.-]{1,140}", argument):
+            record["systemService"] = argument
+        elif argument.startswith("/"):
+            # Classify text only: do not stat/read paths named by system diagnostics.
+            path = os.path.normpath(argument)
+            relation = next((label for label, root in roots.items() if path == str(root) or path.startswith(str(root) + "/")), None)
+            if relation is None:
+                darwin = re.match(r"^/(?:private/)?var/folders/[^/]+/[^/]+/(T|C)(?:/|$)", path)
+                if darwin:
+                    relation = "darwin-user-temp" if darwin[1] == "T" else "darwin-user-cache"
+                elif path == "/Library/Keychains" or path.startswith("/Library/Keychains/"):
+                    relation = "system-keychain"
+            record["pathRelation"] = relation or "outside-known-roots"
+            if relation is None:
+                record["resourceState"] = "unavailable"
+        else:
+            record["resource"] = "redacted-or-unclassified"
+            record["resourceState"] = "unavailable"
+        records.append(record)
+        require(len(records) <= 16 and len(json.dumps(records).encode()) <= 16 * 1024, "normalized denial capture overflow")
+    require(finished, "denial capture lacks completion record")
+    return records
+
+
+def foundation_record(raw, pid, mode):
+    require(0 < len(raw) <= 4096, "invalid Foundation receipt size")
+    value = json.loads(raw)
+    require(isinstance(value, dict) and value.get("pid") == pid and value.get("mode") == mode and type(value.get("ok")) is bool, "invalid Foundation receipt identity")
+    allowed = {"mode", "pid", "ok", "moved", "homeRelation", "temporaryRelation", "callbackRelation", "status", "url", "acceptedBytes", "gitBlob", "failure", "redirects", "errors"}
+    require(value.keys() <= allowed, "unexpected Foundation receipt field")
+    for key in ["homeRelation", "temporaryRelation", "callbackRelation"]:
+        require(key not in value or value[key] in ["owned", "outside-owned"], "invalid Foundation path relation")
+    failures = {"response-identity", "response-status-or-length", "accepted-length", "accepted-identity", "redirect-identity-or-limit", "retained-byte-limit", "download-progress-limit", "callback-file-size-or-type", "unowned-hf-destination", "callback-move-or-read", "native-task", "missing-download-callback", "task-deadline"}
+    require(value.get("failure") is None or value["failure"] in failures, "invalid Foundation failure class")
+    for key in ["status", "acceptedBytes", "redirects"]:
+        require(key not in value or (type(value[key]) is int and 0 <= value[key] <= (599 if key == "status" else 680 if key == "acceptedBytes" else 3)), "invalid Foundation numeric field")
+    require("moved" not in value or type(value["moved"]) is bool, "invalid callback move receipt")
+    require("gitBlob" not in value or re.fullmatch(r"[0-9a-f]{40}", value["gitBlob"]), "invalid Foundation blob")
+    urls = [CONFIG_URL, f"https://huggingface.co/api/resolve-cache/models/{MODEL}/{REVISION}/config.json"]
+    require("url" not in value or value["url"] in urls, "invalid Foundation public URL")
+    errors = value.get("errors", [])
+    require(isinstance(errors, list) and len(errors) <= 3, "invalid Foundation error chain")
+    for error in errors:
+        require(isinstance(error, dict) and error.keys() == {"domain", "code"} and isinstance(error["domain"], str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", error["domain"]) and type(error["code"]) is int, "invalid Foundation error metadata")
+    if value["ok"]:
+        require(value.get("status") == 200 and value.get("acceptedBytes") == 680 and value.get("gitBlob") == FILES["config.json"][1] and value.get("failure") is None and value.get("url") in urls, "incomplete Foundation success")
+        require(mode != "download" or value.get("moved") is True, "missing Foundation callback move")
+    return value
+
+
 class Proof:
     def __init__(self, checkout, scratch, proof_dir, budget):
         self.checkout, self.scratch, self.proof_dir, self.budget = checkout, scratch, proof_dir, budget
@@ -247,6 +525,97 @@ class Proof:
             return child.stdout.decode().strip()
         finally:
             child.retire(self.budget.cleanup_end)
+
+    def quiet_capture(self, argv, seconds, env=None):
+        started = time.time()
+        child = Child(argv, self.checkout, env or self.env, quiet_limit=CAPTURE_LIMIT)
+        self.children.append(child)
+        code, failure = None, None
+        try:
+            code = child.join(self.budget.deadline(seconds))
+        except RuntimeError:
+            failure = "capture-deadline"
+        finally:
+            try:
+                child.retire(self.budget.cleanup_end)
+            except (RuntimeError, OSError):
+                self.result["captureCustodyFailed"] = True
+                raise CaptureCustodyError("quiet diagnostic child retirement unverified; retaining scratch") from None
+        return {"child": child, "code": code, "failure": failure, "started": started, "ended": time.time()}
+
+    def denial_receipt(self, capture):
+        child, started, ended = capture["child"], capture["started"], capture["ended"]
+        pid = child.process.pid
+        predicate = ('(((processID == 0) AND (senderImagePath CONTAINS "/Sandbox")) OR '
+                     '(subsystem == "com.apple.sandbox.reporting")) AND '
+                     f'(eventMessage CONTAINS "Sandbox:") AND (eventMessage CONTAINS "({pid})")')
+        try:
+            require(child.joined(), "denial observation requires a retired child")
+            output = self.quiet_capture(["/usr/bin/log", "show", "--style", "ndjson", "--timezone", "UTC", "--start", f"@{started:.6f}", "--end", f"@{ended:.6f}", "--predicate", predicate], 10)
+            log_child = output["child"]
+            require(output["code"] == 0 and not log_child.capture_overflow and not output["failure"], "denial log capture unavailable")
+            roots = {**capture.get("roots", {}), "owned-scratch": self.scratch, "checkout": self.checkout, "runner-home": Path(os.environ["HOME"])}
+            records = sandbox_denials(bytes(log_child.stdout), pid, started, ended, roots)
+            observed = records and all(record["resourceState"] == "available" for record in records)
+            return {"state": "observed" if observed else "unavailable", "records": records}
+        except CaptureCustodyError:
+            raise
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError):
+            return {"state": "unavailable", "records": []}
+
+    def foundation_attempt(self, binary, mode):
+        home = self.scratch / ("foundation-" + mode + "-home")
+        env = self.isolated_env(home, home / "hf-hub")
+        capture = self.quiet_capture(self.sandbox([binary, mode, self.scratch, CONFIG_URL], online=True), 30, env=env)
+        capture["roots"] = {"probe-tmp": Path(env["TMPDIR"]), "probe-hf-cache": Path(env["HF_HUB_CACHE"]), "probe-hf-home": Path(env["HF_HOME"]), "probe-home": home}
+        child = capture["child"]
+        try:
+            require(not child.capture_overflow and not capture["failure"], "Foundation capture unavailable")
+            record = foundation_record(bytes(child.stdout).strip(), child.process.pid, mode)
+            require(capture["code"] == (0 if record["ok"] else 1), "Foundation exit disagrees with receipt")
+        except (RuntimeError, ValueError, TypeError, KeyError):
+            record = {"mode": mode, "pid": child.process.pid, "ok": False, "failure": "receipt-unavailable"}
+        record["captureOverflow"] = child.capture_overflow
+        record["stderrPresent"] = bool(child.stderr)
+        # Persist the native error before a diagnostic collector can fail custody.
+        self.result.setdefault("foundationAdmission", {})["primary" if mode == "download" else "secondary"] = record
+        if not record["ok"]:
+            try:
+                record["sandboxDenials"] = self.denial_receipt(capture)
+            except CaptureCustodyError:
+                record["sandboxDenials"] = {"state": "custody-unverified", "records": []}
+                raise
+        return record
+
+    def foundation_admission(self):
+        self.begin("Foundation-only native download admission; no helper/model proof")
+        source, binary = self.scratch / "foundation-admission.swift", self.scratch / "foundation-admission"
+        source.write_text(FOUNDATION_SOURCE)
+        receipt = {
+            "probeSourceSHA256": digest(source), "url": CONFIG_URL,
+            "acceptedBytes": 680, "expectedGitBlob": FILES["config.json"][1],
+            "byteLimitClaim": "application retained/accepted bytes; cancellation does not cap in-flight transfer or Foundation internal buffers",
+            "credit": "Foundation-only admission; no helper, inference, offline cache or settings compatibility proof",
+        }
+        self.result["foundationAdmission"] = receipt
+        compiled = self.quiet_capture(["swiftc", source, "-o", binary], 45)
+        require(compiled["code"] == 0 and not compiled["child"].capture_overflow and not compiled["failure"], "Foundation probe compilation unavailable or failed")
+        # The primary target must not be warmed by a same-URL dataTask control.
+        primary = self.foundation_attempt(binary, "download")
+        receipt["primary"] = primary
+        if not primary["ok"]:
+            receipt["secondaryCredit"] = "post-failure diagnostic only; cannot change primary failure"
+            if time.monotonic() < self.budget.work_end:
+                try:
+                    receipt["secondary"] = self.foundation_attempt(binary, "data")
+                except CaptureCustodyError:
+                    raise
+                except (RuntimeError, OSError):
+                    receipt["secondary"] = {"ok": False, "failure": "unavailable"}
+            else:
+                receipt["secondary"] = {"ok": False, "failure": "budget-unavailable"}
+            raise RuntimeError("Foundation native download admission failed; helper/model proof not run")
+        receipt["pass"] = True
 
     def git(self, *args):
         return self.command(["git", *args], 30)
@@ -515,12 +884,18 @@ class Proof:
         self.result["offlineHelperCacheComplete"] = True
         self.result["settingsUpgradeComplete"] = False
 
-    def execute(self, extended):
+    def execute(self, extended, foundation_only=False):
+        require(not foundation_only or extended, "Foundation admission-only requires extended admission")
         revision = os.environ["CHECKOUT_SHA"]
         require(re.fullmatch(r"[0-9a-f]{40}", revision), "invalid selected checkout SHA")
         self.result.update({"source": self.verify_source(self.checkout, revision), "workflowSHA": os.environ.get("GITHUB_WORKFLOW_SHA"), "triggerSHA": os.environ.get("GITHUB_SHA"), "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "extended": extended})
         self.result["variants"]["fixed"] = dict(self.result["source"])
         (self.proof_dir / "source.txt").write_text(f"source_sha={revision}\nrun_id={os.environ['GITHUB_RUN_ID']}\nrun_attempt={os.environ['GITHUB_RUN_ATTEMPT']}\njob={os.environ['GITHUB_JOB']}\n")
+        if foundation_only:
+            self.result.update({"diagnosticOnly": True, "helperBuildRun": False, "modelInferenceRun": False, "offlineHelperCacheComplete": False, "settingsUpgradeComplete": False})
+            self.foundation_admission()
+            self.result["diagnosticComplete"] = True
+            return  # Deliberately do not mark the full native compatibility proof complete.
         fixed = self.build("fixed", self.checkout)
         if extended:
             self.extended(fixed)
@@ -535,10 +910,11 @@ class Proof:
                 joined = False
                 self.result.setdefault("cleanupErrors", []).append(str(error))
         self.result["processesAndPipesRetired"] = joined
-        if joined:
+        removable = joined and not self.result.get("captureCustodyFailed", False)
+        if removable:
             shutil.rmtree(self.scratch)
-        self.result["scratchRemoved"] = joined
-        self.result["complete"] = self.result["complete"] and joined
+        self.result["scratchRemoved"] = removable
+        self.result["complete"] = self.result["complete"] and removable
         # No model weights, audio, tokens, raw HOME, or unbounded logs become artifacts.
         payload = json.dumps(self.result, indent=2, sort_keys=True).replace(str(self.scratch), "<owned-scratch>").replace(str(self.checkout), "<checkout>").replace(os.environ["HOME"], "<runner-home>")
         require(len(payload.encode()) <= 128 * 1024, "native proof metadata exceeded artifact bound")
@@ -551,7 +927,9 @@ def main():
     parser.add_argument("--proof-dir", type=Path, required=True)
     parser.add_argument("--started", type=float, required=True)
     parser.add_argument("--extended", action="store_true")
+    parser.add_argument("--foundation-admission-only", action="store_true")
     args = parser.parse_args()
+    require(not args.foundation_admission_only or args.extended, "Foundation admission-only requires extended admission")
     require(sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GITHUB_REPOSITORY") == "openclaw/openclaw", "native MLX proof requires disposable canonical macOS CI")
     require(not args.extended or os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "extended model proof requires admitted manual CI")
     runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
@@ -562,7 +940,7 @@ def main():
     proof = Proof(Path.cwd().resolve(), scratch, proof_dir, budget)
     previous = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
-        proof.execute(args.extended)
+        proof.execute(args.extended, args.foundation_admission_only)
     except BaseException as error:
         proof.result["failure"] = {"phase": proof.phase, "detail": str(error)}
         raise

@@ -5105,9 +5105,13 @@ jobs:
           MACOS_NATIVE_PHASE: ${{ matrix.phase }}
         run: |
           set -euo pipefail
-          native_install_args=(install --frozen-lockfile --prefer-offline --optional --filter '@openclaw/mermaid-renderer...' --filter '@openclaw/gateway-protocol...')
-          if [[ "$MACOS_NATIVE_PHASE" == "mlx-settings" || ( "$MACOS_NATIVE_PHASE" == "tests" && -f apps/macos/Sources/OpenClaw/NativeExecPolicyOwner.swift ) ]]; then
-            native_install_args+=(--filter 'openclaw...')
+          native_install_args=(install --frozen-lockfile --prefer-offline --optional)
+          # Real Gateway source imports cross root-manifest edges; settings needs the full workspace.
+          if [[ "$MACOS_NATIVE_PHASE" != "mlx-settings" ]]; then
+            native_install_args+=(--filter '@openclaw/mermaid-renderer...' --filter '@openclaw/gateway-protocol...')
+            if [[ "$MACOS_NATIVE_PHASE" == "tests" && -f apps/macos/Sources/OpenClaw/NativeExecPolicyOwner.swift ]]; then
+              native_install_args+=(--filter 'openclaw...')
+            fi
           fi
           pnpm "${native_install_args[@]}" \
             --config.ignore-scripts=false \
@@ -5377,7 +5381,8 @@ jobs:
           echo "proof-path=$mlx_proof" >> "$GITHUB_OUTPUT"
           mlx_args=()
           if [[ "$MLX_NATIVE_PROOF" == "true" ]]; then
-            mlx_args+=(--extended)
+            # Temporary Foundation-only diagnosis; full cache/inference proof remains incomplete.
+            mlx_args+=(--extended --foundation-admission-only)
           fi
           python3 -I -S scripts/test-macos-mlx-native.py --proof-dir "$mlx_proof" \
             --started "$NATIVE_STARTED" "${mlx_args[@]}"

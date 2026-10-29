@@ -225,8 +225,8 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
       fixed: { sha: selectedSHA, inputs: dependencyInputs(current, currentTree) },
       overlays: overlayHashes,
     };
-    // Current root dependencies were installed by the CI owner before these
-    // workspace imports. Stable runs its own hooks/install, sharing only CAS.
+    // Source-path imports reach beyond root-manifest dependency edges. Each
+    // revision needs its own full frozen workspace install, sharing only CAS.
     const pm = JSON.parse(
       fs.readFileSync(path.join(stable, "package.json"), "utf8"),
     ).packageManager;
@@ -243,12 +243,6 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
         "--frozen-lockfile",
         "--prefer-offline",
         "--optional",
-        "--filter",
-        "openclaw...",
-        "--filter",
-        "@openclaw/mermaid-renderer...",
-        "--filter",
-        "@openclaw/gateway-protocol...",
         "--config.ignore-scripts=false",
         "--config.engine-strict=false",
         "--config.enable-pre-post-scripts=true",

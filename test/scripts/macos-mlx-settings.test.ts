@@ -6,6 +6,39 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { hasMlxNativeProofInputs } from "../../scripts/ci-changed-scope.mjs";
 
+it("prepares the stable producer with its full frozen workspace graph and own cwd", () => {
+  const source = fs.readFileSync(
+    new URL("../../scripts/test-macos-mlx-settings.mts", import.meta.url),
+    "utf8",
+  );
+  const call = source.match(
+    /await run\(\s*"pnpm",\s*(\[\s*"install"[\s\S]*?\]),\s*stable,\s*240_000,\s*\)/u,
+  );
+  expect(call).not.toBeNull();
+  if (!call) throw new Error("Missing source-owned stable install");
+  const args: unknown = JSON.parse(call[1]!.replace(/,\s*\]$/u, "]"));
+  if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string"))
+    throw new Error("Install argv must be literal strings");
+  // Fake pnpm receives the actual preparer argv; it never installs anything.
+  const observed = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ["--input-type=module", "-e", "console.log(JSON.stringify(process.argv.slice(1)))", ...args],
+      { encoding: "utf8", timeout: 5_000 },
+    ),
+  );
+  expect(observed.slice(0, 4)).toEqual([
+    "install",
+    "--frozen-lockfile",
+    "--prefer-offline",
+    "--optional",
+  ]);
+  expect(observed).not.toContain("--filter");
+  expect(observed).not.toContain("--filter-prod");
+  expect(observed).toContain("--config.ignore-scripts=false");
+  expect(observed).toContain("--config.enable-pre-post-scripts=true");
+});
+
 it.skipIf(process.platform === "win32")(
   "retains the original job clock across fresh Node owners",
   () => {

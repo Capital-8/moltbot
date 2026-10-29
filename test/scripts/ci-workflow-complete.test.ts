@@ -85,8 +85,8 @@ describe("complete CI failure reporting", () => {
           ...context,
           matrix: { phase: "mlx-settings" },
           steps: {
-            "select-xcode": { outcome: "success" },
-            "macos-native-assets": { outcome: "success" },
+            "select-xcode": { outputs: {}, outcome: "success" },
+            "macos-native-assets": { outputs: {}, outcome: "success" },
           },
         }),
       ).toBe(eligible === "true");
@@ -459,6 +459,57 @@ ${ciStep("macos-swift-packages", "Clean OpenClawKit build scratch").run}
   });
 
   it.each([
+    { phase: "mlx-settings", nativeOwner: false, filters: [] },
+    {
+      phase: "packages",
+      nativeOwner: false,
+      filters: ["@openclaw/mermaid-renderer...", "@openclaw/gateway-protocol..."],
+    },
+    {
+      phase: "release",
+      nativeOwner: false,
+      filters: ["@openclaw/mermaid-renderer...", "@openclaw/gateway-protocol..."],
+    },
+    {
+      phase: "tests",
+      nativeOwner: false,
+      filters: ["@openclaw/mermaid-renderer...", "@openclaw/gateway-protocol..."],
+    },
+    {
+      phase: "tests",
+      nativeOwner: true,
+      filters: ["@openclaw/mermaid-renderer...", "@openclaw/gateway-protocol...", "openclaw..."],
+    },
+  ])("installs the full settings source graph while preserving ordinary filters for %j", (row) => {
+    const root = fixture();
+    if (row.nativeOwner) {
+      const owner = path.join(root, "apps/macos/Sources/OpenClaw/NativeExecPolicyOwner.swift");
+      mkdirSync(path.dirname(owner), { recursive: true });
+      writeFileSync(owner, "// fixture presence only\n");
+    }
+    const result = run(
+      root,
+      `
+pnpm() { printf '%s\\n' "$@" > "$TRACE"; }
+${ciStep("macos-swift-packages", "Install native asset dependencies").run}
+`,
+      { MACOS_NATIVE_PHASE: row.phase },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const args = readFileSync(path.join(root, "trace"), "utf8").trim().split("\n");
+    expect(args.slice(0, 4)).toEqual([
+      "install",
+      "--frozen-lockfile",
+      "--prefer-offline",
+      "--optional",
+    ]);
+    expect(args.filter((_, index) => args[index - 1] === "--filter")).toEqual(row.filters);
+    expect(args.filter((arg) => arg === "--filter")).toHaveLength(row.filters.length);
+    expect(args).toContain("--config.ignore-scripts=false");
+    expect(args).toContain("--config.enable-pre-post-scripts=true");
+  });
+
+  it.each([
     { extended: false, exit: 0 },
     { extended: true, exit: 0 },
     { extended: true, exit: 1 },
@@ -486,6 +537,7 @@ ${check.run}
     expect(commands).toContain("-I -S scripts/test-macos-mlx-native.py --proof-dir ");
     expect(commands).toContain("--started 1234");
     expect(commands.includes("--extended")).toBe(row.extended);
+    expect(commands.includes("--foundation-admission-only")).toBe(row.extended);
     const proof = readFileSync(path.join(root, "outputs"), "utf8")
       .trim()
       .slice("proof-path=".length);

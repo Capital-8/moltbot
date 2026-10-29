@@ -4,8 +4,10 @@ import { expect, it } from "vitest";
 
 // Exercise the stdlib driver with fake tools/frames, never models, Swift, or network.
 const program = String.raw`
-import base64, hashlib, importlib.util, json, os, signal, struct, sys, tempfile, time, unittest
+import base64, hashlib, importlib.util, io, json, os, signal, struct, sys, tempfile, time, unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 spec = importlib.util.spec_from_file_location("mlx_proof", sys.argv[1])
 m = importlib.util.module_from_spec(spec)
@@ -45,6 +47,192 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(child.event(time.monotonic()+5), {"type": "ready"})
         self.assertEqual(child.join(time.monotonic()+5), 0)
         self.assertTrue(child.joined())
+
+    def test_quiet_capture_hard_caps_both_pipes_before_any_echo(self):
+        source = "import os; os.write(1,b'private-output'*10000); os.write(2,b'private-stderr'*10000)"
+        child = m.Child([sys.executable, "-I", "-S", "-c", source], self.root, dict(os.environ), quiet_limit=1024)
+        self.proof.children.append(child)
+        with patch.object(sys, "stdout", io.StringIO()) as stdout, patch.object(sys, "stderr", io.StringIO()) as stderr:
+            self.assertEqual(child.join(time.monotonic()+5), 0)
+            self.assertEqual(stdout.getvalue()+stderr.getvalue(), "")
+        self.assertTrue(child.capture_overflow)
+        self.assertEqual(len(child.stdout)+len(child.stderr), 1024)
+        self.assertTrue(child.joined())
+
+    def test_quiet_deadline_retires_owned_group_and_pipes(self):
+        source = "import time; time.sleep(30)"
+        # Simulate the join deadline, signaling only this fixture group before retirement.
+        real_child = m.Child
+        def child(*args, **kwargs):
+            instance = real_child(*args, **kwargs)
+            def deadline(_):
+                os.killpg(instance.group, signal.SIGTERM)
+                raise RuntimeError("fixture deadline")
+            instance.join = deadline
+            return instance
+        with patch.object(m, "Child", side_effect=child):
+            result = self.proof.quiet_capture([sys.executable, "-I", "-S", "-c", source], 1)
+        self.assertTrue(result["child"].joined())
+        self.assertEqual(result["failure"], "capture-deadline")
+
+    def test_denials_require_exact_owned_pid_time_and_normalize_paths(self):
+        def event(pid, stamp, operation, argument):
+            return json.dumps({"timestamp": datetime.fromtimestamp(stamp, timezone.utc).isoformat(), "eventMessage": "Sandbox: probe("+str(pid)+") deny(1) "+operation+" "+argument}).encode()+b"\n"
+        raw = event(99, 1001, "file-write-create", str(self.root / "private"))
+        raw += event(98, 1001, "mach-lookup", "com.apple.foreign")
+        raw += event(99, 999, "mach-lookup", "com.apple.old")
+        raw += event(99, 1002, "mach-lookup", "com.apple.trustd")
+        raw += b'{"finished":1}\n'
+        records = m.sandbox_denials(raw, 99, 1000, 1003, {"owned": self.root})
+        self.assertEqual(records, [{"pid":99,"operation":"file-write-create","pathRelation":"owned","resourceState":"available"}, {"pid":99,"operation":"mach-lookup","systemService":"com.apple.trustd","resourceState":"available"}])
+        self.assertNotIn(str(self.root), json.dumps(records))
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            m.sandbox_denials(event(99,1001,"mach-lookup","com.apple.trustd")*17+b'{"finished":1}\n',99,1000,1003,{})
+        with self.assertRaisesRegex(RuntimeError,"after denial completion"):
+            m.sandbox_denials(raw+event(99,1002,"mach-lookup","com.apple.trustd"),99,1000,1003,{})
+        with self.assertRaisesRegex(RuntimeError,"lacks completion"):
+            m.sandbox_denials(event(99,1001,"mach-lookup","com.apple.trustd"),99,1000,1003,{})
+
+    def test_denial_categories_keep_staging_cache_and_keychain_distinct_without_paths(self):
+        arguments=[str(self.root/"tmp/private-file"),str(self.root/"hub/private-file"),"/private/var/folders/ab/opaque-runner/T/private-file","/var/folders/ab/opaque-runner/C/private-file","/Library/Keychains/System.keychain","<private>","/unclassified/private-file"]
+        raw=b"".join(json.dumps({"timestamp":"1970-01-01 00:16:41.000000+0000","eventMessage":"Sandbox: probe(99) deny(1) file-write-create "+arg}).encode()+b"\n" for arg in arguments)+b'{"finished":1}\n'
+        roots={"probe-tmp":self.root/"tmp","probe-hf-cache":self.root/"hub","owned":self.root}
+        records=m.sandbox_denials(raw,99,1000,1003,roots)
+        self.assertEqual([r.get("pathRelation") for r in records],["probe-tmp","probe-hf-cache","darwin-user-temp","darwin-user-cache","system-keychain",None,"outside-known-roots"])
+        self.assertTrue(all(r["resourceState"]=="available" for r in records[:5]))
+        self.assertTrue(all(r["resourceState"]=="unavailable" for r in records[5:]))
+        serialized=json.dumps(records)
+        for private in ["opaque-runner","private-file","System.keychain",str(self.root)]:
+            self.assertNotIn(private,serialized)
+
+    def test_log_overflow_and_capture_failure_are_unavailable_not_partial_success(self):
+        target = SimpleNamespace(process=SimpleNamespace(pid=99), joined=lambda: True)
+        captured = SimpleNamespace(capture_overflow=True, stdout=b"private-system-output")
+        calls = []
+        self.proof.quiet_capture = lambda argv, seconds: calls.append((argv,seconds)) or {"code":0,"failure":None,"child":captured}
+        result = self.proof.denial_receipt({"child":target,"started":1000,"ended":1003})
+        self.assertEqual(result, {"state":"unavailable","records":[]})
+        self.assertNotIn("private", json.dumps(result))
+        argv, seconds = calls[0]
+        self.assertEqual(seconds,10)
+        self.assertIn("@1000.000000",argv)
+        self.assertIn("@1003.000000",argv)
+        self.assertIn('(eventMessage CONTAINS "(99)")',argv[-1])
+        captured.capture_overflow=False
+        captured.stdout=b""
+        self.assertEqual(self.proof.denial_receipt({"child":target,"started":1000,"ended":1003})["state"],"unavailable")
+        captured.stdout=b'{"timestamp":"1970-01-01 00:16:41+0000","eventMessage":"Sandbox: probe(99) deny(1) file-write-create <private>"}\n{"finished":1}\n'
+        redacted=self.proof.denial_receipt({"child":target,"started":1000,"ended":1003})
+        self.assertEqual(redacted["state"],"unavailable")
+        self.assertEqual(redacted["records"][0]["operation"],"file-write-create")
+
+    def test_collector_retirement_failure_preserves_native_error_stops_secondary_and_retains_scratch(self):
+        profile=self.root/"scripts/macos-health-render.sb"
+        profile.parent.mkdir()
+        profile.write_text("(version 1)\n(allow default)\n(deny network*)\n")
+        calls=[]
+        class FakeChild:
+            failing=True
+            def __init__(self,argv,*args,**kwargs):
+                args=[str(x) for x in argv]
+                self.log=args[0]=="/usr/bin/log"
+                mode="download" if "download" in args else "data" if "data" in args else None
+                calls.append("log" if self.log else mode or "compiler")
+                self.process=SimpleNamespace(pid=99 if mode else 100)
+                self.capture_overflow=False
+                self.stdout=bytearray(json.dumps({"pid":99,"mode":mode,"ok":False,"failure":"native-task","errors":[{"domain":"NSPOSIXErrorDomain","code":1}]}).encode()) if mode else bytearray()
+                self.stderr=bytearray()
+                self.code=1 if mode else 0
+            def join(self,deadline): return self.code
+            def joined(self): return not (self.log and self.failing)
+            def retire(self,deadline):
+                if self.log and self.failing: raise RuntimeError("fixture collector pipes unretired")
+        with patch.object(m,"Child",FakeChild):
+            with self.assertRaises(m.CaptureCustodyError):
+                self.proof.foundation_admission()
+        self.assertEqual(calls,["compiler","download","log"])
+        primary=self.proof.result["foundationAdmission"]["primary"]
+        self.assertEqual(primary["errors"],[{"domain":"NSPOSIXErrorDomain","code":1}])
+        self.assertEqual(primary["sandboxDenials"]["state"],"custody-unverified")
+        with self.assertRaisesRegex(RuntimeError,"cleanup is incomplete"):
+            self.proof.close()
+        self.assertTrue(self.scratch.exists())
+        self.assertFalse(self.proof.result["scratchRemoved"])
+        self.assertFalse(self.proof.result["processesAndPipesRetired"])
+        FakeChild.failing=False
+
+    def test_probe_receipt_rejects_foreign_pid_raw_fields_and_false_success(self):
+        receipt = {"pid":99,"mode":"download","ok":True,"moved":True,"status":200,"acceptedBytes":680,"gitBlob":m.FILES["config.json"][1],"url":m.CONFIG_URL}
+        self.assertEqual(m.foundation_record(json.dumps(receipt).encode(),99,"download"),receipt)
+        for update in [{"pid":98},{"headers":"private"},{"acceptedBytes":681},{"moved":False},{"url":m.CONFIG_URL+"?private=true"}]:
+            with self.assertRaises(RuntimeError):
+                m.foundation_record(json.dumps({**receipt,**update}).encode(),99,"download")
+
+    def test_native_download_precedes_control_and_secondary_cannot_override_failure(self):
+        self.proof.quiet_capture = lambda *args, **kwargs: {"code":0,"failure":None,"child":SimpleNamespace(capture_overflow=False)}
+        calls=[]
+        def attempt(binary,mode):
+            calls.append(mode)
+            return {"ok": mode == "data"}
+        self.proof.foundation_attempt=attempt
+        with self.assertRaisesRegex(RuntimeError,"native download admission failed"):
+            self.proof.foundation_admission()
+        self.assertEqual(calls,["download","data"])
+        self.assertFalse(self.proof.result["foundationAdmission"]["primary"]["ok"])
+        self.assertTrue(self.proof.result["foundationAdmission"]["secondary"]["ok"])
+        calls.clear()
+        self.proof.foundation_attempt=lambda binary,mode: calls.append(mode) or {"ok":True}
+        self.proof.foundation_admission()
+        self.assertEqual(calls,["download"])
+
+    def test_callback_contract_and_stream_caps_preserve_hf_default_shape(self):
+        source=m.FOUNDATION_SOURCE
+        self.assertIn("URLSession(configuration: .default)",source)
+        self.assertIn("URLSession(configuration: original.configuration, delegate: self",source)
+        self.assertIn("session.downloadTask(with: url)",source)
+        self.assertIn("didFinishDownloadingTo location: URL",source)
+        self.assertLess(source.index('relation(temporary) == "owned"'),source.index("moveItem(at: location"))
+        self.assertLess(source.index("data.count <= 680 - bytes.count"),source.index("bytes.append(data)"))
+        self.assertIn("totalBytesWritten <= 680",source)
+        self.assertIn("callback-move-or-read",source)
+        for forbidden in ["ephemeral", "requestCachePolicy", "httpCookieStorage", "urlCredentialStorage", "localizedDescription", "allHeaderFields"]:
+            self.assertNotIn(forbidden,source)
+
+    def test_callback_failure_receipt_is_preserved_and_quiet(self):
+        value={"pid":99,"mode":"download","ok":False,"failure":"callback-move-or-read","callbackRelation":"outside-owned","errors":[{"domain":"NSCocoaErrorDomain","code":513}]}
+        child=SimpleNamespace(process=SimpleNamespace(pid=99),capture_overflow=False,stdout=json.dumps(value).encode(),stderr=bytearray(b"private unsolicited Foundation stderr"))
+        self.proof.quiet_capture=lambda *args,**kwargs: {"child":child,"code":1,"failure":None,"started":1,"ended":2}
+        self.proof.denial_receipt=lambda capture: {"state":"unavailable","records":[]}
+        profile=self.root/"scripts/macos-health-render.sb"
+        profile.parent.mkdir()
+        profile.write_text("(version 1)\n(allow default)\n(deny network*)\n")
+        record=self.proof.foundation_attempt(Path("fixture"),"download")
+        self.assertFalse(record["ok"])
+        self.assertEqual(record["failure"],"callback-move-or-read")
+        self.assertTrue(record["stderrPresent"])
+        self.assertNotIn("private",json.dumps(record))
+        child.capture_overflow=True
+        child.stdout=b"private-overflow-not-json"
+        overflow=self.proof.foundation_attempt(Path("fixture"),"download")
+        self.assertEqual(overflow["failure"],"receipt-unavailable")
+        self.assertNotIn("private",json.dumps(overflow))
+
+    def test_foundation_only_requires_admission_and_returns_before_build_or_models(self):
+        with self.assertRaisesRegex(RuntimeError,"requires extended"):
+            self.proof.execute(False,True)
+        self.proof.verify_source=lambda *args: {"sha":"a"*40}
+        self.proof.foundation_admission=lambda: None
+        self.proof.build=lambda *args: self.fail("unexpected helper build")
+        self.proof.extended=lambda *args: self.fail("unexpected model proof")
+        with patch.dict(os.environ,{"CHECKOUT_SHA":"a"*40,"GITHUB_RUN_ID":"1","GITHUB_RUN_ATTEMPT":"1","GITHUB_JOB":"fixture"}):
+            self.proof.execute(True,True)
+        self.assertTrue(self.proof.result["diagnosticOnly"])
+        self.assertTrue(self.proof.result["diagnosticComplete"])
+        for field in ["helperBuildRun","modelInferenceRun","offlineHelperCacheComplete","settingsUpgradeComplete","complete"]:
+            self.assertFalse(self.proof.result[field])
+        result=m.subprocess.run([sys.executable,"-I","-S",sys.argv[1],"--proof-dir",str(self.artifacts),"--started",str(time.monotonic()),"--foundation-admission-only"],capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn(b"requires extended",result.stderr)
 
     def test_decoder_failure_does_not_block_child_retirement(self):
         child = m.Child([sys.executable, "-I", "-S", "-c", "import time; time.sleep(30)"], self.root, dict(os.environ), framed=True)
