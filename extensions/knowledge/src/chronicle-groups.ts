@@ -3,7 +3,7 @@ import type { LoadedRecord } from "./model.js";
 import { recordDate } from "./temporal-query.js";
 
 /** One derived entity Timeline row: a dated source, or a dated claim with no dated source. */
-export type SourceRow = {
+type SourceRow = {
   record: LoadedRecord;
   date: string;
   summary: string;
