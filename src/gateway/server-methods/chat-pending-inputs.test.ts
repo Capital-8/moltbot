@@ -426,6 +426,34 @@ describe("pending input read boundary", () => {
       expect(await lookup()).toEqual({ ok: false, unavailableReason: "not_found" });
     }));
 
+  it("keeps pending input custody when its unavailable display has no native sequence", () =>
+    withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const scope = await createScope("unavailable-input");
+      await using inputs = pendingInputs(scope);
+      const receipt = await inputs.stage("unavailable-run", {
+        content: "Pending input",
+        toolName: "z".repeat(128 * 1024),
+      });
+      const page = await readChatPendingInputs(scope, { limit: 1, maxChars: 50 });
+      expect(page).toMatchObject({
+        total: 1,
+        items: [
+          {
+            id: receipt.inputId,
+            runId: "unavailable-run",
+            state: "queued",
+            message: {
+              role: "assistant",
+              content: [{ text: expect.stringContaining("chat.history unavailable") }],
+            },
+          },
+        ],
+      });
+      expect(page.items[0]?.message).not.toHaveProperty("__openclaw");
+      expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(128 * 1024);
+      expect(await loadTranscriptEvents(scope)).toEqual([]);
+    }));
+
   it("does not reveal an input hidden by the canonical history visibility policy", () =>
     withOpenClawTestState({ scenario: "minimal" }, async () => {
       const scope = await createScope("hidden-input", "hidden-session");

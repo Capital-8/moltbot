@@ -16,6 +16,7 @@ import {
   loadTranscriptEvents,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
+import { prepareChatHistoryResponsePage } from "../chat-history-response-page.js";
 import { serializeGatewayFrame } from "../serialized-json.js";
 import { readChatHistoryMessageId } from "../session-history-tail.js";
 import {
@@ -439,3 +440,44 @@ it("keeps recovery context when an older cursor excludes the successful boundary
     ]);
   });
 });
+
+it.each(["source ID", "tool identity"])(
+  "publishes a bounded unavailable source with oversized %s in the resident transcript",
+  (oversized) => {
+    const messages = [1, 2, 3].map((seq) => ({
+      role: "assistant",
+      content: `Message ${seq}`,
+      __openclaw: { id: `source-${seq}`, seq },
+      ...(seq === 2
+        ? oversized === "source ID"
+          ? { __openclaw: { id: "z".repeat(4000), seq } }
+          : { role: "toolResult", toolName: "z".repeat(4000), toolCallId: "call" }
+        : {}),
+    }));
+    const page = prepareChatHistoryResponsePage(
+      {
+        messages,
+        pagination: { offset: 0, totalMessages: 3, rawPageMessages: 3 },
+      },
+      { entry: undefined, maxHistoryBytes: 1024, messageId: undefined },
+    );
+    expect(page.messages).toHaveLength(3);
+    expect(page.messages[1]).toMatchObject({
+      content: [{ text: expect.stringContaining("chat.history unavailable") }],
+    });
+    expect(Buffer.byteLength(JSON.stringify(page.messages))).toBeLessThan(1024);
+    const host = makeChatHost({ sessionKey: scope.sessionKey, currentSessionId: scope.sessionId });
+    expect(admitChatHistoryPage(host, page, "around")).toBe("messages");
+    expect(host.chatMessages).toEqual(page.messages);
+    expect(page.messages[1]).toHaveProperty("__openclaw", { seq: 2 });
+    expect(host.chatHistoryPagination.segments?.flatMap((segment) => segment.sources)).toEqual([
+      "id:source-1",
+      "seq:2",
+      "id:source-3",
+    ]);
+    publishChatSessionProjection(host, getChatSessionProjection(host));
+    expect(host.chatMessages).toEqual(page.messages);
+    expect(host.chatHistoryPagination.hasMore).toBe(false);
+    expect(host.chatHistoryPagination.hasNewer).toBeUndefined();
+  },
+);
