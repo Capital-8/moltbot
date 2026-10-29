@@ -620,6 +620,42 @@ fixture callers on both hosts. Their broader results remain historical; this
 is fresh integrated lifecycle proof, not a full current-owner sweep. The
 separate macOS tooling workflow and packaged qualification remain distinct.
 
+## October 29 integrated owner measurement protocol
+
+The next comparison freezes runtime source at
+[`e1d5fe2c5949cbf2efd36c23c64c3aa68f667ff0`](https://github.com/openclaw/openclaw/commit/e1d5fe2c5949cbf2efd36c23c64c3aa68f667ff0).
+Documentation-only measurement commits do not change that runtime. This is a
+Node-versus-QuickJS comparison of the existing production-owner probe, not a
+before/after optimization or a scored ShellBench run.
+
+Acceptance is declared before execution:
+
+- Run five serial process pairs, alternating Node/QuickJS and QuickJS/Node, with
+  `OPENCLAW_VITEST_RUNTIME=node`, 40 timed cells and three warmups per scenario.
+  All 11 committed scenarios must run: 4,400 timed cells, 330 warmups, ten
+  successful child exits and 110 measurement records. Every cell must satisfy
+  the probe's result, bridge-call and active-run assertions. Keep failed arms
+  visible; a retry does not replace a failure.
+- Compare each scenario's paired warm medians and p95 values, including the
+  range across process pairs. Report worker-leg and public-wait counts first.
+  Do not pool unlike workloads into an overall speedup. A consistent direction
+  across five pairs supports only that scenario; mixed directions remain
+  inconclusive. A 20% adverse move must be visible, not dismissed as noise.
+- Keep `firstCellMs` separate. Only the process-first scenario is a comparable
+  first-use observation: Node closes its host-owned pool after each scenario,
+  while QuickJS can retain its module-owned pool across scenarios. These values
+  do not measure packaged startup or an isolated worker-start duration.
+- Record source and probe identities, installed QuickJS version, Node version,
+  architecture, CPU affinity/quota, memory limits, load and run order. CPU includes
+  warmups and assertions; RSS is sampled after cells, not a true peak. Worker
+  `runMs` includes host waiting, so timing fields are not additive CPU phases.
+- Do not infer full Gateway, shutdown, sandbox, model/provider, network or
+  ShellBench correctness from this synthetic owner workload. In particular,
+  `host.close()` does not prove retirement of QuickJS's shared worker pool.
+
+Results are pending. This protocol alone supplies no execution or performance
+proof and does not justify removing either executor.
+
 ## Reproduction and remaining qualification
 
 The October 27 production-owner measurement inputs can be reconstructed from
