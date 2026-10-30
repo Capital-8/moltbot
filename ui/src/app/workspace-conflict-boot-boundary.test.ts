@@ -14,6 +14,7 @@ it("keeps composer conflict recovery outside the durable transcript entry", asyn
   const owners = new Set([
     ...Object.values(entries),
     path.join(root, "pages/chat/components/chat-workspace-conflict.tsx"),
+    path.join(root, "pages/chat/components/chat-transcript-specialized.ts"),
     path.join(root, "pages/chat/workspace-conflict.ts"),
     path.join(root, "i18n/locales/en-chat-session.ts"),
     path.join(root, "i18n/locales/en-chat-session-optional.ts"),
@@ -50,7 +51,7 @@ it("keeps composer conflict recovery outside the durable transcript entry", asyn
     throw new Error("Expected one in-memory build");
   }
   const chunks = result.output.filter((asset) => asset.type === "chunk");
-  const closure = (name: string, exported: string) => {
+  const closure = (name: string, exported: string, includeDynamic = false) => {
     const entry = chunks.find((chunk) => chunk.isEntry && chunk.name === name);
     expect(entry?.exports).toContain(exported);
     if (!entry) {
@@ -62,7 +63,11 @@ it("keeps composer conflict recovery outside the durable transcript entry", asyn
         return;
       }
       reachable.add(file);
-      chunks.find((chunk) => chunk.fileName === file)?.imports.forEach(visit);
+      const chunk = chunks.find((chunk) => chunk.fileName === file);
+      chunk?.imports.forEach(visit);
+      if (includeDynamic) {
+        chunk?.dynamicImports.forEach(visit);
+      }
     };
     visit(entry.fileName);
     const selected = chunks.filter((chunk) => reachable.has(chunk.fileName));
@@ -76,16 +81,18 @@ it("keeps composer conflict recovery outside the durable transcript entry", asyn
     };
   };
   const hot = closure("transcript", "GroupedMessage");
+  const durable = closure("transcript", "GroupedMessage", true);
   const cold = closure("notices", "ChatComposerNoticesContent");
   expect(hot.modules).toContain(normalizePath(entries.transcript));
-  expect(hot.code).toContain("chat-workspace-conflict-event");
-  expect(hot.code).toContain("Local versions were kept for these paths");
+  expect(hot.code).not.toContain("chat-workspace-conflict-event");
+  expect(durable.code).toContain("chat-workspace-conflict-event");
+  expect(durable.code).toContain("Local versions were kept for these paths");
   for (const marker of [
     "chat-workspace-conflict-notice",
     "git show ",
     "Local versions kept; inspect or take the cloud version.",
   ]) {
-    expect(hot.code).not.toContain(marker);
+    expect(durable.code).not.toContain(marker);
     expect(cold.code).toContain(marker);
   }
   expect(cold.modules).toContain(normalizePath(entries.notices));

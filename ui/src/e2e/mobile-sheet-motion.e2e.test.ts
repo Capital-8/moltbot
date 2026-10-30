@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { expect, it } from "vitest";
 import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
@@ -56,6 +56,62 @@ async function shellState(page: Page) {
       easing: style.transitionTimingFunction,
     };
   });
+}
+
+/** Sample the real transition at a fixed browser time, independent of driver delays. */
+async function sampleSheetTransition(trigger: Locator, sampleTime: number) {
+  return trigger.evaluate(
+    (element, elapsed) =>
+      new Promise<{
+        hidden: boolean;
+        display: string;
+        top: number;
+        height: number;
+        regionBottom: number;
+        easing: string;
+        contentVisible: boolean;
+      }>((resolve, reject) => {
+        const shell = document.querySelector<HTMLElement>(".chat-mobile-host");
+        if (!shell || !(element instanceof HTMLElement)) {
+          throw new Error("Expected the sheet and its trigger");
+        }
+        const capture = (event: TransitionEvent) => {
+          if (event.target !== shell || event.propertyName !== "transform") {
+            return;
+          }
+          shell.removeEventListener("transitionrun", capture);
+          const animation = shell
+            .getAnimations()
+            .find(
+              (entry) => entry instanceof CSSTransition && entry.transitionProperty === "transform",
+            );
+          if (!animation) {
+            reject(new Error("Expected the sheet transform transition"));
+            return;
+          }
+          animation.pause();
+          animation.currentTime = elapsed;
+          const bounds = shell.getBoundingClientRect();
+          const style = getComputedStyle(shell);
+          const state = {
+            hidden: shell.hidden,
+            display: style.display,
+            top: bounds.top,
+            height: bounds.height,
+            regionBottom: shell.parentElement!.getBoundingClientRect().bottom,
+            easing: style.transitionTimingFunction,
+            contentVisible: Boolean(
+              shell.querySelector(".chat-panel-launcher-mobile")?.getClientRects().length,
+            ),
+          };
+          animation.play();
+          void animation.finished.then(() => resolve(state), reject);
+        };
+        shell.addEventListener("transitionrun", capture);
+        element.click();
+      }),
+    sampleTime,
+  );
 }
 
 /** Drags the grabber by dy with paced moves, then pauses before lifting. */
@@ -116,27 +172,27 @@ suite.define(() => {
   it("presents and dismisses the Panels sheet with the sheet spring", async () => {
     await suite.withPage(mobile, async ({ page }) => {
       await openSession(page);
-      await page.getByRole("button", { name: "Panels", exact: true }).first().click();
+      const entering = await sampleSheetTransition(
+        page.getByRole("button", { name: "Panels", exact: true }).first(),
+        40,
+      );
       // The sheet enters from below the viewport instead of fading in place.
-      await page.waitForTimeout(40);
-      const entering = await shellState(page);
       expect(entering.top).toBeGreaterThan(entering.regionBottom - entering.height + 20);
       expect(entering.easing).toContain("linear(");
-      await settle(page);
       const open = await shellState(page);
       expect(Math.abs(open.top + open.height - open.regionBottom)).toBeLessThan(1.5);
 
-      await page.locator(".chat-mobile-host__header .chat-mobile-host__circle").first().click();
-      await page.waitForTimeout(60);
-      const leaving = await shellState(page);
+      const leaving = await sampleSheetTransition(
+        page.locator(".chat-mobile-host__header .chat-mobile-host__circle").first(),
+        60,
+      );
       // Hidden immediately for focus and accessibility, but still sliding out on screen.
       expect(leaving.hidden).toBe(true);
       expect(leaving.display).not.toBe("none");
       expect(leaving.top).toBeGreaterThan(open.top + 10);
       // The page it showed slides away with it instead of blanking first.
-      expect(await page.locator(".chat-panel-launcher-mobile").boundingBox()).not.toBeNull();
-      await settle(page);
-      expect((await shellState(page)).display).toBe("none");
+      expect(leaving.contentVisible).toBe(true);
+      await expect.poll(async () => (await shellState(page)).display).toBe("none");
     });
   });
 

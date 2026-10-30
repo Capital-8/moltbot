@@ -513,10 +513,9 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       rows.length !== this.rowKeys.length ||
       rows.some((row, index) => row.key !== this.rowKeys[index]);
     const nextKeys = rowModelChanged ? rows.map((row) => row.key) : this.rowKeys;
-    const virtualizer = this.virtualizer;
     const nextRowKeys = rowModelChanged
       ? nextKeys
-      : virtualizer.getVirtualItems().map(({ index }) => rows[index]!.key);
+      : this.virtualizer.getVirtualItems().map(({ index }) => rows[index]!.key);
     return this.mcpAppUnmountGate.render(
       rowModelChanged ? nextKeys : JSON.stringify(nextRowKeys),
       () => {
@@ -550,21 +549,10 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
         }
         this.headerHeight = header?.height ?? 0;
         if (rowModelChanged) {
-          this.rowKeys = nextKeys;
-          this.rowIndexesByKey = new Map(nextKeys.map((key, index) => [key, index]));
-          // Prepending rows and removing their header share one edge-key re-anchor.
-          virtualizer.setOptions({
-            ...virtualizer.options,
-            count: nextKeys.length,
-            getItemKey: (index) => nextKeys[index]!,
-            rangeExtractor: (range) => this.initialRange.extract(range),
-            scrollMargin:
-              virtualizer.options.scrollMargin + this.headerHeight - this.appliedHeaderHeight,
-          });
-          this.appliedHeaderHeight = this.headerHeight;
+          this.syncRows(nextKeys);
         } else {
           this.appliedHeaderHeight = reconcileTranscriptHeaderMargin(
-            virtualizer,
+            this.virtualizer,
             this.headerHeight,
             this.appliedHeaderHeight,
           );
@@ -575,7 +563,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       () =>
         leavingTranscriptMcpAppRows(this.threadInnerElement, () =>
           rowModelChanged
-            ? previewTranscriptRowKeys(virtualizer, nextKeys, this.focusedRowKey)
+            ? previewTranscriptRowKeys(this.virtualizer, nextKeys, this.focusedRowKey)
             : new Set(nextRowKeys),
         ),
       {
@@ -718,6 +706,22 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     ) {
       this.offsetState.pendingInteractionAnchor = null;
     }
+  }
+
+  private syncRows(nextKeys: readonly string[]): void {
+    this.rowKeys = nextKeys;
+    this.rowIndexesByKey = new Map(nextKeys.map((key, index) => [key, index]));
+    // Keep virtualizer callbacks outside the render snapshot's closure so
+    // retained geometry cannot keep disconnected message bodies alive.
+    this.virtualizer.setOptions({
+      ...this.virtualizer.options,
+      count: nextKeys.length,
+      getItemKey: (index) => nextKeys[index]!,
+      rangeExtractor: (range) => this.initialRange.extract(range),
+      scrollMargin:
+        this.virtualizer.options.scrollMargin + this.headerHeight - this.appliedHeaderHeight,
+    });
+    this.appliedHeaderHeight = this.headerHeight;
   }
 
   private queueLayout(): void {
