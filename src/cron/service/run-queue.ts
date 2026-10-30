@@ -113,7 +113,10 @@ export function adoptCronRunRequests(
     const launch: CronLaunchContext = {
       receipt: entry.runReceipt,
       context,
+      // Durable acceptance ends caller-turn admission. Reservation still checks
+      // the original source and exact job through the scheduler's retained guard.
       options: Object.assign({}, options, {
+        commitGuard: options.acceptedRunGuard ?? options.commitGuard,
         scheduleOwnershipAtMs: options.scheduleOwnershipAtMs ?? entry.runReceipt.startedAtMs,
       }),
       generation,

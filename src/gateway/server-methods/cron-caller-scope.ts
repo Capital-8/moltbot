@@ -4,12 +4,15 @@ import {
   tryResolveCronJobEffectiveAgentId,
 } from "../../cron/agent-id.js";
 import { resolveCronJobConfigRevision } from "../../cron/config-revision.js";
+import { isPluginCommandCronJob } from "../../cron/plugin-command-schedule.js";
 import type { CronRuntimeAuthority } from "../../cron/runtime-authority.js";
 import {
   createAccountCronScheduledToolPolicy,
   createTrustedCronScheduledToolPolicy,
   type CronScheduledToolPolicy,
 } from "../../cron/scheduled-tool-policy.js";
+import type { CronEnqueueRunOptions } from "../../cron/service-contract.js";
+import { resolveCronOperatorExecutionRevision } from "../../cron/service/jobs-tool-policy.js";
 import {
   CRON_STREAM_EXEC_AUTHORITY_ERROR,
   type CronStreamExecPolicy,
@@ -29,6 +32,8 @@ import {
   resolveCronCreatorStreamExecPolicy,
   getCronManagementStreamExecPolicy,
   getCronManagementAuthority,
+  getCronManagementRunSource,
+  isCronModelManagementAllowed,
   getCronManagementCallerOrigin,
   getCronManagementChannelRequester,
   resolveCronCreatorAuthorityGrantProvenance,
@@ -196,6 +201,48 @@ export function resolveCronMutationCommitGuard(
       }
     }
   }, callerAuthority?.hasCurrentClientAuthority);
+}
+
+/** Transfer one management run request, retaining source revocation and its exact definition. */
+export function resolveCronRunRequestGuards(
+  options: GatewayRequestHandlerOptions,
+  job: CronJob,
+  callerScope: CronCallerScope | undefined,
+): CronEnqueueRunOptions {
+  const { client, context, sessionMutationCommitGuard, hasCurrentClientAuthority } = options;
+  const identity = client?.internal?.agentRuntimeIdentity;
+  const sourceCurrent = identity ? getCronManagementRunSource(identity) : undefined;
+  const expectedConfigRevision = sourceCurrent ? resolveCronJobConfigRevision(job) : undefined;
+  const executionRevision = sourceCurrent ? resolveCronOperatorExecutionRevision(job) : undefined;
+  const commitGuard = resolveCronMutationCommitGuard(
+    client,
+    context,
+    { callerScope, jobId: job.id, expectedConfigRevision },
+    {
+      sessionMutationCommitGuard,
+      hasCurrentClientAuthority,
+      modelJobPolicy: { config: context.getRuntimeConfig(), jobId: job.id },
+    },
+  );
+  const acceptedRunGuard =
+    sourceCurrent &&
+    bindGatewayDeviceRevocation(() => {
+      sourceCurrent();
+      const current = context.cron.getJob(job.id);
+      const config = context.getRuntimeConfig();
+      if (
+        !current ||
+        resolveCronOperatorExecutionRevision(current) !== executionRevision ||
+        (job.enabled && !current.enabled && !isPluginCommandCronJob(current)) ||
+        !isCronModelManagementAllowed(config)
+      ) {
+        throw new TypeError(
+          "Accepted automation changed or management access was revoked. Request a fresh run.",
+        );
+      }
+      assertCronModelJobAllowed(client, config, current);
+    }, sourceCurrent);
+  return { commitGuard, ...(acceptedRunGuard ? { acceptedRunGuard } : {}) };
 }
 
 export type CronCallerScope = {
