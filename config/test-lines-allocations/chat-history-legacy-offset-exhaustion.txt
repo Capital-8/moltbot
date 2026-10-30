@@ -1,2 +1,2 @@
-# Exercise explicit numeric offset exhaustion alongside the existing hidden-prefix cases.
-2
+# Cover hidden-prefix exhaustion and lossless initial CLI paging through legacy rows.
+41
