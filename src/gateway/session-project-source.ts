@@ -14,6 +14,7 @@ import {
   selectStoredProjectRegistry,
 } from "../projects/project-registry.js";
 import type { ProjectRegistryRecord } from "../projects/project-registry.types.js";
+import type { ExecutionSkillWorkspace } from "../skills/loading/workspace-skill-roots.js";
 import { prepareSessionCreateFilesystemRoot } from "./server-methods/session-create-root.js";
 
 export async function resolveSessionProjectRootForRecord(
@@ -51,6 +52,9 @@ export function selectSessionWorktreeProjectSource(
 /**
  * Advisory command discovery reads skills only from the direct project root that
  * session creation would admit for this agent, including sandbox containment.
+ * The registry's source classification decides the file host: registered and cloned
+ * checkouts are Gateway-owned; the agent-workspace pseudo-project keeps the
+ * workspace's own host, exactly as the created session's resolver does.
  */
 export async function resolveSessionProjectSkillRoot(params: {
   cfg: OpenClawConfig;
@@ -58,7 +62,7 @@ export async function resolveSessionProjectSkillRoot(params: {
   targetAgentId: string;
   resolveSandboxRequired: () => boolean;
   assertCurrent: () => void;
-}): Promise<string | undefined> {
+}): Promise<ExecutionSkillWorkspace | undefined> {
   params.assertCurrent();
   const project = await resolveProjectRegistry(params.cfg, params.projectId);
   params.assertCurrent();
@@ -78,7 +82,15 @@ export async function resolveSessionProjectSkillRoot(params: {
     enforceSandboxContainment: true,
     sandboxRequired: params.resolveSandboxRequired(),
   });
-  return admitted.ok ? admitted.value.sessionCwd : undefined;
+  const root = admitted.ok ? admitted.value.sessionCwd : undefined;
+  return root
+    ? {
+        executionWorkspaceDir: root,
+        ...(project.source === "workspace"
+          ? {}
+          : { executionWorkspaceFileHost: "gateway" as const }),
+      }
+    : undefined;
 }
 
 /** Advisory discovery shares source custody classification with managed creation. */

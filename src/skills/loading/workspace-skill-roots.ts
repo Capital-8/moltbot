@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isWorkspaceProjectId } from "../../projects/workspace-project-id.js";
 
 export type ExecutionSkillWorkspace = {
   executionWorkspaceDir?: string;
@@ -28,7 +29,7 @@ export function resolveSessionSkillExecutionWorkspace(
   // the agent workspace. Agent-workspace projects and node cwds keep their own host.
   const gatewayProjectRoot =
     session?.projectId &&
-    !session.projectId.startsWith("workspace:") &&
+    !isWorkspaceProjectId(session.projectId) &&
     session.spawnedCwd &&
     executionWorkspaceDir === session.spawnedCwd;
   return gatewayProjectRoot

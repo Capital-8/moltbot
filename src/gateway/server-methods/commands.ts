@@ -1,9 +1,11 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   ErrorCodes,
   errorShape,
   validateCommandsListParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { ExecutionSkillWorkspace } from "../../skills/loading/workspace-skill-roots.js";
 import { authorizeOperatorScopesForMethod } from "../method-scopes.js";
 import { authorizeGatewaySessionCreation, resolveCreatorSandbox } from "../operator-role-policy.js";
 import { resolveOperatorSessionCreation } from "../session-creation-provenance.js";
@@ -25,7 +27,7 @@ async function prepareProjectSkillScope(
     GatewayRequestHandlerOptions,
     "client" | "context" | "signal" | "hasCurrentClientAuthority"
   > & { cfg: OpenClawConfig; agentId: string; projectId: string },
-): Promise<{ root: string; assertDisclosable: () => Promise<void> } | undefined> {
+): Promise<{ root: ExecutionSkillWorkspace; assertDisclosable: () => Promise<void> } | undefined> {
   const { cfg, agentId, client } = params;
   const canCreate = () =>
     !authorizeGatewaySessionCreation({ cfg, agentId, client }) &&
@@ -61,7 +63,7 @@ async function prepareProjectSkillScope(
     ? {
         root,
         assertDisclosable: async () => {
-          if ((await admit()) !== root) {
+          if (!isDeepStrictEqual(await admit(), root)) {
             throw new ProjectCommandScopeChangedError();
           }
           assertCurrent();
