@@ -547,18 +547,15 @@ function renderCatalogGroup(
                 expanded: !collapsed(),
                 title: hasError() ? errorHelp() : undefined,
                 onToggle: () => params.host.toggleSection(sectionId()),
-                content: (
+                content: hasError() ? (
                   <span
-                    class={[
-                      "sidebar-session-group-count",
-                      { "sidebar-session-group-count--error": hasError() },
-                    ]}
-                    data-session-catalog-error={hasError() ? readCatalog().id : undefined}
+                    class="sidebar-session-group-count sidebar-session-group-count--error"
+                    data-session-catalog-error={readCatalog().id}
                     aria-hidden="true"
                   >
-                    {hasError() ? <Icon name="alertTriangle" /> : rows().length}
+                    <Icon name="alertTriangle" />
                   </span>
-                ),
+                ) : undefined,
               }
             : undefined
         }
