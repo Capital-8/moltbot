@@ -422,7 +422,13 @@ When authentication status is available, each provider heading in the chat model
 
 ## Suggested tasks
 
-Suggested task cards offer **Start in a new session** and **Start in a new
+Suggested tasks appear as a compact row above the composer, alongside queued
+messages and the progress card. The row shows the task title and repository;
+select it to read the summary, folder, and full instructions. Copy, paging
+between several suggestions, and dismiss stay in the row.
+
+The row's start button uses the same accent color as **Send**. It offers
+**Start in a new session**, and its arrow menu adds **Start in a new
 worktree**. Both start the task in the background and keep your current
 conversation and draft open. The card disappears after the task starts; select
 the new session in the sidebar when you want to follow its progress.

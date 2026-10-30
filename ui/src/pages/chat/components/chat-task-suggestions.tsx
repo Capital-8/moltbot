@@ -1,4 +1,4 @@
-import { createMemo, createUniqueId, For, Show, onSettled } from "solid-js";
+import { createMemo, createSignal, createUniqueId, For, Show, onSettled } from "solid-js";
 import type {
   ProjectRecord,
   TaskSuggestion,
@@ -11,6 +11,7 @@ import { pathDisplayName } from "../../../lib/path-display.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import { createScrollStateRef } from "../../../lib/reactive/scroll-state.ts";
 import { isAbsolutePath } from "../../new-session/path.ts";
+import "../../../styles/chat/composer-task-suggestions.css";
 
 registerEnglishCatalog(registerChatSessionOptionalEnglish);
 
@@ -69,12 +70,11 @@ export function ChatTaskSuggestionTray(props: { view: ChatTaskSuggestionTrayProp
       ? props.view.activeTaskSuggestionId
       : suggestions()[0]?.id,
   );
+  // Disclosure belongs to the tray, so paging through suggestions keeps the operator's choice.
+  const [expanded, setExpanded] = createSignal(false);
   return (
     <Show when={suggestions().length > 0}>
-      <div
-        class={["task-suggestions", { "task-suggestions--stack": suggestions().length > 1 }]}
-        aria-live="polite"
-      >
+      <div class="task-suggestions" aria-live="polite">
         <For each={suggestions()} keyed={(suggestion) => suggestion.id}>
           {(suggestion, index) => (
             // Only navigation generations replace cards; ordinary owner updates retain native state.
@@ -88,6 +88,8 @@ export function ChatTaskSuggestionTray(props: { view: ChatTaskSuggestionTrayProp
                   index={index()}
                   count={suggestions().length}
                   active={suggestion().id === activeId()}
+                  expanded={expanded()}
+                  onToggle={() => setExpanded((open) => !open)}
                   view={props.view}
                 />
               )}
@@ -104,8 +106,11 @@ function TaskSuggestionCard(props: {
   index: number;
   count: number;
   active: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   view: ChatTaskSuggestionTrayProps;
 }) {
+  const detailsId = createUniqueId();
   const canAccept = () => props.view.canAcceptTaskSuggestions === true;
   const acceptance = () => props.view.taskSuggestionAcceptance?.(props.suggestion.id);
   const busy = () => acceptance()?.phase === "starting";
@@ -116,18 +121,17 @@ function TaskSuggestionCard(props: {
   const repository = () => failure()?.repository;
   const title = () => sanitizeTaskSuggestionText(props.suggestion.title);
   const cwd = () => sanitizeTaskSuggestionText(props.suggestion.cwd);
+  const repoName = () => sanitizeTaskSuggestionText(pathDisplayName(cwd()));
+  const copied = () => props.view.taskSuggestionCopiedIds?.has(props.suggestion.id) === true;
   const copyLabel = () =>
-    t(
-      props.view.taskSuggestionCopiedIds?.has(props.suggestion.id)
-        ? "chat.taskSuggestions.promptCopied"
-        : "chat.taskSuggestions.copyPrompt",
-    );
-  // Native edits and manual disclosure state survive unrelated owner refreshes.
+    t(copied() ? "chat.taskSuggestions.promptCopied" : "chat.taskSuggestions.copyPrompt");
+  const startLabel = () =>
+    t(busy() ? "chat.taskSuggestions.starting" : "chat.taskSuggestions.startSession");
+  // Native edits survive unrelated owner refreshes.
   const repositoryCwd = createMemo(() => repository()?.cwd ?? "");
-  const instructionsOpen = createMemo(() => Boolean(acceptance()));
   const pathRef = createScrollStateRef(
     (element, state) => element.toggleAttribute("data-overflow-right", !state.atEnd),
-    { presented: () => props.active, horizontal: true, content: cwd },
+    { presented: () => props.active && props.expanded, horizontal: true, content: cwd },
   );
   const accept = (mode: TaskSuggestionStartMode) => {
     if (!busy() && canAccept()) {
@@ -140,10 +144,10 @@ function TaskSuggestionCard(props: {
     return (
       <Menu
         id={`task-start-${id}`}
-        placement="bottom-end"
+        placement="top-end"
         label={t("chat.taskSuggestions.startOptions")}
         disabled={busy() || !canAccept()}
-        triggerClass="btn task-suggestion__start task-suggestion__start--options"
+        triggerClass="btn primary task-suggestion__start task-suggestion__start--options"
         triggerAttributes={{ title: canAccept() ? "" : t("chat.taskSuggestions.adminRequired") }}
         trigger={<Icon name="chevronDown" />}
         items={[
@@ -175,21 +179,82 @@ function TaskSuggestionCard(props: {
     <article
       class="task-suggestion"
       data-task-id={props.suggestion.id}
+      data-expanded={props.expanded ? "true" : "false"}
       data-swap-direction={props.active ? props.view.taskSuggestionSwapDirection : undefined}
+      aria-label={t("chat.taskSuggestions.eyebrow", { repo: repoName() })}
       hidden={!props.active}
     >
-      <header class="task-suggestion__header">
-        <div class="task-suggestion__eyebrow" title={cwd()}>
-          {t("chat.taskSuggestions.eyebrow", {
-            repo: sanitizeTaskSuggestionText(pathDisplayName(cwd())),
-          })}
+      <div class="task-suggestion__row">
+        <span class="task-suggestion__icon" aria-hidden="true">
+          <Icon name="lightbulb" />
+        </span>
+        <button
+          class="task-suggestion__toggle"
+          type="button"
+          aria-expanded={props.expanded ? "true" : "false"}
+          aria-controls={detailsId}
+          title={t(
+            props.expanded
+              ? "chat.taskSuggestions.hideInstructions"
+              : "chat.taskSuggestions.showInstructions",
+          )}
+          onClick={() => props.onToggle()}
+        >
+          <span class="task-suggestion__title">{title()}</span>
+          <span class="task-suggestion__repo" title={cwd()}>
+            {repoName()}
+          </span>
+          <span class="task-suggestion__chevron" aria-hidden="true">
+            <Icon name="chevronDown" />
+          </span>
+        </button>
+        <div class="task-suggestion__row-actions">
           <Show when={props.count > 1}>
-            <span class="task-suggestion__position">
-              {props.index + 1} / {props.count}
-            </span>
+            <div class="task-suggestion__pager">
+              <For each={["previous", "next"] as const}>
+                {(direction) => {
+                  let button: HTMLButtonElement | undefined;
+                  onSettled(() => {
+                    if (props.active && button) {
+                      props.view.onTaskSuggestionNavigationMount?.(
+                        props.suggestion.id,
+                        direction,
+                        button,
+                      );
+                    }
+                  });
+                  return (
+                    <>
+                      <Show when={direction === "next"}>
+                        <span class="task-suggestion__position">
+                          {props.index + 1} / {props.count}
+                        </span>
+                      </Show>
+                      <button
+                        ref={(element) => {
+                          button = element;
+                        }}
+                        class="task-suggestion__header-action"
+                        type="button"
+                        aria-label={t(
+                          direction === "previous"
+                            ? "chat.taskSuggestions.previous"
+                            : "chat.taskSuggestions.next",
+                        )}
+                        data-task-prev={direction === "previous" ? "" : undefined}
+                        data-task-next={direction === "next" ? "" : undefined}
+                        onClick={() =>
+                          props.view.onNavigateTaskSuggestion?.(props.suggestion.id, direction)
+                        }
+                      >
+                        <Icon name={direction === "previous" ? "chevronLeft" : "chevronRight"} />
+                      </button>
+                    </>
+                  );
+                }}
+              </For>
+            </div>
           </Show>
-        </div>
-        <div class="task-suggestion__header-actions">
           <button
             class="task-suggestion__header-action task-suggestion__copy"
             type="button"
@@ -197,46 +262,23 @@ function TaskSuggestionCard(props: {
             title={copyLabel()}
             onClick={() => props.view.onCopyTaskSuggestionPrompt?.(props.suggestion)}
           >
-            <Icon
-              name={props.view.taskSuggestionCopiedIds?.has(props.suggestion.id) ? "check" : "copy"}
-            />
+            <Icon name={copied() ? "check" : "copy"} />
           </button>
-          <Show when={props.count > 1}>
-            <For each={["previous", "next"] as const}>
-              {(direction) => {
-                let button: HTMLButtonElement | undefined;
-                onSettled(() => {
-                  if (props.active && button) {
-                    props.view.onTaskSuggestionNavigationMount?.(
-                      props.suggestion.id,
-                      direction,
-                      button,
-                    );
-                  }
-                });
-                return (
-                  <button
-                    ref={(element) => {
-                      button = element;
-                    }}
-                    class="task-suggestion__header-action"
-                    type="button"
-                    aria-label={t(
-                      direction === "previous"
-                        ? "chat.taskSuggestions.previous"
-                        : "chat.taskSuggestions.next",
-                    )}
-                    data-task-prev={direction === "previous" ? "" : undefined}
-                    data-task-next={direction === "next" ? "" : undefined}
-                    onClick={() =>
-                      props.view.onNavigateTaskSuggestion?.(props.suggestion.id, direction)
-                    }
-                  >
-                    <Icon name={direction === "previous" ? "chevronLeft" : "chevronRight"} />
-                  </button>
-                );
-              }}
-            </For>
+          <Show when={!failure()}>
+            <div class="task-suggestion__split">
+              <button
+                class="btn primary task-suggestion__start task-suggestion__start--primary"
+                type="button"
+                disabled={busy() || !canAccept()}
+                aria-label={startLabel()}
+                title={canAccept() ? startLabel() : t("chat.taskSuggestions.adminRequired")}
+                onClick={() => accept("local")}
+              >
+                <Icon name="play" />
+                <span class="task-suggestion__start-label">{startLabel()}</span>
+              </button>
+              <TaskStartMenu />
+            </div>
           </Show>
           <Show when={props.view.canDismissTaskSuggestions === true}>
             <button
@@ -244,136 +286,119 @@ function TaskSuggestionCard(props: {
               type="button"
               disabled={busy()}
               aria-label={t("chat.taskSuggestions.dismiss", { title: title() })}
+              title={t("chat.taskSuggestions.dismiss", { title: title() })}
               onClick={() => props.view.onDismissTaskSuggestion?.(props.suggestion)}
             >
               <Icon name="x" />
             </button>
           </Show>
         </div>
-      </header>
-      <div class="task-suggestion__body">
-        <div class="task-suggestion__title">{title()}</div>
+      </div>
+      <div class="task-suggestion__details" id={detailsId} hidden={!props.expanded}>
+        <div class="task-suggestion__eyebrow" title={cwd()}>
+          {t("chat.taskSuggestions.eyebrow", { repo: repoName() })}
+        </div>
         <div class="task-suggestion__summary">
           {sanitizeTaskSuggestionText(props.suggestion.tldr)}
         </div>
-        <details class="task-suggestion__instructions" open={instructionsOpen()}>
-          <summary>
-            <span class="task-suggestion__instructions-chevron" aria-hidden="true">
-              <Icon name="chevronRight" />
-            </span>
-            <span class="task-suggestion__show">{t("chat.taskSuggestions.showInstructions")}</span>
-            <span class="task-suggestion__hide">{t("chat.taskSuggestions.hideInstructions")}</span>
-          </summary>
-          <div class="task-suggestion__instruction-body">
-            <code ref={pathRef}>{cwd()}</code>
-            <pre>{sanitizeTaskSuggestionText(props.suggestion.prompt)}</pre>
-          </div>
-        </details>
-        <Show when={failure()}>
-          {(value) => (
+        <div class="task-suggestion__instruction-body">
+          <code ref={pathRef}>{cwd()}</code>
+          <pre>{sanitizeTaskSuggestionText(props.suggestion.prompt)}</pre>
+        </div>
+      </div>
+      <Show when={failure()}>
+        {(value) => (
+          <div class="task-suggestion__failure">
             <div class="callout danger" role="alert">
               <span>
                 {repository() ? undefined : t("chat.taskSuggestions.startUnconfirmed")}{" "}
                 {value().error}
               </span>
             </div>
-          )}
-        </Show>
-        <Show when={repository()?.open}>
-          <div class="task-suggestion__repository">
-            <p>{t("chat.taskSuggestions.chooseRepositoryHelp")}</p>
-            <label>
-              <span>{t("chat.taskSuggestions.repositoryFolder")}</span>
-              <input
-                type="text"
-                class="task-suggestion__repository-path"
-                value={repositoryCwd()}
-                disabled={!canAccept()}
-                onInput={(event) =>
-                  props.view.onChangeTaskRepository?.(props.suggestion, {
-                    cwd: event.currentTarget.value,
-                  })
-                }
-              />
-            </label>
-            <For each={repository()?.projects ?? []}>
-              {(project) => (
+            <Show when={repository()?.open}>
+              <div class="task-suggestion__repository">
+                <p>{t("chat.taskSuggestions.chooseRepositoryHelp")}</p>
+                <label>
+                  <span>{t("chat.taskSuggestions.repositoryFolder")}</span>
+                  <input
+                    type="text"
+                    class="task-suggestion__repository-path"
+                    value={repositoryCwd()}
+                    disabled={!canAccept()}
+                    onInput={(event) =>
+                      props.view.onChangeTaskRepository?.(props.suggestion, {
+                        cwd: event.currentTarget.value,
+                      })
+                    }
+                  />
+                </label>
+                <For each={repository()?.projects ?? []}>
+                  {(project) => (
+                    <button
+                      type="button"
+                      class="btn task-suggestion__repository-choice"
+                      disabled={!canAccept()}
+                      title={project.repoRoot ?? ""}
+                      onClick={() =>
+                        props.view.onChangeTaskRepository?.(props.suggestion, {
+                          cwd: project.repoRoot ?? "",
+                        })
+                      }
+                    >
+                      {project.displayName}
+                      <small>{project.repoRoot}</small>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            {/* Recovery actions wrap below the row so narrow composers keep every row control. */}
+            <div class="task-suggestion__failure-actions">
+              <Show when={repository()?.open}>
                 <button
                   type="button"
-                  class="btn task-suggestion__repository-choice"
-                  disabled={!canAccept()}
-                  title={project.repoRoot ?? ""}
+                  class="btn"
                   onClick={() =>
-                    props.view.onChangeTaskRepository?.(props.suggestion, {
-                      cwd: project.repoRoot ?? "",
-                    })
+                    props.view.onChangeTaskRepository?.(props.suggestion, { open: false })
                   }
                 >
-                  {project.displayName}
-                  <small>{project.repoRoot}</small>
+                  {t("common.cancel")}
                 </button>
-              )}
-            </For>
-            <button
-              type="button"
-              class="btn"
-              onClick={() => props.view.onChangeTaskRepository?.(props.suggestion, { open: false })}
-            >
-              {t("common.cancel")}
-            </button>
-          </div>
-        </Show>
-      </div>
-      <div class="task-suggestion__actions">
-        <Show
-          when={failure()}
-          fallback={
-            <>
+              </Show>
               <button
-                class="btn task-suggestion__start task-suggestion__start--primary"
+                class="btn primary task-suggestion__start task-suggestion__retry"
                 type="button"
-                disabled={busy() || !canAccept()}
-                title={canAccept() ? "" : t("chat.taskSuggestions.adminRequired")}
-                onClick={() => accept("local")}
+                disabled={
+                  !canAccept() ||
+                  Boolean(repository()?.open && !isAbsolutePath(repositoryCwd().trim()))
+                }
+                onClick={() => {
+                  const target = repository();
+                  if (!target) {
+                    accept("local");
+                  } else if (!target.open) {
+                    props.view.onChangeTaskRepository?.(props.suggestion, { open: true });
+                  } else if (canAccept() && isAbsolutePath(target.cwd.trim())) {
+                    props.view.onAcceptTaskSuggestion?.(
+                      props.suggestion,
+                      "worktree",
+                      target.cwd.trim(),
+                    );
+                  }
+                }}
               >
-                <Icon name="play" />
-                {t(busy() ? "chat.taskSuggestions.starting" : "chat.taskSuggestions.startSession")}
+                {repository()
+                  ? t(
+                      repository()?.open
+                        ? "chat.taskSuggestions.startWorktree"
+                        : "chat.taskSuggestions.chooseRepository",
+                    )
+                  : t("common.retry")}
               </button>
-              <TaskStartMenu />
-            </>
-          }
-        >
-          <button
-            class="btn task-suggestion__start task-suggestion__retry"
-            type="button"
-            disabled={
-              !canAccept() || Boolean(repository()?.open && !isAbsolutePath(repositoryCwd().trim()))
-            }
-            onClick={() => {
-              const target = repository();
-              if (!target) {
-                accept("local");
-              } else if (!target.open) {
-                props.view.onChangeTaskRepository?.(props.suggestion, { open: true });
-              } else if (canAccept() && isAbsolutePath(target.cwd.trim())) {
-                props.view.onAcceptTaskSuggestion?.(
-                  props.suggestion,
-                  "worktree",
-                  target.cwd.trim(),
-                );
-              }
-            }}
-          >
-            {repository()
-              ? t(
-                  repository()?.open
-                    ? "chat.taskSuggestions.startWorktree"
-                    : "chat.taskSuggestions.chooseRepository",
-                )
-              : t("common.retry")}
-          </button>
-        </Show>
-      </div>
+            </div>
+          </div>
+        )}
+      </Show>
     </article>
   );
 }
