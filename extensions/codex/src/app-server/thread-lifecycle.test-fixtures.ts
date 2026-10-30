@@ -65,6 +65,7 @@ export function createCodexLifecycleHarness(options: {
   respond: (method: string, params?: unknown) => unknown;
   persistedThreads?: Array<string | ReturnType<typeof nativeThreadStartResult>>;
   unsubscribe?: (threadId: string) => unknown;
+  unloadImmediatelyOnUnsubscribe?: boolean;
 }) {
   const threads = new Map<string, NativeFixtureThread>();
   const writtenRequests = createCodexRequestRecorder();
@@ -133,12 +134,14 @@ export function createCodexLifecycleHarness(options: {
         (response.status === "unsubscribed" || response.status === "notSubscribed")
       ) {
         current.subscribed = false;
-        current.loaded = false;
-        harness.send({
-          method: "thread/status/changed",
-          params: { threadId, status: { type: "notLoaded" } },
-        });
-        harness.send({ method: "thread/closed", params: { threadId } });
+        if (options.unloadImmediatelyOnUnsubscribe !== false) {
+          current.loaded = false;
+          harness.send({
+            method: "thread/status/changed",
+            params: { threadId, status: { type: "notLoaded" } },
+          });
+          harness.send({ method: "thread/closed", params: { threadId } });
+        }
       }
       return response;
     }
