@@ -21,11 +21,18 @@ const EXPECTED: Record<string, { levels: string[]; defaultLevel: string }> = {
   "mistral/mistral-medium-3-5": mistralReasoning(),
   "mistral/mistral-small-2603": mistralReasoning(),
   "mistral/mistral-small-latest": mistralReasoning(),
+  "particle/particle-ai/particle-1": deepSeekV4(),
   "moonshot/kimi-k2.7-code": { levels: ["low:on"], defaultLevel: "low" },
   "moonshot/kimi-k2.7-code-highspeed": { levels: ["low:on"], defaultLevel: "low" },
   "moonshot/kimi-k3": { levels: ["max"], defaultLevel: "max" },
   "moonshot/kimi-k3.1-pro": { levels: ["max"], defaultLevel: "max" },
   "moonshot/kimi-k3.1-pro-highspeed": { levels: ["max"], defaultLevel: "max" },
+  "xai/grok-4.7": { levels: ["low", "medium", "high", "xhigh"], defaultLevel: "high" },
+  "xai/grok-4.6": { levels: ["low", "medium", "high", "xhigh"], defaultLevel: "high" },
+  "xai/grok-4.5": { levels: ["low", "medium", "high"], defaultLevel: "high" },
+  "xai/grok-build-0.1": { levels: ["off"], defaultLevel: "off" },
+  "xai/grok-4.3": { levels: ["off", "minimal", "low", "medium", "high"], defaultLevel: "low" },
+  "xai/grok-4.20-0309-reasoning": { levels: ["off"], defaultLevel: "off" },
 };
 
 function kimiK3(off: boolean) {
