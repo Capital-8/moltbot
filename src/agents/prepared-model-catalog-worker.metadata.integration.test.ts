@@ -125,7 +125,6 @@ describe("prepared catalog parent metadata ownership", () => {
           {
             pluginMetadataSnapshot: metadata,
             pluginRegistry: registry,
-            remoteCatalog: null,
           },
           "live",
           { modelsJsonContents: null, pluginCatalogs: [] },
