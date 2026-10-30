@@ -1099,10 +1099,10 @@ elif common_git_dir=$(pr_git -C "$script_parent_dir" rev-parse --path-format=abs
     linked_wrapper_revision=$(
       pr_git -C "$script_parent_dir" rev-parse "${pr_wrapper_components[@]/#/HEAD:}" 2>/dev/null || true
     )
-    canonical_wrapper_revision=$(
-      pr_git -C "$canonical_repo_root" rev-parse "${pr_wrapper_components[@]/#/HEAD:}" 2>/dev/null || true
-    )
     if [ "$script_self" != "$canonical_self" ] && [ -z "$PR_WORKFLOW_PR" ] && [ -n "$linked_wrapper_revision" ] &&
+      canonical_wrapper_revision=$(
+        pr_git -C "$canonical_repo_root" rev-parse "${pr_wrapper_components[@]/#/HEAD:}" 2>/dev/null || true
+      ) &&
       [ "$linked_wrapper_revision" = "$canonical_wrapper_revision" ] &&
       pr_git -C "$canonical_repo_root" diff --quiet HEAD -- "${pr_wrapper_components[@]/#/:(top)}"; then
       pr_bind_git_invocation || exit 1
