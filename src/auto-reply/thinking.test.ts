@@ -256,6 +256,20 @@ describe("provider profiles", () => {
     ]);
   });
 
+  it("lets a stated ladder own the profile without a default", () => {
+    mocks.profile.mockReturnValue({ levels: [{ id: "high" }], defaultLevel: "high" });
+    const params = thinkingModel({
+      reasoning: true,
+      thinkingLevelMap: { minimal: "low", xhigh: "high" },
+      compat: { thinkingLevels: ["low", "medium", "high"] },
+    });
+    expect(resolveThinkingProfile({ ...params, agentRuntime: "codex" })).toMatchObject({
+      levels: [{ id: "low" }, { id: "medium" }, { id: "high" }, { id: "ultra" }],
+      defaultLevel: undefined,
+    });
+    expect(mocks.profile).not.toHaveBeenCalled();
+  });
+
   it("preserves catalog-advertised advanced levels on other runtimes", () => {
     const params = thinkingModel({
       reasoning: true,

@@ -88,6 +88,7 @@ export function resolveCatalogOwnedModelCompat(params: {
     (
       [
         "defaultThinkingLevel",
+        "thinkingLevels",
         "adaptiveThinking",
         "thinkingRequired",
         "thinkingLevelLabels",
