@@ -3996,7 +3996,17 @@ html.openclaw-native-web-chrome
    sidebar edge. Touch and drawer rows keep their always-visible actions beside
    the text, and an empty endcap charges the title nothing. */
 @media (hover: hover) and (pointer: fine) {
-  .shell:not(.shell--mobile-nav)
+  .shell:not(.shell:not(.shell--mobile-nav)
+    .sidebar-recent-session--child
+    .sidebar-recent-session__details-endcap:has(
+      .session-row-badges,
+      .viewer-facepile,
+      .session-row-trail
+    ) {
+    padding-inline-end: 7px;
+  }
+
+  .shell--mobile-nav)
     .sidebar-recent-session:not(.sidebar-recent-session--child, .sidebar-recent-session--team)
     .sidebar-recent-session__details-endcap:has(
       .session-row-badges,
@@ -4064,25 +4074,6 @@ html.openclaw-native-web-chrome
   color: var(--text-strong);
 }
 
-.session-row-trail--snooze {
-  gap: 4px;
-}
-
-/* Sidebar numbers stay tabular so counts and elapsed times hold their column. */
-:is(
-  .session-row-badge,
-  .session-row-trail,
-  .sidebar-child-session-toggle__count,
-  .sidebar-session-group-count,
-  .sidebar-agent-roster__unread,
-  .sidebar-issues-button__count,
-  .session-owner-stack__count,
-  .viewer-avatar--overflow,
-  .sidebar-session-tree__show-more
-) {
-  font-variant-numeric: tabular-nums lining-nums;
-}
-
 .sidebar-recent-session__subtitle,
 .sidebar-recent-session__channel {
   letter-spacing: 0;
@@ -4094,11 +4085,6 @@ html.openclaw-native-web-chrome
 
 .sidebar-recent-session__channel {
   font-size: calc(12px * var(--control-ui-text-scale));
-}
-
-:is(.sidebar-child-session-toggle, .session-action, .sidebar-session-group-actions) {
-  border-radius: 7px;
-  corner-shape: superellipse(1.5);
 }
 
 .sidebar-session-tree__children .sidebar-session-error.callout.danger {

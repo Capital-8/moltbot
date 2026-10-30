@@ -303,6 +303,11 @@ openclaw-session-owner-chip .viewer-avatar__initials {
 
 .session-glyph__icon,
 .session-glyph__icon > * {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-recent-session .session-glyph__icon .session-css-icon {
   width: 15px;
   height: 15px;
 }
@@ -2826,7 +2831,7 @@ td.data-table-key-col {
 .sidebar-session-fork-indicator svg {
   width: 13px;
   height: 13px;
-  stroke-width: 1.75px;
+  stroke-width: 2px;
 }
 
 /* Attribute badges (approval, cloud placement):
@@ -3256,4 +3261,41 @@ td.data-table-key-col {
 .person-activity-avatar-link {
   display: block;
   line-height: 0;
+}
+
+.session-row-trail--snooze {
+  gap: 4px;
+}
+
+/* Sidebar numbers stay tabular so counts and elapsed times hold their column. */
+:is(
+  .session-row-badge,
+  .session-row-trail,
+  .sidebar-child-session-toggle__count,
+  .sidebar-session-group-count,
+  .sidebar-agent-roster__unread,
+  .sidebar-issues-button__count,
+  .session-owner-stack__count,
+  .viewer-avatar--overflow,
+  .sidebar-session-tree__show-more
+) {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.sidebar-child-session-toggle,
+.session-action,
+.sidebar-session-group-actions {
+  border-radius: 7px;
+  corner-shape: superellipse(1.5);
+}
+
+/* Trailing signals stay quieter than secondary text; only action or live state adds color. */
+.session-row-badges,
+.sidebar-child-session-toggle {
+  color: color-mix(in srgb, var(--muted) 82%, var(--sidebar-bg, var(--bg)));
+}
+
+.sidebar-child-session-toggle:hover,
+.sidebar-child-session-toggle:focus-visible {
+  color: var(--text);
 }
