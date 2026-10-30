@@ -94,9 +94,7 @@ export class TranscriptInitialRange {
       }
     }
     if (!this.tailRows) {
-      const indexes = new Set(
-        this.normalRange(this.viewportOnly ? { ...range, overscan: 0 } : range, this.rowIndexes),
-      );
+      const indexes = new Set(this.normalIndexes(range));
       for (const key of this.preparedRowKeys) {
         const index = this.rowIndexes.get(key);
         if (index !== undefined) {
@@ -136,15 +134,24 @@ export class TranscriptInitialRange {
     }
     const range = virtualizer.calculateRange();
     return range
-      ? this.normalRange(
-          {
-            ...range,
-            count: virtualizer.options.count,
-            overscan: this.viewportOnly ? 0 : virtualizer.options.overscan,
-          },
-          this.rowIndexes,
-        )
+      ? this.normalIndexes({
+          ...range,
+          count: virtualizer.options.count,
+          overscan: virtualizer.options.overscan,
+        })
       : [];
+  }
+
+  private normalIndexes(range: Range): number[] {
+    // Large jumps skip these neighbours on the next frame. Spend their mount
+    // budget preparing the arriving viewport instead.
+    const jumping =
+      this.isReaderMoving() &&
+      this.scrollSample.distance >= (this.virtualizer().scrollRect?.height ?? 600);
+    return this.normalRange(
+      this.viewportOnly || jumping ? { ...range, overscan: 0 } : range,
+      this.rowIndexes,
+    );
   }
 
   private endIndexes(): number[] {

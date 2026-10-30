@@ -293,8 +293,9 @@ export function observeTranscriptOffset(
     });
     // Record the arriving viewport before row rendering dirties native layout.
     owner.endAnchor.recordViewport(element);
-    callback(offset, scrolling);
+    // Range selection uses this movement to budget offscreen preparation.
     owner.onOffset(readerDelta);
+    callback(offset, scrolling);
     // Range/isScrolling and pane follow policy already invalidate themselves.
     // The rail observes offsets directly; only touch-held history needs a geometry commit.
     if (owner.state.touchActive !== owner.state.renderedTouchActive) {

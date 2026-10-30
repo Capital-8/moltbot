@@ -542,9 +542,13 @@ it.each([1, -1])(
   },
 );
 
-it("cancels queued scroll warming when the transcript is hidden", async () => {
+it("budgets large jumps and cancels queued scroll warming when hidden", async () => {
   const view = await transcriptFixture(0, true, false, true);
+  const indexes = () => transcriptRows(view.container).map((row) => Number(row.dataset.index));
   await view.scrollTo(60);
+  expect(indexes()).toEqual([60, 61, 62, 63, 64, 65]);
+  await view.scrollTo(61);
+  expect(indexes()).toEqual([60, 61, 62, 63, 64, 65, 66, 67]);
   await view.frame();
   await view.present(false);
   const rendered = view.renderRow.mock.calls.length;
@@ -800,6 +804,7 @@ it("keeps manual end-follow from measuring history before reader navigation", as
   expect(transcriptRows(view.container)).toEqual(initialRows);
   await view.scrollTo(240);
   await view.frame(8);
+  await view.task();
   expect(transcriptRows(view.container).some((row) => Number(row.dataset.index) < 240)).toBe(true);
 });
 
