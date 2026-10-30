@@ -95,6 +95,10 @@ it.each([
   const state = new TranscriptOffsetState();
   const endAnchor = new TranscriptEndAnchor(() => {});
   const onOffset = vi.fn();
+  const cancelScroll = vi.fn(() => {
+    state.scrollCommand = null;
+  });
+  const onReaderScroll = vi.fn();
   const order: string[] = [];
   const recordedEnd: boolean[] = [];
   const deliver = vi.fn((offset: number) => {
@@ -115,12 +119,12 @@ it.each([
         endAnchor,
         prependAnchor: new TranscriptPrependAnchor(new Map(), vi.fn()),
         canFollowEnd: () => false,
-        isProgrammaticScroll: () => false,
-        cancelScroll: vi.fn(),
+        isProgrammaticScroll: () => isTranscriptProgrammaticScroll(state, element),
+        cancelScroll,
         onLayoutCorrection: vi.fn(),
         invalidate: vi.fn(),
         onOffset,
-        onReaderScroll: vi.fn(),
+        onReaderScroll,
         onComposerLayout: () => order.push("composer"),
         onNativeScroll,
       },
@@ -145,6 +149,27 @@ it.each([
   nested.dispatchEvent(new Event("scroll"));
   expect(order).toEqual(["composer"]);
   expect(onNativeScroll).toHaveBeenCalledOnce();
+  nested.addEventListener("wheel", (event) => event.preventDefault(), { once: true });
+  nested.dispatchEvent(new WheelEvent("wheel", { deltaY: -240, bubbles: true, cancelable: true }));
+  expect(cancelScroll).not.toHaveBeenCalled();
+  expect(onReaderScroll).not.toHaveBeenCalled();
+  element.scrollTop = 12;
+  element.dispatchEvent(new Event("scroll"));
+  onOffset.mockClear();
+  state.scrollCommand = { target: "end", behavior: "smooth" };
+  element.scrollTop = 19;
+  expect(isTranscriptProgrammaticScroll(state, element)).toBe(false);
+  element.dispatchEvent(new Event("scroll"));
+  expect(onOffset).toHaveBeenCalledExactlyOnceWith(0);
+  // Actual input retires the command before its native movement reaches the observer.
+  virtualizer.scrollOffset = 19;
+  element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, bubbles: true, cancelable: true }));
+  expect(cancelScroll).toHaveBeenCalledOnce();
+  expect(state.scrollCommand).toBeNull();
+  onOffset.mockClear();
+  element.scrollTop = 20;
+  element.dispatchEvent(new Event("scroll"));
+  expect(onOffset).toHaveBeenCalledExactlyOnceWith(1);
   if (logicalDrift) {
     Object.defineProperties(element, {
       clientHeight: { value: 200 },

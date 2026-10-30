@@ -76,9 +76,10 @@ it("shares mobile layout only for earlier-message actions and preserves updates"
       { key: "second", message: { ...message, content: "Second message", timestamp: 1001 } },
     ],
   });
+  // AgentRunFrame always owns assistant chrome around its representative messages.
   const frame = mountSolid(() => (
     <MessageGroup
-      group={group}
+      group={{ ...group, role: "assistant" }}
       options={{ showReasoning: false, frameContent: [<span>Completed fragment</span>] }}
     />
   ));
@@ -246,6 +247,7 @@ it.each([false, true])(
         frame={frame}
         options={{
           streamOptions: { bubbleMode },
+          workPreviews: new Map(),
           renderGroupOptions: () => ({
             bubbleMode,
             showReasoning: false,

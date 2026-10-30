@@ -127,7 +127,7 @@ export class TranscriptInitialRange {
           {
             ...range,
             count: virtualizer.options.count,
-            overscan: virtualizer.options.overscan,
+            overscan: this.viewportOnly ? 0 : virtualizer.options.overscan,
           },
           this.rowIndexes,
         )
@@ -169,12 +169,13 @@ export class TranscriptInitialRange {
   }
 
   finish(viewportOnly = false): void {
+    const changed = this.viewportOnly !== viewportOnly;
     this.pending = false;
     // Boot placement can precede the native extent; only reader navigation
     // releases its anchor to subsequent native-offset measurements.
     this.viewportOnly = viewportOnly;
     this.virtualizer().shouldAdjustScrollPositionOnItemSizeChange = undefined;
-    if (!this.tailRows) {
+    if (!this.tailRows && !changed) {
       return;
     }
     // The measured viewport stays adaptive; offscreen rows wait for reader navigation.
@@ -564,6 +565,10 @@ export class TranscriptInitialRange {
       const frame = requestAnimationFrame((time) => prepare(time + 6));
       this.cancelPreparation = () => cancelAnimationFrame(frame);
     }
+  }
+
+  releaseRows(): void {
+    this.rows = [];
   }
 
   disconnect(): void {

@@ -23,10 +23,7 @@ import {
 } from "./chat-transcript-geometry.ts";
 import { reconcileTranscriptHeaderMargin } from "./chat-transcript-header.ts";
 import { TranscriptInitialRange } from "./chat-transcript-initial-range.ts";
-import {
-  reconcileChatTranscriptInteractionResize,
-  resolveChatTranscriptInteractionAnchor,
-} from "./chat-transcript-interaction-anchor.ts";
+import { resolveChatTranscriptInteractionAnchor } from "./chat-transcript-interaction-anchor.ts";
 import { TranscriptLayoutOwner } from "./chat-transcript-layout-owner.ts";
 import { ChatTranscriptRenderer } from "./chat-transcript-layout-solid.tsx";
 import type { TranscriptContent, TranscriptRow } from "./chat-transcript-layout.ts";
@@ -152,7 +149,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     queueMicrotask(() => this.offsetState.pendingInteractionAnchor === anchor && this.invalidate());
   };
   private readonly handleGeometryCommit = (ev: Event) => {
-    this.reconcileInteractionResize(ev.target);
+    this.offsetState.reconcileInteractionResize(this.scrollElement, this.virtualizer, ev.target);
     this.viewportRect.commit(!(ev instanceof CustomEvent) || ev.detail?.widthChanged !== false);
   };
   private rowKeys: readonly string[] = [];
@@ -374,7 +371,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     updateVirtualizer();
     this.rowRefs.observeConnected();
     const interactionResizePending = this.offsetState.pendingInteractionAnchor !== null;
-    this.reconcileInteractionResize();
+    this.offsetState.reconcileInteractionResize(this.scrollElement, this.virtualizer);
     if (
       !this.offsetState.touchActive &&
       this.prependAnchor.update(this.scrollElement, this.virtualizer, this.presentation.measureRows)
@@ -409,10 +406,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     this.expandedAssistantMessages.clear();
     this.expandedAssistantMessages = new Map();
     this.offsetState.scrollCommand = null;
-    this.offsetState.maintenanceScrollOffset = null;
     this.prependAnchor.clear();
-    this.offsetState.touching = false;
-    this.offsetState.touchScrolling = false;
     this.renderPreviousRows = null;
     this.messageReveal.clear();
     cancelPendingScrollRetry(this.scrollRestoreHost);
@@ -424,6 +418,13 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     this.cleanupVirtualizer?.();
     this.cleanupVirtualizer = undefined;
     this.presentation.disconnect();
+    // Match the renderer's same-task move grace period without retaining row payloads afterward.
+    queueMicrotask(() => {
+      if (!this.connected) {
+        this.acceptedRows = null;
+        this.initialRange.releaseRows();
+      }
+    });
   }
 
   dispose(): void {
@@ -435,6 +436,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     this.rowRefs.clear();
     this.rowKeys = [];
     this.acceptedRows = null;
+    this.initialRange.releaseRows();
     this.initialRange.rowIndexes.clear();
     this.messageRowKeysById = new Map();
     this.prependAnchor.reset();
@@ -604,7 +606,8 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       return false;
     }
     if (source !== "auto") {
-      this.initialRange.finish();
+      // End-follow must not let speculative history measurements move its target.
+      this.initialRange.finish(true);
     }
     scrollTranscriptToEnd(
       this.offsetState,
@@ -705,15 +708,6 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
 
   handleFocusOut(event: FocusEvent): void {
     this.focusedRowKey = focusedTranscriptRowKey(this.scrollElement, event.relatedTarget);
-  }
-
-  private reconcileInteractionResize(target?: EventTarget | null): void {
-    const anchor = this.offsetState.pendingInteractionAnchor;
-    if (
-      reconcileChatTranscriptInteractionResize(anchor, target, this.scrollElement, this.virtualizer)
-    ) {
-      this.offsetState.pendingInteractionAnchor = null;
-    }
   }
 
   private syncRows(nextKeys: readonly string[]): void {

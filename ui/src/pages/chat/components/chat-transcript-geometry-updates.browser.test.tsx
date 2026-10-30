@@ -330,9 +330,11 @@ it("retains the accepted history-header space while a touch holds the older row 
 });
 
 it.each([
-  { offset: null, rowHeight: 120, cachedRows: 100, expected: [94, 95, 96, 97, 98, 99] },
-  { offset: 3600, rowHeight: 120, cachedRows: 100, expected: [27, 28, 29, 30, 31, 32, 33, 34, 35] },
-  { offset: null, rowHeight: 128, cachedRows: 3, expected: [95, 96, 97, 98, 99] },
+  // Complete footprints admit one overscan neighbor; a partial cache keeps
+  // the initial viewport on its three known rows until reader navigation.
+  { offset: null, rowHeight: 120, cachedRows: 100, expected: [95, 96, 97, 98, 99] },
+  { offset: 3600, rowHeight: 120, cachedRows: 100, expected: [28, 29, 30, 31, 32, 33, 34] },
+  { offset: null, rowHeight: 128, cachedRows: 3, expected: [97, 98, 99] },
 ])(
   "commits the cached initial window with $cachedRows footprints and $rowHeight px rows at $offset",
   async ({ offset, rowHeight, cachedRows, expected }) => {
@@ -531,11 +533,12 @@ it("reconciles the streaming end only when native row geometry changes", async (
   );
   host.fixtureStream = "Initial streaming text";
   await settleLayout();
-  // Finish background measurements before attributing changes to live text.
-  await expect.poll(() => virtualizer.getTotalSize()).toBe(7 * 360);
+  const tail = requireElement(host, ".chat-virtual-row:not([data-prepared-row]):last-child");
+  // Startup measures the live viewport; offscreen history can retain estimates.
+  await expect.poll(() => tail.getBoundingClientRect().height).toBe(360);
   await expect.poll(() => virtualizer.isScrolling).toBe(false);
   await settleLayout();
-  const tail = requireElement(host, ".chat-virtual-row:last-child");
+  expect(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop).toBeLessThanOrEqual(1);
   const keys = () =>
     [...host.querySelectorAll<HTMLElement>(".chat-virtual-row")].map(
       (row) => row.dataset.virtualRowKey,

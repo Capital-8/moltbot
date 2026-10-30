@@ -380,7 +380,7 @@ it("mounts prewarmed assistant text around an image without parsing it again", a
   const view = mountSolid(GroupedMessage, {
     preparation: prepareChatMessageRender(message),
     messageKey: "prepared-image",
-    options: {},
+    options: { isStreaming: false, showReasoning: false },
   });
   disposers.push(view.dispose);
   await settle();
@@ -399,7 +399,10 @@ it("warms an embedded widget's caption without mounting the widget", () => {
     content:
       '**Prepared widget caption**\n\n[embed ref="prepared-caption-chart" title="Synthetic chart" height="220" /]',
   };
-  const state = prepareGroupedMessage(prepareChatMessageRender(message), "prepared-widget", {});
+  const state = prepareGroupedMessage(prepareChatMessageRender(message), "prepared-widget", {
+    isStreaming: false,
+    showReasoning: false,
+  });
   expect(state.assistantViewBlocks).toHaveLength(1);
   expect(state.bodyMarkdown).not.toContain("[embed");
   expect(prewarmGroupedMessage(message, {}, "fragment")).toBe(true);
@@ -754,6 +757,22 @@ it("uses cached geometry on the first reader movement after tail placement", asy
   expect(
     style.mock.calls.filter(([element]) => element.classList.contains("chat-virtual-row")),
   ).toHaveLength(0);
+});
+
+it("keeps manual end-follow from measuring history before reader navigation", async () => {
+  const view = await transcriptFixture(null, true);
+  await view.frame(8);
+  const initialRows = transcriptRows(view.container);
+  view.host.scrollToEnd({ source: "manual", behavior: "smooth" });
+  await settle();
+  for (let turn = 0; turn < 8; turn++) {
+    await view.idle();
+    await view.frame();
+  }
+  expect(transcriptRows(view.container)).toEqual(initialRows);
+  await view.scrollTo(240);
+  await view.frame(8);
+  expect(transcriptRows(view.container).some((row) => Number(row.dataset.index) < 240)).toBe(true);
 });
 
 it("measures nearby rows before spending idle budgets on distant Markdown", async () => {

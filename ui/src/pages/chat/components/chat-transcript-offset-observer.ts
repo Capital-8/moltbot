@@ -4,7 +4,10 @@ import { isTranscriptScrollKey } from "../chat-scroll-input.ts";
 import { CHAT_TRANSCRIPT_END_THRESHOLD_PX, type ChatScrollToEndOptions } from "../scroll.ts";
 import type { TranscriptEndAnchor } from "./chat-transcript-end-anchor.ts";
 import { maxTranscriptScrollOffset } from "./chat-transcript-geometry.ts";
-import type { ChatTranscriptInteractionAnchor } from "./chat-transcript-interaction-anchor.ts";
+import {
+  reconcileChatTranscriptInteractionResize,
+  type ChatTranscriptInteractionAnchor,
+} from "./chat-transcript-interaction-anchor.ts";
 import type { TranscriptLayoutOwner } from "./chat-transcript-layout-owner.ts";
 import type { TranscriptPrependAnchor } from "./chat-transcript-prepend-anchor.ts";
 import {
@@ -38,6 +41,23 @@ export class TranscriptOffsetState {
 
   get hasPendingAnchor(): boolean {
     return Boolean(this.pendingScrollOffset || this.scrollCommand || this.pendingInteractionAnchor);
+  }
+
+  reconcileInteractionResize(
+    scrollElement: HTMLDivElement | null,
+    virtualizer: Virtualizer<HTMLDivElement, HTMLElement>,
+    target?: EventTarget | null,
+  ): void {
+    if (
+      reconcileChatTranscriptInteractionResize(
+        this.pendingInteractionAnchor,
+        target,
+        scrollElement,
+        virtualizer,
+      )
+    ) {
+      this.pendingInteractionAnchor = null;
+    }
   }
 }
 
@@ -237,6 +257,8 @@ export function observeTranscriptOffset(
       owner.state.maintenanceScrollOffset = actualOffset === target ? actualOffset : null;
     }
     const programmatic = owner.isProgrammaticScroll();
+    // The follow threshold releases pane policy before a command's last pixels settle.
+    const readerDelta = programmatic || owner.state.scrollCommand !== null ? 0 : delta;
     if (delta !== 0 && !programmatic) {
       // Measurement can observe arrival before the native event unlocks pane following.
       if (delta > 0 && !owner.canFollowEnd() && owner.endAnchor.isRecordedEnd(offset)) {
@@ -262,7 +284,7 @@ export function observeTranscriptOffset(
     // Record the arriving viewport before row rendering dirties native layout.
     owner.endAnchor.recordViewport(element);
     callback(offset, scrolling);
-    owner.onOffset(programmatic ? 0 : delta);
+    owner.onOffset(readerDelta);
     // Range/isScrolling and pane follow policy already invalidate themselves.
     // The rail observes offsets directly; only touch-held history needs a geometry commit.
     if (owner.state.touchActive !== owner.state.renderedTouchActive) {
@@ -339,7 +361,12 @@ export function observeTranscriptOffset(
     }
   };
   const interrupt = (event: Event) => {
-    if (!element || element !== owner.getScrollElement() || instance.scrollElement !== element) {
+    if (
+      event.defaultPrevented ||
+      !element ||
+      element !== owner.getScrollElement() ||
+      instance.scrollElement !== element
+    ) {
       return;
     }
     if (event instanceof KeyboardEvent && !isTranscriptScrollKey(event)) {

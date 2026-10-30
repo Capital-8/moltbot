@@ -208,7 +208,9 @@ suite.define(() => {
         const pendingStatus = activePane.locator(".chat-working-indicator");
         const waitingOn = pendingStatus.getByRole("link", { name: child.label, exact: true });
         await waitingOn.waitFor();
-        expect(await waitingOn.getAttribute("href")).toMatch(/\/chat\/main\/backend-review$/u);
+        expect(await waitingOn.getAttribute("href")).toMatch(
+          /\/chat\/main\/subagent\/backend-review$/u,
+        );
         expect(await pendingStatus.count()).toBe(1);
         await expect.poll(() => pendingStatus.locator(".chat-reading-indicator").count()).toBe(0);
         expect(await pendingStatus.locator("openclaw-working-phrase").count()).toBe(0);
