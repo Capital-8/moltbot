@@ -394,7 +394,7 @@ it("reads Board snapshots and documents without a write-capable publication", as
   const { store, target, putHtml, document } = fixture();
   const put = await putHtml("status", "read-only");
   using publication = vi
-    .spyOn(workerStore, "openOpenClawAgentSqliteWorkerStore")
+    .spyOn(workerStore, "openOpenClawAgentSqliteWorkerStoreV2")
     .mockImplementation(() => {
       throw new Error("Board read acquired a write-capable publication");
     });
