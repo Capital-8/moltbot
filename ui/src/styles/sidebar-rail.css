@@ -429,7 +429,7 @@
   background: var(--surface-selected-hover);
 }
 
-/* Page links take the session rows' rhythm: 30px fill, 15px muted icon, 13.5px title. */
+/* Page links take the session rows' rhythm: 30px fill, 15px muted icon, 13px title. */
 .sidebar-pages__entry .nav-item {
   min-height: var(--sidebar-session-row-floor, 30px);
   background: transparent;
@@ -448,7 +448,6 @@
 }
 
 .sidebar-pages__entry .nav-item__text {
-  font-size: calc(13.5px * var(--control-ui-text-scale));
   letter-spacing: -0.008em;
 }
 
