@@ -136,7 +136,9 @@ fixture.describe("sidebar session row tint", () => {
                 expected,
                 metadata,
                 title: paint(title.color),
-                expectedTitle: paint(style.getPropertyValue(active ? "--text-strong" : "--text")),
+                expectedTitle: paint(
+                  style.getPropertyValue(active || selected ? "--text-strong" : "--text"),
+                ),
               };
             });
           },
