@@ -186,15 +186,18 @@ export async function hydrateChatHistory(
     if (!isCurrent()) {
       return undefined;
     }
-    if (isHistoryCursor(response) && response.kind === "reset") {
+    const cursorReset = isHistoryCursor(response) && response.kind === "reset";
+    if (cursorReset) {
       clearHistoryCursor(state, sessionKey, requestAgentId);
       response = await request();
       if (!isCurrent()) {
         return undefined;
       }
     }
-    // A window reset asks for a fresh window, not continuity with held rows.
-    if (!isHistoryCursor(response) && !requests.windowReset?.isCurrent()) {
+    // Stop persists an interrupted reply, so its delta cursor resets to a
+    // bounded tail. Only that reset can cut a transcript this pane already
+    // shows from the start; a window reset asks for a fresh window instead.
+    if (cursorReset && !isHistoryCursor(response) && !requests.windowReset?.isCurrent()) {
       const tail = response;
       const gapCursor = heldHistoryGapCursor({
         result: tail,
@@ -203,9 +206,8 @@ export async function hydrateChatHistory(
         previousSessionId: state.currentSessionId ?? null,
         maxRows: CHAT_HISTORY_OLDER_PAGE_LIMIT,
       });
-      // A bounded tail would turn rows this pane already shows into earlier
-      // history. Read the gap before publishing; a failed read keeps the tail
-      // and its retryable boundary.
+      // Read the gap before publishing so held rows never become earlier
+      // history. A failed read keeps the tail and its retryable boundary.
       const older = gapCursor
         ? await requestOlderChatHistoryPage(
             client,

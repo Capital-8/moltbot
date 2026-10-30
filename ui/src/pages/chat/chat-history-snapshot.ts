@@ -1,4 +1,3 @@
-import { readSessionMessageSequence } from "@openclaw/gateway-client/browser";
 import { asSafeIntegerInRange } from "@openclaw/normalization-core/number-coercion";
 import { normalizeNullableString } from "@openclaw/normalization-core/string-coerce";
 import type {
@@ -223,13 +222,10 @@ export function reconcileHistoryTail(options: {
 }
 
 /**
- * Older cursor for the rows between a pane's last full read and a bounded tail,
- * when the pane holds its transcript from the start and grew it live past that
- * read (Stop resets the delta cursor to such a tail). Live rows do not prove
- * contiguous coverage: tool results arrive as activity, so neither a missing
- * nor a matching first tail row makes the held prefix safe. Only a read fills
- * that range. Without live growth, or with more unread rows than one older
- * page returns, the pane keeps its lazy boundary.
+ * Older cursor for the rows between a transcript this pane holds from its start
+ * and a bounded tail that no longer reaches it. The older page and the tail are
+ * both server rows, so filling the gap never trusts held live rows. Larger gaps
+ * keep the lazy boundary.
  */
 export function heldHistoryGapCursor(options: {
   result: ChatHistoryResult;
@@ -244,6 +240,7 @@ export function heldHistoryGapCursor(options: {
     !nextPagination.olderCursor ||
     options.result.windowReset === true ||
     options.previousPagination.hasMore ||
+    options.previousMessages.length === 0 ||
     !options.previousSessionId ||
     options.previousSessionId !== historySessionId(options.result)
   ) {
@@ -251,17 +248,9 @@ export function heldHistoryGapCursor(options: {
   }
   const readEnd = options.previousPagination.totalMessages ?? 0;
   const tailStart = retainedRawHistoryStart(nextPagination);
-  if (
-    tailStart === null ||
-    tailStart <= readEnd + 1 ||
-    tailStart - 1 - readEnd > options.maxRows ||
-    !options.previousMessages.some(
-      (message) => (readSessionMessageSequence(message) ?? 0) > readEnd,
-    )
-  ) {
-    return null;
-  }
-  return nextPagination.olderCursor;
+  return tailStart !== null && tailStart > readEnd + 1 && tailStart - 1 <= options.maxRows
+    ? nextPagination.olderCursor
+    : null;
 }
 
 export function reopenChatHistoryBoundary(
