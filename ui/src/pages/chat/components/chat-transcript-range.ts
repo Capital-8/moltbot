@@ -60,9 +60,11 @@ export function previewTranscriptRowKeys(
     "rows" | "header" | "rowConfiguration" | "renderKeyRows"
   >,
   owner: TranscriptRangeOwner,
+  estimateInitialWindow = false,
 ): Set<string> {
   const headerHeight = owner.headerHeight();
   if (
+    !estimateInitialWindow &&
     nextKeys === owner.rowKeys() &&
     (snapshot.header?.height ?? 0) === headerHeight &&
     owner.layout.matchesRows(snapshot.rows, snapshot.rowConfiguration)
@@ -76,19 +78,20 @@ export function previewTranscriptRowKeys(
     initialOffset: virtualizer.scrollOffset ?? virtualizer.options.initialOffset,
     initialRect: virtualizer.scrollRect ?? virtualizer.options.initialRect,
     onChange: () => undefined,
-    rangeExtractor: (range) =>
-      owner.initialRange.preview(
-        range,
-        preview,
-        (candidate) =>
-          owner.prependAnchor.extractRange(
-            candidate,
-            nextIndexes,
-            owner.focusedRowKey(),
-            snapshot.renderKeyRows,
-          ),
-        (index) => owner.layout.previewRowMinimum(snapshot.rows[index]!, snapshot.rowConfiguration),
-      ),
+    rangeExtractor: (range) => {
+      const normalRange = (candidate: Range) =>
+        owner.prependAnchor.extractRange(
+          candidate,
+          nextIndexes,
+          owner.focusedRowKey(),
+          snapshot.renderKeyRows,
+        );
+      return estimateInitialWindow
+        ? normalRange(range)
+        : owner.initialRange.preview(range, preview, normalRange, (index) =>
+            owner.layout.previewRowMinimum(snapshot.rows[index]!, snapshot.rowConfiguration),
+          );
+    },
   });
   preview.scrollElement = virtualizer.scrollElement;
   // The fork uses the same placement and range owners without publishing candidate geometry.
@@ -98,6 +101,15 @@ export function previewTranscriptRowKeys(
     preview.options.rangeExtractor,
     (snapshot.header?.height ?? 0) - owner.appliedHeaderHeight(),
   );
+  if (estimateInitialWindow) {
+    const offset = preview.options.initialOffset;
+    // The initial end sentinel is beyond the estimated scroll range. Clamp only
+    // this warming fork; accepted rows still use the measured placement ladder.
+    preview.scrollOffset = Math.min(
+      typeof offset === "function" ? offset() : offset,
+      Math.max(0, preview.getTotalSize() - preview.options.initialRect.height),
+    );
+  }
   return new Set(preview.getVirtualIndexes().map((index) => nextKeys[index]!));
 }
 

@@ -129,10 +129,13 @@ it("keeps initial rows hidden while preparing rich content and reveals failed re
   );
   try {
     view.rerender();
-    expect(chatRichPresentation.load).not.toHaveBeenCalled();
+    expect(chatRichPresentation.load).toHaveBeenCalledOnce();
     expect(view.container.textContent).toContain("Visible plain tail");
+    expect(view.container.querySelector(".chat-transcript-preparation")).toBeNull();
     const tail = view.container.querySelector(".chat-group.user");
-    await waitForSolid(() => expect(chatRichPresentation.load).toHaveBeenCalledOnce());
+    await waitForSolid(() =>
+      expect(view.container.querySelector(".chat-transcript-preparation")).not.toBeNull(),
+    );
     expect(view.container.textContent).not.toContain("Earlier measured image");
     expect(view.container.querySelector(".chat-group.user")).toBe(tail);
     const inner = view.container.querySelector<HTMLDivElement>(".chat-thread-inner")!;

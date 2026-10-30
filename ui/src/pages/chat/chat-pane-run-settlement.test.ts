@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { GatewaySessionRow } from "../../api/types.ts";
 import type { GatewayRequestHandler } from "../../test-helpers/gateway-client.ts";
+import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import { getChatHistoryLoadState } from "./chat-history-state.ts";
 import { createMountedPanes, refreshPane } from "./chat-pane-mounted.test-support.ts";
@@ -122,6 +123,9 @@ describe("mounted pane run settlement", () => {
     });
     await vi.waitFor(() => expect(pane.state.chatRunId).toBeNull());
     draw();
+    await waitForSolid(() =>
+      expect(container.querySelector('[data-entry-id="managed-media-answer"]')).not.toBeNull(),
+    );
     expect(pane.state.chatRunId).toBeNull();
     expect(container.querySelector(".chat-working-indicator")).toBeNull();
     const bubble = requireElement(container, '[data-entry-id="managed-media-answer"]');

@@ -142,7 +142,7 @@ it("announces a run preamble and its later terminal answer separately", async ()
   onTestFinished(() => buildItems.mockRestore());
   const transcript = createTestTranscript();
   const container = createComposerContainer();
-  const user = {
+  const announcementUser = {
     kind: "group",
     key: "group:user:announcement",
     role: "user",
@@ -165,7 +165,7 @@ it("announces a run preamble and its later terminal answer separately", async ()
     renderChatInto(container, { transcript, messages: items });
   };
 
-  renderItems([user] as ReturnType<typeof chatThread.buildCachedChatItems>);
+  renderItems([announcementUser] as ReturnType<typeof chatThread.buildCachedChatItems>);
   const stream = {
     kind: "stream" as const,
     key: "stream:announcement",
@@ -176,7 +176,7 @@ it("announces a run preamble and its later terminal answer separately", async ()
     boundaryId: "send:run-announcement",
   };
   renderItems([
-    user,
+    announcementUser,
     stream,
     {
       kind: "reading-indicator",
@@ -192,7 +192,7 @@ it("announces a run preamble and its later terminal answer separately", async ()
   );
 
   renderItems([
-    user,
+    announcementUser,
     {
       kind: "group",
       key: "group:assistant:persisted-announcement",
@@ -226,7 +226,7 @@ it("announces a run preamble and its later terminal answer separately", async ()
   );
 
   renderItems([
-    user,
+    announcementUser,
     { ...stream, isStreaming: false },
     {
       kind: "group",

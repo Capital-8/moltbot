@@ -53,12 +53,19 @@ export class TranscriptRowPreparation {
     let candidateKeys: Set<string> | undefined;
     const preview = () =>
       (candidateKeys ??= previewTranscriptRowKeys(host.virtualizer, nextKeys, snapshot, host));
-    if (
-      !chatRichPresentation.ready() &&
-      snapshot.richRowKeys?.size &&
-      [...preview()].some((key) => snapshot.richRowKeys!.has(key))
-    ) {
-      if (!this.rich) {
+    if (!chatRichPresentation.ready() && snapshot.richRowKeys?.size) {
+      const required = [...preview()].some((key) => snapshot.richRowKeys!.has(key));
+      // Warm only the estimated initial viewport, while the exact range still
+      // owns admission. A tall tail row may make some of this work unnecessary.
+      const warmInitialWindow =
+        !this.rich &&
+        !required &&
+        rowModelChanged &&
+        host.initialRange.pending &&
+        [...previewTranscriptRowKeys(host.virtualizer, nextKeys, snapshot, host, true)].some(
+          (key) => snapshot.richRowKeys!.has(key),
+        );
+      if (!this.rich && (required || warmInitialWindow)) {
         const pending: { view: RichPresentationPreparation } = { view: { status: "loading" } };
         this.rich = pending;
         void chatRichPresentation.load().then(
@@ -76,26 +83,30 @@ export class TranscriptRowPreparation {
           },
         );
       }
-      return host.renderer.holdRichPreparation(this.rich.view, {
-        applicationContext: snapshot.applicationContext,
-        messageElements: host.messageElements,
-        layout: host.layout,
-        headerHeight: 0,
-        presented: snapshot.presented,
-        initialPositionPending: () => true,
-        onCommit: () => {},
-        rows: [],
-        getContent: () => null,
-        virtualizer: host.virtualizer,
-        overlay: null,
-        header: null,
-        scrollElementRef: host.scrollElementRef,
-        captureInteractionResize: host.captureInteractionResize,
-        measureRowRefFor: host.measureRowRefFor,
-        measureRows: false,
-      });
+      if (required && this.rich) {
+        return host.renderer.holdRichPreparation(this.rich.view, {
+          applicationContext: snapshot.applicationContext,
+          messageElements: host.messageElements,
+          layout: host.layout,
+          headerHeight: 0,
+          presented: snapshot.presented,
+          initialPositionPending: () => true,
+          onCommit: () => {},
+          rows: [],
+          getContent: () => null,
+          virtualizer: host.virtualizer,
+          overlay: null,
+          header: null,
+          scrollElementRef: host.scrollElementRef,
+          captureInteractionResize: host.captureInteractionResize,
+          measureRowRefFor: host.measureRowRefFor,
+          measureRows: false,
+        });
+      }
     }
-    this.rich = undefined;
+    if (chatRichPresentation.ready()) {
+      this.rich = undefined;
+    }
     const nextRowKeys = rowModelChanged
       ? nextKeys
       : host.virtualizer.getVirtualItems().map(({ index }) => rows[index]!.key);
