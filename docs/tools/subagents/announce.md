@@ -197,7 +197,7 @@ the child wrote them. Only a `<` that would open or close a data block, an
 OpenClaw prompt-region marker or an OpenClaw `<<<…>>>` delimiter is escaped as
 `&lt;`. Task titles stay fully escaped. Several results keep a stable order, and
 completion findings have a strict shared 160,000-character cap, including
-escaping, per-child runtime-event framing, and the overflow summary. Control
+escaping, task/result data-block framing, and the overflow summary. Control
 instructions are separate from that data budget. Small answers stay intact; larger answers keep
 their beginning and an explicit truncation marker pointing to `sessions_history`
 with the child session key. `sessions_history` truncates text fields to 4,000
