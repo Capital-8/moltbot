@@ -90,7 +90,11 @@ type MeasurementRequest = { kind: "warm" | "measure" | "stop"; action: ActionNam
 type ProjectionSeed = Parameters<LocalWorkspaceStore["create"]>[0];
 type LegacyProjectionSeed = Omit<
   ProjectionSeed,
-  "tree_root_digest" | "source_paths_digest" | "canonical_fingerprints" | "projection_fingerprints"
+  | "tree_root_digest"
+  | "source_paths_digest"
+  | "canonical_fingerprints"
+  | "projection_fingerprints"
+  | "filesystem_checkpoints_json"
 >;
 
 async function seedState(rawManifest: string, paths: string[]) {

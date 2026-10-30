@@ -57,10 +57,7 @@ import {
   STATE_CURSOR_TABLES_V22,
 } from "./openclaw-state-db-schema-v22-columns.js";
 import { migrateTaskRunIndexesV24 } from "./openclaw-state-db-schema-v24-indexes.js";
-import {
-  migrateSessionStateHeadLayoutV26,
-  withLegacyStateHeadLayout,
-} from "./openclaw-state-db-schema-v26-layout.js";
+import * as heads from "./openclaw-state-db-schema-v26-layout.js";
 import {
   migrateStateWriteIndexesV27,
   withLegacyStateWriteIndexes,
@@ -286,7 +283,9 @@ function assertOpenClawStateDatabaseVersionForMigration(
   assertSqliteSchemaTablesPresent(
     database,
     options.pathname,
-    templates.withLegacyTemplateStateSchema(OPENCLAW_STATE_SCHEMA_SQL),
+    templates.withLegacyTemplateStateSchema(
+      checkpoints.withLegacyLocalWorkspaceCheckpoints(OPENCLAW_STATE_SCHEMA_SQL),
+    ),
     {
       allowedMissingTables: [
         ...(options.version === 5
@@ -475,7 +474,7 @@ const stateHeadLayoutMigration = {
   version: 26,
   tables: ["session_state_heads"],
   columns: [],
-  migrate: migrateSessionStateHeadLayoutV26,
+  migrate: heads.migrateSessionStateHeadLayoutV26,
   applied: "Stored session state heads in their composite primary-key tree (v26)",
 };
 const stateWriteIndexMigration = {
@@ -595,7 +594,7 @@ export function migrateBoundedStateSchema(
   const indexSourceSchema =
     previousVersion < 27 ? withLegacyStateWriteIndexes(manifestSourceSchema) : manifestSourceSchema;
   const sourceSchema =
-    previousVersion < 26 ? withLegacyStateHeadLayout(indexSourceSchema) : indexSourceSchema;
+    previousVersion < 26 ? heads.withLegacyStateHeadLayout(indexSourceSchema) : indexSourceSchema;
   // Older binaries can leave same-version repairs pending alongside a version change.
   if (
     !options.versionMigrationOnly &&

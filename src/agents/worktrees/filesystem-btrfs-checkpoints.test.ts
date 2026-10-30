@@ -54,14 +54,14 @@ it("selects content and namespace roots without turning symlink targets or read 
 it("requires complete, checksummed v1 deltas for the exact parent and snapshot", () => {
   const stream = decode("changed");
   const corrupted = Buffer.from(stream);
-  corrupted[corrupted.length - 1] = corrupted[corrupted.length - 1]! ^ 1;
+  corrupted[corrupted.length - 1] = corrupted.at(-1)! ^ 1;
   const otherVersion = Buffer.from(stream);
   otherVersion.writeUInt32LE(2, 13);
   for (const input of [
     corrupted,
     otherVersion,
     stream.subarray(1),
-    stream.subarray(0, stream.length - 10),
+    stream.subarray(0, -10),
     Buffer.concat([stream, Buffer.of(0)]),
     ...(["unknown", "unsafe", "duplicate", "nonUtf8"] as const).map(decode),
   ]) {

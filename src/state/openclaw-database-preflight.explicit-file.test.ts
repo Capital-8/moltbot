@@ -300,11 +300,13 @@ it.each([false, true])(
       source_paths_digest: null,
       canonical_fingerprints: null,
       projection_fingerprints: null,
+      filesystem_checkpoints_json: null,
     };
     expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toEqual([
       { kind: "local-workspace-manifests-v31", path: pathname },
       { kind: "local-workspace-cas-v35", path: pathname },
       { kind: "template-names-v36", path: pathname },
+      { kind: "local-workspace-checkpoints-v37", path: pathname },
     ]);
     await withStateMigrationBackupForTest(options, async () => {
       using witness = openRawDatabase(pathname);
@@ -558,6 +560,7 @@ it.each([33, 34])(
     expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toEqual([
       { kind: "local-workspace-cas-v35", path: pathname },
       { kind: "template-names-v36", path: pathname },
+      { kind: "local-workspace-checkpoints-v37", path: pathname },
     ]);
     await withStateMigrationBackupForTest(options, async () => {
       using witness = openRawDatabase(pathname);
@@ -578,6 +581,7 @@ it.each([33, 34])(
         source_paths_digest: null,
         canonical_fingerprints: null,
         projection_fingerprints: null,
+        filesystem_checkpoints_json: null,
       });
       expect(
         database.db.prepare("SELECT node_json FROM local_workspace_manifest_nodes").all(),

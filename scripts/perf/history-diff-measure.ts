@@ -217,6 +217,7 @@ async function seed() {
                 session_id: sessionId,
                 lifecycle_revision: lifecycleRevision,
                 projection_path: worktree,
+                filesystem_checkpoints_json: null,
                 base_commit: baseCommit,
                 source_paths_json: "[]",
                 source_paths_digest: null,

@@ -99,8 +99,9 @@ function pendingFromDisk() {
         "SELECT filesystem_checkpoints_json FROM local_workspace_projections WHERE worktree_id = ?",
       )
       .get(worktreeId);
-    assert.equal(typeof row?.filesystem_checkpoints_json, "string");
-    return receipt(row.filesystem_checkpoints_json as string).pending;
+    const raw = row?.filesystem_checkpoints_json;
+    assert(typeof raw === "string", "Expected durable checkpoint receipt");
+    return receipt(raw).pending;
   } finally {
     db.close();
   }

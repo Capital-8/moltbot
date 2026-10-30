@@ -98,7 +98,11 @@ function scanForComparison(value: LocalWorkspaceManifestScan) {
 type ProjectionSeed = Parameters<LocalWorkspaceStore["create"]>[0];
 type LegacyProjectionSeed = Omit<
   ProjectionSeed,
-  "tree_root_digest" | "source_paths_digest" | "canonical_fingerprints" | "projection_fingerprints"
+  | "tree_root_digest"
+  | "source_paths_digest"
+  | "canonical_fingerprints"
+  | "projection_fingerprints"
+  | "filesystem_checkpoints_json"
 >;
 const edited = { ...initial, "source.txt": "modified\n" };
 const addedRemoved = {

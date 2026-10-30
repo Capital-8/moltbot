@@ -632,6 +632,13 @@ afterAll(async () => {
 });
 
 describe("openclaw state database", () => {
+  const workspaceAndTemplateMigrations = [
+    "local-workspace-manifests-v31",
+    "local-workspace-cas-v35",
+    "template-names-v36",
+    "local-workspace-checkpoints-v37",
+  ];
+
   it("requires Doctor to repair the dangling Workshop review index in schema v16", async () => {
     const { options, databasePath } = createStateFixture((database) => {
       restorePreTemplateStateIdentifiersForTest(database);
@@ -1611,28 +1618,26 @@ describe("openclaw state database", () => {
     expect(fixture.compressedSha256).toBe(V2026_7_1_2_STATE_FIXTURE_GZIP_SHA256);
     expect(fixture.rawSha256).toBe(V2026_7_1_2_STATE_FIXTURE_RAW_SHA256);
 
-    expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toEqual([
-      { kind: "commitments-retirement-v7", path: fixture.databasePath },
-      { kind: "state-table-retirement-v10", path: fixture.databasePath },
-      { kind: "state-table-retirement-v11", path: fixture.databasePath },
-      { kind: "singleton-state-foldin-v12", path: fixture.databasePath },
-      { kind: "state-consolidation-v13", path: fixture.databasePath },
-      { kind: "creator-namespace-v14", path: fixture.databasePath },
-      { kind: "conversation-binding-targets-v15", path: fixture.databasePath },
-      { kind: "predicate-columns-v21", path: fixture.databasePath },
-      { kind: "portable-identity-columns-v22", path: fixture.databasePath },
-      { kind: "task-run-indexes-v24", path: fixture.databasePath },
-      { kind: "subagent-operator-recovery-v25", path: fixture.databasePath },
-      { kind: "state-write-indexes-v27", path: fixture.databasePath },
-      { kind: "github-publication-draft-v28", path: fixture.databasePath },
-      { kind: "local-client-credentials-v29", path: fixture.databasePath },
-      { kind: "automation-policy-fence-v30", path: fixture.databasePath },
-      { kind: "local-workspace-manifests-v31", path: fixture.databasePath },
-      { kind: "local-workspace-cas-v35", path: fixture.databasePath },
-      { kind: "template-names-v36", path: fixture.databasePath },
-      { kind: "audit-events-v2", path: fixture.databasePath },
-      { kind: "strict-tables-v3", path: fixture.databasePath },
-    ]);
+    expectMigrations(options, fixture.databasePath).exactly(
+      "commitments-retirement-v7",
+      "state-table-retirement-v10",
+      "state-table-retirement-v11",
+      "singleton-state-foldin-v12",
+      "state-consolidation-v13",
+      "creator-namespace-v14",
+      "conversation-binding-targets-v15",
+      "predicate-columns-v21",
+      "portable-identity-columns-v22",
+      "task-run-indexes-v24",
+      "subagent-operator-recovery-v25",
+      "state-write-indexes-v27",
+      "github-publication-draft-v28",
+      "local-client-credentials-v29",
+      "automation-policy-fence-v30",
+      ...workspaceAndTemplateMigrations,
+      "audit-events-v2",
+      "strict-tables-v3",
+    );
     expectStateSchemaMigrationRequired(() => openOpenClawStateDatabase(options), {
       kind: "audit-events-v2",
       pathname: fixture.databasePath,
@@ -1825,23 +1830,21 @@ describe("openclaw state database", () => {
     const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
     const seeded = seedLegacySessionWatchCursorSchema(stateDir);
 
-    expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toEqual([
-      { kind: "creator-namespace-v14", path: seeded.databasePath },
-      { kind: "predicate-columns-v21", path: seeded.databasePath },
-      { kind: "portable-identity-columns-v22", path: seeded.databasePath },
-      { kind: "meeting-transcript-start-time", path: seeded.databasePath },
-      { kind: "task-run-indexes-v24", path: seeded.databasePath },
-      { kind: "subagent-operator-recovery-v25", path: seeded.databasePath },
-      { kind: "session-state-head-layout-v26", path: seeded.databasePath },
-      { kind: "state-write-indexes-v27", path: seeded.databasePath },
-      { kind: "github-publication-draft-v28", path: seeded.databasePath },
-      { kind: "local-client-credentials-v29", path: seeded.databasePath },
-      { kind: "automation-policy-fence-v30", path: seeded.databasePath },
-      { kind: "local-workspace-manifests-v31", path: seeded.databasePath },
-      { kind: "local-workspace-cas-v35", path: seeded.databasePath },
-      { kind: "template-names-v36", path: seeded.databasePath },
-      { kind: "session-watch-cursor-provenance-v4", path: seeded.databasePath },
-    ]);
+    expectMigrations(options, seeded.databasePath).exactly(
+      "creator-namespace-v14",
+      "predicate-columns-v21",
+      "portable-identity-columns-v22",
+      "meeting-transcript-start-time",
+      "task-run-indexes-v24",
+      "subagent-operator-recovery-v25",
+      "session-state-head-layout-v26",
+      "state-write-indexes-v27",
+      "github-publication-draft-v28",
+      "local-client-credentials-v29",
+      "automation-policy-fence-v30",
+      ...workspaceAndTemplateMigrations,
+      "session-watch-cursor-provenance-v4",
+    );
     await expectRepair(options, [
       "Migrated cloud worker placements to execution modes",
       "Migrated shared state session watch cursors → provenance column (2 ambient, 5 sentinels removed)",
@@ -2045,16 +2048,14 @@ describe("openclaw state database", () => {
     `);
     }, createLegacyAuditStateDatabase);
 
-    expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toEqual([
-      { kind: "subagent-operator-recovery-v25", path: databasePath },
-      { kind: "state-write-indexes-v27", path: databasePath },
-      { kind: "github-publication-draft-v28", path: databasePath },
-      { kind: "local-client-credentials-v29", path: databasePath },
-      { kind: "automation-policy-fence-v30", path: databasePath },
-      { kind: "local-workspace-manifests-v31", path: databasePath },
-      { kind: "local-workspace-cas-v35", path: databasePath },
-      { kind: "template-names-v36", path: databasePath },
-    ]);
+    expectMigrations(options, databasePath).exactly(
+      "subagent-operator-recovery-v25",
+      "state-write-indexes-v27",
+      "github-publication-draft-v28",
+      "local-client-credentials-v29",
+      "automation-policy-fence-v30",
+      ...workspaceAndTemplateMigrations,
+    );
 
     await withStateMigrationBackupForTest(options, () => openOpenClawStateDatabase(options));
     closeOpenClawStateDatabaseForTest();
