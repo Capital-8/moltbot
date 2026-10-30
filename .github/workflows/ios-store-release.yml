@@ -41,7 +41,7 @@ env:
 
 jobs:
   screenshots:
-    name: Capture release screenshots without uploading
+    name: Account for screenshot simulator controls without uploading
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'screenshots' && github.repository == 'openclaw/openclaw'
     permissions:
       contents: read
@@ -95,7 +95,7 @@ jobs:
           rustup toolchain install "$watch_toolchain" --profile minimal --component rust-src
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Capture iPhone, iPad, and Watch screenshots
+      - name: Measure fresh iPhone and iPad simulator commands
         env:
           OPENCLAW_SNAPSHOT_DIAGNOSTICS: "1"
           OPENCLAW_IOS_RESOURCE_DIAGNOSTICS: ${{ (inputs.resource_diagnostics || inputs.startup_probe) && '1' || '0' }}
@@ -103,8 +103,7 @@ jobs:
           OPENCLAW_SNAPSHOT_DEVICE_FAMILY: ${{ inputs.startup_probe && 'iphone' || '' }}
           OPENCLAW_SNAPSHOT_SKIP_WATCH: ${{ inputs.startup_probe && '1' || '0' }}
         run: |
-          node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-resource-timeline.jsonl" -- \
-            pnpm ios:screenshots
+          python3 scripts/ios-simulator-accounting-probe.py "$RUNNER_TEMP/ios-simulator-accounting"
 
       - name: Compare Spotlight eligibility of build products
         if: inputs.startup_probe
@@ -124,6 +123,7 @@ jobs:
             apps/ios/build/screenshot-diagnostics.json
             ${{ runner.temp }}/ios-resource-timeline.jsonl
             ${{ runner.temp }}/ios-spotlight-probe.json
+            ${{ runner.temp }}/ios-simulator-accounting/
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
