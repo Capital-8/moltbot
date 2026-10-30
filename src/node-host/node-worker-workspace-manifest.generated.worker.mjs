@@ -64,6 +64,7 @@ const DERIVED_WORKSPACE_ROOT_PATHS = [
   ".cache/openclaw/bun",
   ".cache/ms-playwright",
   ".local/share/pnpm/store",
+  ".openclaw/.pnpm-store",
   ".artifacts/vitest-workers",
   ".artifacts/vitest-worker-cache",
   ".artifacts/vitest-shard-timings.json",
