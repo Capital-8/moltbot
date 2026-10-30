@@ -1468,7 +1468,7 @@ export async function handleFeishuMessage(params: {
           if (!dispatcher) {
             // Observer agent: no-op dispatcher (session entry + inference, no Feishu reply).
             // Only the active agent should execute commands, including explicit turn metadata.
-            delete agentCtx.CommandAuthorized;
+            agentCtx.CommandAuthorized = false;
             delete agentCtx.CommandTurn;
             delete agentCtx.CommandSource;
           }

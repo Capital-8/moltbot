@@ -118,7 +118,7 @@ describe("broadcast dispatch", () => {
       authorized: true,
     });
     expect(observer).toBeDefined();
-    expect(observer?.ctxPayload?.CommandAuthorized).toBeUndefined();
+    expect(observer?.ctxPayload?.CommandAuthorized).toBe(false);
     expect(observer?.ctxPayload?.CommandTurn).toBeUndefined();
     expect(observer?.ctxPayload?.CommandSource).toBeUndefined();
   });

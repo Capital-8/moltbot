@@ -290,7 +290,7 @@ export function resolveFeishuReplyPolicy(params: {
 }
 
 export async function shouldIncludeFetchedGroupContextMessage(params: {
-  cfg: ClawdbotConfig;
+  cfg: OpenClawConfig;
   accountId: string;
   chatId: string;
   isGroup: boolean;

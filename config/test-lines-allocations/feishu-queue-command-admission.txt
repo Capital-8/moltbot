@@ -1,2 +1,2 @@
-47
+45
 # Feishu command classification and broadcast observer authorization regressions.
