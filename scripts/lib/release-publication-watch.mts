@@ -16,6 +16,18 @@ const CHILD_WORKFLOWS = new Set([
   ".github/workflows/plugin-clawhub-new.yml",
 ]);
 class PublicationSnapshotChanged extends Error {}
+class PublicationDeadlineExceeded extends Error {}
+
+function readOptions(deadlineAt: number | undefined): { timeoutMs?: number } {
+  if (deadlineAt === undefined) {
+    return {};
+  }
+  const timeoutMs = deadlineAt - Date.now();
+  if (timeoutMs <= 0) {
+    throw new PublicationDeadlineExceeded();
+  }
+  return { timeoutMs };
+}
 
 type RunObservation = {
   id: string;
@@ -80,8 +92,16 @@ function runObservation(run: Record<string, unknown>, expectedId?: string): RunO
   };
 }
 
-async function readRun(ctx: ReleaseContext, id: string): Promise<Record<string, unknown>> {
-  const result = await ctx.run("gh", ["api", `repos/${ctx.state.repo}/actions/runs/${id}`]);
+async function readRun(
+  ctx: ReleaseContext,
+  id: string,
+  deadlineAt?: number,
+): Promise<Record<string, unknown>> {
+  const result = await ctx.run(
+    "gh",
+    ["api", `repos/${ctx.state.repo}/actions/runs/${id}`],
+    readOptions(deadlineAt),
+  );
   const run = parseJson(result.stdout, `run ${id}`);
   if (!isRecord(run)) {
     throw new Error(`Invalid Actions run ${id}.`);
@@ -126,7 +146,7 @@ function isOwnedChild(
     return (
       run.head_branch === state.validate.toolingTag &&
       run.head_sha === state.validate.toolingSha &&
-      title === `Plugin NPM Release [latest] ${state.cut.releaseSha}`
+      title === `Plugin NPM Release [default] ${state.cut.releaseSha}`
     );
   }
   const parentTitle =
@@ -177,11 +197,16 @@ async function listOwnedChildren(
   state: ReleaseState,
   parent: RunObservation,
   dispatchedAt: string,
+  deadlineAt?: number,
 ): Promise<Record<string, unknown>[]> {
-  const result = await ctx.run("gh", [
-    "api",
-    `repos/${state.repo}/actions/runs?event=workflow_dispatch&per_page=100&created=>=${dispatchedAt}`,
-  ]);
+  const result = await ctx.run(
+    "gh",
+    [
+      "api",
+      `repos/${state.repo}/actions/runs?event=workflow_dispatch&per_page=100&created=>=${dispatchedAt}`,
+    ],
+    readOptions(deadlineAt),
+  );
   const listed = parseJson(result.stdout, "publication child runs");
   if (
     !isRecord(listed) ||
@@ -196,11 +221,13 @@ async function listOwnedChildren(
 async function readPendingApprovals(
   ctx: ReleaseContext,
   run: RunObservation,
+  deadlineAt?: number,
 ): Promise<ApprovalObservation[]> {
-  const result = await ctx.run("gh", [
-    "api",
-    `repos/${ctx.state.repo}/actions/runs/${run.id}/pending_deployments`,
-  ]);
+  const result = await ctx.run(
+    "gh",
+    ["api", `repos/${ctx.state.repo}/actions/runs/${run.id}/pending_deployments`],
+    readOptions(deadlineAt),
+  );
   const pending = parseJson(result.stdout, `pending deployments for ${run.id}`);
   if (!Array.isArray(pending)) {
     throw new Error(`Invalid pending deployments for ${run.id}.`);
@@ -226,7 +253,10 @@ async function readPendingApprovals(
   });
 }
 
-export async function observePublication(ctx: ReleaseContext): Promise<PublicationWatchSnapshot> {
+export async function observePublication(
+  ctx: ReleaseContext,
+  deadlineAt?: number,
+): Promise<PublicationWatchSnapshot> {
   const { state } = ctx;
   const parentId = state.publish.publishRunId;
   const dispatchedAt = state.publish.dispatchedAt;
@@ -235,14 +265,14 @@ export async function observePublication(ctx: ReleaseContext): Promise<Publicati
       shellCommand("pnpm", ["release:stable", state.release, "--status"]),
     ]);
   }
-  const parentRun = await readRun(ctx, parentId);
+  const parentRun = await readRun(ctx, parentId, deadlineAt);
   requireParentIdentity(state, parentRun);
   const parent = runObservation(parentRun, parentId);
-  const candidates = await listOwnedChildren(ctx, state, parent, dispatchedAt);
+  const candidates = await listOwnedChildren(ctx, state, parent, dispatchedAt, deadlineAt);
   const children: RunObservation[] = [];
   for (const candidate of candidates) {
     const candidateId = String(candidate.id);
-    const child = await readRun(ctx, candidateId);
+    const child = await readRun(ctx, candidateId, deadlineAt);
     if (!isOwnedChild(state, parent, child)) {
       throw new Error(`Publication child ${candidateId} identity changed while observing it.`);
     }
@@ -259,15 +289,15 @@ export async function observePublication(ctx: ReleaseContext): Promise<Publicati
   }
   const pendingApprovals: ApprovalObservation[] = [];
   for (const run of [parent, ...children]) {
-    pendingApprovals.push(...(await readPendingApprovals(ctx, run)));
+    pendingApprovals.push(...(await readPendingApprovals(ctx, run, deadlineAt)));
   }
-  const finalCandidates = await listOwnedChildren(ctx, state, parent, dispatchedAt);
+  const finalCandidates = await listOwnedChildren(ctx, state, parent, dispatchedAt, deadlineAt);
   if (
     finalCandidates.map((run) => run.id).join(",") !== candidates.map((run) => run.id).join(",")
   ) {
     throw new PublicationSnapshotChanged("Publication child inventory changed while observing it.");
   }
-  const finalParentRun = await readRun(ctx, parentId);
+  const finalParentRun = await readRun(ctx, parentId, deadlineAt);
   requireParentIdentity(state, finalParentRun);
   const finalParent = runObservation(finalParentRun, parentId);
   if (
@@ -352,8 +382,11 @@ export async function watchPublication(
     first = false;
     let snapshot: PublicationWatchSnapshot;
     try {
-      snapshot = await observePublication(ctx);
+      snapshot = await observePublication(ctx, deadline);
     } catch (error) {
+      if (error instanceof PublicationDeadlineExceeded) {
+        throw timeout();
+      }
       if (!(error instanceof PublicationSnapshotChanged) || options.once) {
         throw error;
       }

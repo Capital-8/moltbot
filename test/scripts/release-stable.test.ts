@@ -172,6 +172,26 @@ describe("release:stable CLI", () => {
     expect(readFileSync(release.stateFile, "utf8")).toBe(before);
   });
 
+  it("enforces the publication deadline during a GitHub read", () => {
+    const state = publishState(true);
+    state.publish.publishRunId = "301";
+    state.publish.dispatchedAt = state.startedAt;
+    const release = fixture(state);
+    const startedAt = Date.now();
+    const result = release.run(
+      [
+        {
+          ...jsonStep("gh", ["api", `repos/${REPOSITORY}/actions/runs/301`], {}),
+          delayMs: 5_000,
+        },
+      ],
+      ["--watch", "--once", "--timeout-seconds", "1"],
+    );
+    expect(result.status, result.output).toBe(2);
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
+    expect(result.stderr).toContain("command timed out");
+  });
+
   it("reports a pending publication approval with exit 1 and no mutation", () => {
     const state = publishState(true);
     state.publish.publishRunId = "301";
@@ -199,7 +219,7 @@ describe("release:stable CLI", () => {
       repository: { full_name: REPOSITORY },
       event: "workflow_dispatch",
       actor: { login: "github-actions[bot]" },
-      display_title: `Plugin NPM Release [latest] ${CUT_SHA}`,
+      display_title: `Plugin NPM Release [default] ${CUT_SHA}`,
       created_at: state.startedAt,
       status: "waiting",
       conclusion: null,
@@ -272,7 +292,7 @@ describe("release:stable CLI", () => {
       repository: { full_name: REPOSITORY },
       event: "workflow_dispatch",
       actor: { login: "github-actions[bot]" },
-      display_title: `Plugin NPM Release [latest] ${CUT_SHA}`,
+      display_title: `Plugin NPM Release [default] ${CUT_SHA}`,
       created_at: state.startedAt,
       status: "completed",
       conclusion: "success",
@@ -328,7 +348,7 @@ describe("release:stable CLI", () => {
         repository: { full_name: REPOSITORY },
         event: "workflow_dispatch",
         actor: { login: "github-actions[bot]" },
-        display_title: `Plugin NPM Release [latest] ${CUT_SHA}`,
+        display_title: `Plugin NPM Release [default] ${CUT_SHA}`,
         created_at: state.startedAt,
         status: "completed",
         conclusion: "success",
