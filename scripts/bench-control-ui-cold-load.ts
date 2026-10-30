@@ -288,6 +288,7 @@ const { values } = parseArgs({
     "latency-profile": { type: "string" },
     "transcript-messages": { type: "string" },
     "long-session": { type: "boolean", default: false },
+    "long-session-trace": { type: "boolean", default: false },
     "skip-long-session-heap-snapshots": { type: "boolean", default: false },
     "long-session-scenario": { type: "string", default: "mixed" },
     "overlay-probe": { type: "boolean", default: false },
@@ -429,6 +430,16 @@ if (
   );
 }
 const captureTrace = traced || values["filmstrip-only"];
+if (
+  values["long-session-trace"] &&
+  (!values["long-session"] || !values.untraced || cpuProfile || values["filmstrip-only"])
+) {
+  throw new Error(
+    "long-session-trace requires long-session + untraced without CPU or filmstrip capture",
+  );
+}
+// Keep startup and streaming untraced so their overhead cannot warm the scroll path.
+const captureLongSessionTrace = captureTrace || values["long-session-trace"];
 const colorScheme = values["color-scheme"];
 if (colorScheme !== undefined && colorScheme !== "light" && colorScheme !== "dark") {
   throw new Error("Expected color-scheme light or dark");
@@ -3231,7 +3242,7 @@ try {
       await cdp.send("Profiler.start");
     }
     const longSessionTrace: unknown[] = [];
-    if (values["long-session"] && captureTrace) {
+    if (values["long-session"] && captureLongSessionTrace) {
       collectedTrace = longSessionTrace;
       await cdp.send("Tracing.start", {
         categories: values["filmstrip-only"]
@@ -3257,7 +3268,7 @@ try {
     if (values["long-session"] && cpuProfile) {
       await recordCpu("long-session", (await cdp.send("Profiler.stop")).profile);
     }
-    if (values["long-session"] && captureTrace) {
+    if (values["long-session"] && captureLongSessionTrace) {
       const complete = new Promise<void>((resolve) => {
         cdp.once("Tracing.tracingComplete", () => resolve());
       });
@@ -3653,7 +3664,8 @@ try {
         duplicateBootReads: values["duplicate-boot-reads"],
         dashboardMcpApp: values["dashboard-mcp-app"],
         chatDashboardRoute: values["chat-dashboard-route"],
-        traced,
+        traced: traced || values["long-session-trace"],
+        traceMode: values["long-session-trace"] ? "long-session-only" : undefined,
         selectorStats: values["selector-stats"],
         filmstripOnly: values["filmstrip-only"],
         holdBootAssets: values["hold-boot-assets"],
