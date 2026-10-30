@@ -132,9 +132,9 @@ export function createChatModelSearch() {
     controls: () => state.view()?.controls(),
     highlighted: () => state.view()?.highlighted(),
     isHighlighted: (key: string) => state.view()?.isHighlighted(key) ?? false,
-    bindView(view: ChatModelSearchView) {
-      setView(view);
-      onCleanup(() => setView((current) => (current === view ? undefined : current)));
+    bindView(nextView: ChatModelSearchView) {
+      setView(nextView);
+      onCleanup(() => setView((current) => (current === nextView ? undefined : current)));
     },
   };
 }
