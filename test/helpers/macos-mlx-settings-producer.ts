@@ -66,7 +66,12 @@ await talkHandlers["talk.config"]({
   params: {},
   client: { connId: "mlx-settings-proof", connect: { scopes: ["operator.read"] } },
   isWebchatConnect: () => false,
-  context: { getRuntimeConfig: () => captured },
+  context: {
+    getRuntimeConfig: () => {
+      phase("handler-runtime-config");
+      return captured;
+    },
+  },
   respond: (ok: boolean, value: unknown, error: unknown) => {
     if (calls === 0) {
       phase("handler-respond");
