@@ -1,0 +1,2 @@
+140
+# Bind prior-CI exceptions to the attested gate while enforcing other events, identity faults, and successful-primary authority.
