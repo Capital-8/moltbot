@@ -151,9 +151,7 @@ function prepareComposer(options: NewSessionComposerOptions, textarea: NewSessio
     getDraft: () => textarea.getTextarea()?.value ?? options.message,
     commitDraft: options.onInput,
     getTextarea: textarea.getTextarea,
-    refreshCommands: commandClient
-      ? () => textarea.refreshSkillCommands(commandClient, options)
-      : undefined,
+    refreshCommands: commandClient ? () => textarea.refreshSkillCommands(commandClient) : undefined,
   };
   const slashMenuHost: SlashMenuHost = {
     ...skillMenuHost,

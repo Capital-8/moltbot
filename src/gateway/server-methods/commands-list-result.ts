@@ -52,7 +52,13 @@ export async function buildCommandsListResult(params: {
     agentIds: [params.agentId],
     sessionEntry: params.sessionEntry,
     sessionKey: params.sessionKey,
-    executionWorkspaceDir: params.projectSkillRoot,
+    ...(params.projectSkillRoot
+      ? // The admitted root is a Gateway path, even for node-backed agent workspaces.
+        {
+          executionWorkspaceDir: params.projectSkillRoot,
+          executionWorkspaceFileHost: "gateway" as const,
+        }
+      : {}),
   });
   const chatCommands = listChatCommandsForConfig(params.cfg, { skillCommands });
   const skillsByKey = new Map(skillCommands.map((skill) => [`skill:${skill.skillName}`, skill]));

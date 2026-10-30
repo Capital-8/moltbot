@@ -16,15 +16,16 @@ import { defineValidatedGatewayMethod } from "./validation.js";
 class ProjectCommandScopeChangedError extends Error {}
 
 /**
- * A New session draft may preview its selected project's skills only when this
+ * A New session draft may preview its selected project's skills only while this
  * client could create that session; otherwise the agent-only catalog stays in effect.
+ * The returned check repeats admission after discovery, right before disclosure.
  */
-async function resolveProjectSkillRoot(
+async function prepareProjectSkillScope(
   params: Pick<
     GatewayRequestHandlerOptions,
     "client" | "context" | "signal" | "hasCurrentClientAuthority"
   > & { cfg: OpenClawConfig; agentId: string; projectId: string },
-): Promise<string | undefined> {
+): Promise<{ root: string; assertDisclosable: () => Promise<void> } | undefined> {
   const { cfg, agentId, client } = params;
   const canCreate = () =>
     !authorizeGatewaySessionCreation({ cfg, agentId, client }) &&
@@ -38,22 +39,35 @@ async function resolveProjectSkillRoot(
     if (
       params.hasCurrentClientAuthority?.() === false ||
       params.context.getRuntimeConfig() !== cfg ||
-      client?.authenticatedUserProfile?.profileId !== profileId
+      client?.authenticatedUserProfile?.profileId !== profileId ||
+      !canCreate()
     ) {
       throw new ProjectCommandScopeChangedError();
     }
   };
   const { resolveSessionProjectSkillRoot } = await import("../session-project-source.js");
-  const root = await resolveSessionProjectSkillRoot({
-    cfg,
-    projectId: params.projectId,
-    targetAgentId: agentId,
-    resolveSandboxRequired: () =>
-      resolveCreatorSandbox(cfg, resolveOperatorSessionCreation(client)) === "required",
-    assertCurrent,
-  });
+  const admit = () =>
+    resolveSessionProjectSkillRoot({
+      cfg,
+      projectId: params.projectId,
+      targetAgentId: agentId,
+      resolveSandboxRequired: () =>
+        resolveCreatorSandbox(cfg, resolveOperatorSessionCreation(client)) === "required",
+      assertCurrent,
+    });
+  const root = await admit();
   assertCurrent();
-  return root && canCreate() ? root : undefined;
+  return root
+    ? {
+        root,
+        assertDisclosable: async () => {
+          if ((await admit()) !== root) {
+            throw new ProjectCommandScopeChangedError();
+          }
+          assertCurrent();
+        },
+      }
+    : undefined;
 }
 
 export const commandsHandlers: GatewayRequestHandlers = {
@@ -80,10 +94,14 @@ export const commandsHandlers: GatewayRequestHandlers = {
       if (!resolved) {
         return;
       }
-      let projectSkillRoot: string | undefined;
       if (params.projectId) {
+        const projectChanged = errorShape(
+          ErrorCodes.UNAVAILABLE,
+          "Project access changed while preparing its commands. Retry the request.",
+          { retryable: true },
+        );
         try {
-          projectSkillRoot = await resolveProjectSkillRoot({
+          const scope = await prepareProjectSkillScope({
             cfg: resolved.cfg,
             agentId: resolved.agentId,
             projectId: params.projectId,
@@ -92,21 +110,23 @@ export const commandsHandlers: GatewayRequestHandlers = {
             signal,
             hasCurrentClientAuthority,
           });
+          const result = await buildCommandsListResult({
+            cfg: resolved.cfg,
+            agentId: resolved.agentId,
+            projectSkillRoot: scope?.root,
+            provider: params.provider,
+            scope: params.scope,
+            includeArgs: params.includeArgs,
+          });
+          await scope?.assertDisclosable();
+          respond(true, result, undefined);
         } catch (error) {
           if (!(error instanceof ProjectCommandScopeChangedError)) {
             throw error;
           }
-          respond(
-            false,
-            undefined,
-            errorShape(
-              ErrorCodes.UNAVAILABLE,
-              "Project access changed while preparing its commands. Retry the request.",
-              { retryable: true },
-            ),
-          );
-          return;
+          respond(false, undefined, projectChanged);
         }
+        return;
       }
       await withSessionDiscoveryAccess(
         {
@@ -126,7 +146,6 @@ export const commandsHandlers: GatewayRequestHandlers = {
           buildCommandsListResult({
             cfg: resolved.cfg,
             agentId: resolved.agentId,
-            projectSkillRoot,
             provider: params.provider,
             scope: params.scope,
             includeArgs: params.includeArgs,

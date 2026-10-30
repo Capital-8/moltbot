@@ -1,11 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { CommandsListResult } from "../../../packages/gateway-protocol/src/index.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { registerProjectRegistry } from "../../projects/project-registry.js";
 import { writeSkill } from "../../skills/test-support/e2e-test-helpers.js";
 import { withEnvAsync } from "../../test-utils/env.js";
+import * as commandsListResult from "./commands-list-result.js";
 import { commandsHandlers } from "./commands.js";
 import { initializeRepository, withProjectState } from "./projects.test-support.js";
 
@@ -26,6 +27,7 @@ async function listCommands(
   cfg: OpenClawConfig,
   params: Record<string, unknown>,
   scopes = CREATOR_SCOPES,
+  getRuntimeConfig: () => OpenClawConfig = () => cfg,
 ) {
   let result: { ok: boolean; payload?: unknown; error?: { code?: string } } | undefined;
   await commandsHandlers["commands.list"]!({
@@ -34,7 +36,7 @@ async function listCommands(
     respond: (ok, payload, error) => {
       result = { ok, payload, error };
     },
-    context: { getRuntimeConfig: () => cfg } as never,
+    context: { getRuntimeConfig } as never,
     client: { connect: { scopes } } as never,
     isWebchatConnect: () => false,
   });
@@ -105,6 +107,19 @@ test("New session command discovery previews admitted project skills under runti
       expect(fixtureSkills(await listCommands(cfg, { projectId: "missing-project" }))).toEqual(
         agentOnly,
       );
+      // Admission repeats before disclosure: a sandbox tightened during discovery withholds it.
+      let current = cfg;
+      const build = commandsListResult.buildCommandsListResult;
+      using _ = vi
+        .spyOn(commandsListResult, "buildCommandsListResult")
+        .mockImplementation(async (input) => {
+          const result = await build(input);
+          current = config("all");
+          return result;
+        });
+      expect(
+        await listCommands(cfg, { projectId: registered.id }, CREATOR_SCOPES, () => current),
+      ).toMatchObject({ ok: false, payload: undefined, error: { code: "UNAVAILABLE" } });
       // An existing session owns its project; a client cannot redirect its catalog.
       expect(
         await listCommands(cfg, { projectId: registered.id, sessionKey: "agent:main:main" }),

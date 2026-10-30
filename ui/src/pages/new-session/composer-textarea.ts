@@ -61,13 +61,15 @@ export function createNewSessionComposerTextarea() {
       if (control.ownsSkillCommands(client, scope)) {
         return;
       }
-      // Route, agent, project, or Gateway replacement retires prior async menu results.
+      // Route, agent, project, or Gateway replacement retires prior async menu results,
+      // including a pending slash refresh that would otherwise suppress the new scope's.
       skillCommandClient = client;
       skillCommandAgentId = scope.agentId.trim();
       skillCommandDraftOwnerKey = scope.draftOwnerKey;
       skillCommandProjectId = scope.commandProjectId?.trim() ?? "";
       control.emojiMenu.close();
       control.skillMenu.reset();
+      control.slashMenu.dispose();
       control.slashMenu.reset();
     },
     ownsSkillCommands(client: GatewayBrowserClient | null, scope: SkillCommandScope): boolean {
@@ -78,8 +80,16 @@ export function createNewSessionComposerTextarea() {
         skillCommandProjectId === (scope.commandProjectId?.trim() ?? "")
       );
     },
-    /** Loads the scope's catalog; results apply only while this scope still owns the menus. */
-    refreshSkillCommands(client: GatewayBrowserClient, scope: SkillCommandScope) {
+    /**
+     * Loads the currently owned scope's catalog. Menu hosts may be captured by an older
+     * render, so the request reads this owner rather than the caller's options.
+     */
+    refreshSkillCommands(client: GatewayBrowserClient) {
+      const scope = {
+        agentId: skillCommandAgentId,
+        draftOwnerKey: skillCommandDraftOwnerKey,
+        commandProjectId: skillCommandProjectId,
+      };
       return refreshSlashCommands({
         client,
         agentId: scope.agentId,
