@@ -63,3 +63,47 @@ export function renderedTranscript(state: ChatPageHost) {
     return item.kind === "stream" ? [{ role: "assistant", text: item.text }] : [];
   });
 }
+
+export function textMessage(text: string, role = "assistant") {
+  return { role, content: [{ type: "text", text }] };
+}
+
+export function chatEvent(
+  state: ChatPageHost,
+  runId: string,
+  phase: string,
+  text: string,
+  extra: Record<string, unknown> = {},
+) {
+  emitGatewayEvent(state, "chat", {
+    sessionKey: state.sessionKey,
+    runId,
+    state: phase,
+    message: textMessage(text),
+    ...extra,
+  });
+}
+
+export function clearStream(state: ChatPageHost, runId: string) {
+  emitGatewayEvent(state, "chat", {
+    sessionKey: state.sessionKey,
+    runId,
+    state: "delta",
+    deltaText: "",
+    replace: true,
+    message: { role: "assistant", content: [] },
+  });
+}
+
+export function captureAnimationFrames() {
+  let nextFrame = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  });
+  const cancelFrame = vi
+    .spyOn(globalThis, "cancelAnimationFrame")
+    .mockImplementation((id) => frames.delete(id));
+  return { frames, cancelFrame };
+}

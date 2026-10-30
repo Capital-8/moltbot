@@ -1,8 +1,12 @@
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
+import {
+  onSessionTranscriptUpdate,
+  type SessionTranscriptUpdate,
+} from "../../sessions/transcript-events.js";
 import {
   readOpenClawAgentDatabaseRegistryToken,
   registerOpenClawAgentDatabase,
@@ -357,29 +361,45 @@ describe("transcript turn physical identity", () => {
   );
 
   it.each([
-    { stored: "unknown", requested: "agent:main:unknown", mainKey: undefined },
-    { stored: "agent:main:main", requested: "agent:main:main", mainKey: "custom" },
+    { stored: "global", requested: "agent:main:global", published: "global" },
+    { stored: "agent:main:global", requested: "global", published: "agent:main:global" },
+    { stored: "unknown", requested: "agent:main:unknown", published: "agent:main:unknown" },
+    {
+      stored: "agent:main:main",
+      requested: "agent:main:main",
+      published: "agent:main:main",
+      mainKey: "custom",
+    },
   ])(
-    "preserves the physical row $stored when writing $requested",
-    async ({ stored, requested, mainKey }) => {
+    "preserves the physical row $stored and publication route when writing $requested",
+    async ({ stored, requested, published, mainKey }) => {
       setRuntimeConfigSnapshot(mainKey ? { session: { mainKey } } : {});
       replaceSessionEntrySync(scope(stored), { sessionId, updatedAt: 1 });
       if (mainKey) {
         setCanonicalSqliteSessionMainKey(database(), mainKey);
       }
+      const updates: SessionTranscriptUpdate[] = [];
+      onTestFinished(onSessionTranscriptUpdate((update) => updates.push(update)));
       await expect(
         persistSessionTranscriptTurn(scope(requested), {
           ...(mainKey ? { config: { session: { mainKey } } } : {}),
           expectedSessionId: sessionId,
           messages: [{ message }],
-          updateMode: "none",
+          updateMode: "inline",
         }),
       ).resolves.toMatchObject({ messages: [{ appended: true }] });
+      expect(updates).toEqual([
+        expect.objectContaining({
+          sessionKey: published,
+          target: expect.objectContaining({ agentId: "main", sessionId, sessionKey: published }),
+          message,
+        }),
+      ]);
       expect(keys()).toEqual([{ session_key: stored }]);
       expect(loadTranscriptEventsSync(scope(stored))).toContainEqual(
         expect.objectContaining({ type: "message", message }),
       );
-      if (!mainKey) {
+      if (stored === "unknown") {
         expect(loadSessionEntryReadOnly(scope(stored))?.sessionId).toBe(sessionId);
         expect(loadSessionEntryReadOnly(scope(requested))).toBeUndefined();
       }

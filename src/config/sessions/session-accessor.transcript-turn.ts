@@ -48,6 +48,7 @@ import { readRetainedSessionEntryFacts } from "./session-entry-read-facts.js";
 import { getSessionInputActor } from "./session-input-actor.js";
 import { resolvePersistedSessionStoreOwnerForTarget } from "./session-store-owner.js";
 import { completeSessionTranscriptCommit } from "./session-transcript-commit-completion.js";
+import { normalizeStoreSessionKey } from "./store-entry.js";
 import { captureSessionTranscriptTargetBinding } from "./transcript-target-binding.js";
 import {
   captureSessionTranscriptSourcePublication,
@@ -443,12 +444,16 @@ async function persistExpectedSessionTranscriptTurn(
     };
   }
 
-  // The requested key remains the caller's live update route; the resolved
-  // target above is the distinct physical SQLite owner.
+  const globalKey = `agent:${target.agentId}:global`;
+  const requestedKey = normalizeStoreSessionKey(requestedSessionKey ?? "");
+  const globalAlias =
+    (target.sessionKey === "global" && requestedKey === globalKey) ||
+    (target.sessionKey === globalKey && requestedKey === "global");
+  // Global updates follow the committed row; other aliases retain their live route.
   phase.mark("persist.transcript.publication");
   await publishTranscriptTurnUpdate({
     target:
-      requestedSessionKey === target.sessionKey
+      requestedSessionKey === target.sessionKey || globalAlias
         ? target
         : { ...target, sessionKey: requestedSessionKey },
     sessionEntry: turn.sessionEntry,

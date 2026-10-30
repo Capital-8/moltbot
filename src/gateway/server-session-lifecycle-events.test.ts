@@ -172,7 +172,7 @@ describe("createLifecycleEventBroadcastHandler", () => {
       new Set(["conn-1"]),
       {
         dropIfSlow: true,
-        sessionEventSubscriptionKeys: ["agent:ops:global", "global"],
+        sessionEventSubscriptionKeys: [JSON.stringify(["ops", "global"]), "global"],
         prepareSessionProjection: expect.any(Function),
       },
     );
@@ -224,8 +224,9 @@ describe("createLifecycleEventBroadcastHandler", () => {
       {
         agentId: "ops",
         dropIfSlow: true,
-        sessionEventSubscriptionKeys: ["agent:ops:global"],
-        sessionKeys: ["agent:ops:global"],
+        sessionEventSubscriptionKeys: [JSON.stringify(["ops", "global"])],
+        sessionKeys: ["global"],
+        sessionSubscriptionKeys: [JSON.stringify(["ops", "global"])],
       },
     );
     expectPrivateSessionInvalidation(broadcastToConnIds.mock.calls[0]?.[1]);

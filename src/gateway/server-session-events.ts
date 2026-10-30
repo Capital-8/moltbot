@@ -137,7 +137,7 @@ export function createTranscriptUpdateBroadcastHandler(params: {
         : lifecycleRevision
           ? { ...update, lifecycleRevision }
           : update;
-    // Raw global is per-agent storage identity; its qualified aliases must share a lane.
+    // Producers publish the committed global key; literal global keeps a separate lane.
     const laneKey =
       sessionKey && agentScope?.[1]
         ? resolveSessionSubscriptionKey(sessionKey, agentScope[1])

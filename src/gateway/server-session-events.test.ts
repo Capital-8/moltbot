@@ -432,7 +432,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
     const goal = { ...ownerGoal };
     loadGatewaySessionRowMock.mockReturnValue({ ...sessionRow, goal });
     const { broadcastToConnIds, handler } = routedHandler(
-      { global: ["conn-global"], "agent:ops:global": ["conn-scoped"] },
+      { global: ["conn-global"], [JSON.stringify(["ops", "global"])]: ["conn-scoped"] },
       [],
     );
 
@@ -460,8 +460,8 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
   it("keeps a retired fixed-store owner private instead of routing through another agent", async () => {
     runtimeConfigState.value = fixedStoreRuntimeConfig("ops", ["research"]);
     const { broadcastToConnIds, handler } = routedHandler({
-      "agent:ops:global": ["conn-ops"],
-      "agent:research:global": ["conn-research"],
+      [JSON.stringify(["ops", "global"])]: ["conn-ops"],
+      [JSON.stringify(["research", "global"])]: ["conn-research"],
     });
 
     await handler({
@@ -479,8 +479,9 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       {
         agentId: "ops",
         dropIfSlow: true,
-        sessionKeys: ["agent:ops:global"],
-        sessionEventSubscriptionKeys: ["agent:ops:global"],
+        sessionKeys: ["global"],
+        sessionSubscriptionKeys: [JSON.stringify(["ops", "global"])],
+        sessionEventSubscriptionKeys: [JSON.stringify(["ops", "global"])],
       },
     );
     expectPrivateSessionInvalidation(broadcastToConnIds.mock.calls[0]?.[1]);
@@ -535,6 +536,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
   it.each([
     ["distinct session keys", "agent:main:slow", "main", "agent:main:main"],
     ["global sessions owned by different agents", "global", "research", "global"],
+    ["raw and literal global conversations", "global", "main", "agent:main:global"],
   ])(
     "does not stall %s behind another transcript's pending seq read",
     async (_name, slowSessionKey, fastAgentId, fastSessionKey) => {
@@ -589,7 +591,6 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
   it.each([
     ["an agent-qualified session", "agent:main:main", "agent:main:main", "main"],
     ["an ownerless legacy global update", "global", "global", "main"],
-    ["a global session and its agent-qualified alias", "global", "agent:main:global", "main"],
     ["an ownerless global update in its configured fixed store", "global", "global", "ops"],
   ] as const)(
     "preserves message order for %s",

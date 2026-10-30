@@ -30,6 +30,7 @@ import {
 import { sessionListResult } from "../../test-helpers/chat-model.ts";
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
+import { chatHistoryRequests } from "./chat-history-state.ts";
 import { loadChatHistory } from "./chat-history.ts";
 import { makeChatHost, requestCalls } from "./chat-host.test-support.ts";
 import { removeQueuedMessage, keepVolatileQueuedMessage } from "./chat-queue.ts";
@@ -51,8 +52,12 @@ import {
 } from "./chat-state-refresh.ts";
 import { selectedChatSessionRow } from "./chat-state-route.ts";
 import {
+  captureAnimationFrames,
+  chatEvent,
+  clearStream,
   createSessionEventState,
   emitGatewayEvent,
+  textMessage,
   renderedTranscript,
 } from "./chat-state.test-support.ts";
 import { reduceChatSessionProjection } from "./history-merge.ts";
@@ -66,26 +71,6 @@ import { applySessionMessagePayload } from "./session-message-apply.ts";
 import { createHost as createToolStreamHost } from "./tool-stream.test-helpers.ts";
 
 const historyBudget = { limit: 80, maxBytes: 256 * 1024, toolResultMaxChars: 2_000 };
-
-function textMessage(text: string, role = "assistant") {
-  return { role, content: [{ type: "text", text }] };
-}
-
-function chatEvent(
-  state: ChatPageHost,
-  runId: string,
-  phase: string,
-  text: string,
-  extra: Record<string, unknown> = {},
-) {
-  emitGatewayEvent(state, "chat", {
-    sessionKey: state.sessionKey,
-    runId,
-    state: phase,
-    message: textMessage(text),
-    ...extra,
-  });
-}
 
 function agentEvent(
   state: ChatPageHost,
@@ -114,30 +99,6 @@ function persistMessage(
   });
 }
 
-function clearStream(state: ChatPageHost, runId: string) {
-  emitGatewayEvent(state, "chat", {
-    sessionKey: state.sessionKey,
-    runId,
-    state: "delta",
-    deltaText: "",
-    replace: true,
-    message: { role: "assistant", content: [] },
-  });
-}
-
-function captureAnimationFrames() {
-  let nextFrame = 0;
-  const frames = new Map<number, FrameRequestCallback>();
-  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => {
-    frames.set(++nextFrame, callback);
-    return nextFrame;
-  });
-  const cancelFrame = vi
-    .spyOn(globalThis, "cancelAnimationFrame")
-    .mockImplementation((id) => frames.delete(id));
-  return { frames, cancelFrame };
-}
-
 beforeEach(() => {
   vi.spyOn(assistantIdentity, "loadLocalAssistantIdentity").mockReturnValue({
     avatar: "data:image/png;base64,bG9jYWw=",
@@ -151,8 +112,8 @@ afterEach(() => {
 });
 
 describe("canonical session message recovery", () => {
-  it("reconciles live approval events for the selected session", () => {
-    const { state } = createSessionEventState();
+  it("reconciles live approval events for the selected session", async () => {
+    const { request, state } = createSessionEventState();
     const approval = {
       id: "plugin:approval-live",
       status: "pending" as const,
@@ -174,6 +135,7 @@ describe("canonical session message recovery", () => {
       updatedAtMs: number,
       terminal = false,
       sourceSessionKey?: string,
+      id = approval.id,
     ) =>
       emitGatewayEvent(state, "session.approval", {
         sessionKey,
@@ -183,12 +145,13 @@ describe("canonical session message recovery", () => {
         approval: terminal
           ? {
               ...approval,
+              id,
               status: "denied",
               decision: "deny",
               reason: "user",
               resolvedAtMs: updatedAtMs,
             }
-          : approval,
+          : { ...approval, id },
       });
     deliver("agent:main:main", 1_000, false, "agent:main:cloud-child");
     expect(state.chatSessionApprovalQueue).toEqual([
@@ -198,14 +161,42 @@ describe("canonical session message recovery", () => {
     expect(state.chatSessionApprovalQueue).toEqual([]);
     state.sessionKey = "global";
     state.assistantAgentId = "research";
+    const replay = createDeferred<unknown>();
+    const requested = createDeferred();
+    request.mockImplementation((method: string) => {
+      if (method === "sessions.messages.subscribe") {
+        requested.resolve();
+        return replay.promise;
+      }
+      return Promise.resolve({});
+    });
     deliver("agent:research:global", 3_000);
+    expect(state.chatSessionApprovalQueue).toEqual([]);
+    await requested.promise;
+    expect(request).toHaveBeenCalledWith(
+      "sessions.messages.subscribe",
+      expect.objectContaining({ key: "global", agentId: "research", includeApprovals: true }),
+      expect.anything(),
+    );
+    const ready = chatHistoryRequests(state).subscriptionReady;
+    replay.resolve({
+      key: "global",
+      agentId: "research",
+      approvalReplay: {
+        sessionKey: "agent:research:global",
+        updatedAtMs: 3_000,
+        approvals: [approval],
+        truncated: false,
+      },
+    });
+    expect(await ready).toBe(true);
     expect(state.chatSessionApprovalQueue).toEqual([
       expect.objectContaining({
         id: approval.id,
         request: expect.objectContaining({ sessionKey: "global" }),
       }),
     ]);
-    deliver("agent:main:global", 4_000, true);
+    deliver("agent:main:global", 4_000, true, undefined, "plugin:other-agent");
     expect(state.chatSessionApprovalQueue).toHaveLength(1);
     deliver("agent:research:global", 4_000, true);
     expect(state.chatSessionApprovalQueue).toHaveLength(0);

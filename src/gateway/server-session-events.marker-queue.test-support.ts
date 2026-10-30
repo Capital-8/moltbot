@@ -141,7 +141,7 @@ export function registerTranscriptMarkerQueueTests() {
         await waitForPublication();
       }
       void enqueue("later", {
-        sessionKey: "agent:main:global",
+        sessionKey: differentStore ? "agent:main:global" : "global",
         ...(differentStore ? { target: otherTarget } : {}),
         messageSeq: 3,
       });

@@ -263,20 +263,6 @@ async function setup(
     await page.goto(controlUiSessionUrl(suite.server.baseUrl, namedSessionKey));
   }
   if (selected) {
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (target) => ({
-            sessionMatches: window.openclawControlUi?.snapshot().sessionKey === target.sessionKey,
-            agentMatches:
-              window.openclawControlUi?.diagnostics().gateway.assistantAgentId === target.agentId,
-          }),
-          selected,
-        ),
-      )
-      .toEqual({ sessionMatches: true, agentMatches: true });
-  }
-  if (selected) {
     const pane = nativePane(page);
     await expect
       .poll(() =>

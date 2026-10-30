@@ -89,17 +89,14 @@ const stores = new WeakMap<ApplicationGateway, SessionPullRequestSnapshotStore>(
 export function readSessionPullRequestUpdates(
   payload: unknown,
 ): ControlUiSessionPullRequestsChanged["sessions"] | null {
-  if (!payload || typeof payload !== "object" || !("sessions" in payload)) {
-    return null;
-  }
-  const sessions = (payload as { sessions?: unknown }).sessions;
-  const legacy = asNullableRecord(sessions) as
+  const update = asNullableRecord(payload);
+  const legacy = asNullableRecord(update?.sessions) as
     | ControlUiSessionPullRequestsChanged["sessions"]
     | null;
   if (!legacy) {
     return null;
   }
-  const exact = (payload as ControlUiSessionPullRequestsChanged).exactSessions;
+  const exact = update?.exactSessions;
   return Object.fromEntries([
     ...Object.entries(legacy).map(([key, snapshot]) => [selectionKey(key), snapshot]),
     ...(Array.isArray(exact)
