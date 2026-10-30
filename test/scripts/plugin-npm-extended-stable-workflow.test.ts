@@ -966,14 +966,21 @@ it("runs one trusted-publisher exchange job directly after selected-package plan
 
 it("routes publication recovery through the read-only trusted-publisher preflight", () => {
   const guidance = readFileSync(publicationRecoveryPath, "utf8");
-  const recoveryCommand = guidance
-    .split("Before resuming plugin npm publication", 2)[1]
-    ?.split("```bash", 2)[1]
-    ?.split("```", 1)[0];
+  const recoveryGuidance = guidance
+    .split("Before resuming regular plugin npm publication", 2)[1]
+    ?.split("Publication records distinguish", 1)[0];
+  const recoveryCommand = recoveryGuidance?.split("```bash", 2)[1]?.split("```", 1)[0];
+  expect(recoveryGuidance).toContain("npm-token-bootstrap");
+  expect(recoveryGuidance).toContain("If no recovered package uses `npm-oidc`, skip this check.");
+  expect(recoveryGuidance).toContain("Do not use this protected-tag command for extended-stable");
   expect(recoveryCommand).toBeDefined();
   expect(recoveryCommand).toContain("--ref release-publish/<tooling-sha12>-<epoch>");
   expect(recoveryCommand).toContain("-f preflight_only=true");
   expect(recoveryCommand).toContain("-f trusted_publisher_preflight=true");
+  expect(recoveryCommand).toContain("-f publish_scope=selected");
+  expect(recoveryCommand).toContain("-f plugins=<comma-separated-npm-oidc-package-names>");
+  expect(recoveryCommand).not.toContain("publish_scope=all-publishable");
+  expect(recoveryCommand).not.toContain("npm_dist_tag=extended-stable");
   expect(recoveryCommand).not.toContain("release_publish_run_id");
 });
 
