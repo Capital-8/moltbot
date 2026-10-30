@@ -119,6 +119,8 @@ export type InteractionScenario = {
   id: string;
   route: string;
   expected: string;
+  /** Opt-in cold first-open cells; existing scenarios retain full warm preparation. */
+  firstOpenPhase?: "ready" | "idle";
   /** Deliberately perturbs execution; exclude its timing from performance comparisons. */
   diagnostic?: string;
   /** Run only when its ID is explicitly named in --steps. */
@@ -1610,6 +1612,62 @@ async function prepareFirstModelPicker(page: Page) {
   }
 }
 
+async function setupColdFirstModelPicker(page: Page) {
+  await page.addInitScript(() => {
+    const triggerSelector = ".chat-pane-cache__pane--active [data-chat-model-select]";
+    const recordReady = () => {
+      const trigger = document.querySelector<HTMLElement>(
+        `${triggerSelector}[aria-disabled="false"][aria-busy="false"]`,
+      );
+      if (window.openclawControlUi?.snapshot().ready && trigger?.checkVisibility()) {
+        performance.mark("model-picker:first-ready");
+      } else {
+        requestAnimationFrame(recordReady);
+      }
+    };
+    requestAnimationFrame(recordReady);
+    const recordClick = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest(triggerSelector)) {
+        performance.mark("model-picker:native-click", { startTime: event.timeStamp });
+        performance.mark("model-picker:observed-click");
+        document.removeEventListener("click", recordClick, true);
+      }
+    };
+    document.addEventListener("click", recordClick, true);
+  });
+}
+
+async function prepareColdFirstModelPicker(page: Page) {
+  await page.waitForFunction(() => {
+    if (!performance.getEntriesByName("model-picker:first-ready").length) {
+      return false;
+    }
+    if (document.querySelector(".chat-controls__model-menu, [data-chat-model-search]")) {
+      throw new Error("First-open measurement requires an unopened picker");
+    }
+    return true;
+  });
+}
+
+async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence> {
+  const result = await runFirstModelPicker(page);
+  const phase = await page.evaluate(() => {
+    const readyAt = performance.getEntriesByName("model-picker:first-ready")[0]?.startTime;
+    const clickedAt = performance.getEntriesByName("model-picker:native-click")[0]?.startTime;
+    const observedAt = performance.getEntriesByName("model-picker:observed-click")[0]?.startTime;
+    if (readyAt === undefined || clickedAt === undefined || observedAt === undefined) {
+      throw new Error("Cold first-open readiness/native click was not recorded");
+    }
+    return {
+      firstReadyAtMs: readyAt,
+      nativeClickAtMs: clickedAt,
+      nativeClickObservedAtMs: observedAt,
+      firstReadyToActionMs: clickedAt - readyAt,
+    };
+  });
+  return { ...result, ...phase };
+}
+
 async function runFirstModelPicker(page: Page, recordPhases = false): Promise<InteractionEvidence> {
   const recorder = recordPhases
     ? await page.evaluateHandle((pane) => {
@@ -2769,6 +2827,26 @@ export const interactionScenarios: readonly InteractionScenario[] = [
         throw new Error("Warm Settings tabs must retain the loaded config schema");
       }
     },
+  },
+  {
+    id: "model-picker-first-ready-open-search",
+    route: controlUiSessionPath(sessionKeys[0]),
+    expected: "The unopened model picker focuses and filters without an intentional idle wait.",
+    explicitOnly: true,
+    firstOpenPhase: "ready",
+    setup: setupColdFirstModelPicker,
+    prepare: prepareColdFirstModelPicker,
+    run: runColdFirstModelPicker,
+  },
+  {
+    id: "model-picker-idle-first-open-search",
+    route: controlUiSessionPath(sessionKeys[0]),
+    expected: "The unopened model picker focuses and filters after native idle warming.",
+    explicitOnly: true,
+    firstOpenPhase: "idle",
+    setup: setupColdFirstModelPicker,
+    prepare: prepareColdFirstModelPicker,
+    run: runColdFirstModelPicker,
   },
   {
     id: "model-picker-first-open-search",

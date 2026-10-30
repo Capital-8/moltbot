@@ -54,6 +54,11 @@ import {
 } from "./lib/control-ui-resource-counts.ts";
 import { captureRetention, installRetentionTimers } from "./lib/control-ui-retention.ts";
 import {
+  qualifyRouteNetworkClock,
+  routeNetworkPhase,
+  type RouteNetworkObservation,
+} from "./lib/control-ui-route-network.ts";
+import {
   createWorkboardResourceFixture,
   prepareWorkboardResourceSource,
 } from "./lib/control-ui-workboard-resource-fixture.ts";
@@ -84,6 +89,8 @@ const { values } = parseArgs({
     "renderer-process-metrics": { type: "boolean", default: false },
     counterbalance: { type: "boolean", default: false },
     "asset-latency-ms": { type: "string", default: "0" },
+    "network-latency-ms": { type: "string" },
+    "download-kbps": { type: "string" },
     "projection-fixtures": { type: "boolean", default: false },
     "projection-counts": { type: "boolean", default: false },
     "data-pages": { type: "boolean", default: false },
@@ -113,6 +120,16 @@ const theme = values.theme;
 const pairs = Number(values.pairs);
 const cpuThrottle = Number(values["cpu-throttle"]);
 const assetLatencyMs = Number(values["asset-latency-ms"]);
+const networkLatencyMs = Number(values["network-latency-ms"] ?? 0);
+const downloadKbps = Number(values["download-kbps"] ?? 0);
+const firstOpenNetworkProfile =
+  values["network-latency-ms"] !== undefined || values["download-kbps"] !== undefined;
+if ([networkLatencyMs, downloadKbps].some((value) => !Number.isFinite(value) || value < 0)) {
+  throw new Error("network-latency-ms and download-kbps must be nonnegative");
+}
+if (firstOpenNetworkProfile && assetLatencyMs > 0) {
+  throw new Error("Use either asset latency or a first-open network profile, not both");
+}
 if (!Number.isFinite(assetLatencyMs) || assetLatencyMs < 0) {
   throw new Error("asset-latency-ms must be nonnegative");
 }
@@ -144,6 +161,9 @@ const scenarios = interactionScenarios.filter((step) => {
 });
 if (!scenarios.length || selectedIds?.some((id) => !scenarios.some((step) => step.id === id))) {
   throw new Error("Unknown or empty interaction steps");
+}
+if (firstOpenNetworkProfile && scenarios.some((scenario) => !scenario.firstOpenPhase)) {
+  throw new Error("Network profile flags require only the explicit cold first-open scenarios");
 }
 const artifactDir = createControlUiE2eArtifactDir("warm", values.output);
 const bundles = [
@@ -378,6 +398,7 @@ type Result = {
   domAfter?: { nodes: number; menuItems: number; namedAnchors: number };
   rowIdentity?: { initial: number; created: number; retained: number; final: number };
   navigationPreloads?: InteractionNavigationPreloads;
+  firstOpenNetworkArtifact?: string;
   resourcesBefore?: ControlUiResourceCounts;
   resourcesAfter?: ControlUiResourceCounts;
   processWakeups?: ProcessWakeups;
@@ -413,6 +434,7 @@ const servers: Array<{
   directory: string;
   build: { buildId: string; version: string };
   indexSha256: string;
+  modelPickerAssets: string[];
   workboardSource?: Awaited<ReturnType<typeof prepareWorkboardResourceSource>>;
   projectionBuild?: { entry: string; descriptorSha256: string; entrySha256: string };
   server: Awaited<ReturnType<typeof startControlUiBenchGatewayServer>>;
@@ -596,8 +618,23 @@ try {
         entrySha256: createHash("sha256").update(entry).digest("hex"),
       };
     }
+    let modelPickerAssets: string[] = [];
+    if (scenarios.some((scenario) => scenario.firstOpenPhase)) {
+      const descriptor = /id="openclaw-navigation-preloads" content="([^"]+)"/u.exec(html)?.[1];
+      if (!descriptor) {
+        throw new Error("Cold picker proof requires the built navigation descriptor");
+      }
+      const entries: Record<string, string[]> = JSON.parse(
+        await readFile(path.join(resolved, descriptor), "utf8"),
+      );
+      modelPickerAssets = entries["model-picker"] ?? [];
+      if (!modelPickerAssets.length) {
+        throw new Error("Cold picker proof requires model-picker static asset URLs");
+      }
+    }
     servers.push({
       directory: resolved,
+      modelPickerAssets,
       workboardSource,
       build,
       indexSha256: createHash("sha256").update(html).digest("hex"),
@@ -622,6 +659,13 @@ try {
           ? "CDP trace + 1ms CPU profiler (overhead included)"
           : "untraced CDP metrics",
         metricTimeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
+        firstOpenNetworkProfile: firstOpenNetworkProfile
+          ? {
+              networkLatencyMs,
+              downloadKbps,
+              scope: "Page-target HTTP; synthetic Gateway WS is unchanged",
+            }
+          : undefined,
         functionCounts: values["function-counts"]
           ? "Precise coverage starts before navigation and resets after preparation; diagnostic overhead, not timing evidence."
           : false,
@@ -842,9 +886,48 @@ try {
           let minimizedWindow: number | undefined;
           const events: unknown[] = [];
           const styleSheets = new Map<string, InteractionStyleSheet>();
+          const firstOpenRequests: RouteNetworkObservation[] = [];
           try {
             cdp = await context.newCDPSession(page);
             await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
+            if (scenario.firstOpenPhase) {
+              await cdp.send("Network.enable");
+              await cdp.send("Performance.enable", {
+                timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
+              });
+              cdp.on("Network.requestWillBeSent", (event) => {
+                firstOpenRequests.push({
+                  requestId: event.requestId,
+                  url: event.request.url,
+                  timestampSeconds: event.timestamp,
+                });
+              });
+              cdp.on("Network.loadingFinished", (event) => {
+                const request = firstOpenRequests.findLast(
+                  (entry) => entry.requestId === event.requestId,
+                );
+                if (request) {
+                  request.finishedTimestampSeconds = event.timestamp;
+                  request.wireBytes = event.encodedDataLength;
+                }
+              });
+              cdp.on("Network.loadingFailed", (event) => {
+                const request = firstOpenRequests.findLast(
+                  (entry) => entry.requestId === event.requestId,
+                );
+                if (request) {
+                  request.failed = event.errorText;
+                }
+              });
+              if (firstOpenNetworkProfile) {
+                await cdp.send("Network.emulateNetworkConditions", {
+                  offline: false,
+                  latency: networkLatencyMs,
+                  downloadThroughput: downloadKbps > 0 ? (downloadKbps * 1000) / 8 : -1,
+                  uploadThroughput: -1,
+                });
+              }
+            }
             if (values["function-counts"]) {
               // Starting after warmup can miss calls in already optimized functions.
               await cdp.send("Profiler.enable");
@@ -912,7 +995,10 @@ try {
               await installRetentionTimers(page);
             }
             await scenario.setup?.(page);
-            await page.goto(new URL(scenario.route, slot.server.baseUrl).href);
+            await page.goto(
+              new URL(scenario.route, slot.server.baseUrl).href,
+              scenario.firstOpenPhase ? { waitUntil: "commit" } : undefined,
+            );
             await waitForControlUiInitialRoster(page, 15_000 * cpuThrottle);
             await scenario.prepare(page, gateway);
             if (
@@ -947,13 +1033,15 @@ try {
                 await settleSidebarBackgroundWork(page);
               }
             }
-            if (scenario.route !== "/instance-resource-fixture.html") {
-              result.navigationPreloads = await settleInteractionNavigationPreloads(page);
+            if (scenario.firstOpenPhase !== "ready") {
+              if (scenario.route !== "/instance-resource-fixture.html") {
+                result.navigationPreloads = await settleInteractionNavigationPreloads(page);
+              }
+              // Slow CPUs can still be loading boot modules after the first ready frame.
+              await page.waitForLoadState("networkidle");
+              await page.evaluate(() => document.fonts.ready.then(() => undefined));
+              await settle(page);
             }
-            // Slow CPUs can still be loading boot modules after the first ready frame.
-            await page.waitForLoadState("networkidle");
-            await page.evaluate(() => document.fonts.ready.then(() => undefined));
-            await settle(page);
             const activePet = await page.evaluate(
               () => document.querySelector("openclaw-lobster-pet .lobster-pet__body") !== null,
             );
@@ -961,9 +1049,11 @@ try {
               throw new Error("Warm interaction fixture must disable unrelated pet visits");
             }
             await page.locator(`html[data-theme-mode="${theme}"]`).waitFor({ state: "attached" });
-            await cdp.send("Performance.enable", {
-              timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
-            });
+            if (!scenario.firstOpenPhase) {
+              await cdp.send("Performance.enable", {
+                timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
+              });
+            }
             if (values["retained-heap"]) {
               const artifact = `${artifactPrefix}.before.heapsnapshot`;
               // Scenarios can retain request-count cursors from preparation.
@@ -1241,6 +1331,69 @@ try {
             }
             const requestsAfter = (await gateway.getRequests()).slice(requestsBefore);
             result.domAfter = await countDom();
+            if (scenario.firstOpenPhase) {
+              const evidence = result.scenarioEvidence!;
+              const readyAt = evidence.firstReadyAtMs;
+              const clickedAt = evidence.nativeClickAtMs;
+              if (typeof readyAt !== "number" || typeof clickedAt !== "number") {
+                throw new Error("Cold first-open did not retain its phase boundaries");
+              }
+              // Read resources and write artifacts after the existing action metric cutoff.
+              const observed = await page.evaluate(() => ({
+                endedAt: performance.getEntriesByName("interaction:end")[0]!.startTime,
+                resources: performance.getEntriesByType("resource").map((entry) => {
+                  const resource = entry as PerformanceResourceTiming;
+                  return {
+                    url: resource.name,
+                    initiatorType: resource.initiatorType,
+                    startTime: resource.startTime,
+                    responseEnd: resource.responseEnd,
+                    rawBytes: resource.decodedBodySize,
+                    encodedBytes: resource.encodedBodySize,
+                    transferBytes: resource.transferSize,
+                  };
+                }),
+              }));
+              const { endedAt, resources } = observed;
+              const urls = slot.modelPickerAssets.map(
+                (file) => new URL(file, slot.server.baseUrl).href,
+              );
+              const requests = firstOpenRequests;
+              const artifact = `${artifactPrefix}.first-open-network.json`;
+              await writeFile(
+                path.join(artifactDir, artifact),
+                JSON.stringify(
+                  {
+                    phase: scenario.firstOpenPhase,
+                    firstReadyAtMs: readyAt,
+                    nativeClickAtMs: clickedAt,
+                    actionEndAtMs: endedAt,
+                    requiredAssets: urls,
+                    requiredCompletedBeforeClick: urls.every((url) =>
+                      resources.some(
+                        (entry) =>
+                          entry.url === url &&
+                          entry.responseEnd > 0 &&
+                          entry.responseEnd <= clickedAt,
+                      ),
+                    ),
+                    requests,
+                    resources,
+                    clock: qualifyRouteNetworkClock(requests, before.NavigationStart!, resources),
+                    beforeClick: routeNetworkPhase(requests, before.NavigationStart!, 0, clickedAt),
+                    action: routeNetworkPhase(
+                      requests,
+                      before.NavigationStart!,
+                      clickedAt,
+                      endedAt,
+                    ),
+                  },
+                  null,
+                  2,
+                ),
+              );
+              result.firstOpenNetworkArtifact = artifact;
+            }
             if (scenario.projectionFamily) {
               if (minimizedWindow !== undefined) {
                 await cdp.send("Browser.setWindowBounds", {
