@@ -282,6 +282,7 @@ type EnglishCatalog = TranslationMap & {
       | "withMoreParticipants"
       | "snoozeWakes"
       | "snoozeTomorrowTime"
+      | "snoozeTomorrow"
       | "user"
       | "assistant"
       | "opensAsDashboard"
@@ -307,7 +308,6 @@ type EnglishCatalog = TranslationMap & {
       | "approvalsNeedApproval"
       | "attentionMore"
       | "runFailedReason"
-      | "childRunFailedReason"
       | "runErrorTimedOut"
       | "runErrorUnknown"
       | "attentionRequired"
@@ -723,6 +723,7 @@ const startupEnglish = {
     withMoreParticipants: "+{count} more",
     snoozeWakes: "Wakes {time}",
     snoozeTomorrowTime: "tomorrow {time}",
+    snoozeTomorrow: "Tomorrow",
     user: "User",
     assistant: "Assistant",
     opensAsDashboard: "Opens as dashboard",
@@ -748,7 +749,6 @@ const startupEnglish = {
     approvalsNeedApproval: "{count} requests need approval",
     attentionMore: "+{count} more",
     runFailedReason: "Run failed: {reason}",
-    childRunFailedReason: "Child session {label} failed: {reason}",
     runErrorTimedOut: "Timed out",
     runErrorUnknown: "Unknown error",
     attentionRequired: "Session needs attention",
