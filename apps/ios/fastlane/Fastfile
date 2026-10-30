@@ -9,7 +9,6 @@ require "digest/md5"
 require "time"
 require "rubygems/version"
 require_relative "screenshot_diagnostics"
-require_relative "inventory_probe"
 require_relative "testflight"
 
 default_platform(:ios)
@@ -203,7 +202,7 @@ def watch_snapshot_device
 end
 
 def available_simulator_devices
-  stdout, stderr, status = InventoryProbe.capture("xcrun", "simctl", "list", "devices", "available", "--json")
+  stdout, stderr, status = Open3.capture3("xcrun", "simctl", "list", "devices", "available", "--json")
   unless status.success?
     detail = stderr.to_s.strip
     detail = stdout.to_s.strip if detail.empty?
