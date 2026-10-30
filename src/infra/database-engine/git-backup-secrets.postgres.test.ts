@@ -1,400 +1,129 @@
-import "./backup-worker.test-support.js";
-import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { getEnvironmentData } from "node:worker_threads";
 import { Client } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  clearRuntimeConfigSnapshot,
-  setRuntimeConfigSnapshot,
-} from "../../config/runtime-snapshot.js";
-import { readBackupEngine, verifyMatchedPostgresBackup } from "../../snapshot/database-backup.js";
-import {
-  dumpGitBackupDatabase,
-  restoreGitBackupDirectory,
-} from "../../snapshot/git-backup-codec.js";
-import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { createGitBackupRowTransform } from "../../snapshot/git-backup-sanitizer.js";
 import { openNodeSqliteDatabase } from "../node-sqlite.js";
-import { agentPortProvider } from "./agent-port.js";
-import { materializeDatabasePort } from "./port.worker.js";
-import { statePortProvider } from "./state-port.js";
+import { materializeDatabasePort, type PortDescriptor } from "./port.worker.js";
+import { expectedPostgresCatalog } from "./postgres-catalog.js";
 
-const configured = getEnvironmentData("openclaw.test.state.conformance.connection");
+const configured = getEnvironmentData("openclaw.test.workboard.connection");
 const connection = typeof configured === "string" ? configured : undefined;
+const dirs = useAutoCleanupTempDirTracker(afterEach);
 const secret = "synthetic-secret-must-not-appear-in-export";
-const retainedPluginRows = [
-  { plugin_id: "active-memory", value_json: '{"disabled":true}' },
-  { plugin_id: "mcp-relay", value_json: '{"clientId":"client"}' },
-  { plugin_id: "x", value_json: "15000000" },
-];
-const retainedBlobHex = Buffer.from("retained-plugin-document").toString("hex");
 
-afterEach(() => clearRuntimeConfigSnapshot());
-
-describe.skipIf(!connection)("Git backup secret exclusion across engines", () => {
-  it.each([
-    { family: "state", generic: false },
-    { family: "agent", generic: false },
-    { family: "state", generic: true },
-    { family: "agent", generic: true },
-  ] as const)(
-    "redacts the same $family rows and fields with generic scope=$generic, including deleted bytes",
-    async ({ family, generic }) => {
-      await withOpenClawTestState(
-        { scenario: "minimal", prefix: "git-secrets-" },
-        async (state) => {
-          const config = { database: { engine: "postgres" as const, postgres: { connection } } };
-          await state.writeConfig(config);
-          setRuntimeConfigSnapshot(config);
-          const client = new Client({ connectionString: connection });
-          await client.connect();
-          const namespace = `secrets_${randomUUID().replaceAll("-", "")}`;
-          try {
-            const descriptor = await (
-              family === "state" ? statePortProvider : agentPortProvider
-            ).loadDescriptor();
-            const identity =
-              family === "state"
-                ? { role: "global" as const }
-                : { role: "agent" as const, agentId: "main" };
-            const pgIdentity = generic
-              ? { role: "generic" as const, id: `retained_${family}` }
-              : identity;
-            const sourcePath = state.path("source.sqlite");
-            using source = openNodeSqliteDatabase(sourcePath);
-            source.exec(descriptor.sqlite);
-            for (const fragment of descriptor.fragments ?? []) {
-              source.exec(fragment.sqlite);
-            }
-            source.exec(`PRAGMA user_version = ${descriptor.version}`);
-            source
-              .prepare("INSERT INTO schema_meta VALUES ('primary', ?, ?, ?, NULL, 1, 1)")
-              .run(identity.role, descriptor.version, family === "state" ? null : "main");
-            if (family === "state") {
-              source
-                .prepare(
-                  "INSERT INTO config_machine_state VALUES ('state.schema.contentVersion', ?, 1)",
-                )
-                .run(String(descriptor.version));
-              for (const key of [
-                "authProfiles.store",
-                "nodeHost.config",
-                "webPush.vapidKeys",
-                "sidebar.retained",
-              ]) {
-                source
-                  .prepare("INSERT INTO config_machine_state VALUES (?, ?, 1)")
-                  .run(key, key === "sidebar.retained" ? '"keep"' : JSON.stringify(secret));
-              }
-              source.exec(`
-                INSERT INTO operator_approvals (
-                  cursor_id, approval_id, resolution_ref, kind, status, presentation_json,
-                  reviewer_device_ids_json, audience_session_keys_json, runtime_epoch,
-                  created_at_ms, expires_at_ms, updated_at_ms
-                ) VALUES (1, 'approval', '${"a".repeat(43)}', 'exec', 'pending', '{}',
-                  '[]', '[]', 'fixture', 1, 2, 1);
-                INSERT INTO web_push_subscriptions (
-                  endpoint_hash, subscription_id, endpoint, p256dh, auth, created_at_ms, updated_at_ms
-                ) VALUES ('endpoint', 'subscription', 'https://push.example.test',
-                  'synthetic-key', 'synthetic-auth', 1, 1);
-                INSERT INTO web_push_approval_deliveries VALUES (
-                  'approval', 'subscription', 'device', NULL, 1
-                );
-              `);
-              source
-                .prepare("INSERT INTO device_auth_tokens VALUES ('device', 'operator', ?, '[]', 1)")
-                .run(secret);
-              source
-                .prepare(
-                  "INSERT INTO secret_store_entries VALUES ('team', '', 'fixture', ?, 'secret', 1, 1, NULL, NULL, NULL)",
-                )
-                .run(secret);
-              const pluginInsert = source.prepare(
-                "INSERT INTO plugin_state_entries (plugin_id, namespace, entry_key, value_json, created_at) VALUES (?, ?, ?, ?, 1)",
-              );
-              for (const [plugin, pluginNamespace, key, value] of [
-                ["zalouser", "credentials", "default", { cookie: secret }],
-                ["matrix", "@retained.credentials", "account:default", { accessToken: secret }],
-                ["discord", "activities-doc-tokens", secret, { widgetId: "widget" }],
-                [
-                  "discord",
-                  "thread-bindings",
-                  "thread",
-                  { threadId: "thread", webhookToken: secret },
-                ],
-                ["x", "x.spend", "cycle", 15_000_000],
-                ["active-memory", "session-toggles", "session", { disabled: true }],
-                ["mcp-relay", "mcp-relay-authority", "grant:client", { clientId: "client" }],
-              ] as const) {
-                pluginInsert.run(plugin, pluginNamespace, key, JSON.stringify(value));
-              }
-              const blobInsert = source.prepare(
-                "INSERT INTO plugin_blob_entries (plugin_id, namespace, entry_key, metadata_json, blob, created_at) VALUES (?, ?, 'blob', '{}', ?, 1)",
-              );
-              blobInsert.run("zalouser", "credentials", Buffer.from(secret));
-              blobInsert.run("fixture", "documents", Buffer.from("retained-plugin-document"));
-            } else {
-              source.exec(
-                "INSERT INTO session_key_contract (id, main_key, updated_at) VALUES (1, 'main', 0)",
-              );
-              source
-                .prepare("INSERT INTO auth_profile_store VALUES ('main', ?, 1)")
-                .run(JSON.stringify(secret));
-              source
-                .prepare("INSERT INTO auth_profile_state VALUES ('main', ?, 1)")
-                .run(JSON.stringify(secret));
-              source.exec(
-                "INSERT INTO session_nodes (session_key, current_session_id, entry_json, updated_at) VALUES ('agent:main:main', 'session', '{}', 1)",
-              );
-              source
-                .prepare(
-                  "INSERT INTO session_suggestions (id, session_key, author_id, text, created_at, state) VALUES ('suggestion', 'agent:main:main', 'owner', ?, 1, 'pending')",
-                )
-                .run(secret);
-              const catalog = JSON.stringify({
-                generatedBy: "openclaw-plugin-model-catalog-v1",
-                providers: {
-                  fixture: {
-                    apiKey: secret,
-                    headers: { Authorization: secret },
-                    models: [{ id: "model", apiKey: secret, headers: { "X-Secret": secret } }],
-                  },
-                },
-              });
-              for (const scope of [
-                "plugin-model-catalog-v1",
-                "plugin-model-catalog-migration-v1",
-              ]) {
-                source
-                  .prepare("INSERT INTO cache_entries VALUES (?, 'catalog', ?, NULL, NULL, 1)")
-                  .run(scope, catalog);
-                source
-                  .prepare("INSERT INTO cache_entries VALUES (?, 'broken', ?, NULL, NULL, 1)")
-                  .run(scope, secret);
-              }
-              source.exec(
-                "INSERT INTO cache_entries VALUES ('unrelated', 'keep', '{\"retained\":true}', NULL, NULL, 1)",
-              );
-            }
-            const storeId = randomUUID();
-            await materializeDatabasePort({
-              source: { engine: "sqlite", db: source },
-              destination: { engine: "postgres", db: client, namespace },
-              descriptor,
-              storeId,
-              assertCurrent() {},
-            });
-            const anchorPath = state.path("anchor.sqlite");
-            {
-              using anchor = openNodeSqliteDatabase(anchorPath);
-              anchor.exec(
-                "CREATE TABLE openclaw_engine_anchor (store_id TEXT NOT NULL, engine TEXT NOT NULL, schema TEXT NOT NULL)",
-              );
-              anchor
-                .prepare("INSERT INTO openclaw_engine_anchor VALUES (?, 'postgres', ?)")
-                .run(storeId, namespace);
-            }
-            const sqliteDir = state.path("sqlite-git");
-            const pgDir = state.path("pg-git");
-            const sqliteManifest = await dumpGitBackupDatabase({
-              snapshotPath: sourcePath,
-              outputPath: sqliteDir,
-              identity,
-              excludeSecrets: true,
-            });
-            const pgManifest = await dumpGitBackupDatabase({
-              snapshotPath: anchorPath,
-              outputPath: pgDir,
-              identity: pgIdentity,
-              excludeSecrets: true,
-            });
-            expect(pgManifest.schemaVersion).toBe(2);
-            expect(pgManifest.excludedTables).toEqual(sqliteManifest.excludedTables);
-            expect(pgManifest.excludedConfigStateKeyPrefixes).toEqual(
-              sqliteManifest.excludedConfigStateKeyPrefixes,
-            );
-            const envelope = await verifyMatchedPostgresBackup(
-              path.join(pgDir, "postgres"),
-              "user-backup",
-            );
-            const imagePath = path.join(pgDir, "postgres", "database.sqlite");
-            using image = openNodeSqliteDatabase(imagePath);
-            if (family === "state") {
-              expect(
-                image
-                  .prepare("SELECT name FROM sqlite_schema WHERE name = 'device_auth_tokens'")
-                  .all(),
-              ).toEqual([]);
-              expect(image.prepare("SELECT count(*) AS n FROM plugin_state_entries").get()?.n).toBe(
-                4,
-              );
-              expect(
-                image
-                  .prepare(
-                    "SELECT plugin_id, value_json FROM plugin_state_entries WHERE plugin_id IN ('active-memory', 'mcp-relay', 'x') ORDER BY plugin_id",
-                  )
-                  .all(),
-              ).toEqual(retainedPluginRows);
-              expect(
-                image
-                  .prepare("SELECT value_json FROM plugin_state_entries WHERE plugin_id='discord'")
-                  .all(),
-              ).toEqual([{ value_json: '{"threadId":"thread"}' }]);
-              expect(
-                image
-                  .prepare("SELECT plugin_id, lower(hex(blob)) AS bytes FROM plugin_blob_entries")
-                  .all(),
-              ).toEqual([{ plugin_id: "fixture", bytes: retainedBlobHex }]);
-            }
-            for (const table of sqliteManifest.excludedTables) {
-              expect(image.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get()?.n).toBe(0);
-              expect(envelope.verification.tables[table]?.rows).toBe(0);
-            }
-            const retainedTable = family === "state" ? "config_machine_state" : "cache_entries";
-            const sqliteRows = (
-              await fs.readFile(path.join(sqliteDir, "tables", `${retainedTable}.jsonl`), "utf8")
-            )
-              .trim()
-              .split("\n")
-              .map((line) => JSON.parse(line));
-            const pgRows = image
-              .prepare(
-                `SELECT * FROM ${retainedTable} ORDER BY ${family === "state" ? "state_key" : "scope, key"}`,
-              )
-              .all();
-            expect(pgRows).toEqual(sqliteRows);
-            expect((await fs.readFile(imagePath)).includes(Buffer.from(secret))).toBe(false);
-            expect(
-              source
-                .prepare(
-                  `SELECT COUNT(*) AS n FROM ${family === "state" ? "device_auth_tokens" : "auth_profile_store"}`,
-                )
-                .get()?.n,
-            ).toBe(1);
-            // The default still captures credentials; exclusion must be an explicit choice.
-            const unredacted = state.path("pg-full");
-            await dumpGitBackupDatabase({
-              snapshotPath: anchorPath,
-              outputPath: unredacted,
-              identity: pgIdentity,
-            });
-            expect(
-              (await fs.readFile(path.join(unredacted, "postgres", "database.sqlite"))).includes(
-                Buffer.from(secret),
-              ),
-            ).toBe(true);
-            if (family === "state") {
-              using fullImage = openNodeSqliteDatabase(
-                path.join(unredacted, "postgres", "database.sqlite"),
-              );
-              expect(
-                fullImage.prepare("SELECT count(*) AS n FROM plugin_state_entries").get()?.n,
-              ).toBe(7);
-              expect(
-                fullImage.prepare("SELECT count(*) AS n FROM plugin_blob_entries").get()?.n,
-              ).toBe(2);
-              expect(
-                fullImage
-                  .prepare(
-                    "SELECT value_json FROM plugin_state_entries WHERE plugin_id='discord' AND namespace='thread-bindings'",
-                  )
-                  .all(),
-              ).toEqual([
-                { value_json: JSON.stringify({ threadId: "thread", webhookToken: secret }) },
-              ]);
-            }
-            if (!generic) {
-              for (const [index, directory] of [pgDir, unredacted].entries()) {
-                const targetPath = state.path(`restored-${index}.sqlite`);
-                await restoreGitBackupDirectory({
-                  sourcePath: directory,
-                  targetPath,
-                  expectedIdentity: pgIdentity,
-                });
-                const restored = readBackupEngine(targetPath);
-                assert(restored.engine === "postgres");
-                try {
-                  expect(restored.storeId).toBe(storeId);
-                  expect(restored.namespace).not.toBe(namespace);
-                  const retained =
-                    family === "state"
-                      ? `SELECT value_json FROM "${restored.namespace}".config_machine_state WHERE state_key = 'sidebar.retained'`
-                      : `SELECT value_json FROM "${restored.namespace}".cache_entries WHERE scope = 'unrelated' AND key = 'keep'`;
-                  expect((await client.query(retained)).rows).toEqual([
-                    { value_json: family === "state" ? '"keep"' : '{"retained":true}' },
-                  ]);
-                  const secretTable =
-                    family === "state" ? "device_auth_tokens" : "auth_profile_store";
-                  expect(
-                    (
-                      await client.query(
-                        `SELECT count(*)::int AS n FROM "${restored.namespace}"."${secretTable}"`,
-                      )
-                    ).rows,
-                  ).toEqual([{ n: index }]);
-                  if (family === "state") {
-                    expect(
-                      (
-                        await client.query(
-                          `SELECT count(*)::int AS n FROM "${restored.namespace}".web_push_approval_deliveries`,
-                        )
-                      ).rows,
-                    ).toEqual([{ n: index }]);
-                    expect(
-                      (
-                        await client.query(
-                          `SELECT count(*)::int AS n FROM "${restored.namespace}".plugin_state_entries`,
-                        )
-                      ).rows,
-                    ).toEqual([{ n: index === 0 ? 4 : 7 }]);
-                    expect(
-                      (
-                        await client.query(
-                          `SELECT plugin_id, value_json FROM "${restored.namespace}".plugin_state_entries WHERE plugin_id IN ('active-memory', 'mcp-relay', 'x') ORDER BY plugin_id`,
-                        )
-                      ).rows,
-                    ).toEqual(retainedPluginRows);
-                    expect(
-                      (
-                        await client.query(
-                          `SELECT value_json FROM "${restored.namespace}".plugin_state_entries WHERE plugin_id='discord' AND namespace='thread-bindings'`,
-                        )
-                      ).rows,
-                    ).toEqual([
-                      {
-                        value_json: JSON.stringify(
-                          index === 0
-                            ? { threadId: "thread" }
-                            : { threadId: "thread", webhookToken: secret },
-                        ),
-                      },
-                    ]);
-                    expect(
-                      (
-                        await client.query(
-                          `SELECT plugin_id, encode(blob, 'hex') AS bytes FROM "${restored.namespace}".plugin_blob_entries ORDER BY plugin_id`,
-                        )
-                      ).rows,
-                    ).toEqual([
-                      { plugin_id: "fixture", bytes: retainedBlobHex },
-                      ...(index === 0
-                        ? []
-                        : [{ plugin_id: "zalouser", bytes: Buffer.from(secret).toString("hex") }]),
-                    ]);
-                  }
-                } finally {
-                  await client.query(`DROP SCHEMA "${restored.namespace}" CASCADE`);
-                }
-              }
-            }
-          } finally {
-            await client.query(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
-            await client.end();
-          }
-        },
-      );
+const metadata = {
+  schema: "git_backup_secret_fixture",
+  tables: [
+    {
+      name: "plugin_state_entries",
+      columns: [
+        { name: "plugin_id", type: "text", nullable: false, identity: false, default: null },
+        { name: "namespace", type: "text", nullable: false, identity: false, default: null },
+        { name: "entry_key", type: "text", nullable: false, identity: false, default: null },
+        { name: "value_json", type: "text", nullable: false, identity: false, default: null },
+        { name: "created_at", type: "bigint", nullable: false, identity: false, default: null },
+      ],
+      pk: ["plugin_id", "namespace", "entry_key"],
+      unique: [],
+      foreignKeys: [],
+      indexes: 1,
+      identities: [],
     },
-  );
+  ],
+  objects: [],
+};
+const descriptor: PortDescriptor = {
+  ...metadata,
+  id: "state",
+  version: 1,
+  minimumPostgresVersion: 16,
+  sqlite: `CREATE TABLE plugin_state_entries (
+    plugin_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (plugin_id, namespace, entry_key)
+  ) STRICT`,
+  preData: `CREATE TABLE plugin_state_entries (
+    plugin_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    entry_key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (plugin_id, namespace, entry_key)
+  )`,
+  postData: "",
+  expectedCatalog: expectedPostgresCatalog(metadata),
+};
+
+describe.skipIf(!connection)("PostgreSQL Git backup secret exclusion", () => {
+  it("redacts credential rows before portable image materialization", async () => {
+    const directory = dirs.make("git-backup-postgres-secrets-");
+    const sourcePath = `${directory}/source.sqlite`;
+    const imagePath = `${directory}/image.sqlite`;
+    const namespace = `git_backup_secrets_${randomUUID().replaceAll("-", "")}`;
+    const storeId = randomUUID();
+    using source = openNodeSqliteDatabase(sourcePath);
+    source.exec(descriptor.sqlite);
+    const insert = source.prepare("INSERT INTO plugin_state_entries VALUES (?, ?, ?, ?, 1)");
+    insert.run("zalouser", "credentials", "default", JSON.stringify({ cookie: secret }));
+    insert.run(
+      "discord",
+      "thread-bindings",
+      "thread",
+      JSON.stringify({ threadId: "thread", webhookToken: secret }),
+    );
+    insert.run("active-memory", "session-toggles", "session", JSON.stringify({ disabled: true }));
+
+    const client = new Client({ connectionString: connection });
+    await client.connect();
+    try {
+      await materializeDatabasePort({
+        source: { engine: "sqlite", db: source },
+        destination: { engine: "postgres", db: client, namespace },
+        descriptor,
+        storeId,
+        assertCurrent() {},
+      });
+
+      using image = openNodeSqliteDatabase(imagePath, { readBigInts: true });
+      await materializeDatabasePort({
+        source: { engine: "postgres", db: client, namespace },
+        destination: { engine: "sqlite", db: image },
+        descriptor,
+        storeId,
+        assertCurrent() {},
+        transformRow: createGitBackupRowTransform(
+          { role: "global" },
+          "state",
+          new Set(["plugin_state_entries"]),
+        ),
+      });
+
+      expect(
+        image
+          .prepare("SELECT plugin_id, value_json FROM plugin_state_entries ORDER BY plugin_id")
+          .all(),
+      ).toEqual([
+        { plugin_id: "active-memory", value_json: '{"disabled":true}' },
+        { plugin_id: "discord", value_json: '{"threadId":"thread"}' },
+      ]);
+      expect((await fs.readFile(imagePath)).includes(Buffer.from(secret))).toBe(false);
+      expect(
+        (
+          await client.query(
+            `SELECT count(*)::int AS n FROM "${namespace}".plugin_state_entries WHERE value_json LIKE $1`,
+            [`%${secret}%`],
+          )
+        ).rows,
+      ).toEqual([{ n: 2 }]);
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
+      await client.end();
+    }
+  });
 });

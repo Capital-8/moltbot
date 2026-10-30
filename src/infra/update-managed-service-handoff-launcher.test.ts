@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
 
 const resolveExecutable = vi.hoisted(() => vi.fn(() => "/usr/bin/systemd-run"));
-vi.mock("./executable-path.js", () => ({ resolveExecutableFromPathEnv: resolveExecutable }));
+vi.mock("./executable-path.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./executable-path.js")>()),
+  resolveExecutableFromPathEnv: resolveExecutable,
+}));
 
 import {
   resolveSystemdHandoffLauncher,

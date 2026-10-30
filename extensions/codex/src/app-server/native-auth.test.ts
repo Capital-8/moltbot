@@ -33,17 +33,14 @@ describe("Codex native login discovery", () => {
       "API key configured - sk-synthetic***11111\nAuthentication is checked when you send a request.",
       "api-key",
     ],
-  ])(
-    "projects %s as a native-only fact",
-    async (line, mode) => {
-      run.mockResolvedValue({ termination: "exit", code: 0, stdout: "", stderr: line });
-      expect(await probeCodexNativeAuth({ config, env: {} })).toMatchObject({
-        source: "Codex native login",
-        mode,
-        nativeAuth: { runtime: "codex", mode },
-      });
-    },
-  );
+  ])("projects %s as a native-only fact", async (line, mode) => {
+    run.mockResolvedValue({ termination: "exit", code: 0, stdout: "", stderr: line });
+    expect(await probeCodexNativeAuth({ config, env: {} })).toMatchObject({
+      source: "Codex native login",
+      mode,
+      nativeAuth: { runtime: "codex", mode },
+    });
+  });
 
   it.each([
     [0, "Logged in using Amazon Bedrock"],

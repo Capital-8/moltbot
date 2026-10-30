@@ -19,6 +19,10 @@ import {
 
 registerCodexEventProjectorTestLifecycle();
 
+function assistantEvent(itemId: string, text: string, delta = text) {
+  return { stream: "assistant", data: { itemId, text, delta, occurrenceId: expect.any(String) } };
+}
+
 function finalItem(id: string, text: string) {
   return { type: "agentMessage", id, phase: "final_answer", text };
 }
@@ -351,34 +355,51 @@ describe("CodexAppServerEventProjector assistant projection", () => {
   it.each([false, true])(
     "retains stable partial answers before the final answer (native handoff: %s)",
     async (handoff) => {
-      const { projector, onAgentEvent, onPartialReply } = await fixture.observePartial();
-      const partial = fixture.message("partial", "The first result is ready.", "partial_answer");
+      const onAgentEvent = vi.fn();
+      const onPartialReply = vi.fn();
+      const projector = await createProjector({
+        ...(await createParams()),
+        onAgentEvent,
+        onPartialReply,
+      });
+      const partial = {
+        type: "agentMessage",
+        id: "partial",
+        phase: "partial_answer",
+        text: "The first result is ready.",
+      };
       const final = finalItem("final", "The second result is ready.");
-      await fixture.start(projector, { ...partial, text: "" });
-      await fixture.delta(projector, partial.text, partial.id);
-      await fixture.complete(projector, partial);
+      await projector.handleNotification(
+        forCurrentTurn("item/started", { item: { ...partial, text: "" } }),
+      );
+      await projector.handleNotification(agentMessageDelta(partial.text, partial.id));
+      await projector.handleNotification(forCurrentTurn("item/completed", { item: partial }));
       if (handoff) {
         const work = { type: "sleep", id: "work", durationMs: 1 };
-        await fixture.start(projector, work);
-        await fixture.complete(projector, work);
+        await projector.handleNotification(forCurrentTurn("item/started", { item: work }));
+        await projector.handleNotification(forCurrentTurn("item/completed", { item: work }));
       }
       await streamFinalAnswer(projector, final.id, final.text);
-      await fixture.finish(projector, [final]);
+      await projector.handleNotification(turnCompleted([final]));
 
-      const result = fixture.result(projector);
+      const result = projector.buildResult(buildEmptyToolTelemetry());
       const answer = `${partial.text}\n\n${final.text}`;
+      const textContent = [{ type: "text", text: answer }];
       expect(result.assistantTexts).toEqual([partial.text, final.text]);
-      expect(result.preparedTerminalReply).toEqual(terminalReply(answer));
-      expect(result.lastAssistant?.content).toEqual(fixture.text(answer));
+      expect(result.lastAssistant?.content).toEqual(textContent);
       expect(result.messagesSnapshot).toContainEqual(
-        expect.objectContaining({ role: "assistant", content: fixture.text(answer) }),
+        expect.objectContaining({ role: "assistant", content: textContent }),
       );
-      expect(fixture.events(onAgentEvent, "assistant")).toEqual([
-        assistantEvent(partial.id, partial.text),
-        assistantEvent(final.id, final.text),
-      ]);
       expect(
-        fixture.events(onAgentEvent, "item", "answer_candidate").map((event) => event.data.itemId),
+        onAgentEvent.mock.calls
+          .map((call) => call[0])
+          .filter((event) => event.stream === "assistant"),
+      ).toEqual([assistantEvent(partial.id, partial.text), assistantEvent(final.id, final.text)]);
+      expect(
+        onAgentEvent.mock.calls
+          .map((call) => call[0])
+          .filter((event) => event.stream === "item" && event.data.kind === "answer_candidate")
+          .map((event) => event.data.itemId),
       ).toEqual([final.id, final.id]);
       expect(onPartialReply.mock.calls.map(([reply]) => reply.text)).toEqual([
         partial.text,

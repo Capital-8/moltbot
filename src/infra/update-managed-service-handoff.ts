@@ -1307,11 +1307,12 @@ async function spawnManagedServiceUpdateHandoff(
     if (params.foregroundOrigin && isGatewayRestartDraining()) {
       throw new GatewayDrainingError();
     }
+    const stdio: ["pipe", "pipe", "ignore"] = ["pipe", "pipe", "ignore"];
     const spawnOptions = {
       cwd: dir,
       env,
       detached: true,
-      stdio: ["pipe", "pipe", "ignore"] as const,
+      stdio,
     };
     child = systemdScope
       ? spawn(systemdScope.command, systemdScope.args, spawnOptions)
