@@ -43,6 +43,7 @@ type WorkspaceSkillCommandParams = {
   execOverrides?: ExecPolicyOverrides;
   includeAllowlistHidden?: boolean;
   pluginMetadataSnapshot?: PluginMetadataSnapshot;
+  executionWorkspaceDir?: string;
 };
 
 function resolveWorkspaceSkillCommandOptions(
@@ -61,6 +62,7 @@ function resolveWorkspaceSkillCommandOptions(
     eligibility,
     pluginMetadataSnapshot: params.pluginMetadataSnapshot,
     librarySelections: params.sessionEntry?.skillLibrarySelections,
+    executionWorkspaceDir: params.executionWorkspaceDir,
   };
 }
 
@@ -155,6 +157,8 @@ type AgentSkillCommandParams = {
     Pick<SessionEntry, "skillLibrarySelections" | "skillsSnapshot">;
   sessionKey?: string;
   execOverrides?: ExecPolicyOverrides;
+  /** Admitted project root for a single-agent catalog; callers own its authorization. */
+  executionWorkspaceDir?: string;
 };
 
 function* resolveAgentSkillCommandWorkspaces(params: AgentSkillCommandParams, allowRemote = false) {
@@ -204,6 +208,7 @@ function* resolveAgentSkillCommandWorkspaces(params: AgentSkillCommandParams, al
               sessionEntry: params.sessionEntry,
               sessionKey: params.sessionKey,
               execOverrides: params.execOverrides,
+              executionWorkspaceDir: params.executionWorkspaceDir,
             }
           : {}),
       },

@@ -36,6 +36,8 @@ export async function buildCommandsListResult(params: {
   sessionKey?: string;
   cfg: OpenClawConfig;
   agentId: string;
+  /** Admitted project root selected before session creation. */
+  projectSkillRoot?: string;
   provider?: string;
   scope?: "native" | "text" | "both";
   includeArgs?: boolean;
@@ -50,6 +52,7 @@ export async function buildCommandsListResult(params: {
     agentIds: [params.agentId],
     sessionEntry: params.sessionEntry,
     sessionKey: params.sessionKey,
+    executionWorkspaceDir: params.projectSkillRoot,
   });
   const chatCommands = listChatCommandsForConfig(params.cfg, { skillCommands });
   const skillsByKey = new Map(skillCommands.map((skill) => [`skill:${skill.skillName}`, skill]));

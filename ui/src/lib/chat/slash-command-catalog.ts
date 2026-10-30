@@ -22,16 +22,24 @@ const remoteSlashCommandCache = new WeakMap<
   Map<string, RemoteSlashCommandCacheEntry>
 >();
 
-function remoteSlashCommandCacheKey(agentId: string | undefined, sessionKey?: string): string {
-  return JSON.stringify([agentId ?? null, sessionKey ?? null]);
+type RemoteSlashCommandScope = {
+  agentId?: string;
+  sessionKey?: string;
+  /** Registered project selected by a New session draft; never combined with sessionKey. */
+  projectId?: string;
+};
+
+function remoteSlashCommandCacheKey(scope: RemoteSlashCommandScope): string {
+  return JSON.stringify([scope.agentId ?? null, scope.sessionKey ?? null, scope.projectId ?? null]);
 }
 
 function loadRemoteSlashCommands(
   client: GatewayBrowserClient,
-  agentId: string | undefined,
-  sessionKey?: string,
+  scope: RemoteSlashCommandScope,
 ): Promise<SlashCommandDef[]> {
-  const metadata = peekChatMetadata(client, { agentId, sessionKey });
+  const { agentId, sessionKey, projectId } = scope;
+  // Chat metadata is agent/session scoped; a selected project needs its own catalog.
+  const metadata = projectId ? undefined : peekChatMetadata(client, { agentId, sessionKey });
   // Store-held metadata carries app-level invalidation on config changes and logical reconnects,
   // so no TTL applies here. The cache below owns only commands.list-derived entries.
   if (metadata) {
@@ -42,7 +50,7 @@ function loadRemoteSlashCommands(
     cache = new Map();
     remoteSlashCommandCache.set(client, cache);
   }
-  const key = remoteSlashCommandCacheKey(agentId, sessionKey);
+  const key = remoteSlashCommandCacheKey(scope);
   const cached = cache.get(key);
   const now = Date.now();
   if (cached?.commands && cached.expiresAt > now) {
@@ -60,6 +68,7 @@ function loadRemoteSlashCommands(
       const result = await client.request<CommandsListResult>("commands.list", {
         ...(agentId ? { agentId } : {}),
         ...(sessionKey ? { sessionKey } : {}),
+        ...(projectId ? { projectId } : {}),
         includeArgs: true,
         scope: "text",
       });
@@ -88,9 +97,7 @@ export function invalidateSessionSlashCommands(
   scope: { agentId: string; sessionKey: string },
 ): void {
   refreshSeq += 1;
-  remoteSlashCommandCache
-    .get(client)
-    ?.delete(remoteSlashCommandCacheKey(scope.agentId, scope.sessionKey));
+  remoteSlashCommandCache.get(client)?.delete(remoteSlashCommandCacheKey(scope));
 }
 
 export function applyRemoteSlashCommandsResult(
@@ -109,12 +116,18 @@ export async function refreshSlashCommands(params: {
   client: GatewayBrowserClient | null;
   agentId?: string | null;
   sessionKey?: string;
+  projectId?: string;
   shouldApply?: () => boolean;
 }): Promise<void> {
   const seq = ++refreshSeq;
-  const agentId = params.agentId?.trim();
+  const agentId = params.agentId?.trim() || undefined;
+  const projectId = params.sessionKey ? undefined : params.projectId?.trim() || undefined;
   const commands = params.client
-    ? await loadRemoteSlashCommands(params.client, agentId, params.sessionKey)
+    ? await loadRemoteSlashCommands(params.client, {
+        agentId,
+        sessionKey: params.sessionKey,
+        projectId,
+      })
     : undefined;
   if (seq !== refreshSeq || params.shouldApply?.() === false) {
     return;

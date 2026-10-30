@@ -48,6 +48,39 @@ export function selectSessionWorktreeProjectSource(
     : undefined;
 }
 
+/**
+ * Advisory command discovery reads skills only from the direct project root that
+ * session creation would admit for this agent, including sandbox containment.
+ */
+export async function resolveSessionProjectSkillRoot(params: {
+  cfg: OpenClawConfig;
+  projectId: string;
+  targetAgentId: string;
+  resolveSandboxRequired: () => boolean;
+  assertCurrent: () => void;
+}): Promise<string | undefined> {
+  params.assertCurrent();
+  const project = await resolveProjectRegistry(params.cfg, params.projectId);
+  params.assertCurrent();
+  if (!project) {
+    return undefined;
+  }
+  const direct = await resolveSessionProjectRootForRecord(project, false);
+  params.assertCurrent();
+  if (!direct.ok) {
+    return undefined;
+  }
+  const admitted = prepareSessionCreateFilesystemRoot({
+    cfg: params.cfg,
+    requestedProjectId: params.projectId,
+    targetAgentId: params.targetAgentId,
+    sessionCwd: direct.value,
+    enforceSandboxContainment: true,
+    sandboxRequired: params.resolveSandboxRequired(),
+  });
+  return admitted.ok ? admitted.value.sessionCwd : undefined;
+}
+
 /** Advisory discovery shares source custody classification with managed creation. */
 export async function resolveSessionProjectCheckoutOptions(params: {
   cfg: OpenClawConfig;
