@@ -125,8 +125,8 @@ export function controlUiStableChunkName(id: string): string | undefined {
       return "template-creator-runtime";
     case "ui/src/pages/templates/draft-navigation.ts":
     case "ui/src/i18n/locales/en-agents-home.ts":
-      // Keep shared admission and roster labels independent of optional creator work.
-      return "virtual-core-runtime";
+      // Template admission must not make virtualized pickers import the Chat graph.
+      return "template-navigation-runtime";
     case "src/shared/dedupe-by-key.ts":
       // Config search shares this helper without loading optional session UI.
       return "control-ui-boot-shared";

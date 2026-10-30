@@ -44,6 +44,9 @@ describe("Control UI build chunking", () => {
     const flow = modulePath("../pages/templates/creator-flow.ts");
     const copy = modulePath("../i18n/locales/en-template-creator.ts");
     const title = modulePath("../i18n/locales/en-agents-home.ts");
+    const navigation = modulePath("../pages/templates/draft-navigation.ts");
+    const config = modulePath("../pages/config/config-state-model.ts");
+    const picker = modulePath("../pages/chat/components/chat-model-picker-panel.tsx");
     const virtualizer = modulePath("../../node_modules/@tanstack/virtual-core/dist/esm/index.js");
     const entry = "\0creator-owner-fixture";
     const result = await buildFixture(
@@ -51,11 +54,11 @@ describe("Control UI build chunking", () => {
       new Map([
         [
           entry,
-          `export { open } from ${JSON.stringify(owner)}; export { measure } from ${JSON.stringify(virtualizer)};`,
+          `export { open } from ${JSON.stringify(owner)}; export const pick = () => import(${JSON.stringify(picker)});`,
         ],
         [
           owner,
-          `import { title } from ${JSON.stringify(title)}; export const open = () => import(${JSON.stringify(flow)}).then(m => m.start(title));`,
+          `import { title } from ${JSON.stringify(title)}; import { navigate } from ${JSON.stringify(navigation)}; export const open = () => import(${JSON.stringify(flow)}).then(m => m.start(title + navigate()));`,
         ],
         [
           flow,
@@ -63,6 +66,9 @@ describe("Control UI build chunking", () => {
         ],
         [copy, "export const copy = 'Optional creator copy';"],
         [title, "export const title = 'Create Template';"],
+        [navigation, `export { current as navigate } from ${JSON.stringify(config)};`],
+        [config, "export const current = () => 'config';"],
+        [picker, `export { measure } from ${JSON.stringify(virtualizer)};`],
         [virtualizer, "export const measure = () => 1;"],
       ]),
     );
@@ -88,6 +94,13 @@ describe("Control UI build chunking", () => {
         .filter((chunk) => reachable.has(chunk.fileName))
         .some((chunk) => owner in chunk.modules),
     ).toBe(true);
+    reachable.clear();
+    visit(chunks.find((chunk) => picker in chunk.modules)!.fileName);
+    expect(
+      chunks
+        .filter((chunk) => reachable.has(chunk.fileName))
+        .some((chunk) => navigation in chunk.modules || config in chunk.modules),
+    ).toBe(false);
   });
   it("keeps optional parsing and device signing outside the eager graph", async () => {
     const zod = modulePath("../../node_modules/zod/index.js");

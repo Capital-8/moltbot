@@ -66,14 +66,26 @@ export function connectShellIdle(
       return intent;
     }
     const currentRoute = router.getState().matches[0]?.routeId;
+    if (
+      currentRoute === "new-session" &&
+      context.theme.settings.sidebarAgentsMode === "roster" &&
+      pending.has("roster-next")
+    ) {
+      return "roster-next";
+    }
     const currentNext =
-      currentRoute === "new-session" && context.theme.settings.sidebarAgentsMode === "roster"
-        ? "roster-next"
+      currentRoute && isSessionRouteId(currentRoute)
+        ? "chat-next"
         : currentRoute
           ? `${currentRoute}-next`
           : undefined;
     if (currentNext && manifest?.[currentNext]) {
-      return pending.has(currentNext) ? currentNext : undefined;
+      if (pending.has(currentNext)) {
+        return currentNext;
+      }
+      if (currentNext !== "chat-next" && currentNext !== "new-session-next") {
+        return undefined;
+      }
     }
     return pending.has("new-session") ? "new-session" : undefined;
   };
@@ -169,9 +181,11 @@ export function connectShellIdle(
         }
         seen.add(href);
         const link = document.createElement("link");
-        link.rel = file.endsWith(".css") ? "preload" : "modulepreload";
-        if (file.endsWith(".css")) {
-          link.as = "style";
+        // Closed controls need warm bytes, but evaluating them belongs to opening.
+        const downloadOnly = key === "chat-next" || key === "new-session-next";
+        link.rel = file.endsWith(".css") || downloadOnly ? "preload" : "modulepreload";
+        if (link.rel === "preload") {
+          link.as = file.endsWith(".css") ? "style" : "script";
         }
         link.crossOrigin = "";
         link.fetchPriority = "low";
