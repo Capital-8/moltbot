@@ -229,9 +229,10 @@ export function prepareChatHistoryResponsePage(
         : Math.max(pagination.offset + 1, pagination.totalMessages - oldestSeq + 1);
   }
   const cursors = resolveChatHistoryPageCursors(historyPage.anchor, capped, normalized);
-  // Source cursors account for hidden rows already consumed by this page.
+  // Numeric pages can begin without an explicit offset or a native message ID.
+  // The reader still owns exhaustion after consuming a hidden prefix.
   const hasMore = historyPage.anchor
-    ? Boolean(cursors.olderCursor)
+    ? Boolean(cursors.olderCursor) || (pagination !== undefined && historyPage.anchor.hasOlder)
     : pagination !== undefined && candidateNextOffset !== undefined
       ? candidateNextOffset < pagination.totalMessages
       : undefined;
