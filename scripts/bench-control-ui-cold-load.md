@@ -47,7 +47,11 @@ that synthetic target; a nonzero gap remains a reported trajectory problem.
 Endpoint completion is a separate measured phase: after two sampled settling
 frames, at most one native wheel input requests the remaining distance plus one
 viewport, followed by two more sampled frames. The final endpoint must be within
-two pixels in either direction. This proves reader-directed completion, not
+two pixels in either direction. Endpoint misses remain in the result alongside
+their CPU, long tasks, and sampled geometry; completing collection is not an
+acceptance verdict. Score every candidate's endpoint and correction fields,
+and report baseline misses rather than discarding their attempted samples.
+This proves reader-directed completion, not
 automatic anchor recovery. One long-task observer and the CPU/wall interval cover
 hover, wheel admission, the full sweep, settling, and native completion. Reports
 keep the sweep and completion frames separate; neither phase is discarded.

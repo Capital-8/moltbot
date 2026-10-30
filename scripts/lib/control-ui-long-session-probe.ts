@@ -445,9 +445,8 @@ export async function probeLongSession(options: {
             destination === "top"
               ? scroller.scrollTop
               : scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-          if (distance > 2) {
-            throw new Error(`Scroll did not settle at ${destination}: ${distance}px remaining`);
-          }
+          // Preserve failed endpoints so the report also retains their CPU and long tasks.
+          // Acceptance scoring rejects misses; aborting here loses the failed sample.
           return distance;
         }, direction);
       },
