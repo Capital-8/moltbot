@@ -216,7 +216,12 @@ it("keeps the physical producer selector identical across trusted workflow bound
 
 it.each(["", "scan / "])("retains original producer attempts (%s)", async (prefix) => {
   await expect(
-    resolve(producers().map((job) => ({ ...job, name: prefix + job.name }))),
+    resolve(
+      producers().map((job) => {
+        job.name = prefix + job.name;
+        return job;
+      }),
+    ),
   ).resolves.toEqual({
     "ios-attempt": "1",
     "ios-artifact-id": "11",
@@ -350,13 +355,15 @@ it.each(["ios", "macos"] as const)(
 it("retains independent reports from completed failed producers", async () => {
   await expect(
     resolve(
-      producers().map((job) => ({
-        ...job,
-        conclusion: "failure",
-        steps: job.steps.map((step) =>
-          step.name.startsWith("Scan shared kit") ? { ...step, conclusion: "failure" } : step,
-        ),
-      })),
+      producers().map((job) => {
+        job.conclusion = "failure";
+        for (const step of job.steps) {
+          if (step.name.startsWith("Scan shared kit")) {
+            step.conclusion = "failure";
+          }
+        }
+        return job;
+      }),
     ),
   ).resolves.toMatchObject({
     "ios-attempt": "1",
@@ -394,22 +401,80 @@ it("finds the earliest cohort and exact artifact across pages in any history ord
 it.each([
   ["missing", () => producers().slice(0, 1)],
   ["ambiguous", () => [...producers(), producer(`scan / ${names.macos}`)]],
-  ["wrong run", () => producers().map((job) => ({ ...job, run_id: 999 }))],
-  ["wrong head", () => producers().map((job) => ({ ...job, head_sha: "old-head" }))],
-  ["incomplete", () => producers().map((job) => ({ ...job, status: "queued" }))],
-  ["invalid attempt", () => producers().map((job) => ({ ...job, run_attempt: 0 }))],
-  ["missing start", () => producers().map((job) => ({ ...job, started_at: "" }))],
-  ["invalid end", () => producers().map((job) => ({ ...job, completed_at: "not a date" }))],
-  ["missing steps", () => producers().map((job) => ({ ...job, steps: [] }))],
+  [
+    "wrong run",
+    () =>
+      producers().map((job) => {
+        job.run_id = 999;
+        return job;
+      }),
+  ],
+  [
+    "wrong head",
+    () =>
+      producers().map((job) => {
+        job.head_sha = "old-head";
+        return job;
+      }),
+  ],
+  [
+    "incomplete",
+    () =>
+      producers().map((job) => {
+        job.status = "queued";
+        return job;
+      }),
+  ],
+  [
+    "invalid attempt",
+    () =>
+      producers().map((job) => {
+        job.run_attempt = 0;
+        return job;
+      }),
+  ],
+  [
+    "missing start",
+    () =>
+      producers().map((job) => {
+        job.started_at = "";
+        return job;
+      }),
+  ],
+  [
+    "invalid end",
+    () =>
+      producers().map((job) => {
+        job.completed_at = "not a date";
+        return job;
+      }),
+  ],
+  [
+    "missing steps",
+    () =>
+      producers().map((job) => {
+        job.steps = [];
+        return job;
+      }),
+  ],
   [
     "non-skipped null timestamp",
     () =>
-      producers().map((job) => ({
-        ...job,
-        steps: job.steps.map((step) => ({ ...step, started_at: null })),
-      })),
+      producers().map((job) => {
+        for (const step of job.steps) {
+          step.started_at = null;
+        }
+        return job;
+      }),
   ],
-  ["unordered steps", () => producers().map((job) => ({ ...job, steps: job.steps.toReversed() }))],
+  [
+    "unordered steps",
+    () =>
+      producers().map((job) => {
+        job.steps = job.steps.toReversed();
+        return job;
+      }),
+  ],
 ] as const)("fails closed for %s producer metadata", async (_label, jobs) => {
   await expect(resolve(jobs())).rejects.toThrow("Periphery producer");
 });
@@ -417,20 +482,38 @@ it.each([
 it.each([
   ["duplicate name", () => [...artifacts(), { ...artifact("ios", 1), id: 999 }]],
   ["duplicate ID", () => [...artifacts(), { ...artifact("ios", 1), name: "unrelated" }]],
-  ["invalid ID", () => artifacts().map((item) => ({ ...item, id: 0 }))],
+  [
+    "invalid ID",
+    () =>
+      artifacts().map((item) => {
+        item.id = 0;
+        return item;
+      }),
+  ],
   [
     "wrong run",
-    () => artifacts().map((item) => ({ ...item, workflow_run: { ...item.workflow_run, id: 999 } })),
+    () =>
+      artifacts().map((item) => {
+        item.workflow_run.id = 999;
+        return item;
+      }),
   ],
   [
     "wrong head",
     () =>
-      artifacts().map((item) => ({
-        ...item,
-        workflow_run: { ...item.workflow_run, head_sha: "old-head" },
-      })),
+      artifacts().map((item) => {
+        item.workflow_run.head_sha = "old-head";
+        return item;
+      }),
   ],
-  ["expired", () => artifacts().map((item) => ({ ...item, expired: true }))],
+  [
+    "expired",
+    () =>
+      artifacts().map((item) => {
+        item.expired = true;
+        return item;
+      }),
+  ],
 ] as const)("rejects %s artifact identity", async (_label, reports) => {
   await expect(resolve(producers(), reports())).rejects.toThrow("artifact");
 });

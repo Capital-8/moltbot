@@ -251,7 +251,9 @@ async function runCommenter(
         listJobsForWorkflowRun(this: void, params: Record<string, unknown>) {
           apiCalls.push("listJobs");
           expect(params).toMatchObject({ run_id: run.id, filter: "all", per_page: 100 });
-          if (options.jobPages) return options.jobPages.flat();
+          if (options.jobPages) {
+            return options.jobPages.flat();
+          }
           return [
             ...(options.previousAttempts ?? []).flatMap((run_attempt) =>
               [
@@ -281,7 +283,9 @@ async function runCommenter(
         listWorkflowRunArtifacts(this: void, params: Record<string, unknown>) {
           apiCalls.push("listArtifacts");
           expect(params).toMatchObject({ run_id: run.id, per_page: 100 });
-          if (options.artifactPages) return options.artifactPages.flat();
+          if (options.artifactPages) {
+            return options.artifactPages.flat();
+          }
           return [
             {
               ...artifact,
