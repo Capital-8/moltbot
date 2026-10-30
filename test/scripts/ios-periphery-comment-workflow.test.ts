@@ -660,7 +660,17 @@ describe("Periphery publication admission", () => {
     ...metadata,
   });
   const publish = (options: Parameters<typeof runCommenter>[2] = {}) =>
-    runReport(findingArchive, { platform, ...options }, { name: "" });
+    runReport(
+      findingArchive,
+      { platform, ...options },
+      {
+        name: "",
+        workflow_run: {
+          id: options.run?.id ?? 12345,
+          head_sha: options.run?.head_sha ?? "head-sha",
+        },
+      },
+    );
 
   describe.each(["iOS", "macOS"] as const)("%s producer admission", (producerPlatform) => {
     it.each(["report", "draft", "passive", "manual"] as const)(
