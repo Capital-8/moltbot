@@ -1,5 +1,5 @@
 name: CI
-run-name: iOS screenshot baseline index count (build only, no upload)
+run-name: iOS screenshot index comparison (five alternating pairs, no upload)
 on:
   workflow_dispatch: {}
 permissions:
@@ -13,9 +13,9 @@ env:
   IOS_SCREENSHOT_NODE_VERSION: 24.22.1
   IOS_SCREENSHOT_XCODE_VERSION: Xcode 27.1 Build version 27A9275
 jobs:
-  index-store-baseline:
+  index-store-comparison:
     runs-on: xcode-27-xlarge
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       HISTORICAL_TARGET: "false"
       BUNDLE_DEPLOYMENT: "true"
@@ -100,13 +100,31 @@ jobs:
         with:
           path: apps/ios/build/SnapshotDerivedData/SourcePackages
           key: ios-screenshot-packages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ios-cache-inputs.outputs.xcode }}-${{ hashFiles('apps/ios/**/Package.resolved', 'apps/ios/project.yml', 'apps/shared/**/Package*.swift', 'apps/shared/**/Package.resolved', 'apps/swabble/Package*.swift', 'apps/swabble/Package.resolved') }}
-      - name: Build baseline screenshot products and count index output
-        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs
-      - name: Retain baseline compiler and resource evidence
+      - name: Sample 01-baseline
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/01-baseline/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 1
+      - name: Sample 02-candidate
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/02-candidate/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 2
+      - name: Sample 03-baseline
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/03-baseline/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 3
+      - name: Sample 04-candidate
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/04-candidate/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 4
+      - name: Sample 05-baseline
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/05-baseline/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 5
+      - name: Sample 06-candidate
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/06-candidate/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 6
+      - name: Sample 07-baseline
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/07-baseline/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 7
+      - name: Sample 08-candidate
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/08-candidate/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 8
+      - name: Sample 09-baseline
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/09-baseline/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 9
+      - name: Sample 10-candidate
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/10-candidate/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs 10
+      - name: Retain compiler comparison and resource evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ios-index-baseline-${{ github.run_id }}
+          name: ios-index-comparison-${{ github.run_id }}
           path: ${{ runner.temp }}/ios-index-probe
           if-no-files-found: warn
           retention-days: 14
