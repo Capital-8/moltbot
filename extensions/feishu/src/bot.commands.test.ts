@@ -23,7 +23,7 @@ describe("Feishu text command admission", () => {
         runtime: createRuntimeEnv(),
       });
       expect(resolvedTurnCalls).toHaveLength(1);
-      const context = resolvedTurnCalls[0].ctxPayload;
+      const context = resolvedTurnCalls[0]?.ctxPayload;
       expect(context).toMatchObject({
         RawBody: `<at user_id="ou-bot">Bot</at> ${command}`,
         CommandBody: command,
