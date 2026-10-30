@@ -65,6 +65,8 @@ describe("chat task suggestions", () => {
 
     setAcceptance({ phase: "failed", error: "Start unavailable" });
     flush();
+    // A failure keeps the card open so its error and recovery stay in view.
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Start unavailable");
     container.querySelector<HTMLButtonElement>(".task-suggestion__retry")!.click();
     expect(onAccept).toHaveBeenCalledWith(suggestion, "local", undefined);
@@ -78,10 +80,10 @@ describe("chat task suggestions", () => {
       "Start in a new session",
     );
 
-    expect(container.querySelector(".task-suggestion__eyebrow")?.textContent).toContain(
+    expect(container.querySelector(".task-suggestion")?.getAttribute("aria-label")).toBe(
       "Suggested task · in project",
     );
-    expect(container.querySelector(".task-suggestion__eyebrow")?.getAttribute("title")).toBe(
+    expect(container.querySelector(".task-suggestion__repo")?.getAttribute("title")).toBe(
       "/repo/project",
     );
     expect(container.querySelector(".task-suggestion__title")?.textContent).toContain(
@@ -102,6 +104,11 @@ describe("chat task suggestions", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(details.hidden).toBe(false);
     expect(details.textContent).toContain("Delete the stale adapter and update tests.");
+    // Open, the start action moves from the header to the footer.
+    expect(container.querySelector(".task-suggestion__head .task-suggestion__start")).toBeNull();
+    expect(
+      container.querySelector('.task-suggestion__split[data-placement="foot"]'),
+    ).not.toBeNull();
 
     container.querySelector<HTMLButtonElement>(".task-suggestion__start")?.click();
     container.querySelector<HTMLButtonElement>(".task-suggestion__dismiss")?.click();
@@ -170,7 +177,7 @@ describe("chat task suggestions", () => {
 
     let cards = [...container.querySelectorAll<HTMLElement>(".task-suggestion")];
     expect(cards.map((card) => card.hidden)).toEqual([false, true]);
-    expect(cards[0]?.querySelector(".task-suggestion__position")?.textContent).toContain("1 / 2");
+    expect(cards[0]?.querySelector(".task-suggestion__position")?.textContent).toContain("1/2");
 
     cards[0]?.querySelector<HTMLButtonElement>("[data-task-next]")?.click();
     await Promise.resolve();
@@ -237,7 +244,7 @@ describe("chat task suggestions", () => {
     expect(container.textContent).toContain("/repo/project");
     expect(container.textContent).toContain("run exactly");
     expect(container.textContent).not.toMatch(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u);
-    expect(container.querySelector(".task-suggestion__eyebrow")?.getAttribute("title")).toBe(
+    expect(container.querySelector(".task-suggestion__repo")?.getAttribute("title")).toBe(
       "/repo/project",
     );
   });

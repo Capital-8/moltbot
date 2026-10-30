@@ -138,7 +138,6 @@ suite.define(() => {
       await expect
         .poll(() => options.evaluate((element) => element === document.activeElement))
         .toBe(true);
-      expect(await findButton(card, "Copy prompt").isEnabled()).toBe(true);
       expect(await gateway.getRequests("environments.list")).toHaveLength(0);
 
       // Above the composer, not floating over the transcript.
@@ -153,6 +152,11 @@ suite.define(() => {
       await exactText(page, suggestion.tldr).waitFor(visible);
       await exactText(page, suggestion.cwd).waitFor(visible);
       await exactText(page, suggestion.prompt).waitFor(visible);
+      expect(await findButton(card, "Copy prompt").isEnabled()).toBe(true);
+      // Open, the start action sits in the footer, nearest the composer.
+      expect(await card.locator('.task-suggestion__split[data-placement="foot"]').isVisible()).toBe(
+        true,
+      );
       const sourceUrl = page.url();
       const composer = page.locator(".agent-chat__composer-combobox textarea");
       const draft = "Continue the current conversation.";
@@ -206,6 +210,8 @@ suite.define(() => {
     await card.waitFor(visible);
     expect(await findButton(card, startLabel).isDisabled()).toBe(true);
     expect(await findButton(card, optionsLabel).isDisabled()).toBe(true);
+    // Copy lives beside the prompt it copies.
+    await card.locator(".task-suggestion__toggle").click();
     expect(await findButton(card, "Copy prompt").isEnabled()).toBe(true);
   });
 
@@ -238,9 +244,9 @@ suite.define(() => {
       await tray.waitFor(visible);
       expect(await tray.locator(".task-suggestion:visible").count()).toBe(1);
       await tray.locator(".task-suggestion:visible .task-suggestion__toggle").click();
-      expect(await exactText(tray, "1 / 12").count()).toBe(1);
+      expect(await exactText(tray, "1/12").count()).toBe(1);
       await tray.getByRole("button", { name: "Next suggested task" }).click();
-      expect(await exactText(tray, "2 / 12").count()).toBe(1);
+      expect(await exactText(tray, "2/12").count()).toBe(1);
       const summary = tray.locator(".task-suggestion:visible .task-suggestion__summary");
 
       expect(
@@ -303,17 +309,10 @@ suite.define(() => {
         });
       await expect.poll(hasClearance).toBe(true);
 
+      // Playwright's trial click proves each control is visible, stable and receives the pointer.
       for (const control of [findButton(card, "Copy prompt"), start]) {
-        expect(
-          await control.evaluate((element) => {
-            const bounds = element.getBoundingClientRect();
-            return element.contains(
-              document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
-            );
-          }),
-        ).toBe(true);
+        await control.click({ trial: true });
       }
-      await start.click({ trial: true });
 
       const composer = page.locator(".agent-chat__composer-shell");
       await composer.waitFor(visible);
