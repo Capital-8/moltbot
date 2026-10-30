@@ -440,6 +440,7 @@ async function runCronIsolatedAgentTurnInTrace(
                 loadThinkingCatalog: prepared.context.thinkingSelection.loadThinkingCatalog,
                 executionIdentity: params.executionIdentity,
                 admissionSource: params.admissionSource,
+                assertCurrent: params.assertCurrent,
               };
               const execution = await prepared.context.sessionPreparationEffect.run(() =>
                 withAgentRunLifecycleGeneration(runLifecycleGeneration, () =>

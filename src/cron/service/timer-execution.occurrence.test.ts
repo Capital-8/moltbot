@@ -77,7 +77,7 @@ const SESSION_TARGETS: readonly CronStoredJob["sessionTarget"][] = [
   "main",
 ];
 
-function harness() {
+function harness(onAdmission?: () => void) {
   const admitted: ScheduledOccurrence[] = [];
   const release = vi.fn();
   const seen: Array<{ executor: string; occurrence: unknown }> = [];
@@ -92,6 +92,7 @@ function harness() {
     admitScheduledOccurrence: vi.fn(async () => {
       const occurrence = { ...unadmittedScheduledOccurrence("matrix"), release };
       admitted.push(occurrence);
+      onAdmission?.();
       return occurrence;
     }),
     evaluateCronTrigger: record("evaluateCronTrigger", { kind: "evaluated", fire: true }),
@@ -147,20 +148,25 @@ describe("scheduled occurrence admission", () => {
     },
   );
 
-  it("reaches every admitted executor across the matrix", async () => {
-    const reached = new Set<string>();
-    for (const { kind, sessionTarget, withTrigger } of MATRIX) {
-      const { state, seen } = harness();
-      await executeJobCore(state, {
-        ...makeCronJob({ payload: payloadFor(kind), sessionTarget }),
-        ...(withTrigger ? { trigger: { script: "return { fire: true }" } } : {}),
+  it.each(PAYLOAD_KINDS)(
+    "revokes a %s source during awaited occurrence admission",
+    async (kind) => {
+      let current = true;
+      const { state, seen } = harness(() => {
+        current = false;
       });
-      for (const call of seen) {
-        reached.add(call.executor);
-      }
-    }
-    expect([...reached].toSorted()).toEqual(Object.keys(executorsRequireOccurrence).toSorted());
-  });
+      await expect(
+        executeJobCore(state, makeCronJob({ payload: payloadFor(kind) }), undefined, {
+          assertSourceCurrent: () => {
+            if (!current) {
+              throw new Error("accepted source revoked");
+            }
+          },
+        }),
+      ).rejects.toThrow("accepted source revoked");
+      expect(seen).toEqual([]);
+    },
+  );
 
   it("admits before trigger evaluation, so a trigger that does not fire still consumes it", async () => {
     const { state, admitted, release } = harness();

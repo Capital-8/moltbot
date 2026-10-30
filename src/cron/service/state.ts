@@ -56,6 +56,7 @@ export type { CronAddOptions } from "./job-options.types.js";
 
 /** Transient internal context delivered beside, but never projected into, a CronEvent. */
 type CronEventContext = {
+  runNotStarted?: boolean;
   failureNotificationDetail?: CronFailureNotificationDetail;
 };
 
@@ -137,6 +138,7 @@ export type CronServiceDeps = {
   admitScheduledOccurrence?: (params: { job: CronStoredJob }) => Promise<ScheduledOccurrence>;
   evaluateCronTrigger?: (params: {
     occurrence: ScheduledOccurrence;
+    assertCurrent?: () => void;
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
     job: CronStoredJob;
     script: string;
@@ -230,6 +232,7 @@ export type CronServiceDeps = {
   };
   runIsolatedAgentJob: (params: {
     occurrence: ScheduledOccurrence;
+    assertCurrent?: () => void;
     waitForIdle?: CronIdleAdmissionWait;
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
     job: CronJob;
@@ -274,12 +277,14 @@ export type CronServiceDeps = {
   runCommandJob?: (params: {
     /** Consumed by the occurrence; command runs are not agent runs and mint no context. */
     occurrence: ScheduledOccurrence;
+    assertCurrent?: () => void;
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
     job: CronJob;
     abortSignal?: AbortSignal;
   }) => Promise<CronRunOutcome & CronRunDeliveryResult>;
   runScriptJob?: (params: {
     occurrence: ScheduledOccurrence;
+    assertCurrent?: () => void;
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
     job: CronStoredJob;
     streamBatch?: string;

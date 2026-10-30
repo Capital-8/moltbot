@@ -4,7 +4,6 @@ import {
   tryResolveCronJobEffectiveAgentId,
 } from "../../cron/agent-id.js";
 import { resolveCronJobConfigRevision } from "../../cron/config-revision.js";
-import { isPluginCommandCronJob } from "../../cron/plugin-command-schedule.js";
 import type { CronRuntimeAuthority } from "../../cron/runtime-authority.js";
 import {
   createAccountCronScheduledToolPolicy,
@@ -39,7 +38,10 @@ import {
   resolveCronCreatorAuthorityGrantProvenance,
 } from "../cron-creator-authority-grant.js";
 import type { CronCreatorAuthorityGrant } from "../cron-creator-authority-grant.types.js";
-import { bindGatewayDeviceRevocation } from "../device-revocation.js";
+import {
+  bindGatewayDeviceRevocation,
+  readGatewayDeviceSourceAuthority,
+} from "../device-revocation.js";
 import { assertActiveAgentRuntimeAuthority } from "./agent-runtime-authority.js";
 import type {
   GatewayClient,
@@ -224,25 +226,33 @@ export function resolveCronRunRequestGuards(
       modelJobPolicy: { config: context.getRuntimeConfig(), jobId: job.id },
     },
   );
-  const acceptedRunGuard =
-    sourceCurrent &&
-    bindGatewayDeviceRevocation(() => {
-      sourceCurrent();
-      const current = context.cron.getJob(job.id);
-      const config = context.getRuntimeConfig();
-      if (
-        !current ||
-        resolveCronOperatorExecutionRevision(current) !== executionRevision ||
-        (job.enabled && !current.enabled && !isPluginCommandCronJob(current)) ||
-        !isCronModelManagementAllowed(config)
-      ) {
-        throw new TypeError(
-          "Accepted automation changed or management access was revoked. Request a fresh run.",
-        );
-      }
-      assertCronModelJobAllowed(client, config, current);
-    }, sourceCurrent);
-  return { commitGuard, ...(acceptedRunGuard ? { acceptedRunGuard } : {}) };
+  if (!sourceCurrent) {
+    const callerSource = readGatewayDeviceSourceAuthority(hasCurrentClientAuthority);
+    const acceptedRunGuard =
+      callerSource &&
+      bindGatewayDeviceRevocation(() => {
+        if (!callerSource()) {
+          throw new TypeError("Gateway caller authority is no longer active.");
+        }
+      }, hasCurrentClientAuthority);
+    return { commitGuard, ...(acceptedRunGuard ? { acceptedRunGuard } : {}) };
+  }
+  const acceptedRunGuard = bindGatewayDeviceRevocation(() => {
+    sourceCurrent();
+    const current = context.cron.getJob(job.id);
+    const config = context.getRuntimeConfig();
+    if (
+      !current ||
+      resolveCronOperatorExecutionRevision(current) !== executionRevision ||
+      !isCronModelManagementAllowed(config)
+    ) {
+      throw new TypeError(
+        "Accepted automation changed or management access was revoked. Request a fresh run.",
+      );
+    }
+    assertCronModelJobAllowed(client, config, current);
+  }, sourceCurrent);
+  return { commitGuard, acceptedRunGuard };
 }
 
 export type CronCallerScope = {

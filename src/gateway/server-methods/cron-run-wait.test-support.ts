@@ -24,6 +24,13 @@ import {
 } from "./cron.validation.test-support.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
+export const cronRunEnqueueAck = {
+  ok: true,
+  enqueued: true,
+  runId: "run-1",
+  processInstanceId: getGatewayProcessInstanceId(),
+};
+
 export function registerCronRunWaitTests({
   handlers,
   getRuntimeConfig,
@@ -32,12 +39,6 @@ export function registerCronRunWaitTests({
   getRuntimeConfig: Mock<() => OpenClawConfig>;
 }) {
   const invokeCron = createCronTestInvoker(handlers, getRuntimeConfig);
-  const enqueueAck = {
-    ok: true,
-    enqueued: true,
-    runId: "run-1",
-    processInstanceId: getGatewayProcessInstanceId(),
-  };
   it.each([
     { name: "main", job: { sessionTarget: "main" }, waits: false },
     {
@@ -107,7 +108,7 @@ export function registerCronRunWaitTests({
       // The caller's turn holds the main lane and its own session lane, so those runs
       // only start after this request returns; waiting would just burn the budget.
       expect(context.cron.waitForManualRun).toHaveBeenCalledTimes(waits ? 1 : 0);
-      expect(respond).toHaveBeenCalledWith(true, enqueueAck, undefined);
+      expect(respond).toHaveBeenCalledWith(true, cronRunEnqueueAck, undefined);
     },
   );
 
@@ -157,7 +158,7 @@ export function registerCronRunWaitTests({
           { context, client: callerClient("ops", undefined, callerSessionKey) },
         );
         expect(context.cron.waitForManualRun).toHaveBeenCalledTimes(waits ? 1 : 0);
-        expect(respond).toHaveBeenCalledWith(true, enqueueAck, undefined);
+        expect(respond).toHaveBeenCalledWith(true, cronRunEnqueueAck, undefined);
       } finally {
         resolveTarget.mockRestore();
       }
@@ -215,7 +216,7 @@ export function registerCronRunWaitTests({
         );
         expect(context.cron.enqueueRun).toHaveBeenCalledOnce();
         expect(context.cron.waitForManualRun).toHaveBeenCalledTimes(waits ? 1 : 0);
-        expectCronReply(respond, enqueueAck);
+        expectCronReply(respond, cronRunEnqueueAck);
       } finally {
         revokeCronCreatorAuthorityRunScope(scope);
         releaseAgentRunDelegatedAuthority(authority);
