@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -17,10 +17,23 @@ import {
   createSessionRowProjection,
   type SessionRowProjection,
 } from "../../../src/gateway/session-row-projection.js";
+import { sessionChanges } from "../../../src/sessions/session-row-changes.js";
+import {
+  createAgentDatabaseInspectionRefusal,
+  publishPendingAgentDatabaseReadAdmission,
+  readAgentDatabaseAdmissionRefusal,
+  readAgentDatabaseReadAdmissionRefusal,
+  recordAgentDatabaseAdmissions,
+} from "../../../src/state/agent-database-admission.js";
+import { createAgentDatabaseStartupObservation } from "../../../src/state/agent-database-startup-observation.js";
+import type { PendingAgentDatabaseRecovery } from "../../../src/state/agent-database-startup.types.js";
+import { resolveOpenClawAgentSqlitePath } from "../../../src/state/openclaw-agent-db.paths.js";
 import { ensureCanonicalUserProfileForEmail } from "../../../src/state/user-profile-writes.js";
 import { createOpenClawTestState } from "../../../src/test-utils/openclaw-test-state.js";
 import { reserveTestPortListener } from "../../../src/test-utils/port-claims.js";
 import { createDeferred, withinTest } from "../../../test/helpers/promise.js";
+import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
+import { takeControlUiViewportScreenshot } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import {
   buildProductionControlUiE2e,
   captureControlUiE2eFailureDiagnostics,
@@ -58,6 +71,8 @@ describe("public-session post-deploy app handoff", () => {
   let listener: Awaited<ReturnType<typeof reserveTestPortListener<Server>>> | undefined;
   let baseUrl: string;
   let root: { kind: "resolved"; path: string };
+  let cfg: OpenClawConfig;
+  let gatewayContext: ReturnType<typeof createGatewayRequestContext>;
   const requests: HttpSample[] = [];
   let publication = 2;
 
@@ -79,7 +94,7 @@ describe("public-session post-deploy app handoff", () => {
       label: "post-deploy-session-entry",
     });
     const trustedProxy = { userHeader: "x-forwarded-user", allowLoopback: true };
-    const cfg: OpenClawConfig = {
+    cfg = {
       agents: { entries: { main: {} } },
       gateway: {
         publicOrigin: "https://threads.example.test",
@@ -119,9 +134,9 @@ describe("public-session post-deploy app handoff", () => {
     });
     projection = await createSessionRowProjection({ cfg, getConfig: () => cfg, modelCatalog: [] });
     await projection.ensureMaterialized();
-    const context = createGatewayRequestContext(makeContextParams());
-    context.resolveGatewayContext = () => context;
-    bindSessionRowProjection(context, () => projection);
+    gatewayContext = createGatewayRequestContext(makeContextParams());
+    gatewayContext.resolveGatewayContext = () => gatewayContext;
+    bindSessionRowProjection(gatewayContext, () => projection);
     root = { kind: "resolved", path: path.join(fixture, buildA) };
     const auth = { mode: "trusted-proxy" as const, trustedProxy, allowTailscale: false };
     listener = await reserveTestPortListener({
@@ -138,8 +153,8 @@ describe("public-session post-deploy app handoff", () => {
           resolvedAuth: auth,
           getResolvedAuth: () => auth,
           getRuntimeConfig: () => cfg,
-          getGatewayRequestContext: () => context,
-          httpRequestLifetime: context,
+          getGatewayRequestContext: () => gatewayContext,
+          httpRequestLifetime: gatewayContext,
           isTerminalEnabled: () => false,
         });
         server.prependListener("request", (req, res) => {
@@ -369,6 +384,138 @@ describe("public-session post-deploy app handoff", () => {
       }
     }, 60_000);
   }
+
+  it("keeps a controlled handoff pending until its source is readable", async ({ signal }) => {
+    root.path = path.join(fixture!, buildA);
+    const proof = process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR
+      ? createControlUiE2eArtifactDir("session-entry-readiness")
+      : undefined;
+    await using browserContext = await browser!.newContext({
+      serviceWorkers: "allow",
+      viewport: { width: 1440, height: 1000 },
+      ...(proof ? { recordVideo: { dir: proof, size: { width: 1440, height: 1000 } } } : {}),
+    });
+    await browserContext.addCookies([{ name: "operator", value: "1", url: baseUrl }]);
+    const page = await browserContext.newPage();
+    const gateway = await installAppGateway(page, buildA);
+    await openAcrossPublication(page, signal, buildA, 2, gateway);
+    await page.waitForFunction(() => navigator.serviceWorker.controller?.state === "activated");
+
+    const readReady = createDeferred();
+    const completion = createDeferred();
+    const joined = createDeferred();
+    const databasePath = resolveOpenClawAgentSqlitePath({ agentId: "main" });
+    const refusal = createAgentDatabaseInspectionRefusal({
+      agentId: "main",
+      paths: [databasePath],
+      reason: "Source inspection is pending",
+      pending: true,
+    });
+    const pending: PendingAgentDatabaseRecovery = {
+      refusal,
+      readReady: readReady.promise,
+      completion: completion.promise,
+      startedAt: 0,
+      phase: "inspection",
+      phaseStartedAt: 0,
+      phaseDurationsMs: {},
+    };
+    const startup = createAgentDatabaseStartupObservation(new Map([["main", pending]]), signal);
+    const wait = startup.waitForAgentPreparation.bind(startup);
+    const observedWait = vi
+      .spyOn(startup, "waitForAgentPreparation")
+      .mockImplementation((...args) => {
+        const result = wait(...args);
+        if (result) {
+          joined.resolve();
+        }
+        return result;
+      });
+    let revokeRead: (() => void) | undefined;
+    let navigation: Promise<unknown> | undefined;
+    try {
+      recordAgentDatabaseAdmissions([refusal], { source: "startup" });
+      gatewayContext.agentDatabaseStartup = startup;
+      // A restarted projection captures the real pending source, not the old warm rows.
+      projection!.dispose();
+      projection = await createSessionRowProjection({
+        cfg,
+        getConfig: () => cfg,
+        modelCatalog: [],
+      });
+      await projection.ensureMaterialized();
+      const start = requests.length;
+      root.path = path.join(fixture!, buildB);
+      await gateway.setServerBuildId(buildB);
+      const response = browserContext.waitForEvent("response", {
+        predicate: (result) => result.url().includes("/__openclaw__/session-entry?"),
+      });
+      void response.catch(() => {});
+      navigation = page.reload({ waitUntil: "commit" });
+      void navigation.catch(() => {});
+      // A pre-fix 503 fails immediately at the real HTTP boundary instead of timing out.
+      expect(
+        await withinTest(
+          Promise.race([
+            joined.promise.then(() => "waiting"),
+            response.then((result) => result.status()),
+          ]),
+          signal,
+        ),
+      ).toBe("waiting");
+      revokeRead = publishPendingAgentDatabaseReadAdmission(refusal, {
+        paths: [databasePath],
+        assertCurrent: () => signal.throwIfAborted(),
+      });
+      pending.readReady = undefined;
+      readReady.resolve();
+      sessionChanges.emit({ all: true, scope: { agentId: "main", topology: true } });
+      const entryResponse = await response;
+      expect(entryResponse.status()).toBe(200);
+      expect(await entryResponse.headerValue("x-openclaw-session-entry")).toBe("1");
+      expect(await entryResponse.headerValue("cache-control")).toBe("no-store");
+      await navigation;
+      await page.waitForFunction(() => window.openclawControlUi?.snapshot().ready === true);
+      expect(new URL(page.url()).pathname).toBe(publicPath);
+      expect((await gateway.getRequests("connect")).at(-1)?.params).toMatchObject({
+        client: { buildId: buildB },
+      });
+      expect(
+        requests
+          .slice(start)
+          .filter(({ path: url }) => url.startsWith("/chat/") || url.includes("probe=1")),
+      ).toEqual([]);
+      expect(readAgentDatabaseReadAdmissionRefusal("main")).toBeUndefined();
+      expect(readAgentDatabaseAdmissionRefusal("main")).toBe(refusal);
+      if (proof) {
+        await writeFile(
+          path.join(proof, "recovered.png"),
+          await takeControlUiViewportScreenshot(page, page.locator("openclaw-app"), []),
+        );
+      }
+    } catch (error) {
+      if (proof) {
+        await page.screenshot({ path: path.join(proof, "failure.png") });
+      }
+      throw error;
+    } finally {
+      await browserContext.close();
+      await Promise.allSettled(navigation ? [navigation] : []);
+      observedWait.mockRestore();
+      revokeRead?.();
+      recordAgentDatabaseAdmissions([], { source: "startup" });
+      gatewayContext.agentDatabaseStartup = undefined;
+      readReady.resolve();
+      completion.resolve();
+      projection?.dispose();
+      projection = await createSessionRowProjection({
+        cfg,
+        getConfig: () => cfg,
+        modelCatalog: [],
+      });
+      await projection.ensureMaterialized();
+    }
+  }, 60_000);
 
   it("keeps an unauthenticated public-session reload in the reader", async () => {
     root.path = path.join(fixture!, buildB);
