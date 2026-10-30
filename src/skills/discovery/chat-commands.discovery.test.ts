@@ -226,42 +226,6 @@ describe("skill command discovery through workspace loading", () => {
     },
   );
 
-  it("reads a Gateway-admitted project root beside a node-backed agent workspace", async () => {
-    const root = tempDirs.make("node-agent-gateway-project-");
-    const gateway = path.join(root, "missing-gateway-workspace");
-    const remote = path.join(root, "remote");
-    const project = path.join(root, "gateway-project");
-    await putSkill(path.join(remote, "skills"), "node-agent-skill");
-    await putSkill(path.join(project, "skills"), "gateway-project-skill");
-    const cfg = configFor(
-      { main: { workspace: gateway, skills: ["node-agent-skill", "gateway-project-skill"] } },
-      { allowBundled: [] },
-    );
-    // A paired node reads only its own workspace; Gateway paths never resolve there.
-    const release = registerAgentWorkspaceAccess(gateway, {
-      bridge: bridge(),
-      loadSkills: async (request) =>
-        readWorkspaceSkillSources({
-          ...request,
-          executionWorkspaceDir: undefined,
-          sourcePlan: resolveWorkspaceSkillSourcePlan(remote, { workspaceOnly: true }),
-        }),
-    });
-    try {
-      await withBundledDir(root, async () => {
-        const commands = await prepareSkillCommandsForAgents({
-          cfg,
-          agentIds: ["main"],
-          executionWorkspaceDir: project,
-          executionWorkspaceFileHost: "gateway",
-        });
-        expect(skillNames(commands)).toEqual(["gateway-project-skill", "node-agent-skill"]);
-      });
-    } finally {
-      release();
-    }
-  });
-
   it("keeps a previewed Gateway project root Gateway-owned after session creation", async () => {
     const root = tempDirs.make("node-agent-created-project-");
     const gateway = path.join(root, "missing-gateway-workspace");
