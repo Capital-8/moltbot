@@ -5,8 +5,8 @@
  *   --output /btrfs/new-proof-directory
  *
  * Exercises the real projection owner, manifest worker, SQLite writer and lease.
- * Only the proof driver's store.manifest wrapper pauses execution: the production
- * owner has already persisted its pending receipt and created its real snapshot.
+ * Proof-only store wrappers pause after snapshot creation or after retirement of
+ * the old snapshot, before the production owner commits checkpoint acceptance.
  * A separate process kills that owner, changes the source again, then restarts it.
  * The fixture subvolume is removed even on failure; logs/report remain in output.
  * Requires permission to create/delete subvolumes and btrfs send checkpoints.
@@ -29,6 +29,7 @@ const { values } = parseArgs({
     output: { type: "string" },
     child: { type: "string" },
     direction: { type: "string" },
+    point: { type: "string" },
   },
 });
 assert(values.output, "--output must name a new directory on btrfs");
@@ -42,6 +43,7 @@ const stateRoot = path.join(fixture, "state");
 const projection = path.join(stateRoot, "worktree-projections", worktreeId, "workspace");
 const checkpoints = path.join(path.dirname(projection), "checkpoints");
 type Direction = "canonical" | "projection";
+type CrashPoint = "before-scan" | "after-retirement";
 type Receipt = {
   pending?: { target: Direction; token: string };
   accepted: Partial<Record<Direction, { token: string }>>;
@@ -91,7 +93,7 @@ function receipt(raw: string | null): Receipt {
   assert(raw, "Expected durable native checkpoint state");
   return JSON.parse(raw) as Receipt;
 }
-function pendingFromDisk() {
+function checkpointFromDisk() {
   const db = new DatabaseSync(path.join(stateRoot, "state", "openclaw.sqlite"), { readOnly: true });
   try {
     const row = db
@@ -101,7 +103,7 @@ function pendingFromDisk() {
       .get(worktreeId);
     const raw = row?.filesystem_checkpoints_json;
     assert(typeof raw === "string", "Expected durable checkpoint receipt");
-    return receipt(raw).pending;
+    return receipt(raw);
   } finally {
     db.close();
   }
@@ -178,6 +180,10 @@ async function child() {
   async function observe(
     target: Direction,
     before: (action: LocalWorkspaceManifestAction, store: LocalWorkspaceStore) => Promise<void>,
+    beforeUpdate?: (
+      patch: Parameters<LocalWorkspaceStore["update"]>[1],
+      store: LocalWorkspaceStore,
+    ) => Promise<void>,
   ) {
     return withLocalWorkspaceStore({ ...owner, worktreeId }, async (store) => {
       const wrapped: LocalWorkspaceStore = {
@@ -185,6 +191,10 @@ async function child() {
         manifest: async (row, action) => {
           await before(action, store);
           return store.manifest(row, action);
+        },
+        update: async (...args) => {
+          await beforeUpdate?.(args[1], store);
+          return store.update(...args);
         },
       };
       await projectionOperations(owner, wrapped, store.get()).synchronize(target);
@@ -285,25 +295,63 @@ async function child() {
       const target = values.direction;
       const source = target === "canonical" ? projection : canonical;
       const destination = target === "canonical" ? canonical : projection;
+      const point = values.point ?? "before-scan";
+      assert(point === "before-scan" || point === "after-retirement");
       if (values.child === "crash") {
         await synchronize(target);
         edit(source, "crash001\n");
-        await observe(target, async (action, store) => {
-          if (action.kind !== "scan") {
-            return;
-          }
-          const pending = receipt(store.get()!.filesystem_checkpoints_json).pending;
-          assert.equal(pending?.target, target);
-          assert(pending);
-          const candidate = path.join(checkpoints, pending.token);
-          assert.equal(read(candidate), "crash001\n");
-          btrfs("subvolume", "show", candidate);
-          process.send?.({ kind: "ready", token: pending.token });
-          await new Promise<void>(() => {});
-        });
+        await observe(
+          target,
+          async (action, store) => {
+            if (point !== "before-scan" || action.kind !== "scan") {
+              return;
+            }
+            const pending = receipt(store.get()!.filesystem_checkpoints_json).pending;
+            assert.equal(pending?.target, target);
+            assert(pending);
+            const candidate = path.join(checkpoints, pending.token);
+            assert.equal(read(candidate), "crash001\n");
+            btrfs("subvolume", "show", candidate);
+            process.send?.({ kind: "ready", point, token: pending.token });
+            await new Promise<void>(() => {});
+          },
+          async (patch, store) => {
+            if (point !== "after-retirement" || !patch.filesystem_checkpoints_json) {
+              return;
+            }
+            const current = receipt(store.get()!.filesystem_checkpoints_json);
+            const next = receipt(patch.filesystem_checkpoints_json);
+            const pending = current.pending;
+            if (!pending || next.pending || next.accepted[target]?.token !== pending.token) {
+              return;
+            }
+            const previous = current.accepted[target];
+            assert(previous, "Retirement requires an existing accepted checkpoint");
+            assert.equal(pending.target, target);
+            assert(
+              !fs.existsSync(path.join(checkpoints, previous.token)),
+              "Retirement crash must happen after old snapshot deletion",
+            );
+            const durable = checkpointFromDisk();
+            assert.equal(durable.pending?.token, pending.token);
+            assert.equal(durable.accepted[target]?.token, previous.token);
+            const candidate = path.join(checkpoints, pending.token);
+            btrfs("subvolume", "show", candidate);
+            for (const root of [source, destination, candidate]) {
+              assert.equal(read(root), "crash001\n", "Content must settle before retirement");
+            }
+            process.send?.({
+              kind: "ready",
+              point,
+              token: pending.token,
+              retiredToken: previous.token,
+            });
+            await new Promise<void>(() => {});
+          },
+        );
         assert.fail("Crash child must be killed before acceptance");
       } else {
-        const pending = pendingFromDisk();
+        const pending = checkpointFromDisk().pending;
         assert(pending);
         let fullScan = false;
         await observe(target, async (action) => {
@@ -332,7 +380,7 @@ async function child() {
             undefined,
           );
         });
-        process.send?.({ kind: "passed", phase: `recover-${target}`, fullScan });
+        process.send?.({ kind: "passed", phase: `recover-${target}`, point, fullScan });
       }
     } else {
       assert.equal(values.child, "cleanup");
@@ -376,11 +424,9 @@ async function orchestrate() {
     btrfs("subvolume", "create", canonical);
     git(repository, "worktree", "add", "--quiet", "-b", "openclaw/proof", canonical);
     fs.writeFileSync(path.join(canonical, ".env.local"), "synthetic-host-secret\n");
-    async function run(phase: string, direction?: Direction) {
-      const log = fs.openSync(
-        path.join(output, `${phase}${direction ? `-${direction}` : ""}.log`),
-        "w",
-      );
+    async function run(phase: string, direction?: Direction, point?: CrashPoint) {
+      const label = [phase, direction, point].filter(Boolean).join("-");
+      const log = fs.openSync(path.join(output, `${label}.log`), "w");
       const subprocess = spawn(
         process.execPath,
         [
@@ -392,6 +438,7 @@ async function orchestrate() {
           "--child",
           phase,
           ...(direction ? ["--direction", direction] : []),
+          ...(point ? ["--point", point] : []),
         ],
         { stdio: ["ignore", log, log, "ipc"] },
       );
@@ -400,6 +447,7 @@ async function orchestrate() {
       const timeout = setTimeout(() => subprocess.kill("SIGKILL"), 300_000);
       let ready = false;
       let passed = false;
+      let retiredToken: string | undefined;
       subprocess.on("message", (message: unknown) => {
         if (!message || typeof message !== "object" || !("kind" in message)) {
           return;
@@ -407,6 +455,9 @@ async function orchestrate() {
         results.push(message);
         if (message.kind === "ready") {
           ready = true;
+          if ("retiredToken" in message && typeof message.retiredToken === "string") {
+            retiredToken = message.retiredToken;
+          }
           subprocess.kill("SIGKILL");
         }
         passed ||= message.kind === "passed";
@@ -418,28 +469,33 @@ async function orchestrate() {
         },
       ).finally(() => clearTimeout(timeout));
       if (phase === "crash") {
-        assert(
-          ready,
-          `Crash child never reached durable checkpoint; see ${phase}-${direction}.log`,
-        );
+        assert(ready, `Crash child never reached durable checkpoint; see ${label}.log`);
         assert.equal(signal, "SIGKILL");
-        const pending = pendingFromDisk();
+        const durable = checkpointFromDisk();
+        const pending = durable.pending;
         assert.equal(
           pending?.target,
           direction,
           "Pending receipt must survive SIGKILL in canonical SQLite",
         );
         assert(pending && fs.existsSync(path.join(checkpoints, pending.token)));
+        if (point === "after-retirement") {
+          assert(direction && retiredToken);
+          assert.equal(durable.accepted[direction]?.token, retiredToken);
+          assert(!fs.existsSync(path.join(checkpoints, retiredToken)));
+        }
         edit(direction === "canonical" ? projection : canonical, "newest01\n");
       } else {
-        assert.equal(code, 0, `${phase} failed; inspect its log (signal ${signal})`);
+        assert.equal(code, 0, `${label} failed; inspect its log (signal ${signal})`);
         assert(passed);
       }
     }
     await run("exercise");
-    for (const target of ["canonical", "projection"] as const) {
-      await run("crash", target);
-      await run("recover", target);
+    for (const point of [undefined, "after-retirement"] as const) {
+      for (const target of ["canonical", "projection"] as const) {
+        await run("crash", target, point);
+        await run("recover", target, point);
+      }
     }
     await run("cleanup");
     fs.writeFileSync(

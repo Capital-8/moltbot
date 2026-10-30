@@ -289,36 +289,51 @@ it("uses checkpoint deltas only for the accepted content and current host admiss
   expect(await fs.readFile(path.join(projection, "nested/file.txt"), "utf8")).toBe("baseline");
 });
 
-it("retains baseline changes across direction switches even when the native delta is empty", async () => {
+async function filesystemCheckpointFixture() {
   const { canonical, projection } = await repairFixture();
+  const identities = new Map<string, btrfs.BtrfsCheckpointIdentity>(
+    [canonical, projection].map((root) => [
+      root,
+      { uuid: randomUUID(), parentUuid: null, device: "1", inode: "256" },
+    ]),
+  );
+  vi.spyOn(btrfs, "readBtrfsCheckpointIdentity").mockImplementation(
+    async (root) => identities.get(root) ?? null,
+  );
+  vi.spyOn(btrfs, "createBtrfsCheckpoint").mockImplementation(async (source, root) => {
+    const identity = {
+      uuid: randomUUID(),
+      parentUuid: identities.get(source)!.uuid,
+      device: "2",
+      inode: "256",
+    };
+    identities.set(root, identity);
+    return identity;
+  });
+  const diff = vi.spyOn(btrfs, "diffBtrfsCheckpoints").mockResolvedValue(new Set());
+  const remove = vi.spyOn(btrfs, "deleteBtrfsCheckpoint").mockImplementation(async (root) => {
+    identities.delete(root);
+    return true;
+  });
+  const row = { baseline_ref: "A", filesystem_checkpoints_json: null as string | null };
+  const update = vi.fn(async (patch: { filesystem_checkpoints_json: string | null }) => {
+    Object.assign(row, patch);
+  });
+  const checkpoints = localWorkspaceFilesystemCheckpoints({
+    projectionPath: projection,
+    current: () => row,
+    update,
+    assertCurrent() {},
+    signal: new AbortController().signal,
+  });
+  return { canonical, projection, identities, diff, remove, row, update, checkpoints };
+}
+
+it("retains baseline changes across direction switches even when the native delta is empty", async () => {
+  const { canonical, projection, diff, row, checkpoints } = await filesystemCheckpointFixture();
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
   Object.defineProperty(process, "platform", { value: "linux" });
   try {
-    const sources = new Map(
-      [canonical, projection].map((root) => [
-        root,
-        { uuid: randomUUID(), parentUuid: null, device: "1", inode: "256" },
-      ]),
-    );
-    vi.spyOn(btrfs, "readBtrfsCheckpointIdentity").mockImplementation(
-      async (root) => sources.get(root) ?? null,
-    );
-    vi.spyOn(btrfs, "createBtrfsCheckpoint").mockImplementation(async (root) => ({
-      uuid: randomUUID(),
-      parentUuid: sources.get(root)!.uuid,
-      device: "2",
-      inode: "256",
-    }));
-    const diff = vi.spyOn(btrfs, "diffBtrfsCheckpoints").mockResolvedValue(new Set());
-    vi.spyOn(btrfs, "deleteBtrfsCheckpoint").mockResolvedValue(true);
-    const row = { baseline_ref: "A", filesystem_checkpoints_json: null as string | null };
-    const checkpoints = localWorkspaceFilesystemCheckpoints({
-      projectionPath: projection,
-      current: () => row,
-      update: async (patch) => void Object.assign(row, patch),
-      assertCurrent() {},
-      signal: new AbortController().signal,
-    });
     for (const target of ["canonical", "projection"] as const) {
       const prepared = await checkpoints.prepare(
         target,
@@ -370,6 +385,73 @@ it("retains baseline changes across direction switches even when the native delt
     Object.defineProperty(process, "platform", platform);
   }
 });
+
+it.each(["success", "acceptance failure", "deferred deletion"] as const)(
+  "keeps rotation cleanup recoverable with one acceptance write: %s",
+  async (outcome) => {
+    const { projection, identities, diff, remove, row, update, checkpoints } =
+      await filesystemCheckpointFixture();
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    try {
+      const facts = {
+        previousRoot: "A",
+        resultingRoot: "A",
+        filesystemAdmissionRef: "admission",
+        filesystemChangedRoots: [],
+      };
+      const previous = (await checkpoints.prepare("canonical", projection))!;
+      await checkpoints.accept(previous, facts);
+      update.mockClear();
+      diff.mockResolvedValue(new Set([".git"]));
+      const prepared = (await checkpoints.prepare("canonical", projection))!;
+      const reserved = row.filesystem_checkpoints_json;
+      remove.mockImplementationOnce(async (root, identity) => {
+        expect(root).toBe(previous.root);
+        expect(identity).toEqual(previous.snapshot);
+        // The durable reservation owns recovery until retirement finishes.
+        expect(row.filesystem_checkpoints_json).toBe(reserved);
+        if (outcome === "deferred deletion") {
+          return false;
+        }
+        identities.delete(root);
+        return true;
+      });
+      if (outcome === "acceptance failure") {
+        update.mockRejectedValueOnce(new Error("acceptance unavailable"));
+        await expect(checkpoints.accept(prepared, facts)).rejects.toThrow("acceptance unavailable");
+        expect(identities.has(previous.root)).toBe(false);
+        expect(row.filesystem_checkpoints_json).toBe(reserved);
+        // Recovery must ignore native equality after an interrupted rotation.
+        const recovered = await checkpoints.prepare("canonical", projection);
+        expect(recovered).toBeDefined();
+        expect(recovered!.changedRoots).toBeUndefined();
+        expect(identities.has(prepared.root)).toBe(false);
+      } else {
+        await checkpoints.accept(prepared, facts);
+        expect(update).toHaveBeenCalledTimes(2);
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(row.filesystem_checkpoints_json!)).toMatchObject({
+          accepted: { canonical: { token: prepared.token } },
+          garbage:
+            outcome === "deferred deletion"
+              ? [expect.objectContaining({ token: previous.token })]
+              : [],
+        });
+        expect(JSON.parse(row.filesystem_checkpoints_json!)).not.toHaveProperty("pending");
+        if (outcome === "deferred deletion") {
+          expect(identities.has(previous.root)).toBe(true);
+          await checkpoints.prepare("canonical", projection);
+          expect(remove).toHaveBeenCalledTimes(2);
+          expect(identities.has(previous.root)).toBe(false);
+          expect(JSON.parse(row.filesystem_checkpoints_json!).garbage).toEqual([]);
+        }
+      }
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  },
+);
 
 it.each([
   ["projection", false],

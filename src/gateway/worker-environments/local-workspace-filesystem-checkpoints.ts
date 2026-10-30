@@ -97,28 +97,32 @@ export function localWorkspaceFilesystemCheckpoints(params: {
   };
   const write = (state: Checkpoints) =>
     params.update({ filesystem_checkpoints_json: JSON.stringify(state) });
+  const remove = async (entry: Checkpoints["garbage"][number]) => {
+    // A crash can precede the snapshot's reply. Its reservation still names
+    // only this private path; parent UUID binds any completed snapshot to it.
+    const snapshot =
+      entry.snapshot ?? (await readBtrfsCheckpointIdentity(location(entry), options, true));
+    params.assertCurrent();
+    const exists =
+      snapshot ||
+      (await fs.lstat(location(entry)).catch((error: unknown) => {
+        if (hasNodeErrorCode(error, "ENOENT")) {
+          return undefined;
+        }
+        throw error;
+      }));
+    if ((!snapshot && exists) || (snapshot && snapshot.parentUuid !== entry.source.uuid)) {
+      return false;
+    }
+    return !snapshot || (await deleteBtrfsCheckpoint(location(entry), snapshot, options));
+  };
   const clean = async (state: Checkpoints) => {
     if (!state.garbage.length) {
       return true;
     }
     const remaining: Checkpoints["garbage"] = [];
     for (const entry of state.garbage) {
-      // A crash can precede the snapshot's reply. Its reservation still names
-      // only this private path; parent UUID binds any completed snapshot to it.
-      const snapshot =
-        entry.snapshot ?? (await readBtrfsCheckpointIdentity(location(entry), options, true));
-      params.assertCurrent();
-      const exists =
-        snapshot ||
-        (await fs.lstat(location(entry)).catch((error: unknown) => {
-          if (hasNodeErrorCode(error, "ENOENT")) {
-            return undefined;
-          }
-          throw error;
-        }));
-      if ((!snapshot && exists) || (snapshot && snapshot.parentUuid !== entry.source.uuid)) {
-        remaining.push(entry);
-      } else if (snapshot && !(await deleteBtrfsCheckpoint(location(entry), snapshot, options))) {
+      if (!(await remove(entry))) {
         remaining.push(entry);
       }
     }
@@ -227,7 +231,9 @@ export function localWorkspaceFilesystemCheckpoints(params: {
         throw new Error("Workspace filesystem checkpoint acceptance changed");
       }
       const previous = state.accepted[prepared.target];
-      if (previous) {
+      // Content settlement is already durable. Pending keeps an interrupted
+      // rotation on full-scan recovery until the new receipt is accepted.
+      if (previous && !(await remove(previous))) {
         state.garbage.push(previous);
       }
       const other = state.accepted[prepared.target === "canonical" ? "projection" : "canonical"];
@@ -250,9 +256,10 @@ export function localWorkspaceFilesystemCheckpoints(params: {
         runtimeId,
       };
       delete state.pending;
-      // Filesystem cleanup follows durable acceptance; a crash retains its identities.
       await write(state);
-      await clean(state);
+      if (state.garbage.length) {
+        log.warn("Workspace filesystem checkpoint cleanup deferred; using full synchronization");
+      }
     },
     async remove() {
       if (!params.current().filesystem_checkpoints_json) {
