@@ -57,11 +57,20 @@ describe("chat composer sizing", () => {
     let transcriptLayoutReads = 0;
     Object.defineProperties(textarea, {
       clientHeight: { configurable: true, get: () => Math.min(height, 150) },
-      scrollHeight: { configurable: true, get: () => (++textareaLayoutReads, height) },
+      scrollHeight: {
+        configurable: true,
+        get: () => {
+          textareaLayoutReads++;
+          return height;
+        },
+      },
     });
     Object.defineProperty(thread, "scrollHeight", {
       configurable: true,
-      get: () => (++transcriptLayoutReads, 200),
+      get: () => {
+        transcriptLayoutReads++;
+        return 200;
+      },
     });
     textarea.style.cssText = "height:42px;max-height:150px;box-sizing:border-box;border:0px";
     resizeTextarea();

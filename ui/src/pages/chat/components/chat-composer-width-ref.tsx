@@ -1,4 +1,4 @@
-import { createSignal, lazy, onSettled, Show } from "solid-js";
+import { createMemo, createSignal, lazy, onSettled, Show } from "solid-js";
 import { warmWhenIdle } from "../../../lib/idle-warmup.ts";
 import { createLayoutMeasurement } from "../../../lib/reactive/layout-measurement.ts";
 import { listen } from "../../../lib/reactive/listener.ts";
@@ -42,20 +42,21 @@ function ColumnCap(props: {
   transcript: () => HTMLElement | null | undefined;
   shell: () => HTMLElement | undefined;
 }) {
+  const transcript = createMemo(() => props.transcript());
   const cap = () => {
-    const transcript = props.transcript();
+    const column = transcript();
     props
       .shell()
       ?.style.setProperty(
         "max-width",
-        transcript?.isConnected
-          ? `min(var(--chat-thread-max-width), max(48rem, ${transcriptColumnWidth(transcript)}px))`
+        column?.isConnected
+          ? `min(var(--chat-thread-max-width), max(48rem, ${transcriptColumnWidth(column)}px))`
           : null,
       );
   };
-  const schedule = createLayoutMeasurement(() => props.transcript(), cap, {
-    targets: (transcript) =>
-      [props.shell(), transcript].filter((node): node is HTMLElement => Boolean(node)),
+  const schedule = createLayoutMeasurement(transcript, cap, {
+    targets: (column) =>
+      [props.shell(), column].filter((node): node is HTMLElement => Boolean(node)),
     changeTiming: "sync",
   });
   onSettled(() => {

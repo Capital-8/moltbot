@@ -228,8 +228,11 @@ describe("composer border width control", () => {
       }
       setAttribute(name, value);
     });
+    const transcript = container.closest(".chat")!.querySelector<HTMLElement>(".chat-thread")!;
+    const styleReads = vi.spyOn(window, "getComputedStyle");
     const replacement = vi.fn((value: string | undefined) => f.onWidthChange(value));
     f.props.onComposerWidthChange = replacement;
+    f.props.draft = "Typing without changing the reading column";
     f.draw();
     // draw flushes Solid; native ResizeObserver deliveries may still settle later.
     expect(f.edge()).toBe(edge);
@@ -237,6 +240,8 @@ describe("composer border width control", () => {
       measured.mock.calls.filter(([name]) => name === "aria-valuenow"),
       measureStacks.join("\n\n"),
     ).toEqual([]);
+    expect(styleReads.mock.calls.filter(([element]) => element === transcript)).toEqual([]);
+    styleReads.mockRestore();
     measured.mockRestore();
     await settled();
     f.props.sessionKey = "agent:main:another-draft";
