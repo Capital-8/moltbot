@@ -18,19 +18,19 @@ process.once("beforeExit", () => phase("event-loop-idle"));
 const [rawPath, outputPath] = process.argv.slice(2);
 assert(rawPath && outputPath && process.env.CI === "true");
 assert(process.env.OPENCLAW_PROFILE?.startsWith("test-"));
-const state = fs.realpathSync(process.env.OPENCLAW_STATE_DIR!);
-const rawURL = fs.realpathSync(rawPath);
-assert.equal(rawURL, process.env.OPENCLAW_CONFIG_PATH);
-assert.equal(path.dirname(rawURL), state);
-assert.equal(path.dirname(path.resolve(outputPath)), state);
-assert.equal(os.homedir(), process.env.HOME);
-const before = fs.readFileSync(rawURL);
+const token = process.env.OPENCLAW_MLX_SETTINGS_PRODUCER_TOKEN;
+const send = process.send?.bind(process);
+const disconnect = process.disconnect?.bind(process);
+assert(token && send && disconnect, "Settings producer requires its managed IPC owner");
+const notify = (kind: string) =>
+  new Promise<void>((resolve, reject) => {
+    send({ kind, token }, (error) => (error ? reject(error) : resolve()));
+  });
 const source = fs.realpathSync(process.cwd());
 const load = (relative: string) => import(pathToFileURL(path.join(source, relative)).href);
 phase("paths-import-begin");
 const paths = await load("src/config/paths.ts");
 phase("paths-import-end");
-assert.equal(paths.CONFIG_PATH, rawURL);
 phase("io-import-begin");
 const { createConfigIO } = await load("src/config/io.ts");
 phase("io-import-end");
@@ -43,6 +43,46 @@ phase("handlers-import-end");
 phase("validator-import-begin");
 const { validateTalkConfigResult } = await load("packages/gateway-protocol/src/index.ts");
 phase("validator-import-end");
+await new Promise<void>((resolve, reject) => {
+  const clear = () => {
+    process.removeListener("message", onMessage);
+    process.removeListener("disconnect", onDisconnect);
+  };
+  const onDisconnect = () => {
+    clear();
+    reject(new Error("Settings producer owner disconnected before operation admission"));
+  };
+  const onMessage = (message: unknown) => {
+    clear();
+    if (
+      !message ||
+      typeof message !== "object" ||
+      !("kind" in message) ||
+      message.kind !== "go" ||
+      !("token" in message) ||
+      message.token !== token
+    ) {
+      reject(new Error("Invalid settings producer operation admission"));
+      return;
+    }
+    resolve();
+  };
+  process.once("message", onMessage);
+  process.once("disconnect", onDisconnect);
+  void notify("ready").catch((error: unknown) => {
+    clear();
+    reject(error);
+  });
+});
+phase("operation-begin");
+const state = fs.realpathSync(process.env.OPENCLAW_STATE_DIR!);
+const rawURL = fs.realpathSync(rawPath);
+assert.equal(rawURL, process.env.OPENCLAW_CONFIG_PATH);
+assert.equal(path.dirname(rawURL), state);
+assert.equal(path.dirname(path.resolve(outputPath)), state);
+assert.equal(os.homedir(), process.env.HOME);
+assert.equal(paths.CONFIG_PATH, rawURL);
+const before = fs.readFileSync(rawURL);
 phase("snapshot-begin");
 const snapshot = await createConfigIO({
   configPath: rawURL,
@@ -97,3 +137,5 @@ console.log(
   }),
 );
 phase("script-complete");
+await notify("complete");
+disconnect();

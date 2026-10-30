@@ -365,6 +365,11 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
       const fixturePath = "apps/macos/Tests/OpenClawIPCTests/MLXSettingsUpgradeTests.swift";
       const producerPath = "test/helpers/macos-mlx-settings-producer.ts";
       const producer = `import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';
+const token=process.env.OPENCLAW_MLX_SETTINGS_PRODUCER_TOKEN;
+await new Promise((resolve,reject)=>{
+  process.once('message',message=>{assert.deepEqual(message,{kind:'go',token});resolve();});
+  process.send({kind:'ready',token},error=>{if(error)reject(error);});
+});
 const [raw,out]=process.argv.slice(2);
 assert.equal(raw,process.env.OPENCLAW_CONFIG_PATH);
 assert.deepEqual(fs.readFileSync(raw),fs.readFileSync(raw.replace('openclaw.json','stable-written-config.json')));
@@ -376,7 +381,9 @@ if (${failCandidate} && process.cwd()===${JSON.stringify(f.workspace)}) {
   }
   process.exit(41);
 }
-fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
+fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));
+await new Promise((resolve,reject)=>process.send({kind:'complete',token},error=>error?reject(error):resolve()));
+process.disconnect();`;
       const overlays: Record<string, string> = {};
       const originalManifest = read(path.join(repo, "apps/macos/Package.swift"));
       const focusedManifest = projectMlxSettingsManifest(originalManifest);

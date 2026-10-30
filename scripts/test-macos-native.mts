@@ -6,6 +6,7 @@ import { performance } from "node:perf_hooks";
 import { root as openCaptureRoot } from "@openclaw/fs-safe/root";
 import { readProcessIdentity } from "@openclaw/proc-safe/identity";
 import { runWithFailedTrailer } from "./lib/failed-trailer.mts";
+import { runMlxSettingsProducer } from "./lib/macos-mlx-settings-producer.mts";
 import {
   hasUnjoinedWork,
   runManagedCommand,
@@ -460,28 +461,44 @@ await runWithFailedTrailer("macos-native", async () => {
             throw new Error("Retained config changed before producer");
           }
           console.error(`[macos-native] Settings producer sourceSHA=${source.sha}`);
-          const code = await run(
-            process.execPath,
-            [
-              "--import",
-              "./scripts/tsx.mjs",
-              "test/helpers/macos-mlx-settings-producer.ts",
-              configPath,
-              responsePath,
-            ],
-            30_000,
-            source.sourceRoot,
-          );
+          const observation: Record<string, unknown> = {
+            stage: "producer",
+            sourceSHA: source.sha,
+            rawSHA256: stableWritten,
+          };
+          settings.observations.push(observation);
+          canRemove = false;
+          let code: number;
+          try {
+            code = await runMlxSettingsProducer({
+              args: [
+                "--import",
+                "./scripts/tsx.mjs",
+                "test/helpers/macos-mlx-settings-producer.ts",
+                configPath,
+                responsePath,
+              ],
+              cwd: source.sourceRoot,
+              env: childEnv,
+              observation,
+              remainingMs: (ceiling) =>
+                Math.min(
+                  settings.budget.timeout(ceiling),
+                  Math.floor(settings.phaseEnd - performance.now()),
+                ),
+            });
+            canRemove = true;
+          } catch (error) {
+            canRemove = !hasUnjoinedWork(error);
+            throw error;
+          }
           if (code !== 0) {
             throw new Error(`Actual talk.config producer failed (exit ${code})`);
           }
           if (hash(configPath) !== stableWritten) {
             throw new Error("Producer changed stable config bytes");
           }
-          settings.observations.push({
-            stage: "producer",
-            sourceSHA: source.sha,
-            rawSHA256: stableWritten,
+          Object.assign(observation, {
             responseSHA256: hash(responsePath),
             actualTalkConfigCompleted: true,
           });

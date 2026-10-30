@@ -39,6 +39,9 @@ it.each([
 });
 
 it.each([
+  "scripts/lib/macos-mlx-settings-manifest.mts",
+  "scripts/lib/macos-mlx-settings-producer.mts",
+  "test/scripts/macos-mlx-settings-producer.test.ts",
   "apps/macos/Sources/OpenClaw/AppProfile.swift",
   "apps/macos/Sources/OpenClaw/OpenClawPaths.swift",
   "apps/macos/Sources/OpenClaw/OpenClawConfigFile.swift",
@@ -132,6 +135,9 @@ it.each<[string | string[], string, boolean?]>([
   ["scripts/package-mac-app.sh", "Node Macos MacosNode"],
   ["scripts/lib/openclaw-bun.json", "Node Macos MacosNode"],
   ["scripts/stage-openclaw-bun.sh", "Node Macos MacosNode"],
+  ["scripts/lib/macos-mlx-settings-manifest.mts", "Node Macos MacosNode"],
+  ["scripts/lib/macos-mlx-settings-producer.mts", "Node Macos MacosNode"],
+  ["test/scripts/macos-mlx-settings-producer.test.ts", "Node Macos MacosNode"],
   ["skills/skill-creator/scripts/test_quick_validate.py", "Node SkillsPython"],
   [".github/workflows/ci.yml", "Node Windows UiTests"],
   ["scripts/lib/ci-test-runtime.mts", "Node UiTests"],
