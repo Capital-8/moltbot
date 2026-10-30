@@ -12,7 +12,7 @@ const IDLE_PREWARM_ROW_LIMIT = 2048;
 const INITIAL_PREWARM_ROW_LIMIT = 128;
 // A fast first gesture can skip dozens of rows before velocity is known.
 // Keep nearby sanitized DOM ready without mounting it or changing geometry.
-const IDLE_FRAGMENT_ROW_LIMIT = 64;
+const IDLE_FRAGMENT_ROW_LIMIT = 128;
 
 /** Own initial tail placement and bounded preparation ahead of the visible range. */
 export class TranscriptInitialRange {
