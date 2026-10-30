@@ -3926,7 +3926,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
           agentId,
           state: "final",
         });
-        expect(nodeSend?.[0]).toBe(`agent:${agentId}:global`);
+        expect(nodeSend?.[0]).toBe(JSON.stringify([agentId, "global"]));
         expect(nodeSend?.[2]).toMatchObject({ sessionKey: canonicalKey, agentId });
       } else {
         expect(response?.[1]?.ok).toBe(true);
