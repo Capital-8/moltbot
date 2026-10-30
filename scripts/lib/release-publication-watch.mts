@@ -241,11 +241,12 @@ export async function observePublication(ctx: ReleaseContext): Promise<Publicati
   const candidates = await listOwnedChildren(ctx, state, parent, dispatchedAt);
   const children: RunObservation[] = [];
   for (const candidate of candidates) {
-    const child = await readRun(ctx, String(candidate.id));
+    const candidateId = String(candidate.id);
+    const child = await readRun(ctx, candidateId);
     if (!isOwnedChild(state, parent, child)) {
-      throw new Error(`Publication child ${candidate.id} identity changed while observing it.`);
+      throw new Error(`Publication child ${candidateId} identity changed while observing it.`);
     }
-    children.push(runObservation(child, String(candidate.id)));
+    children.push(runObservation(child, candidateId));
   }
   children.sort((a, b) => Number(a.id) - Number(b.id));
   if (parent.status === "completed" && parent.conclusion === "success") {
