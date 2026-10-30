@@ -446,6 +446,23 @@
       }
     },
     {
+      "files": [
+        "extensions/agentsapi/agentsapi-harness.persistence.test.ts",
+        "extensions/anthropic/cli-runtime.test.ts"
+      ],
+      "rules": {
+        // Signed beta.5 baseline debt; main is already below the default cap.
+        "max-lines": ["error", { "max": 1300, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": ["extensions/codex/src/app-server/session-binding.ts"],
+      "rules": {
+        // Signed beta.5 baseline debt; main is already below the default cap.
+        "max-lines": ["error", { "max": 800, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
       "files": ["extensions/copilot/src/event-bridge.ts"],
       "rules": {
         "max-lines": ["error", { "max": 950, "skipBlankLines": true, "skipComments": true }]
