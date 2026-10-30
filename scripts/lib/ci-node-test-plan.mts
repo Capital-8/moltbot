@@ -2887,7 +2887,14 @@ export function createVitestCacheWarmGroups(
     "agentic-gateway-methods",
     "auto-reply-reply-commands-3",
   ]);
-  const allShards = createNodeTestShards();
+  // Seed selection needs only these parents. Resolving the full plan also
+  // discovers unrelated tooling and runtime inventories on every cold warmer.
+  const allShards = createNodeTestShardsForOwners(
+    fullSuiteVitestShards.filter(({ name }) =>
+      ["core-unit-fast", "auto-reply", "agentic"].includes(name),
+    ),
+    {},
+  );
   const coreShards = allShards.filter((candidate) =>
     candidate.shardName.startsWith("core-unit-fast"),
   );

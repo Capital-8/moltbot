@@ -6,6 +6,7 @@ import { parseFlagArgs, stringFlag } from "./lib/arg-utils.mts";
 import { formatMs } from "./lib/vitest-report-cli-utils.mts";
 
 type BenchOptions = {
+  cacheWarmProfile?: "full" | "hybrid-hosted";
   cwd: string;
   maxWorkers?: number;
   mode: "ref" | "worktree";
@@ -47,6 +48,14 @@ export function parseArgs(argv: string[]): BenchOptions {
     [
       stringFlag("--cwd", "cwd"),
       stringFlag("--ref", "ref"),
+      stringFlag("--cache-warm-planner", "cacheWarmProfile", {
+        transform: (value) => {
+          if (value !== "full" && value !== "hybrid-hosted") {
+            throw new Error("--cache-warm-planner requires full or hybrid-hosted");
+          }
+          return value;
+        },
+      }),
       stringFlag("--max-workers", "maxWorkers", {
         allowInline: false,
         transform: (value) => parsePositiveInteger(value, "--max-workers"),
@@ -71,6 +80,7 @@ export function parseArgs(argv: string[]): BenchOptions {
     mode: args.mode,
     ref: args.ref,
     rss: args.rss,
+    ...(args.cacheWarmProfile ? { cacheWarmProfile: args.cacheWarmProfile } : {}),
     ...(typeof args.maxWorkers === "number" ? { maxWorkers: args.maxWorkers } : {}),
   };
 }
@@ -194,6 +204,64 @@ function main() {
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
+  }
+  if (opts.cacheWarmProfile) {
+    // Each invocation gets fresh planner inventories; repeated calls measure the
+    // same warm process separately instead of hiding first-call discovery.
+    const result = runBenchCommand({
+      ...opts,
+      label: "cache-warm-planner",
+      command: [
+        process.execPath,
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "--eval",
+        `
+        import childProcess from "node:child_process";
+        import { createHash } from "node:crypto";
+        import { syncBuiltinESMExports } from "node:module";
+        import { loadavg } from "node:os";
+        const inventoryQueries = [];
+        const spawnSync = childProcess.spawnSync;
+        childProcess.spawnSync = function(command, args, ...options) {
+          if (command === "git" && args?.[0] === "ls-files") inventoryQueries.push(args);
+          return spawnSync.call(this, command, args, ...options);
+        };
+        syncBuiltinESMExports();
+        const measure = (action, iterations = 1) => {
+          const start = performance.now();
+          const cpu = process.cpuUsage();
+          const queries = inventoryQueries.length;
+          let groups;
+          for (let index = 0; index < iterations; index++) groups = action();
+          const used = process.cpuUsage(cpu);
+          return {
+            wallMs: (performance.now() - start) / iterations,
+            cpuMs: (used.user + used.system) / 1000 / iterations,
+            rssBytes: process.memoryUsage().rss,
+            gitQueries: inventoryQueries.slice(queries),
+            hash: createHash("sha256").update(JSON.stringify(groups)).digest("hex"),
+          };
+        };
+        const start = performance.now();
+        const cpu = process.cpuUsage();
+        const { createVitestCacheWarmGroups } = await import("./scripts/lib/ci-node-test-plan.mts");
+        const used = process.cpuUsage(cpu);
+        const imported = { wallMs: performance.now() - start, cpuMs: (used.user + used.system) / 1000, rssBytes: process.memoryUsage().rss };
+        const profile = ${JSON.stringify(opts.cacheWarmProfile)};
+        const cold = measure(() => createVitestCacheWarmGroups(profile));
+        const warm = measure(() => createVitestCacheWarmGroups(profile), 100);
+        console.log(JSON.stringify({ profile, load: loadavg(), imported, cold, warm, maxRssKiB: process.resourceUsage().maxRSS }));
+      `,
+      ],
+    });
+    process.stdout.write(result.output);
+    if (result.status !== 0) {
+      console.error(`[bench-test-changed] FAILED (exit ${result.status})`);
+      process.exit(result.status);
+    }
+    return;
   }
   const changedPaths = listChangedPaths(opts);
   if (changedPaths.length === 0) {

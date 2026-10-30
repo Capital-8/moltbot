@@ -60,7 +60,14 @@ describe("bench-test-changed script", () => {
     });
   });
 
-  it("rejects malformed max worker values", () => {
+  it("validates planner profiles and max worker values", () => {
+    expect(parseArgs(["--cache-warm-planner", "full"]).cacheWarmProfile).toBe("full");
+    expect(parseArgs(["--cache-warm-planner", "hybrid-hosted"]).cacheWarmProfile).toBe(
+      "hybrid-hosted",
+    );
+    expect(() => parseArgs(["--cache-warm-planner", "other"])).toThrow(
+      "--cache-warm-planner requires full or hybrid-hosted",
+    );
     expect(() => parseArgs(["--max-workers", "2abc"])).toThrow(
       "--max-workers must be a positive integer",
     );

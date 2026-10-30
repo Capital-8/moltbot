@@ -2168,6 +2168,35 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     }
   });
 
+  it("warms caches without discovering unrelated runtime inventory in a cold process", () => {
+    const result = spawnNodeEvalSync(`
+      import childProcess from "node:child_process";
+      import { syncBuiltinESMExports } from "node:module";
+      let infraQueries = 0;
+      const spawnSync = childProcess.spawnSync;
+      childProcess.spawnSync = function(command, args, ...options) {
+        if (command === "git" && JSON.stringify(args) === JSON.stringify(["ls-files", "--", "src/infra"])) infraQueries++;
+        return spawnSync.call(this, command, args, ...options);
+      };
+      syncBuiltinESMExports();
+      const { createNodeTestShards, createVitestCacheWarmGroups } = await import("./scripts/lib/ci-node-test-plan.mts");
+      const hosted = createVitestCacheWarmGroups("hybrid-hosted");
+      const full = createVitestCacheWarmGroups();
+      const warmQueries = infraQueries;
+      const unchanged = JSON.stringify(full) === JSON.stringify(createVitestCacheWarmGroups("full")) &&
+        JSON.stringify(hosted) === JSON.stringify(createVitestCacheWarmGroups("hybrid-hosted"));
+      const runtime = createNodeTestShards().some(shard => shard.shardName.startsWith("core-runtime-infra"));
+      console.log(JSON.stringify({ warmQueries, unchanged, runtime, infraQueries }));
+    `);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      warmQueries: 0,
+      unchanged: true,
+      runtime: true,
+      infraQueries: 1,
+    });
+  });
+
   it("bounds Gateway cache collections without dropping or repeating owner files", () => {
     const config = configPath("gateway-methods");
     const groups = createVitestCacheWarmGroups().filter((group) => group.configs.includes(config));
