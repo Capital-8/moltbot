@@ -128,25 +128,25 @@ describe("scheduled occurrence admission", () => {
     `);
   });
 
-  it.each(MATRIX)(
-    "$kind on $sessionTarget (trigger: $withTrigger) runs every executor with one admitted occurrence",
-    async ({ kind, sessionTarget, withTrigger }) => {
+  it("passes one occurrence to every executor across targets and triggers", async () => {
+    const reached = new Set<string>();
+    for (const { kind, sessionTarget, withTrigger } of MATRIX) {
+      const label = `${kind} on ${sessionTarget} (trigger: ${withTrigger})`;
       const { state, admitted, release, seen } = harness();
-      const job: CronStoredJob = {
+      await executeJobCore(state, {
         ...makeCronJob({ payload: payloadFor(kind), sessionTarget }),
         ...(withTrigger ? { trigger: { script: "return { fire: true }" } } : {}),
-      };
-
-      await executeJobCore(state, job);
-
-      expect(admitted).toHaveLength(1);
+      });
+      expect(admitted, label).toHaveLength(1);
       for (const call of seen) {
-        expect(call, call.executor).toEqual({ executor: call.executor, occurrence: admitted[0] });
+        reached.add(call.executor);
+        expect(call, label).toEqual({ executor: call.executor, occurrence: admitted[0] });
       }
       // The occurrence outlives every executor it admitted and is released once.
-      expect(release).toHaveBeenCalledOnce();
-    },
-  );
+      expect(release, label).toHaveBeenCalledOnce();
+    }
+    expect([...reached].toSorted()).toEqual(Object.keys(executorsRequireOccurrence).toSorted());
+  });
 
   it.each(PAYLOAD_KINDS)(
     "revokes a %s source during awaited occurrence admission",
