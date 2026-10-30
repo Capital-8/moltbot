@@ -179,9 +179,9 @@ suite.define(() => {
         );
         expect(frames.length).toBeGreaterThan(30);
         // No frame shrinks the draft or moves the composer's bottom edge.
-        expect(frames.filter((frame, i) => i > 0 && frame.height < frames[i - 1].height)).toEqual(
-          [],
-        );
+        expect(
+          frames.slice(1).filter((frame, i) => frame.height < (frames[i]?.height ?? 0)),
+        ).toEqual([]);
         expect(new Set(frames.map((frame) => Math.round(frame.bottom))).size).toBe(1);
         const capped = await measure();
         await page.screenshot({ path: `${artifacts}/scrolling.png` });
