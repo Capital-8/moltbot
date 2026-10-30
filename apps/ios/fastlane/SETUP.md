@@ -378,32 +378,6 @@ Remove the collector, phase markers, and comparison switches after the contentio
 cause and its improvement are verified. Do not make full Instruments recordings,
 allocation tracing, or automatic sysdiagnose part of normal release runs.
 
-The temporary `exclude_checkout_indexing` input applies only to the screenshot
-job. It moves the disposable hosted checkout to a sibling directory ending in
-`.noindex`, leaves the expected workspace path as a symlink, and restores the
-original directory after artifact collection, before post-job cleanup. Relocation
-happens before dependency installation, project generation, and compilation.
-It changes no machine-wide indexing settings or store/TestFlight operations.
-
-For an initial screening pair, run these serially on the same committed branch:
-
-```bash
-gh workflow run ios-store-release.yml --ref YOUR_BRANCH -f operation=screenshots -f startup_probe=false -f resource_diagnostics=true -f exclude_checkout_indexing=false
-gh workflow run ios-store-release.yml --ref YOUR_BRANCH -f operation=screenshots -f startup_probe=false -f resource_diagnostics=true -f exclude_checkout_indexing=true
-```
-
-Screening rule: use fresh hosted runners with matching CPU/RAM, Xcode, and
-simulator runtimes; keep all job caches off and include setup, relocation,
-artifact collection, and restoration in total job time. Capture all nine
-iPhone/iPad/Watch screenshots with the normal checks and cleanup. The artificial
-startup waits and filesystem trace stay off. Compare total job time, build,
-headroom, boot, capture, CPU pressure, memory pressure, and swap activity.
-A candidate needs at least 10% lower total job time, no new correctness failures,
-and no phase or resource regression of 20% or more to warrant further trials.
-One pair is screening evidence only: adoption needs at least five interleaved
-samples per arm with median, p95, and spread, and separate cold/warm results.
-This uncached screenshot job cannot establish savings for main CI's cached path.
-
 ## GitHub Actions
 
 Run **iOS Store Release** from `main` with one of these operations:

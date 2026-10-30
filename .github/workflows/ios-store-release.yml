@@ -27,10 +27,6 @@ on:
         description: Observe idle host and iPhone simulator before screenshots (temporary, no upload)
         type: boolean
         default: false
-      exclude_checkout_indexing:
-        description: Use a temporary .noindex checkout (screenshots operation only)
-        type: boolean
-        default: false
 
 permissions: {}
 
@@ -60,24 +56,6 @@ jobs:
 
       - name: Verify screenshot source
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-
-      - name: Exclude screenshot checkout from indexing
-        if: inputs.exclude_checkout_indexing
-        working-directory: ${{ runner.temp }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_ACTIONS" = true
-          test "$RUNNER_OS" = macOS
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -d "$GITHUB_WORKSPACE/.git"
-          test ! -L "$GITHUB_WORKSPACE"
-          excluded_workspace="${GITHUB_WORKSPACE}.noindex"
-          test ! -e "$excluded_workspace"
-          test ! -L "$excluded_workspace"
-          # Move before installing dependencies or generating absolute build paths.
-          mv "$GITHUB_WORKSPACE" "$excluded_workspace"
-          ln -s "$excluded_workspace" "$GITHUB_WORKSPACE"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
@@ -134,30 +112,14 @@ jobs:
         with:
           name: ios-screenshots-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ github.workspace }}/apps/ios/fastlane/screenshots/en-US/*.png
-            ${{ github.workspace }}/apps/ios/build/SnapshotTestResults/capture-attempts.json
-            ${{ github.workspace }}/apps/ios/build/screenshot-diagnostics.json
+            apps/ios/fastlane/screenshots/en-US/*.png
+            apps/ios/build/SnapshotTestResults/capture-attempts.json
+            apps/ios/build/screenshot-diagnostics.json
             ${{ runner.temp }}/ios-resource-timeline.jsonl
             ${{ runner.temp }}/ios-spotlight-path-probe.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
-
-      - name: Restore screenshot checkout for post-job cleanup
-        if: always() && inputs.exclude_checkout_indexing
-        working-directory: ${{ runner.temp }}
-        run: |
-          set -euo pipefail
-          excluded_workspace="${GITHUB_WORKSPACE}.noindex"
-          if [[ -d "$excluded_workspace" ]]; then
-            if [[ -L "$GITHUB_WORKSPACE" ]]; then
-              test "$(readlink "$GITHUB_WORKSPACE")" = "$excluded_workspace"
-              unlink "$GITHUB_WORKSPACE"
-            fi
-            test ! -e "$GITHUB_WORKSPACE"
-            mv "$excluded_workspace" "$GITHUB_WORKSPACE"
-            test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
-          fi
 
   qualify:
     if: >-
