@@ -121,43 +121,50 @@ await runWithFailedTrailer("macos-native", async () => {
     | undefined;
   if (settingsUpgrade) {
     const [manifestPath, started, proofPath] = args;
-    if (!manifestPath || !started || !proofPath)
+    if (!manifestPath || !started || !proofPath) {
       throw new Error("Settings upgrade requires prepared sources and the original job clock");
+    }
     const runnerTemp = fs.realpathSync(env.RUNNER_TEMP);
     const manifest = fs.realpathSync(manifestPath);
     const proofDir = fs.realpathSync(proofPath);
-    if (![manifest, proofDir].every((p) => p.startsWith(runnerTemp + path.sep)))
+    if (![manifest, proofDir].every((p) => p.startsWith(runnerTemp + path.sep))) {
       throw new Error("Settings proof must use owned runner scratch");
+    }
     const prepared = JSON.parse(fs.readFileSync(manifest, "utf8"));
-    if (Object.keys(prepared.overlays).length !== 2)
+    if (Object.keys(prepared.overlays).length !== 2) {
       throw new Error("Settings requires both test overlays");
+    }
     for (const source of [prepared.stable, prepared.fixed]) {
       if (
         !/^[a-f0-9]{40}$/.test(source.sha) ||
         fs.realpathSync(source.sourceRoot) !== source.sourceRoot
-      )
+      ) {
         throw new Error("Invalid prepared settings source");
+      }
       for (const [relative, hash] of Object.entries(prepared.overlays)) {
         if (
           ![
             "test/helpers/macos-mlx-settings-producer.ts",
             "apps/macos/Tests/OpenClawIPCTests/MLXSettingsUpgradeTests.swift",
           ].includes(relative)
-        )
+        ) {
           throw new Error("Unexpected settings overlay");
+        }
         if (
           createHash("sha256")
             .update(fs.readFileSync(path.join(source.sourceRoot, relative)))
             .digest("hex") !== hash
-        )
+        ) {
           throw new Error("Settings test overlay changed");
+        }
       }
     }
     if (
       prepared.fixed.sourceRoot !== fs.realpathSync(process.cwd()) ||
       !prepared.stable.sourceRoot.startsWith(runnerTemp + path.sep)
-    )
+    ) {
       throw new Error("Settings sources do not match owned preparation");
+    }
     settings = {
       ...prepared,
       proofDir,
@@ -286,11 +293,18 @@ await runWithFailedTrailer("macos-native", async () => {
       cwd?: string,
       cleanup = false,
     ) => {
+      let effectiveTimeoutMs = timeoutMs;
       if (settings) {
-        timeoutMs = settings.budget.timeout(timeoutMs ?? 30_000, cleanup);
-        if (!cleanup)
-          timeoutMs = Math.min(timeoutMs, Math.floor(settings.phaseEnd - performance.now()));
-        if (timeoutMs < 1) throw new Error("Ordered settings phase budget exhausted");
+        effectiveTimeoutMs = settings.budget.timeout(timeoutMs ?? 30_000, cleanup);
+        if (!cleanup) {
+          effectiveTimeoutMs = Math.min(
+            effectiveTimeoutMs,
+            Math.floor(settings.phaseEnd - performance.now()),
+          );
+        }
+        if (effectiveTimeoutMs < 1) {
+          throw new Error("Ordered settings phase budget exhausted");
+        }
       }
       canRemove = false;
       const code = await runManagedCommand({
@@ -300,7 +314,7 @@ await runWithFailedTrailer("macos-native", async () => {
         cwd,
         stdio: "inherit",
         requireProcessTreeExit: true,
-        timeoutMs,
+        timeoutMs: effectiveTimeoutMs,
         ...(settings
           ? {
               timeoutKillGraceMs: 5_000,
@@ -387,13 +401,16 @@ await runWithFailedTrailer("macos-native", async () => {
             45_000,
             source,
           );
-          if (code !== 0) throw new Error(`Settings Swift stage ${filter} failed (exit ${code})`);
+          if (code !== 0) {
+            throw new Error(`Settings Swift stage ${filter} failed (exit ${code})`);
+          }
           validateSwiftTestingCompletion(eventStreamPath, filter);
         };
         await swift(settings.stable.sourceRoot, "MLXSettingsSeedProofTests");
         const stableWritten = hash(writtenPath);
-        if (hash(configPath) !== stableWritten)
+        if (hash(configPath) !== stableWritten) {
           throw new Error("Stable writer receipt does not match actual config");
+        }
         settings.observations.push({
           stage: "stable-seed",
           sourceSHA: settings.stable.sha,
@@ -401,8 +418,9 @@ await runWithFailedTrailer("macos-native", async () => {
           actualSwiftCompleted: true,
         });
         for (const source of [settings.stable, settings.fixed]) {
-          if (hash(configPath) !== stableWritten)
+          if (hash(configPath) !== stableWritten) {
             throw new Error("Retained config changed before producer");
+          }
           const code = await run(
             process.execPath,
             [
@@ -415,9 +433,12 @@ await runWithFailedTrailer("macos-native", async () => {
             30_000,
             source.sourceRoot,
           );
-          if (code !== 0) throw new Error(`Actual talk.config producer failed (exit ${code})`);
-          if (hash(configPath) !== stableWritten)
+          if (code !== 0) {
+            throw new Error(`Actual talk.config producer failed (exit ${code})`);
+          }
+          if (hash(configPath) !== stableWritten) {
             throw new Error("Producer changed stable config bytes");
+          }
           settings.observations.push({
             stage: "producer",
             sourceSHA: source.sha,
@@ -426,8 +447,9 @@ await runWithFailedTrailer("macos-native", async () => {
             actualTalkConfigCompleted: true,
           });
           await swift(source.sourceRoot, "MLXSettingsConsumerProofTests");
-          if (hash(configPath) !== stableWritten)
+          if (hash(configPath) !== stableWritten) {
             throw new Error("Consumer changed stable config bytes");
+          }
           settings.observations.push({
             stage: "consumer",
             sourceSHA: source.sha,
@@ -654,7 +676,9 @@ await runWithFailedTrailer("macos-native", async () => {
           true,
         );
         if (cleanupCode !== 0) {
-          if (!settings) canRemove = false;
+          if (!settings) {
+            canRemove = false;
+          }
           process.exitCode ||= cleanupCode;
           console.error(`[macos-native] security delete-keychain failed (exit ${cleanupCode})`);
         }
@@ -662,10 +686,15 @@ await runWithFailedTrailer("macos-native", async () => {
       if (settings && canRemove) {
         try {
           fs.lstatSync(keychain);
-          throw new Error("Settings Keychain retirement is unverified");
+          process.exitCode ||= 1;
+          console.error("[macos-native] Settings Keychain retirement is unverified");
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          settings.keychainRemoved = true;
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            settings.keychainRemoved = true;
+          } else {
+            process.exitCode ||= 1;
+            console.error("[macos-native] Settings Keychain retirement inspection failed", error);
+          }
         }
       }
     }

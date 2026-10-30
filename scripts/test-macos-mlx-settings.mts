@@ -74,14 +74,18 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
       });
       canRemove = true;
       assert.equal(code, 0, `${phase}: ${bin} failed (exit ${code})`);
-      if (fd === undefined) return "";
+      if (fd === undefined) {
+        return "";
+      }
       assert(
         fs.statSync(capturePath).size <= 32 * 1024 * 1024,
         "Source metadata exceeds capture bound",
       );
       return fs.readFileSync(capturePath, "utf8").trim();
     } finally {
-      if (fd !== undefined) fs.closeSync(fd);
+      if (fd !== undefined) {
+        fs.closeSync(fd);
+      }
     }
   };
   type Entry = { relative: string; mode: string; blob: string };
@@ -113,12 +117,13 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
         entry.mode === "120000" ? stat.isSymbolicLink() : stat.isFile(),
         "Source entry kind changed",
       );
-      if (entry.mode !== "120000")
+      if (entry.mode !== "120000") {
         assert.equal(
           (stat.mode & 0o111) !== 0,
           entry.mode === "100755",
           "Source executable mode changed",
         );
+      }
       assert(
         fs.realpathSync(file).startsWith(source + path.sep),
         "Source link escapes its own revision",
@@ -191,12 +196,13 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
       overlays.map((relative) => [relative, sha256(path.join(current, relative))]),
     );
     const verifyOverlays = (source: string) => {
-      for (const relative of overlays)
+      for (const relative of overlays) {
         assert.equal(
           sha256(path.join(source, relative)),
           overlayHashes[relative],
           "Test overlay changed",
         );
+      }
     };
     for (const relative of overlays) {
       const target = path.join(stable, relative);
@@ -314,7 +320,9 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
         for (const entry of fs.readdirSync(macos)) {
           const binary = path.join(macos, entry);
           const stat = fs.lstatSync(binary);
-          if (!stat.isFile() || !(stat.mode & 0o111)) continue;
+          if (!stat.isFile() || !(stat.mode & 0o111)) {
+            continue;
+          }
           assert(
             fs.realpathSync(binary).startsWith(bin + path.sep),
             "Test product escapes its own revision",
@@ -380,16 +388,19 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
     throw error;
   } finally {
     result.sourceProcessesRetired = canRemove;
-    if (canRemove) fs.rmSync(scratch, { recursive: true, force: true });
+    if (canRemove) {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
     result.scratchRemoved = canRemove;
     const payload = JSON.stringify(result, null, 2)
       .replaceAll(scratch, "<owned-scratch>")
       .replaceAll(current, "<current-source>");
     assert(Buffer.byteLength(payload) < 128 * 1024, "Settings metadata exceeds artifact bound");
     fs.writeFileSync(path.join(proofDir, "settings-sources.json"), payload + "\n");
-    if (!canRemove)
+    if (!canRemove) {
       console.error(
         `[mlx-settings] retained resources after unverified child retirement: ${scratch}`,
       );
+    }
   }
 });

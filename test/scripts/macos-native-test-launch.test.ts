@@ -59,7 +59,7 @@ function fixture(
   logicalCpu = "3",
   eventReport: string | null = eventStream("runStarted", "runEnded"),
   waitForSignal: false | "swift" | "security" = false,
-  cleanupFailure: "none" | "stage-write" | "keychain-budget" = "none",
+  cleanupFailure: "none" | "stage-write" | "keychain-budget" | "keychain-retained" = "none",
 ) {
   const root = temps.make("native-launch-");
   const bin = path.join(root, "bin");
@@ -147,7 +147,9 @@ if (tool === 'security') {
   if (operation === 'set-keychain-settings') data.autoLock = false;
   if (operation === 'list-keychains') settings.search = [owned];
   if (operation === 'default-keychain') settings.default = owned;
-  if (operation === 'delete-keychain') fs.unlinkSync(owned);
+  if (operation === 'delete-keychain') {
+    if (${JSON.stringify(cleanupFailure)} !== 'keychain-retained') fs.unlinkSync(owned);
+  }
   else fs.writeFileSync(owned, JSON.stringify(data));
   fs.writeFileSync(settingsPath, JSON.stringify(settings));
 }
@@ -329,6 +331,8 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
     { failCandidate: true, cleanupFailure: "none" },
     { failCandidate: false, cleanupFailure: "stage-write" },
     { failCandidate: false, cleanupFailure: "keychain-budget" },
+    { failCandidate: false, cleanupFailure: "keychain-retained" },
+    { failCandidate: true, cleanupFailure: "keychain-retained" },
   ] as const)(
     "keeps ordered source launches and distinct process/resource retirement for %j",
     ({ failCandidate, cleanupFailure }) => {
@@ -402,7 +406,7 @@ fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
       const ownedRoot = path.dirname(swift[0].env.HOME);
       try {
         expect(calls.some((x) => x.tool === "security" && x.args[0] === "delete-keychain")).toBe(
-          !failedCleanup,
+          !failedCleanup || cleanupFailure === "keychain-retained",
         );
         expect(fs.existsSync(ownedRoot)).toBe(failedCleanup);
         expect(readJson(path.join(proof, "settings-consumers.json"))).toMatchObject({
@@ -414,6 +418,12 @@ fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
           resourcesRemoved: !failedCleanup,
         });
         if (failedCleanup) expect(fs.existsSync(swift[0].settings.default)).toBe(true);
+        if (cleanupFailure === "keychain-retained") {
+          expect(result.stderr).toContain("Settings Keychain retirement is unverified");
+          if (failCandidate) {
+            expect(result.stderr).toContain("Actual talk.config producer failed (exit 41)");
+          }
+        }
       } finally {
         // All synthetic children joined; this test owns the deliberately retained root.
         if (failedCleanup) fs.rmSync(ownedRoot, { recursive: true, force: true });

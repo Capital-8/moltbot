@@ -917,7 +917,7 @@ class Proof:
         info["committedResolutionMatches"] = before == after
         if name != "fixed":
             require(before == after, f"{name}: committed resolution changed")
-        args = ["swift", "build", "--build-system", "swiftbuild", "--package-path", package, "-c", "debug", "--product", "openclaw-mlx-tts", "--build-path", build, "--arch", "arm64", "--jobs", "1"]
+        args = ["swift", "build", "--build-system", "swiftbuild", "--package-path", package, "-c", "debug", "--product", "openclaw-mlx-tts", "--build-path", build, "--arch", "arm64", "--disable-index-store", "-Xswiftc", "-gline-tables-only"]
         started = time.monotonic()
         self.command(args, 480)
         binary_dir = Path(self.command(args + ["--show-bin-path"], 30).splitlines()[-1])
@@ -932,7 +932,7 @@ class Proof:
         self.command(["swiftc", "-framework", "Metal", "-framework", "CoreGraphics", probe_source, "-o", probe], 60)
         self.command([probe, library, "optional"], 30)
         if name == "fixed":
-            self.command(["swift", "test", "--build-system", "swiftbuild", "--package-path", package, "-c", "debug", "--build-path", build, "--arch", "arm64", "--jobs", "1", "--filter", "MLXTTSHelperServiceTests"], 120)
+            self.command(["swift", "test", "--build-system", "swiftbuild", "--package-path", package, "-c", "debug", "--build-path", build, "--arch", "arm64", "--disable-index-store", "-Xswiftc", "-gline-tables-only", "--filter", "MLXTTSHelperServiceTests"], 120)
         require(before == {"manifest": digest(manifest), "lock": digest(lock)}, f"{name}: inputs changed during build/tests")
         return binary, library, probe
 
