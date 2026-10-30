@@ -76,10 +76,11 @@ async function openBuildDetails(page: Page) {
 
 async function assertFullBranchLabel(page: Page) {
   const branchValue = page
-    .locator(".settings-kv dt", { hasText: "Branch" })
-    .locator("xpath=following-sibling::dd[1]/code");
+    .locator(".about-build", { hasText: "Control UI" })
+    .locator(".about-build__branch");
   await branchValue.waitFor();
-  expect(await branchValue.textContent()).toBe(`${NORMALIZED_BRANCH}*`);
+  expect(await branchValue.getAttribute("title")).toBe(NORMALIZED_BRANCH);
+  expect(await branchValue.textContent()).toBe(`Branch ${NORMALIZED_BRANCH}*`);
 }
 
 suite.define(() => {

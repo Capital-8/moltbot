@@ -29,9 +29,7 @@ function render(
       buildId: "test",
       ...buildInfo,
     },
-    gatewayVersion: "2026.7.9",
-    copyState: "idle",
-    onCopyCommit: vi.fn(),
+    gateway: { version: "2026.7.9", commit: "abcdef0", builtAt: "2026-07-09T08:07:00.000Z" },
     clawdWaving: false,
     onPokeClawd: vi.fn(),
     ...overrides,
@@ -86,68 +84,61 @@ it("renders the hero, links, license, and Clawd's active wave", () => {
   expect(query(".about-footer")?.textContent).toContain("MIT License");
 });
 
-it("keeps version, commit, branch, and localized UTC build date in one facts grid", async () => {
+it("renders the Control UI and Gateway as matching identity-rail entries", async () => {
   const { query } = render();
-  const facts = query(".settings-kv");
-  const values = facts?.querySelectorAll("dd");
-  expect(facts).toMatchObject({ tagName: "DL", ariaLabel: "Control UI build details" });
-  expect(facts?.hasAttribute("role")).toBe(false);
-  expect(facts?.classList.contains("about-build-grid")).toBe(true);
-  expect(values).toHaveLength(4);
-  expect(values?.[0]?.textContent).toContain("2026.7.10");
-  expect(values?.[1]?.querySelector("code")).toMatchObject({
-    textContent: COMMIT.slice(0, 12),
+  const rail = query(".settings-group dl.about-builds");
+  expect(rail?.getAttribute("aria-label")).toBe("Build information");
+  const entries = Array.from(rail?.querySelectorAll(":scope > .about-build") ?? []);
+  expect(entries.map((entry) => entry.querySelector("dt")?.textContent)).toEqual([
+    "Control UI",
+    "Gateway",
+  ]);
+  const [ui, gateway] = entries;
+  expect(ui?.querySelector(".about-build__version")?.textContent).toBe("Version 2026.7.10");
+  expect(ui?.querySelector(".about-build__commit code")).toMatchObject({
+    textContent: `Commit ${COMMIT.slice(0, 7)}`,
     title: COMMIT,
     dir: "ltr",
   });
-  const commitAge = values?.[1]?.querySelector("time.about-commit__age");
-  expect(commitAge).toMatchObject({
-    dateTime: COMMIT_AT,
-    nextElementSibling: { tagName: "OPENCLAW-TOOLTIP" },
-  });
-  expect(commitAge?.textContent?.trim()).not.toBe("");
-  expect(values?.[2]?.textContent).toContain("feature/build-chip*");
-  const time = values?.[3]?.querySelector("time");
-  expect(time).toMatchObject({ dateTime: BUILT_AT, title: BUILT_AT, dir: "auto" });
+  expect(ui?.querySelector(".about-build__branch")?.textContent).toContain("feature/build-chip*");
+  expect(gateway?.querySelector(".about-build__version")?.textContent).toBe("Version 2026.7.9");
+  expect(gateway?.querySelector(".about-build__commit code")?.textContent).toBe("Commit abcdef0");
+  for (const entry of entries) {
+    expect(entry.querySelector(".about-build__commit button")?.getAttribute("aria-label")).toBe(
+      "Copy full commit hash",
+    );
+  }
+  const uiTime = ui?.querySelector(".about-build__meta time");
+  expect(uiTime).toMatchObject({ dateTime: BUILT_AT, title: BUILT_AT, dir: "auto" });
   for (const locale of ["en", "de"] as const) {
     await i18n.setLocale(locale);
     flush();
-    const day = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" });
-    expect(time?.textContent).toBe(day.format(new Date(BUILT_AT)));
-    expect(commitAge?.getAttribute("title")).toBe(
-      new Date(COMMIT_AT).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }),
-    );
+    const stamp = new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    });
+    const label = uiTime?.querySelector(".sr-only")?.textContent ?? "";
+    expect(uiTime?.textContent).toBe(`${label}${stamp.format(new Date(BUILT_AT))}`);
   }
+  // Labels stay available to assistive technology without visible helper copy.
+  expect(rail?.querySelectorAll(".sr-only")).not.toHaveLength(0);
+  expect(query(".settings-section__desc")).toBeNull();
 });
 
-it("keeps the commit hash without an age when no commit timestamp is embedded", () => {
-  const { query } = render({}, { commitAt: null });
-  expect(query(".about-commit code")?.textContent).toBe(COMMIT.slice(0, 12));
-  expect(query(".about-commit__age")).toBeNull();
-});
-
-it("copies the full commit while announcing success accessibly", () => {
-  const { query, props } = render({ copyState: "copied" });
-  const button = query<HTMLButtonElement>(".about-commit button");
-  expect(button?.getAttribute("aria-label")).toBe("Commit hash copied");
-  expect(query("[role='status']")?.textContent?.trim()).toBe("Commit hash copied");
-  button?.click();
-  expect(props.onCopyCommit).toHaveBeenCalledOnce();
-});
-
-it("states when artifact identity and Gateway version are unavailable", () => {
-  const { container, query } = render(
-    { gatewayVersion: null },
-    {
-      version: null,
-      commit: null,
-      commitAt: null,
-      builtAt: null,
-      branch: null,
-    },
+it("omits unknown facts and marks a disconnected Gateway unavailable", () => {
+  const { container } = render(
+    { gateway: { version: null, commit: null, builtAt: null } },
+    { commit: null, builtAt: null, branch: null },
   );
-  expect(container.querySelectorAll(".settings-kv .muted")).toHaveLength(3);
-  expect(query(".settings-row__value")?.textContent).toContain("Unavailable");
-  expect(query(".about-commit button")).toBeNull();
-  expect(container.textContent).not.toContain("Unknown build");
+  const [ui, gateway] = Array.from(container.querySelectorAll(".about-build"));
+  expect(ui?.querySelector(".about-build__version")?.textContent).toBe("Version 2026.7.10");
+  expect(ui?.querySelector(".about-build__commit")).toBeNull();
+  expect(ui?.querySelector(".about-build__meta")).toBeNull();
+  expect(gateway?.querySelector("dd")?.textContent).toBe("Unavailable");
+  expect(container.querySelector(".about-build button")).toBeNull();
 });
