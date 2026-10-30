@@ -5,6 +5,9 @@ import { controlUiBootEntryRoute, controlUiBootManifestKey } from "./control-ui-
 // These common interactions download beside the route, but evaluate only on use.
 // Include the nested option entries too: opening a menu must not start a second RTT.
 const sharedInteractionEntries = new Set([
+  "ui/src/pages/chat/components/chat-model-picker-panel.tsx",
+  "ui/src/pages/chat/components/chat-effort-picker-panel.tsx",
+  "ui/src/pages/chat/components/chat-composer-plus-menu-content.tsx",
   "ui/src/pages/chat/components/chat-composer-mention-menu-engine.ts",
   "ui/src/pages/chat/components/chat-composer-emoji-engine.ts",
   "ui/src/pages/chat/components/chat-composer-slash-menu.tsx",
@@ -18,6 +21,9 @@ const sharedInteractionEntries = new Set([
   "ui/src/components/app-sidebar-online.tsx",
 ]);
 const chatInteractionEntries = new Set([
+  "ui/src/pages/chat/components/chat-composer-microphone-menu.tsx",
+  "ui/src/pages/chat/components/chat-header-panel-menu-content.tsx",
+  "ui/src/pages/chat/components/chat-header-session-menu-content.tsx",
   "ui/src/pages/chat/chat-composer-capability-host.tsx",
   "ui/src/pages/chat/components/chat-context-breakdown.tsx",
   "ui/src/components/markdown-live.ts",
