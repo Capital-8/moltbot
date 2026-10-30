@@ -6,13 +6,10 @@ import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import { createTestPluginRegistry } from "../plugins/registry-runtime.test-helpers.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { createDeferredCore } from "../shared/deferred.js";
+import type { DecisionProviderV1 } from "./provider-types.js";
+import type { DecisionRuntimeV1 } from "./runtime-types.js";
 import { evaluateDecisionInRegistry, prepareDecisionProviderReload } from "./runtime.js";
-import type {
-  DecisionBatch,
-  DecisionProviderV1,
-  DecisionRuntimeV1,
-  ProviderDecisionOutcome,
-} from "./types.js";
+import type { DecisionBatch, ProviderDecisionOutcome } from "./types.js";
 
 export const batch: DecisionBatch = {
   state: { evidence: "synthetic" },
