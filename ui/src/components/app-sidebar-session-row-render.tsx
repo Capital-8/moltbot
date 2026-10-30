@@ -208,7 +208,6 @@ function renderRecentSessionRow(params: RecentSessionParams) {
             team() || (!subtitle() && !session().channelPresentation),
           "sidebar-session--archived": session().archived,
           "sidebar-recent-session--active": session().visuallyActive,
-          "sidebar-recent-session--unread": session().unread,
           "sidebar-recent-session--selected": host().selectedSessionKeys.has(session().key),
           "session-row-host--pinned": personallyPinned(),
           "session-row-host--running": running(),

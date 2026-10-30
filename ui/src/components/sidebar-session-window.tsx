@@ -132,10 +132,10 @@ export function createSidebarSessionWindow(
       const known = measured.get(input.row.key);
       const height = known?.signature === input.signature ? known.height : input.height;
       const item = { row: input.row, index, top, height };
-      top += height + 2;
+      top += height;
       return item;
     });
-    totalHeight = Math.max(0, top - 2);
+    totalHeight = top;
     const next = anchor && positions.find((item) => item.row.key === anchor.row.key);
     if (scroller && next && next.top !== anchor?.top) {
       scroller.scrollTop = margin + next.top + offset;
@@ -152,7 +152,7 @@ export function createSidebarSessionWindow(
       const style = getComputedStyle(scroller);
       // Unstyled hosts retain the estimate until CSS supplies the row minimum.
       const nextRowFloor =
-        Number.parseFloat(style.getPropertyValue("--sidebar-session-row-floor")) || 30;
+        Number.parseFloat(style.getPropertyValue("--sidebar-session-row-floor")) || 32;
       const nextLayout = [
         scroller.clientWidth,
         style.getPropertyValue("--control-ui-text-scale"),
@@ -252,8 +252,8 @@ export function createSidebarSessionWindow(
       0,
       inputs().reduce((height, input) => {
         const known = measured.get(input.row.key);
-        return height + (known?.signature === input.signature ? known.height : input.height) + 2;
-      }, -2),
+        return height + (known?.signature === input.signature ? known.height : input.height);
+      }, 0),
     );
   });
   return {
