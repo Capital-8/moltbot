@@ -4,11 +4,33 @@ import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
-import { runWorkflowShellScript } from "./ci-workflow.test-support.js";
+import {
+  quoteShell,
+  runWorkflowShellScript,
+  testNodeExecPath,
+} from "./ci-workflow.test-support.js";
 
 const temporary = useAutoCleanupTempDirTracker(afterEach);
 
 describe("workflow fixture child deadline", () => {
+  it("completes here-string input and redirected heredoc output handoff", () => {
+    // Stay below Bash's tempfile threshold so the pipe-backed path is exercised.
+    const input = "x".repeat(4 * 1024);
+    const result = runWorkflowShellScript(
+      [
+        `value="$(cat <<< '${input}')"`,
+        `${quoteShell(testNodeExecPath)} --input-type=module >> "$TMPDIR/outcome" <<'NODE'`,
+        'process.stdout.write("fixture-outcome=pass\\n");',
+        "NODE",
+        'printf "%s\\n" "${#value}"',
+        'cat "$TMPDIR/outcome"',
+      ].join("\n"),
+      { timeout: 1_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(`${input.length}\nfixture-outcome=pass\n`);
+  });
+
   it("supplies a finite positive deadline when the caller omits one", () => {
     const spawn = vi.spyOn(childProcess, "spawnSync");
     syncBuiltinESMExports();
@@ -29,7 +51,9 @@ describe("workflow fixture child deadline", () => {
       "trap '' TERM\necho fixture-ready\nwhile :; do :; done",
     ]) {
       expect(() => runWorkflowShellScript(script, { timeout: 500 })).toThrow(
-        /Workflow fixture command timed out after 500 ms: 'bash' .*run\.sh'\nfixture-ready/,
+        new RegExp(
+          `Workflow fixture command timed out after 500 ms: '${process.platform === "darwin" ? "/bin/bash" : "bash"}' .*run\\.sh'\\nfixture-ready`,
+        ),
       );
     }
   });
