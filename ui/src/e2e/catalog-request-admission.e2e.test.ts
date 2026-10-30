@@ -42,7 +42,11 @@ async function client(path: string) {
   const gateway = await installMockGateway(page, {
     ...fixture.scenario,
     operatorScopes: ["operator.read", "operator.admin"],
-    featureMethods: [...fixture.scenario.featureMethods!, "tools.catalog", "tools.effective"],
+    featureMethods: [
+      ...(fixture.scenario.featureMethods ?? []),
+      "tools.catalog",
+      "tools.effective",
+    ],
     models: [model("Initial fixture model")],
     methodResponses: {
       ...fixture.scenario.methodResponses,

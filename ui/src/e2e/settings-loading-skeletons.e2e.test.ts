@@ -146,6 +146,7 @@ suite.define(() => {
         agents: { entries: { main: { tools: { profile: "full" } } } },
       };
       const gateway = await installMockGateway(page, {
+        featureMethods: [...defaultControlUiFeatureMethods, "tools.catalog", "tools.effective"],
         heldMethods: ["tools.catalog", "tools.effective"],
         operatorScopes: ["operator.read"],
         featureMethods: [...defaultControlUiFeatureMethods, "tools.catalog", "tools.effective"],

@@ -678,7 +678,7 @@ suite.define(() => {
       if (terminalState === "error") {
         const readMatch = { key: "agent:main:main", unread: false };
         const readsBeforeError = (await gateway.getRequests("sessions.patch", readMatch)).length;
-        // Inspect terminal attention before the visible pane acknowledges it as read.
+        // Inspect the terminal result before the visible pane acknowledges it as read.
         await gateway.deferNext("sessions.patch", readMatch);
         await gateway.emitGatewayEvent("chat", {
           runId,
