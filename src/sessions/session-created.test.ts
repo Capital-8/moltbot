@@ -146,7 +146,7 @@ it.each(["per-sender", "global"] as const)(
   "coalesces creation bursts while preserving reminder capacity with scope=%s",
   async (scope) => {
     const cfg = { session: { scope } };
-    const queueKey = scope === "global" ? "agent:ops:global" : mainSessionKey;
+    const queueKey = scope === "global" ? '["ops","global"]' : mainSessionKey;
     const createIndexed = (index: number) =>
       create(
         { sessionId: `session-${index}`, label: `Task ${index}`, createdActor: undefined },

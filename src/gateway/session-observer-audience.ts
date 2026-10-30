@@ -76,7 +76,8 @@ export function createSessionObserverAudience(params: {
       return {
         agentId,
         dropIfSlow: true,
-        sessionKeys: messageSubscriberKeys(sessionKey, agentId),
+        sessionKeys: [sessionKey],
+        sessionSubscriptionKeys: messageSubscriberKeys(sessionKey, agentId),
         sessionSubscriptionVerified: true,
       };
     },

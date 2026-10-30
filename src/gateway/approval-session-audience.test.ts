@@ -212,3 +212,23 @@ it("scopes raw fallback aliases without changing explicit, unknown, or agent-les
     expect(resolveApprovalSourceStreamKey(key, agent), key).toBe(expected);
   }
 });
+
+it("keeps raw and literal global lineage distinct before projecting legacy audiences", async () => {
+  graph = {
+    global: stored("raw-parent"),
+    "agent:work:global": stored("literal-parent"),
+    "agent:work:raw-parent": { stored: {} },
+    "agent:work:literal-parent": { stored: {} },
+  };
+  expect(await audience("global")).toEqual(["agent:work:global", "agent:work:raw-parent"]);
+  expect(await audience("agent:work:global")).toEqual([
+    "agent:work:global",
+    "agent:work:literal-parent",
+  ]);
+  expect(
+    await resolveApprovalSessionAudienceWithFallback("global", "work", { exact: true }),
+  ).toEqual([JSON.stringify(["work", "global"]), "agent:work:raw-parent"]);
+  expect(
+    await resolveApprovalSessionAudienceWithFallback("agent:work:global", "work", { exact: true }),
+  ).toEqual(["agent:work:global", "agent:work:literal-parent"]);
+});

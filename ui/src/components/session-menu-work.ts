@@ -7,8 +7,11 @@ import type { GatewayBrowserClient } from "../api/gateway.ts";
 import { isNativeLocalGateway } from "../app/native-editor-locality.runtime.ts";
 import { canCallGatewayMethod } from "../lib/gateway-methods.ts";
 import { primarySessionPullRequest } from "../lib/session-pull-request-presentation.ts";
-import { sessionPullRequestsForGateway } from "../lib/session-pull-requests.ts";
-import { parseAgentSessionKey, scopedSessionArtifactKey } from "../lib/sessions/session-key.ts";
+import {
+  sessionPullRequestsForGateway,
+  sessionPullRequestSelection,
+} from "../lib/session-pull-requests.ts";
+import { parseAgentSessionKey } from "../lib/sessions/session-key.ts";
 import type { SidebarRecentSession } from "./app-sidebar-session-types.ts";
 import type { SessionMenuWork } from "./session-menu-solid.tsx";
 import type { SidebarMenusOwner } from "./sidebar-menus-types.ts";
@@ -112,7 +115,7 @@ export function createSessionMenuWork(
     }
     const { selectedAgentId } = host.getSessionNavigationState();
     const store = (sessionMenuWorkStore = sessionPullRequestsForGateway(context.gateway));
-    const pullRequestKey = scopedSessionArtifactKey(
+    const pullRequestKey = sessionPullRequestSelection(
       session.key,
       parseAgentSessionKey(session.key)?.agentId ?? selectedAgentId,
     );

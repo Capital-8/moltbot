@@ -95,11 +95,7 @@ import {
   setEmbeddedQuestionBroker,
 } from "../infra/embedded-question-broker.js";
 import { GatewayScheduler } from "../infra/gateway-scheduler.js";
-import {
-  agentSessionKeysMatchByRequestKey,
-  isIncognitoSessionKey,
-  normalizeAgentId,
-} from "../routing/session-key.js";
+import { isIncognitoSessionKey, normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { getSessionControllerOperation } from "../sessions/session-controller.state.js";
 import { captureSessionTarget } from "../sessions/session-controller.target.js";
@@ -145,6 +141,7 @@ import type {
   TuiImageData,
 } from "./tui-backend.js";
 import { formatTuiErrorMessage } from "./tui-formatters.js";
+import { matchesTuiSessionSelection } from "./tui-session-events.js";
 
 export class EmbeddedTuiBackend implements TuiBackend {
   readonly connection = { url: "local embedded" };
@@ -488,8 +485,10 @@ export class EmbeddedTuiBackend implements TuiBackend {
       ([, run]) =>
         !run.question &&
         run.terminalState !== "final" &&
-        agentSessionKeysMatchByRequestKey(run.sessionKey, opts.sessionKey) &&
-        normalizeAgentId(run.agentId) === normalizeAgentId(sessionAgentId),
+        matchesTuiSessionSelection(
+          { currentSessionKey: run.sessionKey, currentAgentId: normalizeAgentId(run.agentId) },
+          { sessionKey: opts.sessionKey, agentId: normalizeAgentId(sessionAgentId) },
+        ),
     );
     const inFlightRun = newestInFlightRun
       ? {

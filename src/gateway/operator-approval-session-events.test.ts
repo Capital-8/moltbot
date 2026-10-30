@@ -5,6 +5,9 @@ import { MessagePort } from "node:worker_threads";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
+import * as registryState from "../agents/subagents/registry/subagent-registry-state.js";
+import { captureRuntimeConfigAsyncReader } from "../config/io.js";
+import { replaceSessionEntry } from "../config/sessions/session-accessor.sqlite-entry.js";
 import { onAgentEvent, type AgentEventPayload } from "../infra/agent-events.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import { createSqliteWorkerWriteAdmission } from "../infra/sqlite-worker-store.js";
@@ -19,100 +22,32 @@ import {
 import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
 import * as stateWorkerStore from "../state/openclaw-state-worker-store.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import * as approvalAudience from "./approval-session-audience.js";
 import { ExecApprovalManager, type ExecApprovalRecord } from "./exec-approval-manager.js";
 import { installTestApprovalClock } from "./exec-approval-manager.test-support.js";
-import { createOperatorApprovalSessionEventRuntime } from "./operator-approval-session-events.js";
 import {
   createClient,
   createPendingRecord,
+  createRuntimeFactory,
   createTerminalRecord,
+  insertPendingApproval,
   PARENT_SESSION_KEY,
   SOURCE_SESSION_KEY,
 } from "./operator-approval-session-events.test-support.js";
-import {
-  insertOperatorApproval,
-  resolveOperatorApproval,
-  type OperatorApprovalRecord,
-} from "./operator-approval-store.js";
+import { resolveOperatorApproval, type OperatorApprovalRecord } from "./operator-approval-store.js";
 import * as operatorApprovalStore from "./operator-approval-store.js";
-import type { GatewayBroadcastToConnIdsFn } from "./server-broadcast-types.js";
-import { createSessionMessageSubscriberRegistry } from "./server-chat-state.js";
 
 const SIBLING_SESSION_KEY = "agent:main:parent:sibling";
 const tempDirs: string[] = [];
 const subscriptions: Array<() => void> = [];
-type NewOperatorApproval = Parameters<typeof insertOperatorApproval>[0]["approval"];
+const createRuntime = createRuntimeFactory(subscriptions);
 
 function createDatabaseOptions(): OpenClawStateDatabaseOptions {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-events-"));
   tempDirs.push(stateDir);
   vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
   return { env: { ...process.env, OPENCLAW_STATE_DIR: stateDir } };
-}
-
-function createRuntime(
-  params: Omit<
-    Parameters<typeof createOperatorApprovalSessionEventRuntime>[0],
-    "sessionMessageSubscribers" | "broadcastToConnIds"
-  > & { now?: () => number },
-) {
-  const { now = Date.now, ...runtimeParams } = params;
-  vi.spyOn(Date, "now").mockImplementation(now);
-  const subscribers = createSessionMessageSubscriberRegistry();
-  const broadcastToConnIds = vi.fn<GatewayBroadcastToConnIdsFn>();
-  const runtime = createOperatorApprovalSessionEventRuntime({
-    ...runtimeParams,
-    sessionMessageSubscribers: subscribers,
-    broadcastToConnIds,
-  });
-  return {
-    broadcastToConnIds,
-    runtime: {
-      ...runtime,
-      replay: async (...args: Parameters<typeof runtime.replay>) => {
-        const prepared = await runtime.replay(...args);
-        subscriptions.push(prepared.release);
-        return prepared;
-      },
-    },
-    subscribers,
-  };
-}
-
-async function insertPendingApproval(params: {
-  databaseOptions: OpenClawStateDatabaseOptions;
-  id: string;
-  audienceSessionKeys?: string[];
-  createdAtMs?: number;
-  expiresAtMs?: number;
-  reviewerDeviceIds?: string[];
-}): Promise<OperatorApprovalRecord> {
-  const record = createPendingRecord({
-    audienceSessionKeys: [SOURCE_SESSION_KEY],
-    createdAtMs: 1_000,
-    expiresAtMs: 10_000,
-    ...params,
-  });
-  const approval: NewOperatorApproval = {
-    id: record.id,
-    kind: record.kind,
-    presentation: record.presentation,
-    requester: record.requester,
-    reviewerDeviceIds: params.reviewerDeviceIds ?? record.reviewerDeviceIds,
-    source: record.source,
-    audienceSessionKeys: record.audienceSessionKeys,
-    runtimeEpoch: record.runtimeEpoch,
-    createdAtMs: record.createdAtMs,
-    expiresAtMs: record.expiresAtMs,
-  };
-  const inserted = await insertOperatorApproval({
-    approval,
-    databaseOptions: params.databaseOptions,
-  });
-  if (inserted.outcome !== "inserted") {
-    throw new Error(`expected approval '${params.id}' to be inserted`);
-  }
-  return inserted.record;
 }
 
 function createReviewer(connId = "reviewer", deviceId = "reviewer-device") {
@@ -147,6 +82,220 @@ describe("operator approval session events", () => {
     for (const dir of tempDirs.splice(0)) {
       fs.rmSync(dir, { force: true, recursive: true });
     }
+  });
+
+  it.each(["raw", "literal", "pair", "retired"])(
+    "preserves live approval delivery for the %s global selection",
+    async (kind) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
+        await captureRuntimeConfigAsyncReader()();
+        const literal = "agent:main:global";
+        const rawIndex = JSON.stringify(["main", "global"]);
+        for (const sessionKey of kind === "literal"
+          ? [literal]
+          : kind === "pair"
+            ? ["global", literal]
+            : ["global"]) {
+          await replaceSessionEntry(
+            { agentId: "main", sessionKey },
+            {
+              sessionId:
+                sessionKey === (kind === "literal" ? literal : "global")
+                  ? "private-session-id"
+                  : "sibling-session-id",
+              updatedAt: 1,
+            },
+          );
+        }
+        const clients = [createReviewer("raw"), createReviewer("legacy")];
+        const record = createPendingRecord({
+          sourceSessionKey: kind === "literal" ? literal : "global",
+          audienceSessionKeys: [literal],
+          createdAtMs: 1_000,
+          expiresAtMs: 10_000,
+        });
+        const live = {
+          id: record.id,
+          request: record.source,
+          createdAtMs: 1_000,
+          expiresAtMs: 10_000,
+        };
+        let active = true;
+        const harness = createRuntime({
+          clients,
+          now: () => 2_000,
+          getLiveManager: () => ({
+            runtimeEpoch: record.runtimeEpoch,
+            getLiveSnapshot: () => live,
+            isPending: () => active,
+          }),
+        });
+        harness.subscribers.subscribe("raw", rawIndex, { includeApprovals: true });
+        harness.subscribers.subscribe("legacy", literal, { includeApprovals: true });
+        harness.runtime.publish({ phase: "pending", record });
+        if (kind === "retired") {
+          active = false;
+        }
+        await harness.drainPublications();
+        if (kind === "retired") {
+          expect(harness.broadcastToConnIds).not.toHaveBeenCalled();
+        } else if (kind === "pair") {
+          expect(
+            harness.broadcastToConnIds.mock.calls.map(([event, payload, recipients, options]) => [
+              event,
+              payload,
+              [...recipients],
+              options?.sessionKeys,
+            ]),
+          ).toEqual([
+            [
+              "sessions.changed",
+              { sessionKey: "global", agentId: "main", reason: "approval" },
+              ["raw"],
+              ["global"],
+            ],
+            [
+              "sessions.changed",
+              { sessionKey: literal, agentId: "main", reason: "approval" },
+              ["legacy"],
+              [literal],
+            ],
+          ]);
+        } else {
+          expect(harness.broadcastToConnIds).toHaveBeenCalledExactlyOnceWith(
+            "session.approval",
+            expect.objectContaining({
+              sessionKey: literal,
+              phase: "pending",
+              approval: expect.objectContaining({ id: record.id }),
+            }),
+            new Set(kind === "raw" ? ["raw", "legacy"] : ["legacy"]),
+            expect.objectContaining({ sessionKeys: [kind === "raw" ? "global" : literal] }),
+          );
+        }
+      });
+    },
+  );
+
+  it("reuses a current direct global replay without depending on ancestor availability", async () => {
+    const databaseOptions = createDatabaseOptions();
+    const record = await insertPendingApproval({
+      databaseOptions,
+      id: "direct-global",
+      sourceSessionKey: "global",
+      audienceSessionKeys: ["agent:main:global"],
+    });
+    const live = {
+      id: record.id,
+      request: record.source,
+      createdAtMs: record.createdAtMs,
+      expiresAtMs: record.expiresAtMs,
+    };
+    let active = true;
+    const reviewer = createReviewer();
+    const { runtime } = createRuntime({
+      clients: [reviewer],
+      now: () => 2_000,
+      getLiveManager: () => ({
+        runtimeEpoch: record.runtimeEpoch,
+        getLiveSnapshot: () => live,
+        isPending: () => active,
+      }),
+    });
+    const ancestors = vi
+      .spyOn(approvalAudience, "resolveApprovalSessionAudienceWithFallback")
+      .mockRejectedValue(new Error("Higher ancestor unavailable"));
+    vi.spyOn(registryState, "getSubagentSessionListReadSnapshotIdentity").mockImplementation(() => {
+      throw new Error("Unrelated registry is unavailable");
+    });
+    const reads = vi.spyOn(operatorApprovalStore, "prepareOperatorApprovalReplay");
+    const selection = { sessionKey: "global", agentId: "main" };
+    const first = await runtime.replay("agent:main:global", reviewer, selection);
+    first.release();
+    const reconnected = await runtime.replay("agent:main:global", reviewer, selection);
+    expect(reconnected.replay).toMatchObject({
+      sessionKey: "global",
+      truncated: false,
+      approvals: [{ id: record.id }],
+    });
+    expect(reads).toHaveBeenCalledOnce();
+    expect(ancestors).not.toHaveBeenCalled();
+    active = false;
+    expect(reconnected.isCurrent()).toBe(false);
+  });
+
+  it("refreshes global audiences without disclosing sibling cards and replays exact selections", async () => {
+    const databaseOptions = createDatabaseOptions();
+    const keys = ["global", "agent:main:global"];
+    const indexes = [JSON.stringify(["main", "global"]), keys[1]!];
+    const records = await Promise.all(
+      keys.map((sourceSessionKey, index) =>
+        insertPendingApproval({
+          databaseOptions,
+          id: `global-${index}`,
+          sourceSessionKey,
+          audienceSessionKeys: [keys[1]!],
+        }),
+      ),
+    );
+    await insertPendingApproval({
+      databaseOptions,
+      id: "stale-sibling",
+      sourceSessionKey: "agent:main:stale",
+      audienceSessionKeys: [keys[1]!],
+    });
+    const live: ExecApprovalRecord<unknown>[] = records.map((record) => ({
+      id: record.id,
+      request: record.source,
+      createdAtMs: record.createdAtMs,
+      expiresAtMs: record.expiresAtMs,
+    }));
+    let current = true;
+    const reviewer = createReviewer();
+    const { runtime, subscribers, broadcastToConnIds } = createRuntime({
+      clients: [reviewer],
+      now: () => 2_000,
+      getLiveManager: () => ({
+        runtimeEpoch: records[0]!.runtimeEpoch,
+        getLiveSnapshot: (id) => live.find((record) => record.id === id) ?? null,
+        isPending: (record) => current && live.includes(record),
+      }),
+    });
+    // The audience owner is tested against real lineage separately; this boundary
+    // proves exact selection and disclosure over the real persisted candidate bucket.
+    vi.spyOn(approvalAudience, "resolveApprovalSessionAudienceWithFallback").mockImplementation(
+      async (key) => (keys.includes(key) ? [indexes[keys.indexOf(key)]!] : []),
+    );
+    for (const key of indexes) {
+      subscribers.subscribe(reviewer.connId!, key, { includeApprovals: true });
+    }
+    runtime.publish({ phase: "pending", record: records[0]! });
+    await vi.waitFor(() => expect(broadcastToConnIds).toHaveBeenCalledTimes(2));
+    expect(
+      broadcastToConnIds.mock.calls.map(([event, payload, , options]) => [
+        event,
+        payload,
+        options?.sessionKeys,
+      ]),
+    ).toEqual(
+      keys.map((key) => [
+        "sessions.changed",
+        { sessionKey: key, agentId: "main", reason: "approval" },
+        [key],
+      ]),
+    );
+    const prepared = await Promise.all(
+      keys.map((sessionKey) => runtime.replay(keys[1]!, reviewer, { sessionKey, agentId: "main" })),
+    );
+    expect(
+      prepared.map(({ replay }) => [replay.sessionKey, replay.approvals.map(({ id }) => id)]),
+    ).toEqual([
+      [keys[0], [records[0]!.id]],
+      [keys[1], [records[1]!.id]],
+    ]);
+    expect(prepared.every(({ replay }) => !replay.truncated)).toBe(true);
+    current = false;
+    expect(prepared.every((snapshot) => !snapshot.isCurrent())).toBe(true);
   });
 
   it.each(["pending", "terminal"] as const)(
@@ -819,7 +968,11 @@ describe("operator approval session events", () => {
       expiresAtMs: record.expiresAtMs,
     };
     let managerAvailable = true;
-    const manager = { runtimeEpoch: record.runtimeEpoch, getLiveSnapshot: () => live };
+    const manager = {
+      runtimeEpoch: record.runtimeEpoch,
+      getLiveSnapshot: () => live,
+      isPending: () => true,
+    };
     const runtime = createRuntime({
       clients: [],
       getLiveManager: () => (managerAvailable ? manager : undefined),

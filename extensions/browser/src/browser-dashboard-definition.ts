@@ -92,7 +92,7 @@ export async function readBrowserDashboardDefinition(
   }
   const props = parsedProps.data;
   return {
-    sessionKey: snapshot.sessionKey,
+    sessionKey: request.sessionKey.trim() === "global" ? "global" : snapshot.sessionKey,
     agentId,
     name: widget.name,
     instanceId: widget.instanceId,

@@ -29,6 +29,7 @@ import { ADMIN_SCOPE, READ_SCOPE } from "./operator-scopes.js";
 import type { GatewayBroadcastOpts } from "./server-broadcast-types.js";
 import type { SessionRowProjection } from "./session-row-projection.js";
 import { canReceiveSessionEvent } from "./session-sharing.js";
+import { resolveSessionSubscriptionKey } from "./session-subscription-keys.js";
 import type { SessionViewerPresenceDeclarations } from "./session-viewer-presence.js";
 import {
   listCurrentWebPushTargets,
@@ -187,7 +188,11 @@ export function createEventWebPushDelivery(
             ...(mention ? { visibilityScopes: [ADMIN_SCOPE] } : {}),
           });
           // Only an unambiguous session can be matched against one device's viewer declarations.
-          const viewedSessionKey = sessionKeys.length === 1 ? sessionKeys[0] : undefined;
+          const viewedSession = sessionKeys.length === 1 ? sessionKeys[0] : undefined;
+          const viewedSessionKey =
+            viewedSession && agentId
+              ? resolveSessionSubscriptionKey(viewedSession, agentId)
+              : viewedSession;
           const agentLabel = normalizeWebPushDisplayLabel(agentId);
           const agentIcon = currentWebPushAgentIcon(cfg, preparedIcon);
           const groups = new Map<

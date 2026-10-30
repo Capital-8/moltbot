@@ -104,7 +104,7 @@ export const handleSessionBrowserGatewayRequest: GatewayRequestHandlers[string] 
         }
         const { response, resource } = await accessSessionBrowserDashboard(
           {
-            sessionKey: params.sessionKey,
+            sessionKey: authority.target.sessionKey,
             agentId: authority.target.agentId,
             name: identity.name,
             instanceId: identity.instanceId,

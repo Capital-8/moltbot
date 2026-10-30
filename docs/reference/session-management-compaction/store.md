@@ -11,17 +11,16 @@ title: "Session state on disk"
 1. **Session rows (per-agent SQLite)** - key/value map `sessionKey -> SessionEntry`. Mutable runtime state owned by the Gateway. Tracks metadata: current session id, last activity, toggles, token counters.
 2. **Transcript events (per-agent SQLite)** - append-only, tree-structured (entries have `id` + `parentId`). Stores the conversation, tool calls, and compaction summaries; rebuilds model context for future turns. Compaction summaries and available token measurements remain in the transcript without a separate checkpoint record or snapshot copy.
 
-Guarded transcript turns retain the selected stored key and session window. A
-qualified identity such as `agent:main:global` can append to its existing raw
-`global` row without renaming it or creating another row. If both spellings
-already exist, the write refuses the ambiguous selection; exact reads keep the
-two stored addresses separate. This also applies to retained history windows.
+Guarded transcript turns retain the selected stored key, session ID, and window.
+When both raw `global` and literal `agent:<agentId>:global` already exist, an
+explicit selection continues its original row without renaming or merging
+history. A supplied key and session ID must identify the same stored chat,
+including retained history windows.
 
-New chat turns use a qualified admission identity while retaining the selected
-stored key and database. If a raw `global` or `unknown` row and its qualified
-spelling would share that identity, chat execution refuses the ambiguous
-selection, including when the raw row has not been created yet. Choose an
-unambiguous session; the existing rows and history are not merged or renamed.
+New chat admission still refuses creating a missing raw `global` beside an
+occupied qualified spelling. The `unknown` sentinel retains its existing
+ambiguity guard. Existing global chats use their exact selected row for queued
+work, transcript writes, and cleanup; ordinary request aliases remain unchanged.
 Completed-send retries still return their recorded result. Read-only history and
 stored parent, spawn, and fork references keep their physical addresses.
 Input persistence and queued-input cleanup stay bound to the admitted database;

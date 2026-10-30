@@ -4,6 +4,7 @@ import {
   validateSessionTypingParams,
   type SessionTypingEvent,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { presenceUserKey } from "../../shared/presence-user.js";
 import { hasOperatorBoundary } from "../operator-role-policy.js";
 import { sessionObserverScopeKey } from "../session-observer-model.js";
@@ -23,7 +24,10 @@ import {
   prepareProjectedSessionSharing,
   resolveSessionVisibility,
 } from "../session-sharing.js";
-import { resolveSessionSubscriptionKeys as subscriptionKeys } from "../session-subscription-keys.js";
+import {
+  resolveSessionSubscriptionKey,
+  resolveSessionSubscriptionKeys as subscriptionKeys,
+} from "../session-subscription-keys.js";
 import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
 import {
   broadcastTypingThrottled,
@@ -191,7 +195,14 @@ export const sessionTypingHandler: GatewayRequestHandlers[string] = async ({
       ) {
         return false;
       }
-      const liveIdentities = liveViewerIdentities(sessionKeys);
+      const isGlobal =
+        current.canonicalKey === "global" ||
+        parseAgentSessionKey(current.canonicalKey)?.rest === "global";
+      const liveIdentities = isGlobal
+        ? (context.sessionViewerPresence?.liveViewerIdentities(
+            resolveSessionSubscriptionKey(current.canonicalKey, current.agentId),
+          ) ?? new Set<string>())
+        : liveViewerIdentities(sessionKeys);
       const actorKey = presenceUserKey({
         id: actor.id,
         identity: { type: "profile", id: actor.id },
@@ -210,7 +221,8 @@ export const sessionTypingHandler: GatewayRequestHandlers[string] = async ({
         ts: Date.now(),
       };
       context.broadcast("session.typing", event, {
-        sessionKeys: subscriptionKeys(
+        sessionKeys: [current.canonicalKey],
+        sessionSubscriptionKeys: subscriptionKeys(
           current.canonicalKey,
           current.agentId,
           current.canonicalKey === "global"

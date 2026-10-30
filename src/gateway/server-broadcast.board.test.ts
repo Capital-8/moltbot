@@ -408,13 +408,13 @@ describe("collaboration event scope guards", () => {
     {
       name: "global chat owners",
       event: "chat",
-      keys: ["agent:work:global", "agent:main:global", "global"],
+      keys: ['["work","global"]', '["main","global"]', "global", "agent:work:global"],
       allowed: [0],
     },
     {
       name: "capability-free Browser Copilot",
       event: "chat",
-      keys: ["agent:work:global", "agent:other:global"],
+      keys: ['["work","global"]', '["other","global"]', "agent:work:global"],
       allowed: [0],
     },
   ])("subscription-gates $name", ({ name, event, keys, allowed }) => {
@@ -445,7 +445,8 @@ describe("collaboration event scope guards", () => {
       );
     } else {
       broadcaster.broadcast(event, payload, {
-        sessionKeys: resolveSessionSubscriptionKeys("global", "work", "main"),
+        sessionKeys: ["global"],
+        sessionSubscriptionKeys: resolveSessionSubscriptionKeys("global", "work", "main"),
         agentId: "work",
       });
     }
@@ -457,7 +458,7 @@ describe("collaboration event scope guards", () => {
   it("preserves event-only recipients selected by the critical observer audience", () => {
     const { peers, subscribers } = scopedPeers(
       ["message", "event-only", "unrelated"],
-      ["agent:main:global"],
+      ['["main","global"]'],
     );
     const [message, eventOnly, unrelated] = peers;
     const { broadcastToConnIds } = subscriberBroadcaster(peers, subscribers);

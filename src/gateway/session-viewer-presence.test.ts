@@ -88,6 +88,45 @@ describe("session viewer presence declarations", () => {
     expect(publishPresence).toHaveBeenCalledTimes(4);
   });
 
+  it("retains exact global selection while public hints stay equal", () => {
+    const { declarations, client, clients, row, publishPresence } = createDeclarations();
+    const literal = "agent:main:global";
+    const raw = '["main","global"]';
+    clients.add({
+      ...client,
+      connId: "conn-b",
+      presenceKey: "viewer-other",
+      authenticatedUserId: "other@timing.test",
+    });
+    client.connect = {
+      ...client.connect,
+      device: { id: "phone", publicKey: "key", signature: "sig", signedAt: 1, nonce: "n" },
+    };
+    declarations.replace("conn-a", [literal], [raw]);
+    declarations.replace("conn-b", [literal], [literal]);
+    expect(row()?.watchedSessions).toEqual([literal]);
+    expect(declarations.isViewedOnDevice("phone", raw)).toBe(true);
+    expect(declarations.isViewedOnDevice("phone", literal)).toBe(false);
+    expect(declarations.liveViewerIdentities(raw)).toEqual(new Set(["raw:viewer@timing.test"]));
+    expect(declarations.liveViewerIdentities(literal)).toEqual(new Set(["raw:other@timing.test"]));
+    const published = publishPresence.mock.calls.length;
+    declarations.replace("conn-a", [literal], [literal]);
+    expect(publishPresence).toHaveBeenCalledTimes(published);
+    expect(declarations.isViewedOnDevice("phone", raw)).toBe(false);
+    expect(declarations.isViewedOnDevice("phone", literal)).toBe(true);
+    expect(declarations.liveViewerIdentities(raw).size).toBe(0);
+    expect(declarations.liveViewerIdentities(literal).size).toBe(2);
+    client.invalidated = true;
+    expect(declarations.liveViewerIdentities(literal)).toEqual(new Set(["raw:other@timing.test"]));
+    declarations.unsubscribe("conn-b");
+    expect(declarations.liveViewerIdentities(literal).size).toBe(0);
+    client.invalidated = false;
+    const closed = new AbortController();
+    client.connectionSignal = closed.signal;
+    closed.abort();
+    expect(declarations.liveViewerIdentities(literal).size).toBe(0);
+  });
+
   it("rejects declarations from inactive connections and after stop", () => {
     const { declarations, client, clients, publishPresence } = createDeclarations();
     client.invalidated = true;

@@ -255,6 +255,7 @@ type GatewayKernelContext = {
   listSessionPendingApprovals?: (
     sessionKey: string,
     client: GatewayClient | null,
+    selection?: { sessionKey: string; agentId: string },
   ) => Promise<PreparedSessionApprovalReplay>;
   loadGatewayModelCatalog: (params?: {
     agentId?: string;
@@ -652,8 +653,10 @@ export type GatewayBroadcastOpts = {
   dropIfSlow?: boolean;
   /** Omit a redundant projection for clients that advertise this capability. */
   excludeClientCapability?: GatewayClientCap;
-  /** Canonical subscription keys for session-scoped delivery. */
+  /** Real session keys used for authorization and row projection. */
   sessionKeys?: readonly string[];
+  /** Private recipient indexes; never selectors for storage or authorization. */
+  sessionSubscriptionKeys?: readonly string[];
   /** Producer-resolved exact subscription keys for traffic attribution; never changes recipients. */
   sessionEventSubscriptionKeys?: readonly string[];
   /** Prepared facts remain valid only during this synchronous publication. */

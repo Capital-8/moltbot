@@ -3,7 +3,7 @@ import { normalizeAgentId } from "../routing/session-key.js";
 
 export function resolveSessionSubscriptionKey(sessionKey: string, agentId: string): string {
   return normalizeLowercaseStringOrEmpty(sessionKey) === "global"
-    ? `agent:${normalizeAgentId(agentId)}:global`
+    ? JSON.stringify([normalizeAgentId(agentId), "global"])
     : sessionKey;
 }
 

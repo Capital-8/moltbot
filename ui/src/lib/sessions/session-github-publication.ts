@@ -1,7 +1,12 @@
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
+import { sessionPullRequestSelectionKey } from "../../../../src/gateway/control-ui-contract.js";
 import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 import { isGatewayMethodAdvertised } from "../gateway-methods.ts";
+import {
+  readSessionPullRequestUpdates,
+  sessionPullRequestSelection,
+} from "../session-pull-requests.ts";
 import type { GitHubPublicationOwner } from "./github-publication-owner.ts";
 import {
   readSessionChangedEvent,
@@ -9,11 +14,7 @@ import {
   reconcileSessionHistory,
 } from "./reconcile.ts";
 import type { createSessionDeletions } from "./session-deletions.ts";
-import {
-  isUiGlobalSessionKey,
-  resolveUiConversationIdentity,
-  scopedSessionArtifactKey,
-} from "./session-key.ts";
+import { isUiGlobalSessionKey, resolveUiConversationIdentity } from "./session-key.ts";
 import type {
   GitHubPublicationBinding,
   SessionConnectionOwner,
@@ -218,14 +219,14 @@ export function createSessionGitHubPublication(host: Host) {
       }
     },
     observePullRequests(payload: unknown) {
-      const snapshots = asNullableRecord(asNullableRecord(payload)?.sessions);
+      const snapshots = readSessionPullRequestUpdates(payload);
       if (!snapshots) {
         return;
       }
       for (const entry of entries.values()) {
-        const snapshot = asNullableRecord(
-          snapshots[scopedSessionArtifactKey(entry.row.key, entry.row.agentId)],
-        );
+        const { key, agentId } = entry.row;
+        const snapshot =
+          snapshots[sessionPullRequestSelectionKey(sessionPullRequestSelection(key, agentId))];
         if (snapshot?.status !== "ready" || !Array.isArray(snapshot.pullRequests)) {
           continue;
         }

@@ -1,3 +1,4 @@
+import { expectDefined } from "@openclaw/normalization-core";
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import type { SessionCatalogPullRequestSummary } from "../../../packages/gateway-protocol/src/schema/sessions-catalog.js";
 import type {
@@ -5,11 +6,13 @@ import type {
   ControlUiSessionPullRequests,
   ControlUiSessionPullRequestSnapshot,
   ControlUiSessionPullRequestsChanged,
+  ControlUiSessionPullRequestSelection as Selection,
 } from "../../../src/gateway/control-ui-contract.js";
 import {
   CONTROL_UI_SESSION_PULL_REQUESTS_CHANGED_EVENT,
   CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS,
   SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
+  sessionPullRequestSelectionKey as selectionKey,
 } from "../../../src/gateway/control-ui-contract.js";
 import { operatorScopeSatisfied } from "../../../src/shared/operator-scope-compat.js";
 import type { ApplicationGateway } from "../app/gateway.ts";
@@ -18,7 +21,21 @@ import { canCallGatewayMethod } from "./gateway-methods.ts";
 import { createGatewaySetSyncLifecycle } from "./gateway-set-sync-lifecycle.ts";
 import { primarySessionPullRequest } from "./session-pull-request-presentation.ts";
 import { readSessionChangedEvent } from "./sessions/reconcile.ts";
-import { uiSessionEventMatches } from "./sessions/session-key.ts";
+import {
+  parseAgentSessionKey,
+  scopedSessionArtifactKey,
+  uiSessionEventMatches,
+} from "./sessions/session-key.ts";
+
+/** Exact global selections must not inherit the legacy qualified-global alias. */
+export function sessionPullRequestSelection(sessionKey: string, agentId?: string): Selection {
+  const key = sessionKey.trim();
+  const parsed = parseAgentSessionKey(key);
+  const owner = parsed?.agentId ?? agentId;
+  return owner && (key.toLowerCase() === "global" || parsed?.rest === "global")
+    ? { sessionKey: key, agentId: owner }
+    : scopedSessionArtifactKey(key, agentId);
+}
 
 export function sessionGitHubRepository(
   snapshot: ControlUiSessionPullRequests | undefined,
@@ -54,29 +71,49 @@ const STRUCTURAL_SESSION_REASONS = new Set<unknown>([
 export type SessionPullRequestSnapshotStore = {
   watch: (
     owner: object,
-    sessionKeys: readonly string[],
+    sessionKeys: readonly Selection[],
     options?: { foreground?: boolean; passive?: boolean },
   ) => void;
   unwatch: (owner: object) => void;
   load: (
     owner: object,
-    sessionKey: string,
+    sessionKey: Selection,
   ) => Promise<ControlUiSessionPullRequestSnapshot | undefined>;
-  refresh: (sessionKey: string, options?: { automatic?: boolean }) => boolean;
-  get: (sessionKey: string) => ControlUiSessionPullRequestSnapshot | undefined;
+  refresh: (sessionKey: Selection, options?: { automatic?: boolean }) => boolean;
+  get: (sessionKey: Selection) => ControlUiSessionPullRequestSnapshot | undefined;
   subscribe: (listener: () => void) => () => void;
 };
 
 const stores = new WeakMap<ApplicationGateway, SessionPullRequestSnapshotStore>();
 
-function readChangedSessions(
+export function readSessionPullRequestUpdates(
   payload: unknown,
 ): ControlUiSessionPullRequestsChanged["sessions"] | null {
   if (!payload || typeof payload !== "object" || !("sessions" in payload)) {
     return null;
   }
   const sessions = (payload as { sessions?: unknown }).sessions;
-  return asNullableRecord(sessions) as ControlUiSessionPullRequestsChanged["sessions"] | null;
+  const legacy = asNullableRecord(sessions) as
+    | ControlUiSessionPullRequestsChanged["sessions"]
+    | null;
+  if (!legacy) {
+    return null;
+  }
+  const exact = (payload as ControlUiSessionPullRequestsChanged).exactSessions;
+  return Object.fromEntries([
+    ...Object.entries(legacy).map(([key, snapshot]) => [selectionKey(key), snapshot]),
+    ...(Array.isArray(exact)
+      ? exact
+          .filter(
+            (entry) =>
+              entry &&
+              typeof entry.sessionKey === "string" &&
+              typeof entry.agentId === "string" &&
+              asNullableRecord(entry.snapshot),
+          )
+          .map((entry) => [selectionKey(entry), entry.snapshot])
+      : []),
+  ]);
 }
 
 export function sessionPullRequestsForGateway(
@@ -88,9 +125,9 @@ export function sessionPullRequestsForGateway(
   }
   const watchedByOwner = new Map<
     object,
-    { keys: Set<string>; foreground: boolean; passive: boolean }
+    { keys: Map<string, Selection>; foreground: boolean; passive: boolean }
   >();
-  let orderedWatchedKeys: string[] | undefined;
+  let orderedWatch: { keys: string[]; selections: Map<string, Selection> } | undefined;
   let orderedRequestedKeys: string[] = [];
   let orderedPassiveKeys: string[] = [];
   const loadTokens = new WeakMap<object, object>();
@@ -136,42 +173,52 @@ export function sessionPullRequestsForGateway(
     }
   };
 
-  const matchesSession = (sessionKey: string, eventKey: string, agentId?: string | null) =>
-    uiSessionEventMatches(
+  const matchesSession = (key: string, eventKey: string, agentId?: string | null) => {
+    const selection = readWatchUnion().selections.get(key);
+    if (!selection) {
+      return false;
+    }
+    return uiSessionEventMatches(
       {
-        assistantAgentId: gateway.snapshot.assistantAgentId,
+        assistantAgentId:
+          typeof selection === "string" ? gateway.snapshot.assistantAgentId : selection.agentId,
         hello: gateway.snapshot.hello,
-        sessionKey,
+        sessionKey: typeof selection === "string" ? selection : selection.sessionKey,
       },
       eventKey,
       agentId,
     );
+  };
 
-  const watchedKeys = (): string[] => {
-    if (orderedWatchedKeys) {
-      return orderedWatchedKeys;
+  const readWatchUnion = () => {
+    if (orderedWatch) {
+      return orderedWatch;
     }
-    const keys = new Map<string, number>();
+    const keys = new Map<string, { priority: number; selection: Selection }>();
     for (const watched of watchedByOwner.values()) {
       if (watched.passive && !canReadAllPullRequests()) {
         continue;
       }
-      for (const key of watched.keys) {
+      for (const [key, selection] of watched.keys) {
         const priority = watched.passive ? 0 : watched.foreground ? 2 : 1;
-        keys.set(key, Math.max(keys.get(key) ?? 0, priority));
+        keys.set(key, { priority: Math.max(keys.get(key)?.priority ?? 0, priority), selection });
       }
     }
     const ordered = [...keys]
       .toSorted(
         ([leftKey, leftPriority], [rightKey, rightPriority]) =>
-          rightPriority - leftPriority || leftKey.localeCompare(rightKey),
+          rightPriority.priority - leftPriority.priority || leftKey.localeCompare(rightKey),
       )
       .slice(0, CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS);
-    orderedWatchedKeys = ordered.map(([key]) => key);
-    orderedRequestedKeys = ordered.filter(([, priority]) => priority > 0).map(([key]) => key);
-    orderedPassiveKeys = ordered.filter(([, priority]) => priority === 0).map(([key]) => key);
-    return orderedWatchedKeys;
+    orderedWatch = {
+      keys: ordered.map(([key]) => key),
+      selections: new Map(ordered.map(([key, value]) => [key, value.selection])),
+    };
+    orderedRequestedKeys = ordered.filter(([, value]) => value.priority > 0).map(([key]) => key);
+    orderedPassiveKeys = ordered.filter(([, value]) => value.priority === 0).map(([key]) => key);
+    return orderedWatch;
   };
+  const watchedKeys = () => readWatchUnion().keys;
 
   // Passive rows request only durable receipts; active viewers also poll Git/GitHub.
   const requestedKeys = () => {
@@ -234,7 +281,7 @@ export function sessionPullRequestsForGateway(
     const readScopeChanged = broadRead !== nextBroadRead;
     broadRead = nextBroadRead;
     if (changed || readScopeChanged) {
-      orderedWatchedKeys = undefined;
+      orderedWatch = undefined;
       retireConnection();
     }
     if (changed || readScopeChanged || snapshot.hello !== lifecycle.requestHello) {
@@ -305,7 +352,7 @@ export function sessionPullRequestsForGateway(
     if (event.event !== CONTROL_UI_SESSION_PULL_REQUESTS_CHANGED_EVENT) {
       return;
     }
-    const changed = readChangedSessions(event.payload);
+    const changed = readSessionPullRequestUpdates(event.payload);
     if (!changed) {
       return;
     }
@@ -428,13 +475,24 @@ export function sessionPullRequestsForGateway(
       pendingRefreshKeys.delete(key);
     }
     subscriptionMayExist ||= sessionKeys.length > 0 || passiveSessionKeys.length > 0;
+    const selections = readWatchUnion().selections;
+    const select = (keys: readonly string[]) =>
+      keys.map((key) => expectDefined(selections.get(key), "watched PR selection"));
     lifecycle.send(
       client,
       SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
       {
-        sessionKeys,
-        ...(passiveSessionKeys.length > 0 ? { passiveSessionKeys } : {}),
-        ...(refreshSessionKeys.length > 0 ? { refreshSessionKeys } : {}),
+        sessionKeys: select(sessionKeys),
+        ...(passiveSessionKeys.length > 0
+          ? {
+              passiveSessionKeys: select(passiveSessionKeys),
+            }
+          : {}),
+        ...(refreshSessionKeys.length > 0
+          ? {
+              refreshSessionKeys: select(refreshSessionKeys),
+            }
+          : {}),
       },
       signature,
       {
@@ -469,11 +527,17 @@ export function sessionPullRequestsForGateway(
 
   const watch = (
     owner: object,
-    sessionKeys: readonly string[],
+    sessionKeys: readonly Selection[],
     options: { foreground?: boolean; passive?: boolean } = {},
   ) => {
     const wasActive = isActive();
-    const next = new Set(sessionKeys.map((key) => key.trim()).filter(Boolean));
+    const next = new Map(
+      sessionKeys.flatMap((selection) => {
+        const key = (typeof selection === "string" ? selection : selection.sessionKey).trim();
+        const target = typeof selection === "string" ? key : { ...selection, sessionKey: key };
+        return key ? [[selectionKey(target), target] as const] : [];
+      }),
+    );
     const current = watchedByOwner.get(owner);
     const unchanged =
       current === undefined
@@ -481,7 +545,7 @@ export function sessionPullRequestsForGateway(
         : current.keys.size === next.size &&
           current.foreground === (options.foreground === true) &&
           current.passive === (options.passive === true) &&
-          [...next].every((sessionKey) => current.keys.has(sessionKey));
+          [...next.keys()].every((sessionKey) => current.keys.has(sessionKey));
     if (unchanged) {
       return;
     }
@@ -494,7 +558,7 @@ export function sessionPullRequestsForGateway(
         passive: options.passive === true,
       });
     }
-    orderedWatchedKeys = undefined;
+    orderedWatch = undefined;
     lifecycle.resetRetry();
     pruneUnwatched();
     if (isActive()) {
@@ -535,8 +599,8 @@ export function sessionPullRequestsForGateway(
       watch(owner, []);
     },
     load: async (owner, sessionKey) => {
-      const key = sessionKey.trim();
-      if (!key) {
+      const key = selectionKey(sessionKey);
+      if (!(typeof sessionKey === "string" ? sessionKey : sessionKey.sessionKey).trim()) {
         return undefined;
       }
       const loadToken = {};
@@ -544,7 +608,7 @@ export function sessionPullRequestsForGateway(
       const alreadyRequested = requestedKeys().includes(key);
       // A one-shot load owns a foreground watch until it settles, which attaches the store
       // before the waiter is registered and keeps gateway events available for resolution.
-      watch(owner, [key], { foreground: true });
+      watch(owner, [sessionKey], { foreground: true });
       try {
         if (!canReadPullRequests()) {
           return undefined;
@@ -574,8 +638,9 @@ export function sessionPullRequestsForGateway(
         }
       }
     },
-    refresh,
-    get: (sessionKey) => (canReadPullRequests() ? snapshots.get(sessionKey) : undefined),
+    refresh: (sessionKey, options) => refresh(selectionKey(sessionKey), options),
+    get: (sessionKey) =>
+      canReadPullRequests() ? snapshots.get(selectionKey(sessionKey)) : undefined,
     subscribe: (listener) => {
       const wasActive = isActive();
       listeners.add(listener);

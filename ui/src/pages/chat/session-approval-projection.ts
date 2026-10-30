@@ -106,13 +106,33 @@ export function reconcileSessionApprovalEvent(
   sessionKey?: string,
   selectedAgentId?: string,
   onAcceptedEvent?: (event: SessionApprovalEvent) => void,
-): ExecApprovalRequest[] | null {
+): ExecApprovalRequest[] | "refresh" | null {
   if (!isSessionApprovalEvent(event)) {
     return null;
   }
   const presentationSessionKey = sessionKey ?? event.sessionKey;
-  if (!approvalStreamMatchesSession(event.sessionKey, presentationSessionKey, selectedAgentId)) {
+  const matches = approvalStreamMatchesSession(
+    event.sessionKey,
+    presentationSessionKey,
+    selectedAgentId,
+  );
+  if (
+    !matches &&
+    !(
+      isUiGlobalSessionKey(event.sessionKey) &&
+      parseAgentSessionKey(presentationSessionKey)?.rest === "global"
+    ) &&
+    !(event.phase === "terminal" && queue.some((entry) => entry.id === event.approval.id))
+  ) {
     return null;
+  }
+  // Global wire keys fold two possible stored rows. Only a scoped replay can add their cards.
+  if (
+    event.phase === "pending" &&
+    (isUiGlobalSessionKey(event.sessionKey) ||
+      parseAgentSessionKey(event.sessionKey)?.rest === "global")
+  ) {
+    return "refresh";
   }
   onAcceptedEvent?.(event);
   if (event.phase === "terminal") {
@@ -190,7 +210,7 @@ export function applySessionApprovalEvent(
   state: ApprovalReplayHost & { chatSessionApprovalQueue?: ExecApprovalRequest[] },
   value: unknown,
   agentId?: string,
-): boolean {
+): boolean | "refresh" {
   const queue = reconcileSessionApprovalEvent(
     state.chatSessionApprovalQueue ?? [],
     value,
@@ -210,6 +230,9 @@ export function applySessionApprovalEvent(
       }
     },
   );
+  if (queue === "refresh") {
+    return "refresh";
+  }
   if (!queue) {
     return false;
   }

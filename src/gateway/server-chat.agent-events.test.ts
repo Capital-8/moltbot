@@ -1896,7 +1896,7 @@ describe("agent event handler", () => {
       }
       const h = createHarness();
       for (const id of ["main", "work", "ops"]) {
-        h.sessionMessageSubscribers.subscribe(`conn-${id}`, `agent:${id}:global`);
+        h.sessionMessageSubscribers.subscribe(`conn-${id}`, JSON.stringify([id, "global"]));
       }
       h.register("run-hidden-global", "global", "client-hidden-global", { agentId });
       registerAgentRunContext("run-hidden-global", {
@@ -2253,7 +2253,7 @@ describe("agent event handler", () => {
       pairingGeneration: "generation-a",
     });
     runtime.nodeSubscribe("node-a", sessionKey, "conn-node");
-    runtime.nodeSubscribe("node-a", "agent:main:global", "conn-node");
+    runtime.nodeSubscribe("node-a", JSON.stringify(["main", "global"]), "conn-node");
     const sends: Promise<void>[] = [];
     harness.nodeSendToSession.mockImplementation(
       (key: string, event: string, payload: unknown, opts?: GatewayBroadcastOpts) => {

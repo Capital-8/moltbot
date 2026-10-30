@@ -1,3 +1,5 @@
+import { normalizeAgentId } from "@openclaw/normalization-core/agent-id";
+
 // Stable Control UI contract barrel for Gateway callers. Browser code imports
 // narrow browser-safe modules directly so lazy route owners stay out of startup.
 export * from "./control-ui-bootstrap-contract.js";
@@ -12,6 +14,19 @@ export const CONTROL_UI_SESSION_PULL_REQUESTS_CHANGED_EVENT =
 export const CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS = 200;
 
 export const SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD = "controlUi.sessionPullRequests.subscribe";
+
+export type ControlUiSessionPullRequestSelection = string | { sessionKey: string; agentId: string };
+
+/** Private map identity; public updates retain the original selector. */
+export function sessionPullRequestSelectionKey(
+  selection: ControlUiSessionPullRequestSelection,
+): string {
+  return JSON.stringify(
+    typeof selection === "string"
+      ? selection.trim()
+      : [normalizeAgentId(selection.agentId), selection.sessionKey.trim()],
+  );
+}
 
 /** Anonymous public-page presentation; remote URLs never cross into the renderer. */
 export type ControlUiLinkPreview = {
@@ -161,4 +176,9 @@ export type ControlUiSessionPullRequestSnapshot = ControlUiSessionPullRequests &
 /** Targeted delta event for sessions watched by one Control UI connection. */
 export type ControlUiSessionPullRequestsChanged = {
   sessions: Record<string, ControlUiSessionPullRequestSnapshot>;
+  exactSessions?: Array<{
+    sessionKey: string;
+    agentId: string;
+    snapshot: ControlUiSessionPullRequestSnapshot;
+  }>;
 };

@@ -133,7 +133,7 @@ function resolveSessionDrain(
   payload: SessionChangedPayload,
   scope: SessionEventAgentScope | null,
   eventReceivers: ReadonlySet<string>,
-): { connIds: ReadonlySet<string>; subscriptionKey: string } | undefined {
+): { connIds: ReadonlySet<string>; sessionKey: string; subscriptionKey: string } | undefined {
   if (!payload.sessionKey || !scope?.[1] || !["reset", "delete", "new"].includes(payload.reason)) {
     return undefined;
   }
@@ -146,6 +146,7 @@ function resolveSessionDrain(
   const messageReceivers = context.getSessionMessageSubscriberConnIds?.(subscriptionKey);
   return {
     connIds: new Set([...eventReceivers, ...(messageReceivers ?? [])]),
+    sessionKey: key,
     subscriptionKey,
   };
 }
@@ -180,7 +181,8 @@ function broadcastSessionsChanged(
       drain.connIds,
       {
         ...routingOptions,
-        sessionKeys: [drain.subscriptionKey],
+        sessionKeys: [drain.sessionKey],
+        sessionSubscriptionKeys: [drain.subscriptionKey],
         dropIfSlow: false,
       },
     );

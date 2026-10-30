@@ -7,9 +7,11 @@ import type {
 import { projectCatalogItemForDisplay } from "../../../../src/chat/session-catalog-display.js";
 import {
   SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
+  sessionPullRequestSelectionKey,
   type ControlUiSessionBranch,
   type ControlUiSessionPullRequest,
   type ControlUiSessionPullRequestSnapshot,
+  type ControlUiSessionPullRequestSelection,
 } from "../../../../src/gateway/control-ui-contract.js";
 import type { GatewaySessionRow } from "../../api/types.ts";
 import { collectUnreadHiddenRunRows } from "../../components/app-sidebar-session-parent.ts";
@@ -23,6 +25,7 @@ import {
   summarizeSessionPullRequests,
   sessionPullRequestsForGateway,
   sessionGitHubRepository,
+  sessionPullRequestSelection,
 } from "../../lib/session-pull-requests.ts";
 import {
   lookupCatalogSession,
@@ -30,7 +33,7 @@ import {
   type CatalogSessionKey,
 } from "../../lib/sessions/catalog-key.ts";
 import { resolveSessionKey, scopedAgentParamsForSession } from "../../lib/sessions/navigation.ts";
-import { parseAgentSessionKey, scopedSessionArtifactKey } from "../../lib/sessions/session-key.ts";
+import { parseAgentSessionKey } from "../../lib/sessions/session-key.ts";
 import { SessionUnreadPatchGuard } from "../../lib/sessions/unread.ts";
 import { releaseChatAttachmentPayloads } from "./attachment-payload-store.ts";
 import { catalogMessageId } from "./catalog-message-id.ts";
@@ -55,7 +58,10 @@ const NO_PULL_REQUESTS: ControlUiSessionPullRequest[] = [];
 
 export abstract class ChatPaneSession extends ChatPaneTaskSuggestions {
   readonly repository: {
-    target: { store: ReturnType<typeof sessionPullRequestsForGateway>; key: string } | null;
+    target: {
+      store: ReturnType<typeof sessionPullRequestsForGateway>;
+      key: ControlUiSessionPullRequestSelection;
+    } | null;
     dismissedIds: ReadonlySet<string>;
   } = { target: null, dismissedIds: new Set() };
   private previousRepository: ReturnType<typeof sessionGitHubRepository> = null;
@@ -186,7 +192,7 @@ export abstract class ChatPaneSession extends ChatPaneTaskSuggestions {
     }
     const pullRequestEpoch = scope.context.sessions.capturePullRequestEpoch(sessionKey);
     const store = sessionPullRequestsForGateway(scope.context.gateway);
-    const pullRequestKey = scopedSessionArtifactKey(
+    const pullRequestKey = sessionPullRequestSelection(
       sessionKey,
       scopedAgentParamsForSession(scope.state, sessionKey).agentId ??
         resolveChatAgentId(scope.state),
@@ -213,7 +219,11 @@ export abstract class ChatPaneSession extends ChatPaneTaskSuggestions {
       (this.previousRepository.owner !== repository.owner ||
         this.previousRepository.repo !== repository.repo);
     this.previousRepository = repository;
-    if (this.repository.target?.store !== store || this.repository.target.key !== pullRequestKey) {
+    if (
+      this.repository.target?.store !== store ||
+      sessionPullRequestSelectionKey(this.repository.target.key) !==
+        sessionPullRequestSelectionKey(pullRequestKey)
+    ) {
       this.repository.target = { store, key: pullRequestKey };
     }
     const dismissed = listDismissedChatPullRequests(sessionKey);

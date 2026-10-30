@@ -81,7 +81,12 @@ type ChatHistoryPaneRequests = {
   branchVersion: number;
   branchQuery: ChatBranchesQueryReceipt | undefined;
   subscriptionGeneration: number;
-  pendingApprovalReplay?: { generation: number; events: Map<string, SessionApprovalEvent> };
+  pendingApprovalReplay?: {
+    generation: number;
+    events: Map<string, SessionApprovalEvent>;
+    isCurrent: () => boolean;
+    refresh?: boolean;
+  };
   subscriptionReady?: Promise<boolean>;
   openingSubscription?: { isCurrent: () => boolean; admit: () => void };
   subscriptionError?: string;

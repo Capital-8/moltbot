@@ -56,7 +56,9 @@ const hookRunnerMocks = vi.hoisted(() => ({
   runBeforeReset: vi.fn<HookRunner["runBeforeReset"]>(),
 }));
 const sessionCleanupMocks = vi.hoisted(() => ({
-  closeTrackedBrowserTabsForSessions: vi.fn(async () => 0),
+  closeTrackedBrowserTabsForSessions: vi.fn<
+    typeof import("../../plugin-sdk/browser-maintenance.js").closeTrackedBrowserTabsForSessions
+  >(async () => 0),
   resetRegisteredAgentHarnessSessions: vi.fn(async () => undefined),
   retireSessionMcpRuntime: vi.fn(async () => false),
 }));
@@ -137,12 +139,13 @@ function holdRolloverHooks(completed: string[]) {
   };
   hookRunnerMocks.runSessionEnd.mockImplementationOnce(held("end"));
   hookRunnerMocks.runSessionStart.mockImplementationOnce(held("start"));
-  sessionCleanupMocks.closeTrackedBrowserTabsForSessions.mockImplementationOnce(
-    () =>
-      new Promise<number>((resolve) => {
-        releases.push(() => resolve(0));
-      }),
-  );
+  sessionCleanupMocks.closeTrackedBrowserTabsForSessions.mockImplementationOnce(async (params) => {
+    await new Promise<void>((resolve) => {
+      releases.push(resolve);
+    });
+    expect(params.isCurrent?.()).toBe(true);
+    return 0;
+  });
   return releases;
 }
 

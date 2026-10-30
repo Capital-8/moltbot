@@ -49,6 +49,7 @@ const config: OpenClawConfig = {
   hooks: { enabled: true, token: "hook-secret" },
 };
 const sessionKey = "agent:main:main";
+const globalQueueKey = '["main","global"]';
 const target: SessionEventTarget = {
   agentId: "main",
   sessionKey,
@@ -168,7 +169,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   drainSystemEvents(sessionKey);
-  drainSystemEvents("agent:main:global");
+  drainSystemEvents(globalQueueKey);
   await Promise.all(
     controlledSettlements.splice(0).map((settlement) => {
       settlement.resolve({ status: "cancelled", executionStarted: false, delivered: false });
@@ -296,7 +297,7 @@ describe("authenticated immediate hook wake admission", () => {
     "preserves %s wake custody (accepted: %s, global: %s)",
     async (kind, accepted, global) => {
       const existing = kind === "pending";
-      const queueKey = global ? "agent:main:global" : sessionKey;
+      const queueKey = global ? globalQueueKey : sessionKey;
       const expectedTarget = global ? { ...target, sessionKey: "global" } : target;
       if (global) {
         mocks.config.mockReturnValue({ ...config, session: { scope: "global" } });

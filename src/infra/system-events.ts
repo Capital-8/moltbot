@@ -10,7 +10,6 @@ import {
 import type { SessionEntryCreationOperation } from "../config/sessions/session-accessor.sqlite-entry-cache.types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { channelRouteDedupeKey } from "../plugin-sdk/channel-route.js";
-import { parseAgentSessionKey } from "../routing/session-key.js";
 import { resolveGlobalMap, resolveGlobalSingleton } from "../shared/global-singleton.js";
 import {
   mergeDeliveryContext,
@@ -29,6 +28,8 @@ import {
   isSystemEventStoreCurrent,
   registerSystemEventStoreOwner,
   recordSystemEventStoreReplaced,
+  readSystemEventQueueIdentity,
+  resolveSystemEventQueueKey,
 } from "./system-event-ownership.js";
 
 export type SystemEvent = {
@@ -165,11 +166,11 @@ type ReceiptOptions = { allowDuplicate?: boolean };
 
 function requireSessionKey(key?: string | null): string {
   const trimmed = normalizeOptionalString(key) ?? "";
-  const parsed = parseAgentSessionKey(trimmed);
-  if (!parsed) {
+  const target = readSystemEventQueueIdentity(trimmed);
+  if (!target) {
     throw new Error("system events require an agent-qualified sessionKey");
   }
-  return `agent:${parsed.agentId}:${parsed.rest}`;
+  return resolveSystemEventQueueKey(target.sessionKey, target.agentId);
 }
 
 function normalizeContextKey(key?: string | null): string | null {
@@ -324,7 +325,7 @@ export function claimSystemEventTurn(
   agentId?: string,
 ) {
   const key = requireSessionKey(sessionKey);
-  if (agentId && parseAgentSessionKey(key)?.agentId !== agentId) {
+  if (agentId && readSystemEventQueueIdentity(key)?.agentId !== agentId) {
     return undefined;
   }
   const queue = getSessionQueue(key)?.queue;

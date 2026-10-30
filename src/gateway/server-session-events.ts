@@ -204,7 +204,7 @@ export function createTranscriptUpdateBroadcastHandler(params: {
         queue.agentId &&
         queue.storePath &&
         !projection.needsMembershipPreparation() &&
-        (parseAgentSessionKey(laneKey) || laneKey === "global" || laneKey === "unknown")
+        (parseAgentSessionKey(sessionKey) || sessionKey === "global" || sessionKey === "unknown")
           ? projection.sharingTarget({
               agentId: queue.agentId,
               key: sessionKey,

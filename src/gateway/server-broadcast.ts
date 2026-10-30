@@ -25,6 +25,7 @@ import {
   isPlainEventPayload,
   isSessionReadInvalidation,
   modelMetadataInvalidationFragment,
+  SESSION_SUBSCRIPTION_EVENTS,
 } from "./server-broadcast-scopes.js";
 import type {
   SessionEventProjection,
@@ -41,25 +42,13 @@ import type { GatewayClientRegistry } from "./server/client-registry.js";
 import { closeGatewayTransportWithGrace } from "./server/connection-transport-close.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 import { prepareSessionEventMetrics } from "./session-event-metrics.js";
+import { resolveSessionSubscriptionKey } from "./session-subscription-keys.js";
 import { invalidateSharedReadResponses } from "./shared-read-responses.js";
 import { logWs, summarizeAgentEventForWsLog } from "./ws-log.js";
 
 // Opt-in scoped clients never receive session-bearing broadcasts without an
 // authoritative registry key, including malformed/sessionless agent events.
 const log = createSubsystemLogger("gateway/broadcast");
-
-const SESSION_SUBSCRIPTION_EVENTS = new Set([
-  "agent",
-  "chat",
-  "chat.side_result",
-  "session.observer",
-  "session.narration",
-  // Mirrors the raw agent tool event (full args/result snapshots) onto
-  // session subscribers; omitting it here would hand scoped clients the
-  // exact payload the registry gate suppresses on the `agent` event.
-  "session.tool",
-  "socket.drain",
-]);
 
 type EncodedSessionPayload = readonly [Buffer] | readonly [Buffer, Buffer, Buffer];
 type FramePayload = string | Buffer | EncodedSessionPayload;
@@ -267,6 +256,9 @@ export function createGatewayBroadcaster(params: {
       opts?.sessionKeys,
       opts?.agentId,
     );
+    const subscriptionKeys =
+      opts?.sessionSubscriptionKeys ??
+      sessionKeys.map((key) => (agentId ? resolveSessionSubscriptionKey(key, agentId) : key));
     let sessionEventMetrics: ReturnType<typeof prepareSessionEventMetrics> | null = null;
     const sessionSubscriptionVerified = opts?.sessionSubscriptionVerified === true;
     const isSessionSubscriptionEvent = SESSION_SUBSCRIPTION_EVENTS.has(event);
@@ -280,7 +272,7 @@ export function createGatewayBroadcaster(params: {
         subscriptionRequired ? undefined : params.clients.unscopedSessionEventConnIds,
       );
       sessionSubscriberConnIdsByKey = sessionMessageSubscribers
-        ? sessionKeys.map((key) => sessionMessageSubscribers.get(key))
+        ? subscriptionKeys.map((key) => sessionMessageSubscribers.get(key))
         : [];
       for (const subscribers of sessionSubscriberConnIdsByKey) {
         for (const connId of subscribers) {
@@ -394,7 +386,7 @@ export function createGatewayBroadcaster(params: {
         if (!sessionKeys.length || !sessionMessageSubscribers) {
           continue;
         }
-        sessionSubscriberConnIdsByKey ??= sessionKeys.map((key) =>
+        sessionSubscriberConnIdsByKey ??= subscriptionKeys.map((key) =>
           sessionMessageSubscribers.get(key),
         );
         if (!sessionSubscriberConnIdsByKey.some((subscribers) => subscribers.has(c.connId))) {
@@ -418,7 +410,7 @@ export function createGatewayBroadcaster(params: {
       }
       // Narration consumes producer snapshots before the per-socket wire
       // projection below removes cumulative text from foreground appends.
-      if (narration.consume(c, event, payload, sessionKeys, opts)) {
+      if (narration.consume(c, event, payload, subscriptionKeys, opts)) {
         continue;
       }
       if (!outboundEventLogged) {
@@ -565,7 +557,7 @@ export function createGatewayBroadcaster(params: {
       const useDelta = delivery.canSendDelta(state, live, publication);
       const projection = live?.projection;
       const getDeliveryFrameBase = () =>
-        toolNarrationPayload && narration.isNarration(c.connId, sessionKeys)
+        toolNarrationPayload && narration.isNarration(c.connId, subscriptionKeys)
           ? (frames.toolNarration ??= frameBaseFor(toolNarrationPayload()))
           : event === "health" && c.connect.caps?.includes(GATEWAY_CLIENT_CAPS.HEALTH_SUMMARY)
             ? (frames.healthSummary ??= frameBaseFor(
@@ -671,7 +663,7 @@ export function createGatewayBroadcaster(params: {
           sessionEventMetrics = prepareSessionEventMetrics(
             event,
             payload,
-            opts?.sessionEventSubscriptionKeys ?? sessionKeys,
+            opts?.sessionEventSubscriptionKeys ?? subscriptionKeys,
             params.sessionMessageSubscribers,
           );
         }
@@ -684,7 +676,7 @@ export function createGatewayBroadcaster(params: {
       // an unstamped frame is invisible to the client's gap detector, so a
       // drop between two targeted sends would go unnoticed forever.
       clientSeq.set(c, nextSeq);
-      delivery.recordReceipt(state, sessionKeys, live, publication);
+      delivery.recordReceipt(state, subscriptionKeys, live, publication);
       state.inFlight += 1;
       let finished = false;
       const sent = (err?: Error) => {

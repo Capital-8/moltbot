@@ -387,7 +387,7 @@ describe("transcript turn physical identity", () => {
   );
 
   it.each(["entry", "retained window"])(
-    "refuses a competing qualified %s before appending through the selected SID",
+    "appends through the selected SID beside a qualified %s",
     async (kind) => {
       replaceSessionEntrySync(scope(), { sessionId, updatedAt: 1 });
       replaceSessionEntrySync(scope("agent:main:global"), {
@@ -403,10 +403,18 @@ describe("transcript turn physical identity", () => {
           .run("agent:main:global");
       }
       expect(loadSessionEntryReadOnly(scope())?.sessionId).toBe(sessionId);
-      await expect(persist("agent:main:global")).rejects.toMatchObject({
-        code: "SESSION_CANONICAL_KEY_MIGRATION_REQUIRED",
+      await expect(persist("agent:main:global")).rejects.toThrow(
+        "Session key and session ID select different stored conversations",
+      );
+      await expect(persist("global")).resolves.toMatchObject({
+        messages: [{ appended: true }],
       });
-      expect(loadTranscriptEventsSync(scope())).toEqual([]);
+      expect(loadTranscriptEventsSync(scope())).toContainEqual(
+        expect.objectContaining({ type: "message", message }),
+      );
+      expect(
+        loadTranscriptEventsSync({ ...scope("agent:main:global"), sessionId: "competing-window" }),
+      ).toEqual([]);
       expect(keys()).toEqual([{ session_key: "agent:main:global" }, { session_key: "global" }]);
     },
   );
@@ -504,9 +512,7 @@ describe("transcript turn physical identity", () => {
       selection.resume();
       await outcome;
     }
-    expect(await outcome).toMatchObject({
-      error: { code: "SESSION_CANONICAL_KEY_MIGRATION_REQUIRED" },
-    });
+    expect(await outcome).toMatchObject({ result: { rejectedReason: "session-rebound" } });
     expect(keys()).toEqual([{ session_key: "agent:main:global" }]);
     expect(loadTranscriptEventsSync(scope("agent:main:global"))).toEqual([]);
   });

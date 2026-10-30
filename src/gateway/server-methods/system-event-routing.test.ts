@@ -25,6 +25,7 @@ import {
   SystemEventQueueFullError,
 } from "../../infra/system-events.js";
 import { listSystemPresence } from "../../infra/system-presence.js";
+import { peekSystemEventEntries as peekOwnedSystemEventEntries } from "../../plugin-sdk/system-event-runtime.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { resolveIncognitoOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
 import {
@@ -281,11 +282,13 @@ describe("system-event routing", () => {
           "System owner notice.",
           expect.objectContaining({ agentId: "main", sessionKey: "global", createIfMissing: true }),
         );
-        expect(peekSystemEvents("agent:main:global")).toEqual([]);
+        expect(peekOwnedSystemEventEntries("global", "main")).toEqual([]);
       } else {
         expect(mocks.captureTarget).not.toHaveBeenCalled();
         expect(mocks.enqueueEvent).not.toHaveBeenCalled();
-        expect(peekSystemEvents("agent:main:global")).toEqual(["System owner notice."]);
+        expect(peekOwnedSystemEventEntries("global", "main").map((event) => event.text)).toEqual([
+          "System owner notice.",
+        ]);
       }
       expect(peekSystemEvents("agent:main:main")).toEqual([]);
       expect(request.respond).toHaveBeenCalledExactlyOnceWith(true, { ok: true }, undefined);

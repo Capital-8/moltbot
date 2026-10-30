@@ -27,6 +27,12 @@ describe("matchesSelectedTuiSession", () => {
   );
   it.each([
     ["global", "global", true],
+    ["global", "agent:main:global", false],
+    ["agent:main:global", "global", false],
+    ["agent:main:global", "agent:main:global", true],
+    ["agent:main:global", "agent:work:global", false],
+    ["unknown", "agent:main:unknown", true],
+    ["agent:main:main", "main", true],
     ["agent:main:main", undefined, false],
     ["agent:main:main", "  ", false],
     ["agent:main:main", "agent:main:other", false],

@@ -1,5 +1,6 @@
 import type { SessionCompanionExchange } from "../../packages/gateway-protocol/src/schema/sessions.js";
 import { sessionObserverScopeKey } from "./session-observer-model.js";
+import { resolveSessionSubscriptionKey } from "./session-subscription-keys.js";
 
 /** Side chat threads belong to one requester within one session scope. */
 export function sessionCompanionThreadKey(
@@ -12,7 +13,7 @@ export function sessionCompanionThreadKey(
 
 /** Prefix shared by every requester's thread for one session scope. */
 export function sessionCompanionScopePrefix(sessionKey: string, agentId: string): string {
-  return `${sessionObserverScopeKey(sessionKey, agentId)}\u0000`;
+  return `${sessionKey === "global" ? resolveSessionSubscriptionKey(sessionKey, agentId) : sessionObserverScopeKey(sessionKey, agentId)}\u0000`;
 }
 
 export type SessionCompanionContextMessage = {

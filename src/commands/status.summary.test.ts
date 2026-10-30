@@ -313,6 +313,7 @@ describe("getStatusSummary", () => {
 
   it("summarizes every configured agent's global pending events without an ambient owner", async () => {
     const config = setExplicitAgents("global", "inbox");
+    // Echo the internal lookup key here; production returns only the queued event text.
     vi.mocked(peekSystemEvents).mockImplementation((key) => [`pending: ${key}`]);
 
     const summary = await getStatusSummary({
@@ -323,8 +324,8 @@ describe("getStatusSummary", () => {
 
     expect(summary.sessions.byAgent.map((agent) => agent.agentId)).toEqual(["research", "ops"]);
     expect(summary.queuedSystemEvents).toEqual([
-      "pending: agent:research:global",
-      "pending: agent:ops:global",
+      'pending: ["research","global"]',
+      'pending: ["ops","global"]',
     ]);
   });
 

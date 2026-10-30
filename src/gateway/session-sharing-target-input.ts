@@ -11,6 +11,7 @@ import {
 } from "../sessions/session-controller.rpc-sources.js";
 import { isIncognitoSessionKey } from "../shared/incognito-session-key.js";
 import { resolveAuthorizedBoardViewTicketClaims } from "./board-view-ticket.js";
+import { parseControlUiSessionPullRequestsSubscribeParams } from "./control-ui-session-pr-subscription-params.js";
 import type { operatorSessionCap } from "./operator-role-policy.js";
 import { gatewayClientSessionCreator } from "./server-methods/gateway-client-identity.js";
 import type { GatewayClient, GatewayRequestContext } from "./server-methods/types.js";
@@ -103,6 +104,20 @@ export function resolveDirectSessionTargets(
   if (!record) {
     return [];
   }
+  const agentId = normalizeOptionalString(record.agentId);
+  if (method === "controlUi.sessionPullRequests.subscribe") {
+    const selection = parseControlUiSessionPullRequestsSubscribeParams(params);
+    return selection
+      ? [
+          ...selection.sessionKeys.map((target) =>
+            typeof target === "string"
+              ? { sessionKey: target, ...(agentId ? { agentId } : {}) }
+              : target,
+          ),
+          ...(selection.passiveSessionKeys ?? []).filter((target) => typeof target !== "string"),
+        ]
+      : [];
+  }
   const candidates = [record.key, record.sessionKey];
   if (method.startsWith("sessions.") && Array.isArray(record.keys)) {
     candidates.push(...record.keys);
@@ -110,7 +125,6 @@ export function resolveDirectSessionTargets(
   if (Array.isArray(record.sessionKeys)) {
     candidates.push(...record.sessionKeys);
   }
-  const agentId = normalizeOptionalString(record.agentId);
   return candidates.flatMap((candidate): SessionMutationTarget[] =>
     typeof candidate === "string"
       ? [{ sessionKey: candidate, ...(agentId ? { agentId } : {}) }]

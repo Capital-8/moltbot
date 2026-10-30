@@ -12,6 +12,7 @@ import { projectChatDisplayMessage } from "../chat-display-projection.js";
 import { capLiveAssistantText } from "../live-chat-projector.js";
 import type { GatewayBroadcastOpts } from "../server-broadcast-types.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "../session-request-agent.js";
+import { resolveSessionSubscriptionKeys } from "../session-subscription-keys.js";
 import type { GatewayRequestContext } from "./types.js";
 
 type ChatBroadcastContext = Pick<
@@ -54,6 +55,9 @@ export function resolveGlobalAwareNodeChatDeliveryKeys(params: {
     return [params.sessionKey];
   }
   const scopedAgentId = normalizeAgentId(selectedAgentId);
+  if (params.sessionKey === "global") {
+    return resolveSessionSubscriptionKeys(params.sessionKey, scopedAgentId, unscopedOwnerAgentId);
+  }
   const keys = [`agent:${scopedAgentId}:${params.sessionKey}`];
   if (unscopedOwnerAgentId && normalizeAgentId(unscopedOwnerAgentId) === scopedAgentId) {
     keys.push(params.sessionKey);
@@ -82,11 +86,17 @@ export function sendGlobalAwareNodeChatPayload(params: {
   payload: unknown;
   opts?: GatewayBroadcastOpts;
 }): void {
-  const deliveryKeys = params.opts?.sessionKeys ?? resolveChatSessionKeys(params);
+  const deliveryKeys =
+    params.opts?.sessionSubscriptionKeys ??
+    params.opts?.sessionKeys ??
+    resolveChatSessionKeys(params);
   if (deliveryKeys[0]) {
-    const opts = params.opts?.sessionKeys
-      ? params.opts
-      : { ...params.opts, sessionKeys: deliveryKeys };
+    const opts = {
+      ...params.opts,
+      sessionKeys: [params.sessionKey],
+      agentId: params.agentId,
+      sessionSubscriptionKeys: deliveryKeys,
+    };
     params.context.nodeSendToSession(deliveryKeys[0], params.event, params.payload, opts);
   }
 }
@@ -104,7 +114,15 @@ function broadcastChatPayload(
   payload: unknown,
   opts?: GatewayBroadcastOpts,
 ): void {
-  params.context.broadcast(event, payload, opts ?? { sessionKeys: resolveChatSessionKeys(params) });
+  params.context.broadcast(
+    event,
+    payload,
+    opts ?? {
+      sessionKeys: [params.sessionKey],
+      agentId: params.agentId,
+      sessionSubscriptionKeys: resolveChatSessionKeys(params),
+    },
+  );
   sendGlobalAwareNodeChatPayload({ ...params, event, payload, opts });
 }
 
@@ -174,7 +192,9 @@ function broadcastChatFrame(
     ...(excludeClientCapability ? { excludeClientCapability } : {}),
     ...(delivery ? { liveText: delivery } : {}),
     ...(liveText ? { dropIfSlow: true } : {}),
-    sessionKeys: resolveChatSessionKeys({
+    sessionKeys: [params.sessionKey],
+    agentId: payloadAgentId,
+    sessionSubscriptionKeys: resolveChatSessionKeys({
       context: params.context,
       sessionKey: params.sessionKey,
       agentId: payloadAgentId,

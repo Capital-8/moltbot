@@ -291,11 +291,7 @@ function SessionLinkView(props: {
           </div>
         ) : undefined}
       </div>
-      <ActivitySessionGit
-        context={context}
-        sessionKey={scopedSessionArtifactKey(props.row.key, agentId())}
-        agentId={agentId()}
-      />
+      <ActivitySessionGit context={context} sessionKey={props.row.key} agentId={agentId()} />
       <ActivitySessionMedia
         context={context}
         sessionKey={scopedSessionArtifactKey(props.row.key, agentId())}

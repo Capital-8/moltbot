@@ -63,7 +63,7 @@ export function registerSystemEventAdmissionCases({
       sessionKey: "global",
       opts: withReplySystemEventContext(
         {},
-        { sessionKey: "global", events: peekSystemEventEntries("agent:alpha:global") },
+        { sessionKey: "global", events: peekSystemEventEntries('["alpha","global"]') },
       ),
     });
 
@@ -79,7 +79,7 @@ export function registerSystemEventAdmissionCases({
     expect(call.followupRun.prompt).not.toContain("Beta hook finished");
     expect(context?.text).not.toContain("Beta hook finished");
     expect(JSON.stringify(context?.fragments)).not.toContain("Beta hook finished");
-    expect(peekSystemEventEntries("agent:beta:global").map((entry) => entry.text)).toEqual([
+    expect(peekSystemEventEntries('["beta","global"]').map((entry) => entry.text)).toEqual([
       "Beta hook finished",
     ]);
   });

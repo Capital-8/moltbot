@@ -101,11 +101,12 @@ describe("sessions.messages.subscribe approval opt-in", () => {
     expect([...registry.getApprovals(key)]).toEqual([client.connId]);
   });
 
-  it("retains the foreground global observer after narration rollback and release", async () => {
+  it("keeps literal foreground and raw-global narration separate through rollback and release", async () => {
     const key = "agent:work:global";
+    const rawAudience = '["work","global"]';
     const { registry, client, request, read } = createContext({
       config: { session: { scope: "global" }, agents: { entries: { main: {}, work: {} } } },
-      replay: approvalReplay(key),
+      replay: approvalReplay("global"),
     });
     const foreground = await request({ key, subscriptionId: "foreground" });
     expectSuccess(foreground, { subscribed: true, key, agentId: "work" });
@@ -114,16 +115,23 @@ describe("sessions.messages.subscribe approval opt-in", () => {
     const narration = await request({ ...observer, ...narrationOptions });
     expectSuccess(narration, expect.objectContaining({ key: "global", agentId: "work" }));
     expect([...registry.getNarration(key)]).toEqual([]);
-    expect([...registry.getApprovals(key)]).toEqual([client.connId]);
+    expect([...registry.getApprovals(key)]).toEqual([]);
+    expect([...registry.getNarration(rawAudience)]).toEqual([client.connId]);
+    expect([...registry.getApprovals(rawAudience)]).toEqual([client.connId]);
+    expect(read).toHaveBeenLastCalledWith(key, client, { sessionKey: "global", agentId: "work" });
 
     read.mockRejectedValueOnce(new Error("replay failed"));
     expectError(await request({ key, subscriptionId: "failed", ...narrationOptions }));
     expect([...registry.getNarration(key)]).toEqual([]);
+    expect([...registry.getNarration(rawAudience)]).toEqual([client.connId]);
+    expect(read).toHaveBeenLastCalledWith(key, client, { sessionKey: key, agentId: "work" });
 
     expectSuccess(await request(observer, "sessions.messages.unsubscribe"), expect.any(Object));
     expect([...registry.get(key)]).toEqual([client.connId]);
     expect([...registry.getNarration(key)]).toEqual([]);
     expect([...registry.getApprovals(key)]).toEqual([]);
+    expect([...registry.get(rawAudience)]).toEqual([]);
+    expect([...registry.getApprovals(rawAudience)]).toEqual([]);
   });
 
   it.each(["stale", "missing"])(

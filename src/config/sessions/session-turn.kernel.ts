@@ -76,7 +76,8 @@ export function createSessionTranscriptTurnKernel(
       options.keyFormat === "agent-qualified"
         ? readQualifiedSessionEntryRow(database, target.agentId, target.sessionKey, {
             includeWindowFacts,
-            allowCanonicalMove: options.resolveRuntimeTarget,
+            allowCanonicalMove:
+              options.resolveRuntimeTarget && options.selectedSessionId === undefined,
           })
         : readSessionEntryRow(database, target.sessionKey, "full", includeWindowFacts);
     return selected?.entry ? { entry: selected.entry, row: selected.row } : undefined;

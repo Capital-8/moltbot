@@ -76,7 +76,11 @@ export function expectChangedBroadcast(
     prepareSessionProjection: expect.any(Function),
     sessionEventSubscriptionKeys:
       typeof expected.sessionKey === "string"
-        ? [expected.sessionKey === "global" ? `agent:${agentId}:global` : expected.sessionKey]
+        ? [
+            expected.sessionKey === "global"
+              ? JSON.stringify([agentId, "global"])
+              : expected.sessionKey,
+          ]
         : [],
     ...(typeof expected.sessionKey === "string" ? { sessionKeys: [expected.sessionKey] } : {}),
   });

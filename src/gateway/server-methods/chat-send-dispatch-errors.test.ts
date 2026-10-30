@@ -315,6 +315,8 @@ describe("createChatSendDispatchErrorLifecycle", () => {
           {
             liveText: { group: previewGroup?.signal, settle: restartFailure ? undefined : true },
             sessionKeys: [target.sessionKey],
+            agentId: undefined,
+            sessionSubscriptionKeys: [target.sessionKey],
           },
         );
         expect(chatRunState.runs.has(runId)).toBe(false);
@@ -632,7 +634,11 @@ describe("createChatSendDispatchErrorLifecycle", () => {
           runId: "signal-only-dispatch-rejection",
           state: restart ? "aborted" : "error",
         }),
-        { sessionKeys: ["agent:main:main"] },
+        {
+          sessionKeys: ["agent:main:main"],
+          agentId: undefined,
+          sessionSubscriptionKeys: ["agent:main:main"],
+        },
       );
     },
   );

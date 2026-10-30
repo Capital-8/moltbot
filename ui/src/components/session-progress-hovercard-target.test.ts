@@ -165,11 +165,11 @@ describe("session progress hovercard ownership", () => {
   );
 
   it.each([
-    ["global", "agent:research:global", "research"],
+    ["global", { sessionKey: "global", agentId: "research" }, "research"],
     ["agent:other:main", "agent:other:main", "other"],
-  ])(
+  ] as const)(
     "uses the hovered session owner for progress and PR data: %s",
-    async (sessionKey, artifactKey, agentId) => {
+    async (sessionKey, prSelection, agentId) => {
       const harness = mountHovercard(sessionKey);
       await harness.focus();
       await waitForSolid(() =>
@@ -181,7 +181,7 @@ describe("session progress hovercard ownership", () => {
       await waitForSolid(() =>
         expect(harness.request).toHaveBeenCalledWith(
           SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
-          expect.objectContaining({ sessionKeys: [artifactKey] }),
+          expect.objectContaining({ sessionKeys: [prSelection] }),
           { timeoutMs: 30_000, signal: expect.any(AbortSignal) },
         ),
       );

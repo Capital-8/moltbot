@@ -9,6 +9,7 @@ import {
   peekSystemEventEntries,
   peekSystemEvents,
 } from "../infra/system-events.js";
+import { peekSystemEventEntries as peekOwnedSystemEventEntries } from "../plugin-sdk/system-event-runtime.js";
 import { CommandLane } from "../process/lanes.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import {
@@ -190,11 +191,14 @@ function cronRunCall(index = 0): HookCronRunCall {
   return call as HookCronRunCall;
 }
 
-async function waitForSystemEventTexts(sessionKey: string, timeoutMs = 2_000) {
+async function waitForSystemEventTexts(sessionKey: string, agentId?: string, timeoutMs = 2_000) {
   await expect
-    .poll(() => peekSystemEventEntries(sessionKey), { timeout: timeoutMs, interval: 10 })
+    .poll(() => peekOwnedSystemEventEntries(sessionKey, agentId), {
+      timeout: timeoutMs,
+      interval: 10,
+    })
     .not.toHaveLength(0);
-  return peekSystemEventEntries(sessionKey).map((event) => event.text);
+  return peekOwnedSystemEventEntries(sessionKey, agentId).map((event) => event.text);
 }
 
 async function writeHookTransformModule(moduleName: string, source: string): Promise<void> {
@@ -438,8 +442,7 @@ test("queues direct and mapped wake payloads as system events", async () => {
   testState.sessionConfig = { scope: "global" };
   await withHooksServer(async (post) => {
     await post("mapped-wake", { subject: "Global" });
-    await waitForSystemEventTexts("agent:hooks:global");
-    expect(peekSystemEvents("agent:hooks:global")).toContain("Mapped wake: Global");
+    expect(await waitForSystemEventTexts("global", "hooks")).toContain("Mapped wake: Global");
   });
 });
 

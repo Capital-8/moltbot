@@ -9,7 +9,6 @@ import { retireSessionMcpRuntime } from "../../agents/agent-bundle-mcp-tools.js"
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { clearAllCliSessions } from "../../agents/cli-session.js";
 import { resetRegisteredAgentHarnessSessions } from "../../agents/harness/registry.js";
-import { cleanupBrowserSessionsForLifecycleEnd } from "../../browser-lifecycle-cleanup.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveSessionParentSessionKey } from "../../channels/plugins/session-conversation.js";
 import { conversationIdentityFromSessionEntry } from "../../config/sessions/conversation-identity.js";
@@ -62,12 +61,10 @@ import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline
 import { getSessionBindingService } from "../../infra/outbound/session-binding-service.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
-import { runWithGatewayIndependentRootWorkContinuation } from "../../process/gateway-work-admission.js";
 import {
   buildAgentMainSessionKey,
   isAcpSessionKey,
   normalizeMainKey,
-  toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
 import {
   isCronExecutionInputProvenance,
@@ -98,7 +95,6 @@ import type { FinalizedTemplateContext as TemplateContext } from "../templating.
 import { resolveEffectiveResetTargetSessionKey } from "./acp-reset-target.js";
 import { readBeforeResetMessages } from "./commands-reset-hooks.js";
 import { normalizeInboundTextNewlines } from "./inbound-text.js";
-import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import {
   assertPreparedConversationBindingRouteCurrent,
   resolveSessionDefaultAccountId,
@@ -136,6 +132,7 @@ import { prepareReplySessionParentFork } from "./session-parent-fork-prepare.js"
 import {
   clearCommittedSessionResetRuntimeState,
   prepareSessionResetCleanupGuard,
+  scheduleSessionRolloverBrowserCleanup,
   stopSessionResetSubagents,
 } from "./session-reset-cleanup.js";
 import { resolveAuthorizedSessionResetCommand } from "./session-reset-command.js";
@@ -893,26 +890,13 @@ async function initSessionStateAttemptLocked(
         });
       },
     });
-    // Direct-message browser tabs use a peer-scoped runtime identity even when
-    // their transcript aliases main; cleanup must carry both exact keys.
-    const runtimePolicySessionKey =
-      resolveRuntimePolicySessionKey({
-        agentId,
-        cfg,
-        ctx: sessionCtxForState,
-        sessionKey,
-      }) ?? sessionKey;
-    void runWithGatewayIndependentRootWorkContinuation(async () => {
-      await cleanupBrowserSessionsForLifecycleEnd({
-        cfg,
-        sessionKeys: [previousSessionEntry.sessionId, sessionKey, runtimePolicySessionKey].map(
-          (requestKey) => toAgentStoreSessionKey({ agentId, requestKey }),
-        ),
-        onWarn: (message) => log.warn(message),
-        onError: (error) => log.warn(`browser tab cleanup failed: ${String(error)}`),
-      });
-    }, "session:browser-cleanup").catch((error: unknown) => {
-      log.warn(`browser tab cleanup admission failed: ${String(error)}`);
+    scheduleSessionRolloverBrowserCleanup({
+      cfg,
+      target: sessionTarget,
+      expectedSession: committed.sessionEntry,
+      previousSessionId: previousSessionEntry.sessionId,
+      ctx: sessionCtxForState,
+      onWarn: (message) => log.warn(message),
     });
   }
 

@@ -107,7 +107,8 @@ export function resolvePrivateSessionEventBroadcastScope(
     !compatibilityOwnerAgentId
     ? {
         agentId: routingAgentId,
-        sessionKeys: resolveSessionSubscriptionKeys(key, routingAgentId),
+        sessionKeys: [key],
+        sessionSubscriptionKeys: resolveSessionSubscriptionKeys(key, routingAgentId),
       }
     : undefined;
 }

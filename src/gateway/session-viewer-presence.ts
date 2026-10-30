@@ -2,8 +2,9 @@
 // while this replace-set records only the sessions a client is actually rendering.
 import { normalizeOptionalString } from "@openclaw/normalization-core";
 import { upsertPresence } from "../infra/system-presence.js";
+import { presenceUserKey } from "../shared/presence-user.js";
 import { WEBSOCKET_OPEN_READY_STATE } from "./server-constants.js";
-import { recordClientPresenceActivity } from "./server/client-presence.js";
+import { recordClientPresenceActivity, snapshotClientPresence } from "./server/client-presence.js";
 import type { GatewayClientRegistry } from "./server/client-registry.js";
 
 type SessionViewerPresenceDeclarationsDeps = {
@@ -15,10 +16,20 @@ type SessionViewerPresenceDeclarationsDeps = {
 export function createSessionViewerPresenceDeclarations(
   deps: SessionViewerPresenceDeclarationsDeps,
 ) {
-  const declarations = new Map<string, readonly string[]>();
+  const declarations = new Map<
+    string,
+    {
+      sessionKeys: readonly string[];
+      exactKeys: ReadonlySet<string>;
+    }
+  >();
   let stopped = false;
 
-  const replace = (connId: string, sessionKeys: readonly string[]): readonly string[] => {
+  const replace = (
+    connId: string,
+    sessionKeys: readonly string[],
+    exactKeys?: readonly string[],
+  ): readonly string[] => {
     if (stopped) {
       return [];
     }
@@ -28,14 +39,18 @@ export function createSessionViewerPresenceDeclarations(
       return [];
     }
     const next = [...new Set(sessionKeys.map((key) => key.trim()).filter(Boolean))].toSorted();
-    const previous = declarations.get(normalizedConnId) ?? [];
-    if (previous.length === next.length && previous.every((key, index) => key === next[index])) {
-      return next;
-    }
+    const previous = declarations.get(normalizedConnId)?.sessionKeys ?? [];
+    // Equal public hints can represent a switch between distinct stored global rows.
     if (next.length === 0) {
       declarations.delete(normalizedConnId);
     } else {
-      declarations.set(normalizedConnId, next);
+      declarations.set(normalizedConnId, {
+        sessionKeys: next,
+        exactKeys: new Set(exactKeys ?? next),
+      });
+    }
+    if (previous.length === next.length && previous.every((key, index) => key === next[index])) {
+      return next;
     }
     if (client.presenceKey) {
       upsertPresence(client.presenceKey, {
@@ -60,8 +75,8 @@ export function createSessionViewerPresenceDeclarations(
 
   /** True only while an open connection of this paired device currently renders the session. */
   const isViewedOnDevice = (deviceId: string, sessionKey: string): boolean => {
-    for (const [connId, sessionKeys] of declarations) {
-      if (!sessionKeys.includes(sessionKey)) {
+    for (const [connId, { exactKeys }] of declarations) {
+      if (!exactKeys.has(sessionKey)) {
         continue;
       }
       const client = deps.clients.getByConnectionId(connId);
@@ -78,12 +93,28 @@ export function createSessionViewerPresenceDeclarations(
     return false;
   };
 
+  const liveViewerIdentities = (subscriptionKey: string): Set<string> => {
+    const viewers = new Set(
+      [...declarations].flatMap(([connId, { exactKeys }]) => {
+        const client = exactKeys.has(subscriptionKey)
+          ? deps.clients.getByConnectionId(connId)
+          : undefined;
+        return client && !client.connectionSignal?.aborted ? [client] : [];
+      }),
+    );
+    return new Set(
+      snapshotClientPresence(viewers).flatMap(({ user }) =>
+        user?.id ? [presenceUserKey(user)] : [],
+      ),
+    );
+  };
+
   const stop = () => {
     stopped = true;
     declarations.clear();
   };
 
-  return { replace, unsubscribe, isViewedOnDevice, stop };
+  return { replace, unsubscribe, isViewedOnDevice, liveViewerIdentities, stop };
 }
 
 export type SessionViewerPresenceDeclarations = ReturnType<

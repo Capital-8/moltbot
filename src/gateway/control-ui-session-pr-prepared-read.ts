@@ -91,7 +91,7 @@ export function retireControlUiSessionPrState<
 }
 
 /** Retain only branch facts across audience/mode changes on the same physical source. */
-export function retainControlUiSessionPrBranchSnapshot(
+function retainControlUiSessionPrBranchSnapshot(
   state: PreparedSessionPrState,
   previous: PreparedSessionPrState | undefined,
 ) {
@@ -112,6 +112,42 @@ export function retainControlUiSessionPrBranchSnapshot(
     state.assertReadAuthority = previous.assertReadAuthority;
     state.snapshot = undefined;
   }
+}
+
+/** Retain the source-bound snapshot cell without capturing any viewer's authority. */
+export function retainControlUiSessionPrState(
+  keyStates: Map<string, WatchedKeyState>,
+  target: ControlUiSessionPrTarget,
+  sourceIdentity?: string,
+  retained?: WatchedKeyState,
+): WatchedKeyState {
+  // Shared snapshots outlive individual viewers; authority stays only in each watched reader.
+  const { assertCurrent: _assertCurrent, ...preparedTarget } = target;
+  const previous = keyStates.get(target.identity);
+  if (
+    previous?.target.identity === target.identity &&
+    (sourceIdentity === undefined ||
+      previous.sourceIdentity === undefined ||
+      previous.sourceIdentity === sourceIdentity)
+  ) {
+    previous.target = preparedTarget;
+    previous.sourceIdentity ??= sourceIdentity;
+    retainControlUiSessionPrBranchSnapshot(previous, retained);
+    return previous;
+  }
+  previous?.cancelRefresh?.();
+  previous?.cacheLifetime.abort(null);
+  const state: WatchedKeyState = {
+    connIds: new Set(previous?.connIds),
+    sessionKeysByConnId: new Map(previous?.sessionKeysByConnId),
+    target: preparedTarget,
+    prepared: previous?.prepared,
+    sourceIdentity,
+    cacheLifetime: new AbortController(),
+  };
+  retainControlUiSessionPrBranchSnapshot(state, retained);
+  keyStates.set(target.identity, state);
+  return state;
 }
 
 /** Background readers publish into the subscription owner's existing cells and concurrency. */

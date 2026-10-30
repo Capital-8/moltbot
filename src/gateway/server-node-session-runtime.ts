@@ -224,7 +224,9 @@ export function createGatewayNodeSessionRuntime(params: {
     }
     const sessionKeys = [
       ...new Set(
-        (opts?.sessionKeys ?? [normalizedSessionKey]).map((key) => key.trim()).filter(Boolean),
+        (opts?.sessionSubscriptionKeys ?? opts?.sessionKeys ?? [normalizedSessionKey])
+          .map((key) => key.trim())
+          .filter(Boolean),
       ),
     ];
     const subscribers = new Map<string, Recipient>();

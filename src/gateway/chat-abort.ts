@@ -528,7 +528,9 @@ export function abortChatRunById(
       payloadAgentId,
     );
     ops.broadcast("chat", payload, {
-      sessionKeys: deliverySessionKeys,
+      sessionKeys: [sessionKey],
+      agentId: payloadAgentId,
+      sessionSubscriptionKeys: deliverySessionKeys,
       ...(liveTextGroup ? { liveText: { group: liveTextGroup } } : {}),
     });
     for (const deliverySessionKey of deliverySessionKeys) {

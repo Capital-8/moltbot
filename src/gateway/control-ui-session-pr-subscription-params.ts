@@ -1,28 +1,53 @@
+import { normalizeAgentIdStrict } from "@openclaw/normalization-core/agent-id";
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { CHAT_SEND_SESSION_KEY_MAX_LENGTH } from "../../packages/gateway-protocol/src/schema/primitives.js";
-import { CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS } from "./control-ui-contract.js";
+import {
+  CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS,
+  sessionPullRequestSelectionKey as selectionKey,
+  type ControlUiSessionPullRequestSelection as Selection,
+} from "./control-ui-contract.js";
 
-function parseSessionKeys(value: unknown): string[] | null {
+function parseSessionKeys(value: unknown): Selection[] | null {
   if (!Array.isArray(value) || value.length > CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS) {
     return null;
   }
-  const keys = new Set<string>();
+  const keys = new Map<string, Selection>();
   for (const entry of value) {
-    if (typeof entry !== "string") {
-      return null;
-    }
-    const key = entry.trim();
+    const target = asNullableRecord(entry);
+    const key =
+      typeof entry === "string"
+        ? entry.trim()
+        : typeof target?.sessionKey === "string"
+          ? target.sessionKey.trim()
+          : "";
     if (!key || key.length > CHAT_SEND_SESSION_KEY_MAX_LENGTH) {
       return null;
     }
-    keys.add(key);
+    let selection: Selection = key;
+    if (typeof entry !== "string") {
+      if (
+        !target ||
+        Object.keys(target).some((field) => field !== "sessionKey" && field !== "agentId") ||
+        typeof target.agentId !== "string"
+      ) {
+        return null;
+      }
+      const agent = normalizeAgentIdStrict(target.agentId);
+      if (!agent.ok) {
+        return null;
+      }
+      selection = { sessionKey: key, agentId: agent.value };
+    }
+    keys.set(selectionKey(selection), selection);
   }
-  return [...keys];
+  return [...keys.values()];
 }
 
-export function parseControlUiSessionPullRequestsSubscribeParams(
-  value: unknown,
-): { sessionKeys: string[]; refreshSessionKeys: string[]; passiveSessionKeys?: string[] } | null {
+export function parseControlUiSessionPullRequestsSubscribeParams(value: unknown): {
+  sessionKeys: Selection[];
+  refreshSessionKeys: Selection[];
+  passiveSessionKeys?: Selection[];
+} | null {
   const raw = asNullableRecord(value);
   if (!raw) {
     return null;
@@ -35,14 +60,17 @@ export function parseControlUiSessionPullRequestsSubscribeParams(
   if (!sessionKeys || !refreshSessionKeys || !passiveSessionKeys) {
     return null;
   }
-  const watched = new Set(sessionKeys);
+  const watched = new Set(sessionKeys.map(selectionKey));
   for (const key of refreshSessionKeys) {
-    if (!watched.has(key)) {
+    if (!watched.has(selectionKey(key))) {
       return null;
     }
   }
-  const passive = passiveSessionKeys.filter((key) => !watched.has(key));
-  if (new Set([...sessionKeys, ...passive]).size > CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS) {
+  const passive = passiveSessionKeys.filter((key) => !watched.has(selectionKey(key)));
+  if (
+    new Set([...sessionKeys, ...passive].map(selectionKey)).size >
+    CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS
+  ) {
     return null;
   }
   return {

@@ -115,7 +115,7 @@ export type ResolvedSessionEntryStoreTarget = ResolvedSessionEntryAccessTarget &
   storePath: string;
 };
 
-/** Temporary opt-in; remove the selector after internal callers use qualified identities. */
+/** Admitted execution target; existing global rows retain their physical key. */
 export type QualifiedSessionEntryAccessTarget = ResolvedSessionEntryStoreTarget & {
   keyFormat: "agent-qualified";
   /** The admitted physical database is distinct from the logical agent namespace. */

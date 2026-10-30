@@ -6,7 +6,11 @@ import {
   createHello,
   flushSync,
 } from "./session-pull-requests.test-support.ts";
-import { sessionGitHubRepository, sessionPullRequestsForGateway } from "./session-pull-requests.ts";
+import {
+  sessionGitHubRepository,
+  sessionPullRequestsForGateway,
+  sessionPullRequestSelection,
+} from "./session-pull-requests.ts";
 import { scopedSessionArtifactKey } from "./sessions/session-key.ts";
 
 let harness: ReturnType<typeof createGatewayHarness>;
@@ -69,6 +73,40 @@ afterEach(() => {
 });
 
 describe("session pull request snapshot store", () => {
+  it("retains exact global snapshots through watcher changes and ignores retired updates", async () => {
+    const raw = { sessionKey: "global", agentId: "main" };
+    const literal = { sessionKey: "agent:main:global", agentId: "main" };
+    const work = { sessionKey: "global", agentId: "work" };
+    const targets = [raw, literal, work];
+    expect(sessionPullRequestSelection(literal.sessionKey, "main")).toEqual(literal);
+    expect(sessionPullRequestSelection("agent:retired:chat", "retired")).toBe("agent:retired:chat");
+    store.watch(owner, targets);
+    await flushSync();
+    expectSubscription(harness, expect.arrayContaining(targets));
+    const snapshots = targets.map((_, index) => ({
+      pullRequests: [],
+      rateLimited: false,
+      status: "ready",
+      taskPullRequestCount: index + 1,
+    }));
+    const publish = () =>
+      harness.emit({
+        sessions: {},
+        exactSessions: targets.map((target, index) => ({ ...target, snapshot: snapshots[index] })),
+      });
+    publish();
+    targets.forEach((target, index) => expect(store.get(target)).toEqual(snapshots[index]));
+    store.watch(owner, [literal, work]);
+    publish();
+    expect(store.get(raw)).toBeUndefined();
+    store.watch(owner, targets);
+    publish();
+    harness.emit({ ...raw, reason: "reset" }, "sessions.changed");
+    expect(store.get(raw)).toBeUndefined();
+    expect(store.get(literal)).toEqual(snapshots[1]);
+    expect(store.get(work)).toEqual(snapshots[2]);
+    await unwatch();
+  });
   it("clears own imported PR facts after a keyless identity withdrawal", async () => {
     harness.setSnapshot({
       ...harness.gateway.snapshot,

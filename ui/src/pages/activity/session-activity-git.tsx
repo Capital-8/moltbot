@@ -14,7 +14,10 @@ import {
   orderSessionPullRequests,
   sessionPullRequestStateIcons,
 } from "../../lib/session-pull-request-presentation.ts";
-import { sessionPullRequestsForGateway } from "../../lib/session-pull-requests.ts";
+import {
+  sessionPullRequestsForGateway,
+  sessionPullRequestSelection,
+} from "../../lib/session-pull-requests.ts";
 
 registerEnglishCatalog(registerActivityEnglish);
 
@@ -83,8 +86,8 @@ type ActivitySessionGitProps = {
 
 export function ActivitySessionGit(props: ActivitySessionGitProps) {
   const scope = createMemo(
-    () => ({ gateway: props.context.gateway, key: props.sessionKey ?? "" }),
-    { equals: (a, b) => a.gateway === b.gateway && a.key === b.key },
+    () => ({ gateway: props.context.gateway, key: props.sessionKey ?? "", agentId: props.agentId }),
+    { equals: (a, b) => a.gateway === b.gateway && a.key === b.key && a.agentId === b.agentId },
   );
   return (
     <Show when={scope()} keyed>
@@ -94,20 +97,21 @@ export function ActivitySessionGit(props: ActivitySessionGitProps) {
 }
 
 function SessionGit(
-  source: { gateway: ApplicationContext["gateway"]; key: string },
+  source: { gateway: ApplicationContext["gateway"]; key: string; agentId?: string },
   props: ActivitySessionGitProps,
 ) {
   const token = {};
+  const selection = sessionPullRequestSelection(source.key, source.agentId);
   const store = sessionPullRequestsForGateway(source.gateway);
   const gatewayProjection = projectGateway(source.gateway);
   const projection = sharedSessionPullRequestsProjection(store);
   // Each keyed Gateway/session scope owns exactly one remote watch.
   onSettled(() => {
-    store.watch(token, [source.key], { foreground: true });
+    store.watch(token, [selection], { foreground: true });
     return () => store.unwatch(token);
   });
   const connection = () => gatewayProjection.read().snapshot;
-  const snapshot = () => projection.read().get(source.key);
+  const snapshot = () => projection.read().get(selection);
   const branch = createMemo(() => {
     const current = snapshot();
     return current?.pullRequests.some((pr) => pr.state === "open" || pr.state === "draft")

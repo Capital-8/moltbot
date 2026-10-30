@@ -659,10 +659,19 @@ describe("abortChatRunById", () => {
       expect(result).toEqual({ aborted: true });
       const payload = firstBroadcastPayload(ops) as ChatEvent;
       expect(payload.agentId).toBe("main");
-      const delivery = { sessionKeys: ["agent:main:global", "global"] };
+      const delivery = {
+        sessionKeys: ["global"],
+        agentId: "main",
+        sessionSubscriptionKeys: [JSON.stringify(["main", "global"]), "global"],
+      };
       expect(ops.broadcast).toHaveBeenCalledWith("chat", payload, delivery);
-      expect(ops.nodeSendToSession).toHaveBeenCalledWith("agent:main:global", "chat", payload);
+      expect(ops.nodeSendToSession).toHaveBeenCalledWith(
+        JSON.stringify(["main", "global"]),
+        "chat",
+        payload,
+      );
       expect(ops.nodeSendToSession).toHaveBeenCalledWith("global", "chat", payload);
+      expect(ops.nodeSendToSession).toHaveBeenCalledTimes(2);
     });
   }
 
@@ -780,7 +789,7 @@ describe("abortChatRunsForProvider", () => {
         state: "aborted",
         stopReason: "auth-revoked",
       }),
-      { sessionKeys: [sessionKey] },
+      { sessionKeys: [sessionKey], agentId: undefined, sessionSubscriptionKeys: [sessionKey] },
     );
   });
 
