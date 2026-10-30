@@ -107,6 +107,8 @@ export type ReplyToolAuthorityInput = {
     Pick<FollowupRun["run"], "sessionId" | "sessionFile" | "workspaceDir" | "provider" | "model">;
 };
 
+import { resolveAuthorizedCrossSurfaceContinuation } from "./reply-tool-authority-inbound.js";
+
 export { resolveInboundReplyToolAuthorityOverlay } from "./reply-tool-authority-inbound.js";
 
 function applyReplyToolAuthorityOverlay(
@@ -423,9 +425,22 @@ export function prepareReplyToolAuthority(
       memberRoleIds: run.run.memberRoleIds ? [...run.run.memberRoleIds] : undefined,
     },
   };
+  const resolveContinuation = (overlay?: ReplyToolAuthorityOverlay) =>
+    overlay
+      ? resolveAuthorizedCrossSurfaceContinuation({
+          incumbent: run,
+          snapshot,
+          caller: overlay,
+        })
+      : undefined;
   const projectInput = (overlay?: ReplyToolAuthorityOverlay) => {
-    const incoming = overlay ? applyReplyToolAuthorityOverlay(snapshot, overlay) : snapshot;
-    return incoming;
+    const continuation = resolveContinuation(overlay);
+    continuation?.assertCurrent();
+    return continuation
+      ? snapshot
+      : overlay
+        ? applyReplyToolAuthorityOverlay(snapshot, overlay)
+        : snapshot;
   };
   const env = { ...process.env };
   const sessionKey = snapshot.run.runtimePolicySessionKey ?? snapshot.run.sessionKey;
@@ -601,7 +616,10 @@ export function prepareReplyToolAuthority(
       return prepared.read();
     },
     projectAsync: async (overlay: ReplyToolAuthorityOverlay, route: ReplyToolAuthorityRoute) => {
+      const continuation = resolveContinuation(overlay);
+      continuation?.assertCurrent();
       const prepared = await prepare(projectInput(overlay), route);
+      continuation?.assertCurrent();
       projectionRead = prepared;
       return prepared.read();
     },
@@ -621,10 +639,17 @@ export function prepareReplyToolAuthority(
   bindReplyToolAuthorityCallerRead(
     result.projectAsync,
     async (caller, expected, route, assertActive) => {
+      const continuation = resolveContinuation(caller);
+      const assertCallerCurrent = () => {
+        assertActive();
+        continuation?.assertCurrent();
+      };
+      assertCallerCurrent();
       if (readMemoryEntry) {
         const projected = projectInput(caller);
-        const policy = await prepareSessionCapabilityRead(() =>
-          [snapshot, projected].every(
+        const policy = await prepareSessionCapabilityRead(() => {
+          assertCallerCurrent();
+          return [snapshot, projected].every(
             (input) =>
               resolvePreparedReplyToolAuthorityFingerprint(
                 input,
@@ -633,8 +658,8 @@ export function prepareReplyToolAuthority(
                 undefined,
                 memoryCapabilities,
               ) === expected,
-          ),
-        );
+          );
+        });
         releases.add(policy.release);
         const prepared = prepareMemoryReplyToolAuthorityCaller(readMemoryEntry, assertActive, () =>
           policy.read(),
@@ -657,7 +682,7 @@ export function prepareReplyToolAuthority(
         throw new Error("Tool authority classification source is unavailable");
       }
       const assertSources = () => {
-        assertActive();
+        assertCallerCurrent();
         plan?.assertCurrent();
       };
       const assertEntry = (entry: SessionEntry | undefined) => {
