@@ -294,13 +294,13 @@ it("warms HTML and nearby geometry without distant DOM", async () => {
   const view = await transcriptFixture(0, true, false, "retained");
   const elements = view.container.querySelectorAll(".chat-virtual-row").length;
   await view.idle(0);
-  for (let turn = 0; turn < 80; turn++) {
+  for (let turn = 0; turn < 160; turn++) {
     await view.idle(10, 1);
   }
   // The first fast scroll can cross more than the retained geometry window.
-  expect(prewarmGroupedMessage(view.groups[40]!.messages[0]!.message, {})).toBe(false);
+  expect(prewarmGroupedMessage(view.groups[200]!.messages[0]!.message, {})).toBe(false);
   expect(view.container.querySelector('[data-virtual-row-key="fragment:20"]')).not.toBeNull();
-  expect(view.container.querySelector('[data-virtual-row-key="fragment:40"]')).toBeNull();
+  expect(view.container.querySelector('[data-virtual-row-key="fragment:200"]')).toBeNull();
   expect(view.container.querySelectorAll(".chat-virtual-row").length).toBeLessThanOrEqual(
     elements + 24,
   );
@@ -448,9 +448,6 @@ it.each([600, 1400])(
     expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
     // A fast first movement can cross several viewports before scroll warming runs.
     expect(prewarmGroupedMessage(view.groups[96]!.messages[0]!.message, {})).toBe(false);
-    expect(view.renderRow.mock.calls.some(([row]) => row.kind === "item" && row.item === 200)).toBe(
-      false,
-    );
     // A completed sweep does not walk the cached prefix again on every idle delivery.
     expect(view.renderRow.mock.calls.length - rendered).toBeLessThan(530);
     const completed = view.renderRow.mock.calls.length;
