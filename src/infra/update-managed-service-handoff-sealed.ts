@@ -19,6 +19,7 @@ export {
   recoverInterruptedManagedUpdate,
   readManagedHandoffGatewayStop,
 } from "./update-managed-service-handoff-interrupted.js";
+export { findUpdateGatewayStop } from "./update-run-gateway-stop.js";
 export const handoffLedger = {
   adoptUpdateRun,
   finishUpdateRun,

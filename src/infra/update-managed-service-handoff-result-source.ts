@@ -284,7 +284,7 @@ async function restoreGatewayService(reason, decision = params.recovery, childSt
       ? { ...process.env, OPENCLAW_ALLOW_OLDER_BINARY_DESTRUCTIVE_ACTIONS: "1" } : process.env);
   if (!ownsRecovery()) return false;
   if (updaterStopped) {
-    const stop = readManagedHandoffGatewayStop();
+    const stop = readGatewayStop();
     if (stop?.runId !== params.runId || stop.started)
       return refuse("recovery refused: Gateway stop intent was superseded");
   }
@@ -433,8 +433,15 @@ function createInstalledRuntimeLedger(modulePath) {
     if (out.status !== 0) throw new Error("installed runtime ledger " + name + " failed: " + String(out.stderr || out.error || "").slice(-400));
     return JSON.parse(out.stdout || "null") ?? undefined;
   };
-  return Object.fromEntries(["adoptUpdateRun", "finishUpdateRun", "getUpdateRun", "recordUpdateRunStep", "recordUpdateRunVerification"]
+  return Object.fromEntries(["adoptUpdateRun", "finishUpdateRun", "getUpdateRun", "listUpdateRuns", "recordUpdateRunStep", "recordUpdateRunVerification"]
     .map((name) => [name, (...args) => call(name, args)]));
+}
+
+function readGatewayStop() {
+  // Only the installed-runtime ledger lists runs; before post-core repair the staged reader matches the schema.
+  return runLedger?.listUpdateRuns
+    ? findUpdateGatewayStop(runLedger.listUpdateRuns({ limit: 100 }))
+    : readManagedHandoffGatewayStop();
 }
 
 async function recoverInterruptedUpdater() {
@@ -446,7 +453,7 @@ async function recoverInterruptedUpdater() {
     };
     const updaterStopped = !restorationArmed;
     if (updaterStopped) {
-      const stop = readManagedHandoffGatewayStop();
+      const stop = readGatewayStop();
       if (stop?.runId !== params.runId || stop.started)
         throw new Error("Gateway stop intent was superseded by a later running service");
     }
