@@ -93,6 +93,7 @@ export function scrollTranscriptToEnd(
   cancelScroll: (preserveEnd?: boolean) => void,
   measureSkippedRows: () => void,
   endAnchor: TranscriptEndAnchor,
+  prepareEnd: (ready: () => void, isCurrent: () => boolean) => void,
 ): void {
   // Retargeting automatic follow must not insert an instant stop.
   if (source !== "auto" || state.scrollCommand?.target !== "end") {
@@ -102,22 +103,31 @@ export function scrollTranscriptToEnd(
     // TanStack suppressed outside the outgoing smooth command’s target buffer.
     measureSkippedRows();
   }
-  state.scrollCommand = {
+  const command = (state.scrollCommand = {
     behavior,
     target: "end",
+  });
+  const scroll = () => {
+    instance.scrollToEnd({ behavior });
+    // Instant commands and smooth no-ops can reach their target before any
+    // native offset event. Do not let delayed idle reclaim a departed reader.
+    const element = instance.scrollElement;
+    const max = maxTranscriptScrollOffset(element);
+    if (element && max !== null && Math.abs(max - element.scrollTop) <= 1) {
+      cancelScroll(true);
+    }
+    // A smooth no-op emits no native idle event to capture the end. Preserve
+    // that actual resting edge before a later row measurement grows the range.
+    if (behavior !== "smooth" || endAnchor.recordViewport(element)) {
+      endAnchor.capture(element);
+    }
   };
-  instance.scrollToEnd({ behavior });
-  // Instant commands and smooth no-ops can reach their target before any
-  // native offset event. Do not let delayed idle reclaim a departed reader.
-  const element = instance.scrollElement;
-  const max = maxTranscriptScrollOffset(element);
-  if (element && max !== null && Math.abs(max - element.scrollTop) <= 1) {
-    cancelScroll(true);
-  }
-  // A smooth no-op emits no native idle event to capture the end. Preserve
-  // that actual resting edge before a later row measurement grows the range.
-  if (behavior !== "smooth" || endAnchor.recordViewport(element)) {
-    endAnchor.capture(element);
+  if (source !== "auto" && behavior === "smooth") {
+    // Measure the bounded destination before native motion. A late estimate
+    // contraction otherwise clamps the journey backward.
+    prepareEnd(scroll, () => state.scrollCommand === command);
+  } else {
+    scroll();
   }
 }
 

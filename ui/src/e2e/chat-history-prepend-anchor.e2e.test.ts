@@ -20,6 +20,7 @@ import {
   sampleHistoryAnchor,
 } from "./chat-history-pagination-probe.test-support.ts";
 import { layoutBox, twoFrames } from "./chat-presentation.test-support.ts";
+import { captureTopVisibleVirtualRow } from "./virtual-row-anchor.test-support.ts";
 
 const suite = createChatFlowE2eSuite();
 
@@ -502,11 +503,13 @@ suite.define(() => {
           await page.mouse.wheel(0, -600);
           await expect.poll(async () => (await position()).reading).toBe(true);
           await waitForChatScrollIdle(page);
-          const reader = await position();
+          const reader = await captureTopVisibleVirtualRow(thread);
           await roundTrip();
           const restored = await position();
           expect(restored).toMatchObject({ locked: true, reading: true });
-          expect(Math.abs(restored.top - reader.top)).toBeLessThanOrEqual(2);
+          const restoredReader = await captureTopVisibleVirtualRow(thread);
+          expect(restoredReader.key).toBe(reader.key);
+          expect(Math.abs(restoredReader.viewportTop - reader.viewportTop)).toBeLessThanOrEqual(2);
           await page.getByRole("button", { name: "Scroll to latest", exact: true }).click();
           await expect.poll(async () => (await position()).distance).toBeLessThanOrEqual(8);
           expect(await position()).toMatchObject({ locked: false, reading: false });

@@ -181,6 +181,8 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       this.layout.rowMinimum,
       () => this.connected && this.renderer.isPresented(),
       (element, entry) => this.presentation.measureElement(element, entry),
+      (effect) => this.renderer.queueAfterCommit(effect),
+      () => this.presentation.measureRowsWithoutScrollAdjustment(),
       (index, mode) => this.renderer.prewarmRow(index, mode),
       // Coalesce completion with measured geometry instead of mounting a second
       // range in the ResizeObserver delivery's microtask checkpoint.
@@ -559,6 +561,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
           measureRows:
             // The first correction reveals new rows; their real sizes must land before retiring the anchor.
             this.initialRange.pending ||
+            this.initialRange.preparingEnd ||
             this.prependAnchor.messageKey !== null ||
             this.offsetState.scrollCommand?.target === "message" ||
             this.offsetState.scrollCommand?.target === "index",
@@ -602,7 +605,8 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   scrollToEnd({ source = "manual", behavior = "auto" }: ChatScrollToEndOptions = {}): boolean {
     // Hydration/resize follow cannot replace a saved reader. A new latest
     // command intentionally supersedes restoration.
-    if (source === "auto" && (this.offsetState.pendingScrollOffset || !this.canAutoFollow())) {
+    const positioning = this.initialRange.preparingEnd || this.offsetState.pendingScrollOffset;
+    if (source === "auto" && (positioning || !this.canAutoFollow())) {
       return false;
     }
     if (source !== "auto") {
@@ -616,11 +620,13 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       (preserveEnd) => this.cancelScroll(preserveEnd),
       () => this.presentation.queueRowMeasure(),
       this.endAnchor,
+      this.initialRange.prepareEnd,
     );
     return true;
   }
 
   cancelScroll(preserveEnd = false): void {
+    this.initialRange.finishEnd();
     // Completing a smooth journey can reveal skipped row sizes. Retain its
     // resting edge before that measurement moves the end; reader input clears it.
     if (preserveEnd) {

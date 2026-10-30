@@ -267,7 +267,7 @@ suite.define(() => {
                   const viewportTop = scroller.getBoundingClientRect().top;
                   const bubble = Array.from(
                     scroller.querySelectorAll<HTMLElement>(
-                      '.chat-bubble[data-entry-id^="sizing-message-"]',
+                      '.chat-virtual-row:not([data-prepared-row]) .chat-bubble[data-entry-id^="sizing-message-"]',
                     ),
                   ).findLast(
                     (candidate) =>
@@ -396,6 +396,33 @@ suite.define(() => {
           if (interruption === "wheel" && reducedMotion === "reduce") {
             await expect.poll(() => thread.evaluate((element) => element.scrollTop)).toBe(0);
           }
+          if (recoveryPosition === "above-viewport") {
+            // One overscan row may be a user. Put an observed assistant at that edge.
+            const distance = await thread.evaluate((element) => {
+              const viewport = element.getBoundingClientRect();
+              const assistant = [
+                ...element.querySelectorAll<HTMLElement>(
+                  '.chat-virtual-row:not([data-prepared-row]) .chat-bubble[data-entry-id^="sizing-message-"]',
+                ),
+              ].find((candidate) => {
+                const row = candidate.closest(".chat-virtual-row")!.getBoundingClientRect();
+                return (
+                  Number(candidate.dataset.entryId!.slice("sizing-message-".length)) % 2 === 1 &&
+                  row.bottom > viewport.top &&
+                  row.top < viewport.bottom
+                );
+              });
+              return assistant
+                ? assistant.closest(".chat-virtual-row")!.getBoundingClientRect().bottom -
+                    viewport.top +
+                    1
+                : null;
+            });
+            expect(distance).not.toBeNull();
+            await thread.hover();
+            await page.mouse.wheel(0, distance!);
+            await waitForChatScrollIdle(page);
+          }
           const interruptedOffset = await thread.evaluate((element) => element.scrollTop);
           expect(interruptedOffset).toBeLessThan(during.max);
           if (interruption !== "wheel") {
@@ -408,7 +435,7 @@ suite.define(() => {
             const viewport = element.getBoundingClientRect();
             const bubbles = Array.from(
               element.querySelectorAll<HTMLElement>(
-                '.chat-bubble[data-entry-id^="sizing-message-"]',
+                '.chat-virtual-row:not([data-prepared-row]) .chat-bubble[data-entry-id^="sizing-message-"]',
               ),
             );
             const bubble = bubbles.findLast((candidate) => {

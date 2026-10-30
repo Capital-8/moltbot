@@ -15,6 +15,7 @@ const IDLE_FRAGMENT_ROW_LIMIT = 64;
 /** Own initial tail placement and bounded preparation ahead of the visible range. */
 export class TranscriptInitialRange {
   pending = true;
+  preparingEnd = false;
   private tailRows: number;
   private rows: readonly TranscriptRow[] = [];
   // Completed text rows have no widget custody. Retain their keyed DOM while
@@ -47,6 +48,8 @@ export class TranscriptInitialRange {
       element: HTMLElement,
       entry: ResizeObserverEntry | undefined,
     ) => number,
+    private readonly afterCommit: (effect: () => void) => void,
+    private readonly measureRows: () => boolean,
     private readonly prewarmRow?: (index: number, mode: MarkdownPrewarmMode) => boolean | undefined,
     private readonly invalidatePreparation: () => void = invalidate,
   ) {
@@ -104,6 +107,9 @@ export class TranscriptInitialRange {
       if (preparingIndex !== undefined) {
         indexes.add(preparingIndex);
       }
+      for (const index of this.endIndexes()) {
+        indexes.add(index);
+      }
       return [...indexes].toSorted((left, right) => left - right);
     }
     const count = Math.min(range.count, this.tailRows);
@@ -114,7 +120,9 @@ export class TranscriptInitialRange {
     this.rows = rows;
     this.retainViewportRows();
     return {
-      activeRowKeys: new Set(this.activeIndexes().map((index) => rows[index]!.key)),
+      activeRowKeys: new Set(
+        [...this.activeIndexes(), ...this.endIndexes()].map((index) => rows[index]!.key),
+      ),
       preparingRowKey: this.preparingRowKey,
     };
   }
@@ -135,6 +143,50 @@ export class TranscriptInitialRange {
           this.rowIndexes,
         )
       : [];
+  }
+
+  private endIndexes(): number[] {
+    if (!this.preparingEnd) {
+      return [];
+    }
+    const virtualizer = this.virtualizer();
+    const height = virtualizer.scrollRect?.height ?? 0;
+    const indexes: number[] = [];
+    let covered = 0;
+    for (let index = this.rows.length - 1; index >= 0 && covered < height; index--) {
+      indexes.push(index);
+      covered +=
+        (virtualizer.itemSizeCache.get(this.rows[index]!.key) ??
+          virtualizer.options.estimateSize(index)) + virtualizer.options.gap;
+    }
+    return indexes;
+  }
+
+  readonly prepareEnd = (ready: () => void, isCurrent: () => boolean): void => {
+    this.preparingEnd = true;
+    this.refresh();
+    this.invalidate();
+    const begin = () => {
+      if (!this.canPrepare() || !isCurrent()) {
+        return;
+      }
+      if (this.measureRows()) {
+        this.invalidate();
+        this.afterCommit(begin);
+        return;
+      }
+      this.finishEnd();
+      ready();
+    };
+    this.afterCommit(begin);
+  };
+
+  finishEnd(): void {
+    if (this.preparingEnd) {
+      this.preparingEnd = false;
+      this.refresh();
+      this.invalidate();
+    }
   }
 
   private viewportRowHeight(element: HTMLDivElement | null): number {
@@ -290,6 +342,7 @@ export class TranscriptInitialRange {
   private queuePreparation(materialize = false): void {
     if (
       this.cancelPreparation ||
+      this.preparingEnd ||
       this.preparingRowKey ||
       this.pending ||
       this.tailRows > 0 ||
@@ -325,7 +378,13 @@ export class TranscriptInitialRange {
       }
       const virtualizer = this.virtualizer();
       const range = virtualizer.range;
-      if (!this.canPrepare() || !range || !virtualizer.scrollElement || this.prepareStarted) {
+      if (
+        this.preparingEnd ||
+        !this.canPrepare() ||
+        !range ||
+        !virtualizer.scrollElement ||
+        this.prepareStarted
+      ) {
         return;
       }
       const rows = this.rows;
@@ -582,6 +641,7 @@ export class TranscriptInitialRange {
     this.preparingRowKey = undefined;
     this.preparedRowKeys.clear();
     this.viewportOnly = false;
+    this.preparingEnd = false;
     this.refresh();
   }
 }
