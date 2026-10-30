@@ -290,7 +290,7 @@ async function transcriptFixture(
   };
 }
 
-it("warms HTML and nearby geometry without distant DOM", async () => {
+it("bounds initial HTML warming and keeps distant rows out of the DOM", async () => {
   const view = await transcriptFixture(0, true, false, "retained");
   const elements = view.container.querySelectorAll(".chat-virtual-row").length;
   await view.idle(0);
@@ -299,8 +299,9 @@ it("warms HTML and nearby geometry without distant DOM", async () => {
     await view.frame(2, false);
   }
   await view.frame(1, false);
-  // The first fast scroll can cross more than the retained geometry window.
-  expect(prewarmGroupedMessage(view.groups[200]!.messages[0]!.message, {})).toBe(false);
+  // Cover the first gesture without preparing the whole untouched transcript.
+  expect(prewarmGroupedMessage(view.groups[96]!.messages[0]!.message, {})).toBe(false);
+  expect(prewarmGroupedMessage(view.groups[200]!.messages[0]!.message, {})).toBe(true);
   expect(view.container.querySelector('[data-virtual-row-key="fragment:20"]')).not.toBeNull();
   expect(view.container.querySelector('[data-virtual-row-key="fragment:200"]')).toBeNull();
   expect(view.container.querySelectorAll(".chat-virtual-row").length).toBeLessThanOrEqual(

@@ -8,6 +8,8 @@ const PREPARED_ROW_LIMIT = 24;
 // Use idle time before a fast sweep reaches distant rows. The shared HTML cache
 // still bounds admission; DOM and pristine-fragment limits stay unchanged.
 const IDLE_PREWARM_ROW_LIMIT = 2048;
+// Cover the first gesture without parsing the entire untouched transcript on open.
+const INITIAL_PREWARM_ROW_LIMIT = 128;
 // A fast first gesture can skip dozens of rows before velocity is known.
 // Keep nearby sanitized DOM ready without mounting it or changing geometry.
 const IDLE_FRAGMENT_ROW_LIMIT = 64;
@@ -350,6 +352,9 @@ export class TranscriptInitialRange {
     ) {
       return;
     }
+    const idlePrewarmLimit = this.scrollSample.time
+      ? IDLE_PREWARM_ROW_LIMIT
+      : INITIAL_PREWARM_ROW_LIMIT;
     const idleRange = this.virtualizer().range;
     if (
       idleRange &&
@@ -365,7 +370,7 @@ export class TranscriptInitialRange {
         direction > 0 ? this.rows.length - 1 - idleRange.endIndex : idleRange.startIndex;
       // Commits must not re-arm callbacks after the permitted sweep.
       // Reader movement and structural changes reset the existing cursors.
-      if (this.idleStep > Math.min(IDLE_PREWARM_ROW_LIMIT, remaining)) {
+      if (this.idleStep > Math.min(idlePrewarmLimit, remaining)) {
         return;
       }
     }
@@ -447,7 +452,7 @@ export class TranscriptInitialRange {
       const nearGeometryPending = !this.viewportOnly && this.idleMeasureStep <= PREPARED_ROW_LIMIT;
       if (prewarm && !moving) {
         // Measure nearby prepared rows before spending idle slices on distant HTML.
-        const warmLimit = nearGeometryPending ? PREPARED_ROW_LIMIT : IDLE_PREWARM_ROW_LIMIT;
+        const warmLimit = nearGeometryPending ? PREPARED_ROW_LIMIT : idlePrewarmLimit;
         // Resume the sweep rather than charging every slice for its cached prefix.
         // A row can contain several messages; false means ready or not admitted
         // by the bounded cache, so even an oversized row eventually advances.
