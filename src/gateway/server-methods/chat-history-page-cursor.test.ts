@@ -199,14 +199,16 @@ it.each([false, true])("terminates a hidden prefix with tool-only tail=%s", asyn
       ...Array.from({ length: 50 }, () => makeMessage("Hidden", { display: false })),
       ...(toolOnly ? [makeMessage("Synthetic file contents", { role: "toolResult" })] : []),
     ]);
-    const tail = await read({ limit: 2 });
-    expect(tail).toMatchObject({ hasMore: false });
-    expect(tail.messages).toHaveLength(toolOnly ? 1 : 0);
-    expect([tail.olderCursor, tail.newerCursor, tail.nextOffset]).toEqual([
-      undefined,
-      undefined,
-      undefined,
-    ]);
+    for (const params of [{ limit: 2 }, { limit: 2, offset: 0 }]) {
+      const tail = await read(params);
+      expect(tail).toMatchObject({ hasMore: false });
+      expect(tail.messages).toHaveLength(toolOnly ? 1 : 0);
+      expect([tail.olderCursor, tail.newerCursor, tail.nextOffset]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
   });
 });
 
