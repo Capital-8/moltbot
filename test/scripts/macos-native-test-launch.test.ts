@@ -7,6 +7,10 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { detectChangedScope } from "../../scripts/ci-changed-scope.mjs";
+import {
+  projectMlxSettingsManifest,
+  verifyMlxSettingsPackageProjection,
+} from "../../scripts/lib/macos-mlx-settings-manifest.mts";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 import { preparedScriptWrapperPreload } from "./prepared-script-wrapper.test-support.js";
 
@@ -374,6 +378,26 @@ if (${failCandidate} && process.cwd()===${JSON.stringify(f.workspace)}) {
 }
 fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
       const overlays: Record<string, string> = {};
+      const originalManifest = read(path.join(repo, "apps/macos/Package.swift"));
+      const focusedManifest = projectMlxSettingsManifest(originalManifest);
+      // Native commands are fake here; these package graphs describe only the
+      // fixture's manifest contract, not a real SwiftPM build qualification.
+      const originalDump = { targets: [{ name: "OpenClawIPCTests", sources: null }] };
+      const focusedDump = {
+        targets: [{ name: "OpenClawIPCTests", sources: ["MLXSettingsUpgradeTests.swift"] }],
+      };
+      verifyMlxSettingsPackageProjection(originalDump, focusedDump);
+      const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+      const manifestReceipt = {
+        semanticVerified: true,
+        originalBlob: createHash("sha1")
+          .update(`blob ${Buffer.byteLength(originalManifest)}\0${originalManifest}`)
+          .digest("hex"),
+        originalSHA256: hash(originalManifest),
+        effectiveSHA256: hash(focusedManifest),
+        originalDumpSHA256: hash(JSON.stringify(originalDump)),
+        effectiveDumpSHA256: hash(JSON.stringify(focusedDump)),
+      };
       for (const source of [stable, f.workspace]) {
         for (const [relative, content] of [
           [fixturePath, "synthetic Swift fixture"],
@@ -384,6 +408,7 @@ fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
           fs.writeFileSync(file, content!);
           overlays[relative!] = createHash("sha256").update(content!).digest("hex");
         }
+        fs.writeFileSync(path.join(source, "apps/macos/Package.swift"), focusedManifest);
         const scripts = path.join(source, "scripts");
         if (source === stable) {
           fs.mkdirSync(scripts);
@@ -404,6 +429,7 @@ fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
           stable: { sourceRoot: stable, sha: "a".repeat(40) },
           fixed: { sourceRoot: fs.realpathSync(f.workspace), sha: "b".repeat(40) },
           overlays,
+          testBuildManifests: { stable: manifestReceipt, fixed: manifestReceipt },
         }),
       );
       // Exhaust only the final Keychain admission, after the joined defaults
