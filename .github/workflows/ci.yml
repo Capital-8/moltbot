@@ -1,5 +1,5 @@
 name: CI
-run-name: iOS screenshot index-store preflight (no compilation or upload)
+run-name: iOS screenshot compiler command preflight (no compilation or upload)
 on:
   workflow_dispatch: {}
 permissions:
@@ -63,26 +63,28 @@ jobs:
           key: ios-screenshot-packages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ios-cache-inputs.outputs.xcode }}-${{ hashFiles('apps/ios/**/Package.resolved', 'apps/ios/project.yml', 'apps/shared/**/Package*.swift', 'apps/shared/**/Package.resolved', 'apps/swabble/Package*.swift', 'apps/swabble/Package.resolved') }}
       - name: Generate the normal iOS project
         run: pnpm ios:gen
-      - name: Inspect baseline and disabled index settings without compiling
+      - name: Inspect baseline and disabled compiler plans without compiling
         run: |-
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/index-store-settings"
           xcodebuild -version
           sysctl -n hw.ncpu hw.memsize
           for variant in baseline disabled; do
-            settings=(-showBuildSettings -json)
+            settings=(-dry-run build-for-testing)
             if [[ "$variant" == disabled ]]; then settings+=(COMPILER_INDEX_STORE_ENABLE=NO); fi
             xcodebuild -project apps/ios/OpenClaw.xcodeproj -scheme OpenClawUITests -configuration Debug \
               -derivedDataPath apps/ios/build/SnapshotDerivedData -destination 'generic/platform=iOS Simulator' \
               "ARCHS=$(uname -m)" ONLY_ACTIVE_ARCH=YES "${settings[@]}" \
-              > "$RUNNER_TEMP/index-store-settings/$variant.json"
+              > "$RUNNER_TEMP/index-store-settings/$variant.log"
           done
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const keys=['COMPILER_INDEX_STORE_ENABLE','INDEX_ENABLE_DATA_STORE','SWIFT_INDEX_STORE_ENABLE','CLANG_INDEX_STORE_ENABLE','SWIFT_OPTIMIZATION_LEVEL','GCC_OPTIMIZATION_LEVEL','INDEX_DATA_STORE_DIR'];
           for(const variant of ['baseline','disabled']) {
-            const targets=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/index-store-settings/'+variant+'.json','utf8'));
-            for(const target of targets) console.log(JSON.stringify({variant,target:target.target,settings:Object.fromEntries(keys.map(k=>[k,target.buildSettings[k]??null]))}));
+            const text=fs.readFileSync(process.env.RUNNER_TEMP+'/index-store-settings/'+variant+'.log','utf8');
+            const commands=text.split('\n').filter(line=>/ -module-name /.test(line) && /swiftc|SwiftDriver/.test(line));
+            const indexCommands=commands.filter(line=>line.includes('-index-store-path'));
+            console.log(JSON.stringify({variant,swiftCompilerCommands:commands.length,swiftIndexCommands:indexCommands.length}));
+            console.log(commands.slice(0,2).join('\n'));
           }
           NODE
       - name: Retain effective settings
