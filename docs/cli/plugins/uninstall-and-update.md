@@ -239,7 +239,9 @@ When you work on bundled plugin code in a source checkout or a Node/Bun install,
 start the Gateway with `OPENCLAW_DEV_RELOAD_BUNDLED_PLUGINS=1`. Then
 `openclaw plugins reload <id>` loads the plugin's edited code from disk and returns
 `restartRequired: false` with a warning. The plugin's code includes its package
-directory and the compiled chunks that only that plugin uses. Rebuild first when
+directory and the compiled chunks used only by plugins, including chunks it shares
+with other plugins. Chunks that core or the SDK also use keep their loaded code.
+Rebuild first when
 the installation loads compiled output; reload doesn't run the build.
 
 This mode is for development only:

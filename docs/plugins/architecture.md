@@ -285,7 +285,8 @@ capture updated source and dependencies on explicit reload.
 
 For development, `OPENCLAW_DEV_RELOAD_BUNDLED_PLUGINS=1` lets an explicit reload
 capture a bundled plugin's own code: its package tree and the build chunks that
-`dist/runtime-dependency-ownership.json` assigns only to that plugin. Imports of host,
+`dist/runtime-dependency-ownership.json` lists for that plugin. Those chunks are used
+only by plugins, though other plugins may share them. Imports of host,
 SDK, and core-shared chunks resolve to the Gateway's loaded modules, including from
 captured Workers. Standalone executables ignore the variable. See
 [Development: reload edited bundled code](/cli/plugins/uninstall-and-update#development-reload-edited-bundled-code).
