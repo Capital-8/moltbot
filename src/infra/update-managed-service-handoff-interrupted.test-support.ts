@@ -49,10 +49,14 @@ export async function prepareInterruptedManagedServiceFixture(params: {
     });
     console.log(JSON.stringify({status:"ok",coreUpdate:"completed",mode:"finalize"}));
   `;
+  const stageRoot = fixture.params.stage.packageRoot;
+  if (!stageRoot) {
+    throw new Error("Interrupted-update fixture requires a staged package root");
+  }
   for (const [directory, version] of [
     [installRoot, "1.0.0"],
-    [fixture.params.stage.packageRoot, "2.0.0"],
-  ]) {
+    [stageRoot, "2.0.0"],
+  ] as const) {
     await fs.mkdir(path.join(directory, "dist/cli"), { recursive: true });
     await fs.writeFile(
       path.join(directory, "package.json"),
