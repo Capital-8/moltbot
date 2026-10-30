@@ -48,6 +48,7 @@ async function transcriptFixture(
   viewportHeight = 600,
   completedFrame: boolean | "toolCall" = false,
   retainStride = 1,
+  canFollowEnd = true,
 ) {
   let now = 1;
   let nextFrame = 0;
@@ -193,6 +194,7 @@ async function transcriptFixture(
     },
     initialOffset,
     undefined,
+    { canFollowEnd: () => canFollowEnd },
   );
   disposers.push(() => {
     disposed = true;
@@ -922,11 +924,26 @@ it("advances a relative timestamp without refreshing its message", async () => {
   }
 });
 
+it("renders the latest reader destination once before paint", async () => {
+  const view = await transcriptFixture(0, true, false, false, 600, false, 1, false);
+  await view.frame(8);
+  const rendered = view.renderRow.mock.calls.length;
+  await view.scrollTo(60);
+  // A later animation callback can advance past the native scroll event's range.
+  view.container.scrollTop = 12_000;
+  await view.frame(1, false);
+  const entered = view.renderRow.mock.calls.slice(rendered).map(([row]) => row.key);
+  expect(entered).not.toContain("fragment:60");
+  expect(entered).toContain("fragment:120");
+  expect(view.container.querySelector('[data-virtual-row-key="fragment:120"]')).not.toBeNull();
+});
+
 it("updates the settled scroll window without re-entering the caller renderer", async () => {
   const view = await transcriptFixture(0, true);
   await view.frame(8);
   const draws = view.draw.mock.calls.length;
   await view.scrollTo(120);
+  await view.frame(1, false);
   expect(view.draw.mock.calls).toHaveLength(draws);
   expect(view.container.querySelector('[data-virtual-row-key="fragment:120"]')).not.toBeNull();
   expect(view.container.scrollTop).toBe(12_000);

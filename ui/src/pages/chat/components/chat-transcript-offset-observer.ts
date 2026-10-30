@@ -27,8 +27,7 @@ export class TranscriptOffsetState {
   renderedTouchActive = false;
   maintenanceScrollOffset: number | null = null;
   pendingInteractionAnchor: ChatTranscriptInteractionAnchor | null = null;
-  syncNativeOffset: ((measurement?: boolean) => void) | null = null;
-  measuringOffset = false;
+  syncNativeOffset: (() => void) | null = null;
   recordProgrammaticScroll: ((before: number, after: number, maintenance: boolean) => void) | null =
     null;
 
@@ -269,7 +268,7 @@ export function observeTranscriptOffset(
       owner.invalidate();
     }
   };
-  const syncOffset = (measurement = false) => {
+  const syncOffset = () => {
     if (!element || element !== owner.getScrollElement() || instance.scrollElement !== element) {
       return;
     }
@@ -293,12 +292,7 @@ export function observeTranscriptOffset(
         return;
       }
     }
-    owner.state.measuringOffset = measurement;
-    try {
-      publishOffset(offset, instance.isScrolling);
-    } finally {
-      owner.state.measuringOffset = false;
-    }
+    publishOffset(offset, instance.isScrolling);
   };
   owner.state.syncNativeOffset = syncOffset;
   const finishTouch = (event: TouchEvent) => {
