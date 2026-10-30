@@ -19,6 +19,7 @@ import {
   verifyPublishedNpmRegistry,
 } from "./plugin-npm-prepared-release.mjs";
 import { verifyPluginPublicationArtifact } from "./plugin-publication-artifact.mjs";
+import { parseGithubResponse } from "./pr-lib/gh-api-preflight.mjs";
 import { runReleaseToolingGh } from "./release-tooling-identity.mjs";
 
 const WORKFLOW = ".github/workflows/plugin-npm-release.yml";
@@ -83,9 +84,26 @@ export async function createPluginNpmPublicationReadback(options) {
     "Plugin npm parent readback requires the exact source, tooling, and child run.",
   );
   const runGh = options.runGh ?? runReleaseToolingGh;
+  const readApi = (endpoint, jq) => {
+    const raw = runGh([
+      "api",
+      `repos/${repository}/${endpoint}`,
+      ...(jq ? ["--jq", jq] : []),
+      "--include",
+    ]);
+    const response = parseGithubResponse(raw);
+    requireValue(
+      /^2\d\d$/u.test(response.status ?? "") &&
+        response.body !== null &&
+        typeof response.body === "object" &&
+        !Array.isArray(response.body),
+      "Plugin npm GitHub read returned an invalid response.",
+    );
+    return response.body;
+  };
   const api = (endpoint, validate = (value) => value) =>
     retryPluginNpmRead(() => {
-      const value = JSON.parse(runGh(["api", `repos/${repository}/${endpoint}`]));
+      const value = readApi(endpoint);
       return validate(value);
     });
   const inventory = (endpoint, key) =>
@@ -94,26 +112,30 @@ export async function createPluginNpmPublicationReadback(options) {
         key === "jobs"
           ? "id,name,run_id,run_attempt,head_sha,status,conclusion,steps"
           : "id,name,digest,size_in_bytes,expired,expires_at,workflow_run";
-      const raw = runGh([
-        "api",
-        `repos/${repository}/${endpoint}${endpoint.includes("?") ? "&" : "?"}per_page=100`,
-        "--paginate",
-        "--jq",
-        `{total_count, ${key}: [.${key}[] | {${fields}}]} | @json`,
-      ]);
-      const pages = raw
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      const count = pages[0]?.total_count;
-      requireValue(
-        Number.isSafeInteger(count) &&
-          count >= 0 &&
-          count <= 10_000 &&
-          pages.every((page) => page.total_count === count && Array.isArray(page[key])),
-        `Incomplete plugin npm ${key} inventory.`,
-      );
-      const entries = pages.flatMap((page) => page[key]);
+      const entries = [];
+      let count;
+      for (let page = 1; page <= 100; page += 1) {
+        const value = readApi(
+          `${endpoint}${endpoint.includes("?") ? "&" : "?"}per_page=100&page=${page}`,
+          `{total_count, ${key}: [.${key}[] | {${fields}}]}`,
+        );
+        if (count === undefined) {
+          count = value.total_count;
+        }
+        requireValue(
+          Number.isSafeInteger(count) &&
+            count >= 0 &&
+            count <= 10_000 &&
+            value.total_count === count &&
+            Array.isArray(value[key]),
+          `Incomplete plugin npm ${key} inventory.`,
+        );
+        entries.push(...value[key]);
+        if (entries.length >= count) {
+          break;
+        }
+        requireValue(value[key].length === 100, `Incomplete plugin npm ${key} inventory.`);
+      }
       requireValue(
         entries.length === count && new Set(entries.map((entry) => entry.id)).size === count,
         `Incomplete or duplicate plugin npm ${key} inventory.`,

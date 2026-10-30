@@ -3,6 +3,7 @@ import {
   createPluginNpmPublicationReadback,
   retryPluginNpmRead,
 } from "../../scripts/plugin-npm-publication-readback.mjs";
+import { parseGithubResponse } from "../../scripts/pr-lib/gh-api-preflight.mjs";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 import {
   createNpmPublicationReadbackFixture,
@@ -13,8 +14,8 @@ import {
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.useRealTimers());
 
-const transientGitHubError = () =>
-  Object.assign(new Error("gh: HTTP 503"), { stderr: "HTTP 503 Server Error" });
+const transientGitHubError = (stdout?: string) =>
+  Object.assign(new Error("gh: HTTP 503"), { stderr: "HTTP 503 Server Error", stdout });
 
 async function fixture(mode = "direct", fault = "none", distTagVersion?: string) {
   const value = await createNpmPublicationReadbackFixture(
@@ -72,13 +73,14 @@ it("revalidates child identity after a transient GET retry", async () => {
   let reads = 0;
   value.options.runGh = (args: string[]) => {
     if (args[1]?.endsWith(`/actions/runs/${value.options.runId}`)) {
+      expect(args).toContain("--include");
       reads += 1;
       if (reads === 1) {
-        throw transientGitHubError();
+        throw transientGitHubError("HTTP/2 429 Too Many Requests\r\nretry-after: 7\r\n\r\n");
       }
-      const run = JSON.parse(runGh(args));
+      const run = parseGithubResponse(runGh(args)).body;
       run.head_sha = "c".repeat(40);
-      return JSON.stringify(run);
+      return `HTTP/2 200 OK\r\n\r\n${JSON.stringify(run)}`;
     }
     return runGh(args);
   };
@@ -86,7 +88,9 @@ it("revalidates child identity after a transient GET retry", async () => {
   const pending = expect(createPluginNpmPublicationReadback(value.options)).rejects.toThrow(
     "child identity or successful attempt does not match publication",
   );
-  await vi.advanceTimersByTimeAsync(1000);
+  await vi.advanceTimersByTimeAsync(6999);
+  expect(reads).toBe(1);
+  await vi.advanceTimersByTimeAsync(1);
 
   await pending;
   expect(reads).toBe(2);
@@ -100,15 +104,16 @@ it("revalidates publisher job identity after a transient inventory retry", async
   let reads = 0;
   value.options.runGh = (args: string[]) => {
     if (args[1]?.includes(`/actions/runs/${value.options.runId}/jobs?`)) {
+      expect(args).toContain("--include");
       reads += 1;
       if (reads === 1) {
         throw transientGitHubError();
       }
-      const inventory = JSON.parse(runGh(args));
+      const inventory = parseGithubResponse(runGh(args)).body;
       inventory.jobs.find((job: { name?: string }) =>
         job.name?.startsWith("Publish plugin npm package"),
       ).head_sha = "c".repeat(40);
-      return JSON.stringify(inventory);
+      return `HTTP/2 200 OK\r\n\r\n${JSON.stringify(inventory)}`;
     }
     return runGh(args);
   };
@@ -134,9 +139,9 @@ it("revalidates artifact identity after a transient metadata retry", async () =>
       if (reads === 1) {
         throw transientGitHubError();
       }
-      const artifact = JSON.parse(runGh(args));
+      const artifact = parseGithubResponse(runGh(args)).body;
       artifact.digest = `sha256:${"f".repeat(64)}`;
-      return JSON.stringify(artifact);
+      return `HTTP/2 200 OK\r\n\r\n${JSON.stringify(artifact)}`;
     }
     return runGh(args);
   };
