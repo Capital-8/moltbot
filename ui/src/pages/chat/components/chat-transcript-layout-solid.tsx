@@ -1,5 +1,7 @@
 import { dynamic, render, type JSX } from "@solidjs/web";
 import { createMemo, createSignal, For, onSettled, runWithOwner, Show } from "solid-js";
+import { retryStaleChunkReloadWhenReachable } from "../../../app/stale-chunk-reload.ts";
+import { LazyViewError } from "../../../components/solid/lazy-view-error.tsx";
 import { PRESENTATION_CHANGED_EVENT, type PresentationBinding } from "../../../lib/presentation.ts";
 import { ApplicationProvider } from "../../../lib/reactive/context.ts";
 import { elementRef } from "../../../lib/reactive/element-ref.ts";
@@ -17,6 +19,7 @@ import {
   TranscriptRowKeyContext,
   type TranscriptContent,
   type TranscriptLayoutProps,
+  type RichPresentationPreparation,
 } from "./chat-transcript-layout.ts";
 import { TranscriptMediaDisconnect } from "./chat-transcript-media-lifecycle.ts";
 import { transcriptArraysEqual } from "./chat-transcript-memo.ts";
@@ -69,13 +72,45 @@ function RowContent(props: { value: TranscriptContent }): JSX.Element {
   );
 }
 
+function RichPreparationFeedback(props: { preparation: RichPresentationPreparation }) {
+  const failure = () => {
+    const value = props.preparation;
+    return value.status === "error" ? value : undefined;
+  };
+  return (
+    <div
+      class="chat-transcript-preparation"
+      // Stay above focused rows without changing the accepted row geometry.
+      style={{ display: "flow-root", position: "sticky", top: "0", height: "0", "z-index": "2" }}
+    >
+      <Show
+        when={failure()}
+        fallback={
+          <div class="chat-group" role="status">
+            {t("common.loading")}
+          </div>
+        }
+      >
+        {(error) => (
+          <LazyViewError
+            error={error().error}
+            actionLabel={t("common.reload")}
+            onRetry={() => void retryStaleChunkReloadWhenReachable()}
+            inline
+          />
+        )}
+      </Show>
+    </div>
+  );
+}
+
 function TranscriptRows(props: {
   snapshot: TranscriptLayoutProps;
   measureRowRefFor: TranscriptLayoutProps["measureRowRefFor"];
   columnRef: (element: HTMLDivElement) => void;
 }) {
   const virtualRows = createMemo(() => {
-    return props.snapshot.virtualizer.getVirtualItems();
+    return props.snapshot.virtualRows ?? props.snapshot.virtualizer.getVirtualItems();
   });
   const rowRef = (key: string) => {
     const measureRef = props.measureRowRefFor(key);
@@ -86,6 +121,9 @@ function TranscriptRows(props: {
   };
   return (
     <>
+      <Show when={props.snapshot.richPreparation}>
+        {(preparation) => <RichPreparationFeedback preparation={preparation()} />}
+      </Show>
       {/* Live controls can retire before a gesture releases the accepted row model. */}
       <div style={{ height: `${props.snapshot.headerHeight}px`, "transition-property": "none" }}>
         {props.snapshot.header}
@@ -204,7 +242,11 @@ export class ChatTranscriptRenderer {
 
   syncInitialPosition(): void {
     if (this.element && this.accepted) {
-      this.element.style.visibility = this.accepted.initialPositionPending() ? "hidden" : "";
+      this.element.style.visibility = this.accepted.richPreparation
+        ? ""
+        : this.accepted.initialPositionPending()
+          ? "hidden"
+          : "";
     }
   }
 
@@ -228,7 +270,12 @@ export class ChatTranscriptRenderer {
   }
 
   commit(): void {
-    if (!this.lifecycle || this.commitQueued || this.accepted === this.committed) {
+    if (
+      !this.lifecycle ||
+      this.commitQueued ||
+      this.accepted === this.committed ||
+      this.accepted?.richPreparation
+    ) {
       return;
     }
     this.commitQueued = true;
@@ -236,7 +283,7 @@ export class ChatTranscriptRenderer {
       () => {
         this.commitQueued = false;
         const current = this.lifecycle?.snapshot();
-        if (!current || !this.element) {
+        if (!current || !this.element || this.accepted?.richPreparation) {
           return;
         }
         this.committed = current;
@@ -256,7 +303,19 @@ export class ChatTranscriptRenderer {
     );
   }
 
+  holdRichPreparation(
+    preparation: RichPresentationPreparation,
+    initial: TranscriptLayoutProps,
+  ): HTMLDivElement {
+    // Only feedback changes; the accepted rows, geometry and foreign DOM stay owned together.
+    const element = this.render({ ...(this.accepted ?? initial), richPreparation: preparation });
+    this.syncInitialPosition();
+    return element;
+  }
+
   render(next: TranscriptLayoutProps): HTMLDivElement {
+    // A held import retains the accepted range even while the native viewport moves.
+    next = { ...next, virtualRows: next.virtualRows ?? next.virtualizer.getVirtualItems() };
     this.accepted = next;
     const binding = typeof next.presented === "boolean" ? undefined : next.presented;
     if (binding?.owner !== this.binding?.owner) {
@@ -269,7 +328,11 @@ export class ChatTranscriptRenderer {
     if (!this.element) {
       const element = document.createElement("div");
       element.className = "chat-thread-inner chat-thread-inner--virtual";
-      element.style.visibility = next.initialPositionPending() ? "hidden" : "";
+      element.style.visibility = next.richPreparation
+        ? ""
+        : next.initialPositionPending()
+          ? "hidden"
+          : "";
       this.element = element;
       // This retained transcript island outlives the computation that introduces its DOM.
       // Its session owner disposes the detached root, including while the pane is parked.

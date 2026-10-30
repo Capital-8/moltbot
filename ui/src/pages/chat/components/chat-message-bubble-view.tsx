@@ -27,28 +27,19 @@ import { assistantMessageIsInterrupted } from "../chat-assistant-reply.ts";
 import "../../../components/solid/person-reference.tsx";
 import { usePanePresentation } from "../chat-pane-presentation.ts";
 import { persistedMessageEntryId } from "../chat-thread-items.ts";
-import { AsyncQuestionSummary } from "./chat-async-question-summary.tsx";
+import { AssistantViews } from "./chat-assistant-views.tsx";
 import { ChatBubbleActivity } from "./chat-bubble-activity-view.tsx";
 import { ChatLazyBoundary } from "./chat-lazy-boundary.tsx";
-import { OmittedMedia, PairingQrNotices } from "./chat-message-attachment-status-solid.tsx";
 import type { GroupedMessageOptions } from "./chat-message-bubble-options.ts";
 import {
   prepareGroupedMessage,
   type MessageContentProps as ContentProps,
 } from "./chat-message-bubble-presentation.ts";
 import {
-  AssistantViews,
-  BubbleToolCards,
-  InlineToolCards,
-  ToolMessage,
-} from "./chat-message-bubble-tools.tsx";
-import { MessageWorkContext } from "./chat-message-context-view.tsx";
-import {
   AssistantAttachments,
   ChatClawHubCard,
   MessageAttachment,
 } from "./chat-message-deferred.tsx";
-import { MessageImages } from "./chat-message-images-solid.tsx";
 import type { ChatMessageRenderPreparation } from "./chat-message-markdown-view.tsx";
 import type { MarkdownMedia, PositionedMedia } from "./chat-message-media-markdown.ts";
 import { prepareMarkdownMedia } from "./chat-message-media-markdown.ts";
@@ -60,10 +51,20 @@ import {
 } from "./chat-message-media.ts";
 import { MarkdownText, MessageJson, MessageMarkdown } from "./chat-message-text-view.tsx";
 import { ReplyLineView } from "./chat-reply-attribution.tsx";
+import {
+  BubbleToolCards,
+  InlineToolCards,
+  ToolMessage,
+  AsyncQuestionSummary,
+  OmittedMedia,
+  PairingQrNotices,
+  MessageWorkContext,
+  MessageImages,
+  WorkspaceConflictTranscriptMessage,
+} from "./chat-rich-presentation.ts";
 import { ChatRowDisplayContext } from "./chat-row-display-context.ts";
 import type { SidebarContent } from "./chat-sidebar-content-types.ts";
 import { TranscriptMessageElementsContext } from "./chat-transcript-message-elements.ts";
-import { WorkspaceConflictTranscriptMessage } from "./chat-workspace-conflict.tsx";
 
 registerEnglishCatalog(registerChatToolLabelsEnglish);
 
@@ -348,15 +349,21 @@ function BubbleContents(props: ContentProps) {
           {(card) => <ChatClawHubCard recommendation={card()} agentId={props.options.agentId} />}
         </For>
       </Show>
-      <PairingQrNotices count={props.state().expiredPairingQrCount} />
-      <MessageImages
-        images={
-          props.state().renderInOrder ? props.state().supplementalImages : props.state().images
-        }
-        options={props.state().imageRenderOptions}
-        previews={previews()}
-      />
-      <OmittedMedia items={props.state().omittedMedia} />
+      <Show when={props.state().expiredPairingQrCount > 0}>
+        <PairingQrNotices count={props.state().expiredPairingQrCount} />
+      </Show>
+      <Show when={props.state().images.length > 0 || previewCount() > 0}>
+        <MessageImages
+          images={
+            props.state().renderInOrder ? props.state().supplementalImages : props.state().images
+          }
+          options={props.state().imageRenderOptions}
+          previews={previews()}
+        />
+      </Show>
+      <Show when={props.state().omittedMedia.length > 0}>
+        <OmittedMedia items={props.state().omittedMedia} />
+      </Show>
       <AssistantAttachments
         attachments={
           props.state().renderInOrder

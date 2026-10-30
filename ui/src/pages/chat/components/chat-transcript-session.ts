@@ -13,6 +13,7 @@ import { readConnectedTranscriptRows } from "./chat-transcript-geometry.ts";
 import type {
   ComposerActivityLayout,
   TranscriptLayoutOwner,
+  TranscriptRowConfiguration,
 } from "./chat-transcript-layout-owner.ts";
 import type { TranscriptContent, TranscriptRow } from "./chat-transcript-layout.ts";
 import type { TranscriptMessageElements } from "./chat-transcript-message-elements.ts";
@@ -52,6 +53,11 @@ export type TranscriptHeader = {
   height: number;
 };
 
+export type TranscriptPreparation = {
+  richRowKeys: ReadonlySet<string>;
+  rowConfiguration: TranscriptRowConfiguration;
+};
+
 export type ChatTranscriptSession = {
   readonly layout: Pick<TranscriptLayoutOwner, "viewportResizePending" | "configureRows" | "ready">;
   readonly entryAnimations: ChatMessageEntryAnimations;
@@ -69,6 +75,7 @@ export type ChatTranscriptSession = {
     header?: TranscriptHeader | null,
     presented?: PresentationValue,
     applicationContext?: ApplicationContext,
+    preparation?: TranscriptPreparation,
   ): HTMLDivElement;
   syncMessageRows(
     messageRowKeysById: ReadonlyMap<string, string>,
@@ -94,6 +101,8 @@ export type TranscriptRenderSnapshot<T> = {
   entryKeys: ChatMessageEntryAnimations["projectedKeys"];
   presented: PresentationValue;
   applicationContext?: ApplicationContext;
+  richRowKeys?: ReadonlySet<string>;
+  rowConfiguration?: TranscriptRowConfiguration;
 };
 
 /** Session-owned deferred measurements after width changes and smooth scrolling. */

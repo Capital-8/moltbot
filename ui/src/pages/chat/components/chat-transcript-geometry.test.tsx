@@ -24,7 +24,7 @@ import {
   renderChatThread,
   mountTestTranscript,
 } from "../test-helpers/chat-transcript-native.tsx";
-import { RawOutputToggle } from "./chat-tool-content.solid.tsx";
+import { RawOutputToggle } from "./chat-tool-raw-output.tsx";
 import { createChatTranscript } from "./chat-transcript-controller.ts";
 import {
   contentRows,

@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import type { Virtualizer } from "@tanstack/virtual-core";
+import type { VirtualItem, Virtualizer } from "@tanstack/virtual-core";
 import { createContext } from "solid-js";
 import type { ApplicationContext } from "../../../app/context.ts";
 import type { PresentationValue } from "../../../lib/presentation.ts";
@@ -13,12 +13,18 @@ export type TranscriptRow<T = unknown> =
   | { kind: "item"; key: string; item: T; revision?: string }
   | { kind: "content"; key: string; content: TranscriptContent };
 
+export type RichPresentationPreparation =
+  | { status: "loading" }
+  | { status: "error"; error: unknown };
+
 export type TranscriptLayoutProps = {
+  richPreparation?: RichPresentationPreparation;
   applicationContext?: ApplicationContext;
   messageElements: TranscriptMessageElements;
   rows: readonly TranscriptRow[];
   getContent: (index: number) => TranscriptContent;
   virtualizer: Virtualizer<HTMLDivElement, HTMLElement>;
+  virtualRows?: readonly VirtualItem[];
   overlay: JSX.Element;
   header: JSX.Element;
   scrollElementRef: (element?: Element) => void;

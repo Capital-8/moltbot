@@ -16,7 +16,6 @@ import { BrowserTabPreviews } from "./chat-browser-tab-previews.tsx";
 import { ForwardedAttribution } from "./chat-forwarded-attribution.tsx";
 import { ChatHandoffResume } from "./chat-handoff-sessions.tsx";
 import { ChatLazyBoundary } from "./chat-lazy-boundary.tsx";
-import { ActivityGroupContent } from "./chat-message-activity-view.tsx";
 import type { GroupedMessageOptions } from "./chat-message-bubble-options.ts";
 import { GroupedMessage } from "./chat-message-bubble-view.tsx";
 import { RewindButton } from "./chat-message-confirmation-view.tsx";
@@ -49,6 +48,7 @@ import {
 } from "./chat-reply-attribution.ts";
 import { ReplyLineView, ReplyLineConnector } from "./chat-reply-attribution.tsx";
 import type { ReplyConnectorElements } from "./chat-reply-connector.tsx";
+import { ActivityGroupContent } from "./chat-rich-presentation.ts";
 import { ChatSessionActivity } from "./chat-session-activity.solid.tsx";
 import { selectBrowserTabPreviews } from "./chat-tool-cards.ts";
 import { TurnRecapRow } from "./chat-turn-recap-view.tsx";

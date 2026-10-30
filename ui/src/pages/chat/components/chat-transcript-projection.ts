@@ -30,10 +30,7 @@ import { createReplyPreviewResolver } from "./chat-reply-preview.ts";
 import { getTranscriptState, type ChatThreadProps } from "./chat-thread-interactions.ts";
 import { projectTranscriptActivity } from "./chat-transcript-activity.ts";
 import { latestTranscriptAnnouncement } from "./chat-transcript-announcement.ts";
-import {
-  resolveTranscriptAvatarPlacement,
-  resolveTranscriptParticipants,
-} from "./chat-transcript-identity.ts";
+import { resolveTranscriptParticipants } from "./chat-transcript-identity.ts";
 import { createTranscriptMemo } from "./chat-transcript-memo.ts";
 import {
   expandReplyTargetWork,
@@ -42,6 +39,7 @@ import {
   projectTranscriptRows,
   type PlacedContentRow,
 } from "./chat-transcript-message-index.ts";
+import { projectTranscriptPreparation } from "./chat-transcript-preparation.ts";
 import { projectTranscriptRecovery } from "./chat-transcript-recovery.ts";
 import {
   GuardedTranscriptItem,
@@ -133,10 +131,12 @@ export function projectChatTranscript(
           }
         : undefined,
   } satisfies Parameters<typeof buildCachedChatItems>[0];
-  const { snapshot, live, resolveLiveStream } = createTranscriptStreamSource(
-    chatItemsInput,
-    searchFiltering,
-  );
+  const {
+    snapshot,
+    live,
+    richContent: liveRichContent,
+    resolveLiveStream,
+  } = createTranscriptStreamSource(chatItemsInput, searchFiltering);
   const chatItems = snapshot.items;
   const {
     workingIndicator,
@@ -168,6 +168,7 @@ export function projectChatTranscript(
     expandReplyTargetWork(transcriptItems, expandedToolCards, replyNavigationId);
   }
   const {
+    richRowKeys,
     messageRowKeysById,
     transcriptMessageKeys,
     loadedReplySources,
@@ -199,18 +200,17 @@ export function projectChatTranscript(
   const hasLiveContent = Boolean(
     subagents.wait || hasTypingActors || realtimeConversation.hasEntries(),
   );
-  // An empty page is not an empty conversation. Keep the transcript mounted
-  // while older history exists so the reader can request the next page.
-  const isEmpty =
-    transcriptItems.length === 0 &&
-    !props.loading &&
-    !hasLiveContent &&
-    (!props.historyPagination?.hasMore || search.open);
-  const { isDirectThread, avatarPlacement } = resolveTranscriptAvatarPlacement(props, chatItems);
-  transcript.layout.configureRows(props, avatarPlacement, searchFiltering || recovery.revision > 0);
-  const showLoadingSkeleton = props.loading && transcriptItems.length === 0 && !hasTypingActors;
-  const presented =
-    typeof props.presented === "object" ? props.presented.isPresented() : (props.presented ?? true);
+  const { isEmpty, showLoadingSkeleton, isDirectThread, avatarPlacement, preparation, presented } =
+    projectTranscriptPreparation(props, transcript, chatItems, {
+      transcriptItemCount: transcriptItems.length,
+      hasLiveContent,
+      hasTypingActors,
+      searchOpen: search.open,
+      transient: searchFiltering || recovery.revision > 0,
+      richRowKeys,
+      liveRichRowKey: liveRichContent() ? liveItem?.key : undefined,
+      messageRowKeysById,
+    });
   const threadContextWindow =
     props.transcriptMetadata?.contextTokens ??
     activeSession?.contextTokens ??
@@ -720,6 +720,7 @@ export function projectChatTranscript(
         header,
         props.transcriptVisible ?? true,
         props.applicationContext,
+        preparation,
       ),
   };
 }

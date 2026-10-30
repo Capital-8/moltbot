@@ -4,9 +4,11 @@ import {
   findLiveStreamIndex,
   getChatItemsGeneration,
 } from "../chat-thread.ts";
+import { messageNeedsRichPresentation } from "./chat-message-bubble-presentation.ts";
 import { prepareChatStreamRender } from "./chat-message-markdown-view.tsx";
 import type { StreamGroupOptions } from "./chat-message-stream-view.tsx";
 import { isVisibleChatStream } from "./chat-position-projection.ts";
+import { chatRichPresentation } from "./chat-rich-presentation.ts";
 import { projectTurnVideoMessages } from "./chat-turn-video-gallery.ts";
 
 /** Keep row membership separate from the live text consumed by the bubble and open previews. */
@@ -41,19 +43,33 @@ export function createTranscriptStreamSource(
   const snapshot = structure();
   const chatItems = snapshot.items;
   const liveIndex = findLiveStreamIndex(chatItems);
-  const live = createMemo(() => {
-    const candidate = source().items[liveIndex];
-    const part = candidate?.kind === "stream" ? candidate : undefined;
-    return { part, prepared: part ? prepareChatStreamRender(part) : undefined };
+  const candidate = createMemo(() => {
+    const item = source().items[liveIndex];
+    const part = item?.kind === "stream" ? item : undefined;
+    const prepared = part ? prepareChatStreamRender(part) : undefined;
+    return {
+      part,
+      prepared,
+      richContent:
+        !chatRichPresentation.ready() &&
+        Boolean(prepared && messageNeedsRichPresentation(prepared.message)),
+    };
+  });
+  const live = createMemo(candidate, {
+    // Mounted rows keep their last admitted stream while the next rich block loads.
+    equals: (_previous, next) => next.richContent,
   });
   const liveVisibility = createMemo(() => {
     const part = live().part;
     return Boolean(part && isVisibleChatStream(part));
   });
   liveVisibility();
+  const richContent = createMemo(() => candidate().richContent);
+  // A first rich block changes admission, while ordinary text deltas remain local.
+  richContent();
   const resolveLiveStream: NonNullable<StreamGroupOptions["resolveLiveStream"]> = (part) => {
     const current = live().part;
     return current?.key === part.key ? current : part;
   };
-  return { snapshot, live, resolveLiveStream };
+  return { snapshot, live, richContent, resolveLiveStream };
 }

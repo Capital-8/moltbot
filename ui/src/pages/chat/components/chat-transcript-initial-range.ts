@@ -26,15 +26,34 @@ export class TranscriptInitialRange {
   }
 
   extract(range: Range): number[] {
-    const height = this.pending ? this.viewportRowHeight(this.virtualizer().scrollElement) : 0;
+    return this.select(range, this.virtualizer(), this.normalRange, this.cachedRowSize, true);
+  }
+
+  /** Preview the next model without advancing the displayed range's measurement ladder. */
+  preview(
+    range: Range,
+    virtualizer: Virtualizer<HTMLDivElement, HTMLElement>,
+    normalRange: (range: Range) => number[],
+    cachedRowSize: (index: number) => number,
+  ): number[] {
+    return this.select(range, virtualizer, normalRange, cachedRowSize, false);
+  }
+
+  private select(
+    range: Range,
+    virtualizer: Virtualizer<HTMLDivElement, HTMLElement>,
+    normalRange: (range: Range) => number[],
+    cachedRowSize: (index: number) => number,
+    commit: boolean,
+  ): number[] {
+    const height = this.pending ? this.viewportRowHeight(virtualizer.scrollElement) : 0;
     if (height > 0) {
       let startIndex = range.startIndex;
       if (this.tailRows) {
-        const virtualizer = this.virtualizer();
         startIndex = range.count - 1;
-        let covered = this.cachedRowSize(startIndex);
+        let covered = cachedRowSize(startIndex);
         while (startIndex > 0 && covered > 0 && covered < height) {
-          const size = this.cachedRowSize(--startIndex);
+          const size = cachedRowSize(--startIndex);
           if (!size) {
             break;
           }
@@ -46,22 +65,24 @@ export class TranscriptInitialRange {
         startIndex,
         endIndex: this.tailRows ? range.count - 1 : range.endIndex,
       };
-      let indexes = this.normalRange(cachedRange);
-      const cachedWindow = indexes.every((index) => this.cachedRowSize(index) > 0);
+      let indexes = normalRange(cachedRange);
+      const cachedWindow = indexes.every((index) => cachedRowSize(index) > 0);
       if (!cachedWindow && this.tailRows) {
-        indexes = this.normalRange({ ...cachedRange, overscan: 0 });
+        indexes = normalRange({ ...cachedRange, overscan: 0 });
       }
-      if (indexes.length && indexes.every((index) => this.cachedRowSize(index) > 0)) {
+      if (indexes.length && indexes.every((index) => cachedRowSize(index) > 0)) {
         // Exact-width footprints cover the viewport and overscan; no measurement ladder is needed.
-        if (this.tailRows) {
+        if (commit && this.tailRows) {
           this.tailRows = range.count - indexes[0]!;
         }
-        this.cachedWindow = cachedWindow;
+        if (commit) {
+          this.cachedWindow = cachedWindow;
+        }
         return indexes;
       }
     }
     if (!this.tailRows) {
-      return this.normalRange(this.viewportOnly ? { ...range, overscan: 0 } : range);
+      return normalRange(this.viewportOnly ? { ...range, overscan: 0 } : range);
     }
     const count = Math.min(range.count, this.tailRows);
     return Array.from({ length: count }, (_, index) => range.count - count + index);

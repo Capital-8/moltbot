@@ -138,6 +138,21 @@ it("changes the footprint revision when the same message ID receives new content
   expect(replay.kind === "item" && replay.revision).toBe(before.kind === "item" && before.revision);
 });
 
+it("assigns rich preparation to the final row that actually renders expanded work", () => {
+  const chain = projectHistory([
+    makeMessage("question", 1, { role: "user", runId: "run-1" }),
+    makeTool("tool", 2, "run-1", 20),
+    finalAnswer("answer", 3, { runId: "run-1", timestamp: 30, content: "Plain final answer" }),
+  ]);
+  const frame = onlyFrame(chain);
+  const work = frame.parts.find((part) => part.kind === "work-group");
+  expect(work).toBeDefined();
+  const expanded = new Map<string, boolean>();
+  expect(indexFor(chain, expanded).richRowKeys.size).toBe(0);
+  setExpansionState(expanded, work!.key, true);
+  expect([...indexFor(chain, expanded).richRowKeys]).toEqual([frame.key]);
+});
+
 it("invalidates only a changed reaction row while retaining other cached footprints", () => {
   const chain = projectHistory([
     finalAnswer("answer", 2),

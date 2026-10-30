@@ -15,7 +15,7 @@ import type {
   SidebarFullMessageLoader,
   ToolOutputSidebarContent,
 } from "./chat-sidebar-content-types.ts";
-import { RawOutputToggle } from "./chat-tool-content.solid.tsx";
+import { RawOutputToggle } from "./chat-tool-raw-output.tsx";
 
 registerEnglishCatalog(registerChatToolContentEnglish);
 

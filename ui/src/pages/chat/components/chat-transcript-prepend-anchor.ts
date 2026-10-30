@@ -26,12 +26,11 @@ export class TranscriptPrependAnchor {
     range: Range,
     indexes: ReadonlyMap<string, number>,
     focusedRowKey: string | null,
+    messageRows = this.committedMessageRows,
   ): number[] {
     const messageKey = this.messageKey;
     const rowKey =
-      (messageKey === null ? null : this.committedMessageRows.get(messageKey)) ??
-      this.pending?.rowKey ??
-      null;
+      (messageKey === null ? null : messageRows.get(messageKey)) ?? this.pending?.rowKey ?? null;
     return extractTranscriptRange(range, indexes, [focusedRowKey, rowKey]);
   }
 

@@ -1,11 +1,16 @@
 import { readSessionMessageIdentity } from "@openclaw/gateway-client/browser";
 import type { Accessor } from "solid-js";
 import { CHAT_PENDING_INPUT_MESSAGE_PREFIX } from "../../../../../packages/gateway-protocol/src/schema/chat-history-constants.js";
+import { readMessageWorkContext } from "../../../../../src/chat/work-context.js";
 import { parseMarkdownJson } from "../../../components/markdown-json.ts";
 import type { MarkdownRenderOptions } from "../../../components/markdown-render-options.ts";
-import { extractThinkingCached } from "../../../lib/chat/message-extract.ts";
+import {
+  extractThinkingCached,
+  readTranscriptMediaEntries,
+} from "../../../lib/chat/message-extract.ts";
 import {
   isStandaloneToolMessageForDisplay,
+  normalizeMessage,
   normalizeRoleForGrouping,
 } from "../../../lib/chat/message-normalizer.ts";
 import { extractToolCardsCached, isToolCardError } from "../../../lib/chat/tool-cards.ts";
@@ -23,6 +28,21 @@ import { type AttachmentItem, projectMessageMedia } from "./chat-message-media.t
 import { isSentPastedTextAttachment } from "./chat-pasted-text.ts";
 import { isSentCommentAttachment } from "./chat-sent-comments.ts";
 import type { SidebarContent } from "./chat-sidebar-content-types.ts";
+
+/** Uses the same normalized facts as the bubble, including media outside content blocks. */
+export function messageNeedsRichPresentation(message: unknown): boolean {
+  return (
+    isStandaloneToolMessageForDisplay(message) ||
+    normalizeMessage(message).content.some(
+      (item) => item.type !== "text" && item.type !== "thinking" && item.type !== "canvas",
+    ) ||
+    readTranscriptMediaEntries(message).length > 0 ||
+    extractToolCardsCached(message).length > 0 ||
+    readAsyncQuestions(message) !== null ||
+    workspaceResultConflictFromTranscript(message) !== undefined ||
+    readMessageWorkContext(message) !== undefined
+  );
+}
 
 function messageVideoSlots(
   projection: Pick<

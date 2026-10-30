@@ -1,16 +1,28 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { retryStaleChunkReloadWhenReachable } from "../../../app/stale-chunk-reload.ts";
 import type { MessageGroup as MessageGroupData } from "../../../lib/chat/chat-types.ts";
 import { ContentPresentation } from "../../../lib/solid/presentation.ts";
 import { mountSolid as mountView } from "../../../test-helpers/mount-solid.ts";
 import "../../../styles.css";
 import "../../../styles/chat.ts";
 import { mountSolid } from "../../../test-helpers/solid-render.tsx";
+import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { ChatActivityHeadline } from "./chat-activity-headline.solid.tsx";
 import { ActivityGroup, MessageGroup } from "./chat-message-group-view.tsx";
+import { chatRichPresentation } from "./chat-rich-presentation.ts";
+import { ChatThread } from "./chat-thread-view.tsx";
 import { ChatToolCard } from "./chat-tool-cards.solid.tsx";
-import { RawOutputToggle } from "./chat-tool-content.solid.tsx";
+import { RawOutputToggle } from "./chat-tool-raw-output.tsx";
 import { settleToolBridges } from "./chat-tool-render.test-support.ts";
+import { createChatTranscript } from "./chat-transcript-controller.ts";
+import { threadProps } from "./chat-transcript.test-support.ts";
 import { WorkGroupSummary } from "./chat-work-group-summary.tsx";
+
+// Keep the real recovery button handler without navigating the browser test page.
+vi.mock("../../../app/stale-chunk-reload.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../app/stale-chunk-reload.ts")>()),
+  retryStaleChunkReloadWhenReachable: vi.fn(async () => false),
+}));
 
 const browserMode = "__vitest_browser__" in globalThis;
 let userEvent: (typeof import("vitest/browser"))["userEvent"];
@@ -44,6 +56,116 @@ function group(
 }
 
 describe.runIf(browserMode)("chat disclosure activation", () => {
+  it("keeps failed rich-content recovery reachable at the end of retained plain history", async () => {
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof chatRichPresentation.load>>>();
+    const ready = vi.spyOn(chatRichPresentation, "ready").mockReturnValue(false);
+    const load = vi.spyOn(chatRichPresentation, "load").mockReturnValue(pending.promise);
+    vi.mocked(retryStaleChunkReloadWhenReachable).mockClear();
+    container = document.body.appendChild(document.createElement("div"));
+    container.className = "rich-preparation-browser";
+    container.style.width = "min(800px, 100%)";
+    const transcript = createChatTranscript(() => "rich-recovery-browser");
+    const props = threadProps(
+      "rich-recovery-browser",
+      "agent:main:rich-recovery-browser",
+      Array.from({ length: 60 }, (_, index) => ({
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `Plain history message ${index}. This conversation remains readable while the next message loads.`,
+        timestamp: index + 1,
+        __openclaw: { id: `rich-recovery-${index}` },
+      })),
+      {
+        stream: "Plain live answer",
+        streamStartedAt: 100,
+        runActive: true,
+        onSetReply: () => {},
+      },
+    );
+    const settleLayout = async () => {
+      for (let frame = 0; frame < 4; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        flush();
+      }
+    };
+    transcript.start();
+    const view = mountSolid(ChatThread, { props, transcript }, container);
+    try {
+      const style = container.appendChild(document.createElement("style"));
+      style.textContent =
+        ".rich-preparation-browser .chat-thread-viewport { height: 400px; flex: none; }";
+      transcript.update();
+      await settleLayout();
+      transcript.scrollToEnd({ behavior: "instant", source: "manual" });
+      await settleLayout();
+      await waitForSolid(() => expect(transcript.isPositionSettled).toBe(true));
+      const viewport = container.querySelector<HTMLDivElement>(".chat-thread")!;
+      expect(viewport.scrollTop).toBeGreaterThan(viewport.clientHeight);
+      expect(load).not.toHaveBeenCalled();
+      const reply = [
+        ...container.querySelectorAll<HTMLButtonElement>('button[aria-label="Reply to message"]'),
+      ].at(-1)!;
+      expect(reply).toBeDefined();
+      reply.focus({ preventScroll: true });
+      const rows = [...container.querySelectorAll<HTMLElement>("[data-virtual-row-key]")];
+      const positions = rows.map((row) => row.getBoundingClientRect().top);
+      const scrollTop = viewport.scrollTop;
+      const scrollHeight = viewport.scrollHeight;
+      const stream = container.querySelector<HTMLElement>(".chat-bubble.streaming")!;
+      expect(stream.textContent).toContain("Plain live answer");
+      const retained = () => {
+        expect(document.activeElement).toBe(reply);
+        expect(viewport.scrollTop).toBeCloseTo(scrollTop, 0);
+        expect(viewport.scrollHeight).toBe(scrollHeight);
+        expect(container.querySelector(".chat-bubble.streaming")).toBe(stream);
+        expect(stream.textContent).toContain("Plain live answer");
+        expect(stream.textContent).not.toContain("First rich live answer");
+        const current = container.querySelectorAll("[data-virtual-row-key]");
+        expect(current.length).toBe(rows.length);
+        rows.forEach((row, index) => {
+          expect(current[index]).toBe(row);
+          expect(row.getBoundingClientRect().top).toBeCloseTo(positions[index]!, 0);
+        });
+      };
+
+      view.update({
+        props: { ...props, stream: "First rich live answer\nMEDIA:https://example.com/proof.png" },
+        transcript,
+      });
+      transcript.update();
+      await waitForSolid(() => expect(load).toHaveBeenCalledOnce());
+      await settleLayout();
+      retained();
+      pending.reject(new Error("Rich content could not load"));
+      await waitForSolid(() =>
+        expect(container.querySelector(".chat-transcript-preparation [role=alert]")).not.toBeNull(),
+      );
+      await settleLayout();
+      retained();
+      const reload = container.querySelector<HTMLButtonElement>(
+        ".chat-transcript-preparation .lazy-view-error__action",
+      )!;
+      expect(reload.textContent).toBe("Reload");
+      const bounds = reload.getBoundingClientRect();
+      const port = viewport.getBoundingClientRect();
+      expect(bounds.top).toBeGreaterThanOrEqual(port.top);
+      expect(bounds.bottom).toBeLessThanOrEqual(port.bottom);
+      expect(bounds.left).toBeGreaterThanOrEqual(port.left);
+      expect(bounds.right).toBeLessThanOrEqual(port.right);
+      expect(
+        reload.contains(
+          document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2),
+        ),
+      ).toBe(true);
+      await userEvent.click(reload);
+      expect(retryStaleChunkReloadWhenReachable).toHaveBeenCalledOnce();
+    } finally {
+      view.dispose();
+      transcript.dispose();
+      ready.mockRestore();
+      load.mockRestore();
+    }
+  });
+
   it.each(["work", "activity", "tool", "tool-output", "raw"] as const)(
     "toggles on rapid clicks without selecting labels and retains keyboard access (%s)",
     async (kind) => {

@@ -37,6 +37,47 @@ export function unscaledBorderBox(element: HTMLElement, style = getComputedStyle
   };
 }
 
+export type TranscriptRowConfiguration = {
+  ready: boolean;
+  rowLayout: ChatWidgetLayout | undefined;
+  rowPresentation: string;
+};
+
+/** Capture candidate geometry without changing the displayed row model. */
+export function projectTranscriptRowConfiguration(
+  props: ChatThreadProps,
+  avatarPlacement: string,
+  transient: boolean,
+): TranscriptRowConfiguration {
+  const theme = props.applicationContext?.theme;
+  const font = theme?.settings;
+  const presentation = JSON.stringify([
+    CONTROL_UI_BUILD_INFO.buildId,
+    avatarPlacement,
+    props.chatBubbleMode,
+    i18n.getLocale(),
+    font?.fontChat,
+    font?.fontUi,
+    font?.terminalFontFamily,
+    font?.textScale,
+    font?.chatMessageMaxWidth,
+    theme?.resolvedMode,
+    font?.theme,
+    font?.customTheme,
+    props.showThinking,
+    props.showToolCalls,
+    props.persistCommentary,
+    typeof window === "undefined" ? 1 : window.devicePixelRatio,
+    ...getExpandedToolCards(props.sessionKey),
+    ...getExpandedUserMessages(props.sessionKey),
+  ]);
+  return {
+    ready: !props.loading,
+    rowLayout: transient ? undefined : props.widgetLayout,
+    rowPresentation: `${presentation.length}:${fnv1aUtf16(presentation)}`,
+  };
+}
+
 /** The native scroll range changes only at these viewport and content writes. */
 export class TranscriptLayoutOwner {
   ready = false;
@@ -60,45 +101,56 @@ export class TranscriptLayoutOwner {
   }
 
   configureRows(props: ChatThreadProps, avatarPlacement: string, transient: boolean): void {
-    this.ready = !props.loading;
-    // Expanded and filtered rows are transient; the snapshot cannot restore them.
-    this.rowLayout = transient ? undefined : props.widgetLayout;
-    const theme = props.applicationContext?.theme;
-    const font = theme?.settings;
-    const presentation = JSON.stringify([
-      CONTROL_UI_BUILD_INFO.buildId,
-      avatarPlacement,
-      props.chatBubbleMode,
-      i18n.getLocale(),
-      font?.fontChat,
-      font?.fontUi,
-      font?.terminalFontFamily,
-      font?.textScale,
-      font?.chatMessageMaxWidth,
-      theme?.resolvedMode,
-      font?.theme,
-      font?.customTheme,
-      props.showThinking,
-      props.showToolCalls,
-      props.persistCommentary,
-      typeof window === "undefined" ? 1 : window.devicePixelRatio,
-      ...getExpandedToolCards(props.sessionKey),
-      ...getExpandedUserMessages(props.sessionKey),
-    ]);
-    this.rowPresentation = `${presentation.length}:${fnv1aUtf16(presentation)}`;
+    this.applyRowConfiguration(
+      projectTranscriptRowConfiguration(props, avatarPlacement, transient),
+    );
   }
 
-  private rowLayoutKey(index: number, width = this.rowWidth): string | undefined {
-    const row = this.rows[index];
+  applyRowConfiguration(configuration: TranscriptRowConfiguration): void {
+    this.ready = configuration.ready;
+    this.rowLayout = configuration.rowLayout;
+    this.rowPresentation = configuration.rowPresentation;
+  }
+
+  private rowLayoutKey(
+    row: TranscriptRowGeometry | undefined,
+    presentation = this.rowPresentation,
+    width = this.rowWidth,
+  ): string | undefined {
     return width > 0 && this.paneWidth > 0 && row?.revision
-      ? `row:v1:${width}:${this.paneWidth}:${window.innerHeight}:${this.rowGutter}:${this.rowPresentation}:${row.revision}:${JSON.stringify(row.key)}`
+      ? `row:v1:${width}:${this.paneWidth}:${window.innerHeight}:${this.rowGutter}:${presentation}:${row.revision}:${JSON.stringify(row.key)}`
       : undefined;
   }
 
   readonly rowMinimum = (index: number): number => {
-    const key = this.rowLayoutKey(index);
+    const key = this.rowLayoutKey(this.rows[index]);
     return key ? (this.rowLayout?.read(key) ?? 0) : 0;
   };
+
+  previewRowMinimum(
+    row: TranscriptRowGeometry,
+    configuration?: TranscriptRowConfiguration,
+  ): number {
+    const key = this.rowLayoutKey(row, configuration?.rowPresentation);
+    const layout = configuration ? configuration.rowLayout : this.rowLayout;
+    return key ? (layout?.read(key) ?? 0) : 0;
+  }
+
+  matchesRows(
+    rows: readonly TranscriptRowGeometry[],
+    configuration?: TranscriptRowConfiguration,
+  ): boolean {
+    return (
+      (!configuration ||
+        (configuration.rowLayout === this.rowLayout &&
+          configuration.rowPresentation === this.rowPresentation)) &&
+      rows.length === this.rows.length &&
+      rows.every(
+        (row, index) =>
+          row.key === this.rows[index]!.key && row.revision === this.rows[index]!.revision,
+      )
+    );
+  }
 
   restoreRows(
     instance: Virtualizer<HTMLDivElement, HTMLElement>,
@@ -114,7 +166,7 @@ export class TranscriptLayoutOwner {
       return;
     }
     this.rows.forEach((row, index) => {
-      const key = this.rowLayoutKey(index);
+      const key = this.rowLayoutKey(row);
       const minimum = key ? (heights[key] ?? 0) : 0;
       if (minimum > (instance.itemSizeCache.get(row.key) ?? 0)) {
         instance.resizeItem(index, minimum);
@@ -149,7 +201,7 @@ export class TranscriptLayoutOwner {
             if (!element.isConnected) {
               return [];
             }
-            const key = this.rowLayoutKey(instance.indexFromElement(element));
+            const key = this.rowLayoutKey(this.rows[instance.indexFromElement(element)]);
             const size = instance.itemSizeCache.get(id) ?? 0;
             // Local disclosure state is not restored on reload.
             if (

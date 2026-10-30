@@ -1,7 +1,10 @@
 import type { GatewaySessionRow } from "../../../api/types.ts";
 import type { MessageGroup } from "../../../lib/chat/chat-types.ts";
 import { nativeHistoryMessageIdentity } from "../../../lib/chat/history-message-identity.ts";
-import { normalizeMessage } from "../../../lib/chat/message-normalizer.ts";
+import {
+  normalizeMessage,
+  normalizeRoleForGrouping,
+} from "../../../lib/chat/message-normalizer.ts";
 import { fnv1aUtf16 } from "../../../lib/fnv1a.ts";
 import {
   agentRunFrameActiveStatusParts,
@@ -27,6 +30,7 @@ import {
   collapseCompletedTurnWork,
 } from "../chat-turn-presentation.ts";
 import { readLiveTerminalRevision } from "../terminal-message-identity.ts";
+import { messageNeedsRichPresentation } from "./chat-message-bubble-presentation.ts";
 import { prepareChatStreamRender } from "./chat-message-markdown-view.tsx";
 import { resolveMessageGroupSenderLabel } from "./chat-message-sender.ts";
 import type { StreamGroupPart } from "./chat-message-stream-view.tsx";
@@ -57,6 +61,7 @@ type TranscriptChain = Readonly<{
 }>;
 
 type TranscriptIndex = Readonly<{
+  richRowKeys: ReadonlySet<string>;
   messageRowKeysById: ReadonlyMap<string, string>;
   transcriptMessageKeys: ReadonlyMap<string, string>;
   loadedReplySources: ReadonlyMap<string, LoadedReplySource>;
@@ -87,6 +92,36 @@ type ChainEntry = {
 const chains = new WeakMap<object, ChainEntry>();
 const indexes = createTranscriptMemo<TranscriptIndex>();
 const presentationRows = createTranscriptMemo<readonly TranscriptRow<ChatRenderItem>[]>();
+
+function itemNeedsRichPresentation(
+  item: ChatRenderItem,
+  expandedToolCards: ReadonlyMap<string, boolean>,
+): boolean {
+  // The summary is eager; expanded work has its own rows (or frame parts) below.
+  if (item.kind === "work-group") {
+    return false;
+  }
+  const parts = item.kind === "agent-run-frame" ? item.parts : [item];
+  return parts.some((part) => {
+    if (part.kind === "work-group" && !expandedToolCards.get(part.key)) {
+      return false;
+    }
+    const streams = part.kind === "stream-run" ? part.parts : [part];
+    return (
+      streams.some(
+        (stream) =>
+          stream.kind === "stream" &&
+          !stream.isStreaming &&
+          messageNeedsRichPresentation(prepareChatStreamRender(stream).message),
+      ) ||
+      chatItemGroups(part).some(
+        (group) =>
+          normalizeRoleForGrouping(group.role) === "tool" ||
+          group.messages.some(({ message }) => messageNeedsRichPresentation(message)),
+      )
+    );
+  });
+}
 
 // Fold only the final presentation, after causal run/turn ownership is settled.
 // Every original message and its reply identity remains in chronological order.
@@ -264,11 +299,25 @@ export function projectTranscriptIndex(
     props.messageReactions,
   ];
   return indexes(chain, cacheKey, (): TranscriptIndex => {
+    const richRowKeys = new Set<string>();
     const loadedReplySources = new Map<string, LoadedReplySource>();
     const messageRowKeysById = new Map<string, string>();
     const transcriptMessageKeys = new Map<string, string>();
     const rows: TranscriptRow<ChatRenderItem>[] = [];
     const row = (item: ChatRenderItem, key = item.key): TranscriptRow<ChatRenderItem> => {
+      if (
+        itemNeedsRichPresentation(item, expandedToolCards) ||
+        chain.continuations
+          .get(item.key)
+          ?.some(
+            (part) =>
+              part.kind === "stream" &&
+              !part.isStreaming &&
+              messageNeedsRichPresentation(prepareChatStreamRender(part).message),
+          )
+      ) {
+        richRowKeys.add(key);
+      }
       const groups = chatItemGroups(item);
       const parts = item.kind === "agent-run-frame" ? item.parts : [item];
       if (
@@ -349,6 +398,7 @@ export function projectTranscriptIndex(
       chain.searchActive,
     );
     return {
+      richRowKeys,
       messageRowKeysById,
       transcriptMessageKeys,
       loadedReplySources,

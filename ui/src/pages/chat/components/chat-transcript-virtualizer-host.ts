@@ -3,7 +3,6 @@ import type { JSX } from "@solidjs/web";
 // for one transcript. Owned and swapped by the chat transcript owner.
 import { Virtualizer } from "@tanstack/virtual-core";
 import type { ApplicationContext } from "../../../app/context.ts";
-import { createMcpAppUnmountGate } from "../../../components/mcp-app-unmount.ts";
 import type { PresentationValue } from "../../../lib/presentation.ts";
 import { listen } from "../../../lib/reactive/listener.ts";
 import { resolveScrollBehavior } from "../../../lib/scroll-behavior.ts";
@@ -42,11 +41,8 @@ import {
 } from "./chat-transcript-offset-observer.ts";
 import { activeTranscriptMessageId } from "./chat-transcript-position.ts";
 import { TranscriptPrependAnchor } from "./chat-transcript-prepend-anchor.ts";
-import {
-  focusedTranscriptRowKey,
-  leavingTranscriptMcpAppRows,
-  previewTranscriptRowKeys,
-} from "./chat-transcript-range.ts";
+import { focusedTranscriptRowKey, setTranscriptRowRange } from "./chat-transcript-range.ts";
+import { TranscriptRowPreparation } from "./chat-transcript-row-preparation.ts";
 import { TranscriptRowRefs } from "./chat-transcript-row-refs.ts";
 import {
   applyPendingScrollOffset,
@@ -59,6 +55,7 @@ import {
   type ChatTranscriptSession,
   type TranscriptCallbacks,
   type TranscriptHeader,
+  type TranscriptPreparation,
   type TranscriptRenderSnapshot,
 } from "./chat-transcript-session.ts";
 import { TranscriptViewportRect } from "./chat-transcript-viewport-rect.ts";
@@ -170,7 +167,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   private renderPreviousRows: (() => HTMLDivElement) | null = null;
   private focusedRowKey: string | null = null;
   private readonly announcement = new TranscriptAnnouncementState();
-  private readonly mcpAppUnmountGate: ReturnType<typeof createMcpAppUnmountGate>;
+  private readonly rowPreparation: TranscriptRowPreparation;
 
   constructor(
     // Native geometry and touch-held history must commit before paint.
@@ -186,7 +183,6 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       invalidate,
       this.layout.rowMinimum,
     );
-    this.mcpAppUnmountGate = createMcpAppUnmountGate(invalidate);
     this.positionRail = createPositionRailGutter(
       () => this.scrollElement,
       () => this.threadInnerElement,
@@ -266,6 +262,23 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
         this.threadInnerElement?.contains(element) === true && this.rowIndexesByKey.has(key),
       beforeMeasure,
       onMount: () => this.queueLayout(),
+    });
+    this.rowPreparation = new TranscriptRowPreparation({
+      renderer: this.renderer,
+      invalidate,
+      messageElements: this.messageElements,
+      layout: this.layout,
+      virtualizer: this.virtualizer,
+      scrollElementRef: this.scrollElementRef,
+      captureInteractionResize: this.captureInteractionResize,
+      measureRowRefFor: (key) => this.rowRefs.forKey(key),
+      rowKeys: () => this.rowKeys,
+      element: () => this.threadInnerElement,
+      headerHeight: () => this.headerHeight,
+      appliedHeaderHeight: () => this.appliedHeaderHeight,
+      focusedRowKey: () => this.focusedRowKey,
+      initialRange: this.initialRange,
+      prependAnchor: this.prependAnchor,
     });
     this.scrollRestoreHost = {
       offsetState: this.offsetState,
@@ -417,6 +430,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   }
 
   dispose(): void {
+    this.rowPreparation.clear();
     this.disconnect();
     // Temporary disconnect preserves restoration facts; terminal disposal releases their owner.
     Object.assign(this.layout, { rows: [], rowLayout: undefined });
@@ -440,6 +454,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     header: TranscriptHeader | null = null,
     presented: PresentationValue = true,
     applicationContext?: ApplicationContext,
+    preparation?: TranscriptPreparation,
   ): HTMLDivElement {
     this.offsetState.renderedTouchActive = this.offsetState.touchActive;
     // Keep old geometry during the gesture, while still virtualizing that old
@@ -466,6 +481,8 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
         entryKeys: this.entryAnimations.projectedKeys,
         presented,
         applicationContext,
+        richRowKeys: preparation?.richRowKeys,
+        rowConfiguration: preparation?.rowConfiguration,
       },
       true,
     );
@@ -478,91 +495,74 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
   ): HTMLDivElement {
     const { rows, renderRow, announcement, announce, overlay, header, messageRows, renderKeyRows } =
       snapshot;
-    const rowModelChanged =
-      rows.length !== this.rowKeys.length ||
-      rows.some((row, index) => row.key !== this.rowKeys[index]);
-    const nextKeys = rowModelChanged ? rows.map((row) => row.key) : this.rowKeys;
     const virtualizer = this.virtualizer;
-    const nextRowKeys = rowModelChanged
-      ? nextKeys
-      : virtualizer.getVirtualItems().map(({ index }) => rows[index]!.key);
-    return this.mcpAppUnmountGate.render(
-      rowModelChanged ? nextKeys : JSON.stringify(nextRowKeys),
-      () => {
-        // Rows, lookup maps, and the retained renderer commit together. A
-        // teardown-pending candidate must never replace the displayed model.
-        this.entryAnimations.sync(
-          snapshot.entryKeys,
-          announce && !this.offsetState.pendingScrollOffset,
+    return this.rowPreparation.render(snapshot, (rowModelChanged, nextKeys) => {
+      // Rows, lookup maps, and the retained renderer commit together. A
+      // teardown-pending candidate must never replace the displayed model.
+      if (snapshot.rowConfiguration) {
+        this.layout.applyRowConfiguration(snapshot.rowConfiguration);
+      }
+      this.entryAnimations.sync(
+        snapshot.entryKeys,
+        announce && !this.offsetState.pendingScrollOffset,
+      );
+      this.messageRowKeysById = messageRows;
+      this.layout.rows = rows;
+      this.prependAnchor.committedMessageRows = renderKeyRows;
+      this.renderPreviousRows = () => this.renderCommittedRows(snapshot, false);
+      // Capture only after the unmount gate permits the projection to commit.
+      if (capturePrepend) {
+        this.prependAnchor.capture(
+          this.scrollElement,
+          Boolean(
+            this.offsetState.pendingScrollOffset ||
+            this.offsetState.scrollCommand ||
+            this.offsetState.pendingInteractionAnchor,
+          ),
+          // A peer append can add attribution above a bubble inside an
+          // existing run row. Row-height compensation alone cannot hold it.
+          rowModelChanged && !this.canAutoFollow(),
         );
-        this.messageRowKeysById = messageRows;
-        this.layout.rows = rows;
-        this.prependAnchor.committedMessageRows = renderKeyRows;
-        this.renderPreviousRows = () => this.renderCommittedRows(snapshot, false);
-        // Capture only after the unmount gate permits the projection to commit.
-        if (capturePrepend) {
-          this.prependAnchor.capture(
-            this.scrollElement,
-            Boolean(
-              this.offsetState.pendingScrollOffset ||
-              this.offsetState.scrollCommand ||
-              this.offsetState.pendingInteractionAnchor,
-            ),
-            // A peer append can add attribution above a bubble inside an
-            // existing run row. Row-height compensation alone cannot hold it.
-            rowModelChanged && !this.canAutoFollow(),
-          );
-        }
-        // Structural changes can alter the end without a virtualizer notification.
-        if (rowModelChanged || this.headerHeight !== (header?.height ?? 0)) {
-          this.renderer.queueAfterCommit(this.scheduleEndReconcile);
-        }
-        this.headerHeight = header?.height ?? 0;
-        if (rowModelChanged) {
-          this.syncRows(nextKeys);
-        } else {
-          this.appliedHeaderHeight = reconcileTranscriptHeaderMargin(
-            virtualizer,
-            this.headerHeight,
-            this.appliedHeaderHeight,
-          );
-        }
-        this.announcement.sync(announcement, announce);
-        return this.renderer.render({
-          applicationContext: snapshot.applicationContext,
-          messageElements: this.messageElements,
-          layout: this.layout,
-          headerHeight: this.headerHeight,
-          presented: snapshot.presented,
-          initialPositionPending: () => this.initialRange.pending,
-          onCommit: () => this.connected && this.didCommit(),
-          rows,
-          getContent: (index) => renderRow(rows[index]!),
+      }
+      // Structural changes can alter the end without a virtualizer notification.
+      if (rowModelChanged || this.headerHeight !== (header?.height ?? 0)) {
+        this.renderer.queueAfterCommit(this.scheduleEndReconcile);
+      }
+      this.headerHeight = header?.height ?? 0;
+      if (rowModelChanged) {
+        this.syncRows(nextKeys);
+      } else {
+        this.appliedHeaderHeight = reconcileTranscriptHeaderMargin(
           virtualizer,
-          overlay,
-          header: header?.content ?? null,
-          scrollElementRef: this.scrollElementRef,
-          captureInteractionResize: this.captureInteractionResize,
-          measureRowRefFor: (key) => this.rowRefs.forKey(key),
-          measureRows:
-            // The first correction reveals new rows; their real sizes must land before retiring the anchor.
-            this.initialRange.measuring ||
-            this.prependAnchor.messageKey !== null ||
-            this.offsetState.scrollCommand?.target === "message" ||
-            this.offsetState.scrollCommand?.target === "index",
-        });
-      },
-      () =>
-        leavingTranscriptMcpAppRows(this.threadInnerElement, () =>
-          rowModelChanged
-            ? previewTranscriptRowKeys(virtualizer, nextKeys, this.focusedRowKey)
-            : new Set(nextRowKeys),
-        ),
-      {
-        afterCommit: (effect) => void this.renderer.afterCommit(effect),
-      },
-      // SAFETY: Both gate branches return this session's Solid root while MCP views retire.
-    ) as HTMLDivElement;
+          this.headerHeight,
+          this.appliedHeaderHeight,
+        );
+      }
+      this.announcement.sync(announcement, announce);
+      return this.renderer.render({
+        applicationContext: snapshot.applicationContext,
+        messageElements: this.messageElements,
+        layout: this.layout,
+        headerHeight: this.headerHeight,
+        presented: snapshot.presented,
+        initialPositionPending: () => this.initialRange.pending,
+        onCommit: () => this.connected && this.didCommit(),
+        rows,
+        getContent: (index) => renderRow(rows[index]!),
+        virtualizer,
+        overlay,
+        header: header?.content ?? null,
+        scrollElementRef: this.scrollElementRef,
+        captureInteractionResize: this.captureInteractionResize,
+        measureRowRefFor: (key) => this.rowRefs.forKey(key),
+        measureRows:
+          // The first correction reveals new rows; their real sizes must land before retiring the anchor.
+          this.initialRange.measuring ||
+          this.prependAnchor.messageKey !== null ||
+          this.offsetState.scrollCommand?.target === "message" ||
+          this.offsetState.scrollCommand?.target === "index",
+      });
+    });
   }
 
   get isMaintenanceScroll(): boolean {
@@ -718,16 +718,14 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     // The header margin must land in the same setOptions as the key change:
     // the edge-key re-anchor uses absolute offsets, so a prepend that also
     // removes the header (exhausted history) compensates in one adjustment.
-    const scrollMargin =
-      this.virtualizer.options.scrollMargin + this.headerHeight - this.appliedHeaderHeight;
+    const headerDelta = this.headerHeight - this.appliedHeaderHeight;
     this.appliedHeaderHeight = this.headerHeight;
-    this.virtualizer.setOptions({
-      ...this.virtualizer.options,
-      count: nextKeys.length,
-      getItemKey: (index) => nextKeys[index]!,
-      rangeExtractor: (range) => this.initialRange.extract(range),
-      scrollMargin,
-    });
+    setTranscriptRowRange(
+      this.virtualizer,
+      nextKeys,
+      (range) => this.initialRange.extract(range),
+      headerDelta,
+    );
   }
 
   private queueLayout(): void {
