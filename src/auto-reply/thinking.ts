@@ -302,7 +302,12 @@ function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThi
     level.label = compat?.thinkingLevelLabels?.[level.id] ?? level.id;
   }
   profile.defaultLevel = rowDefaultLevel;
-  return normalizeThinkingProfile(profile, context.thinkingLevelMap, mappedLevels);
+  // A stated ladder is the whole offer: mapped wire aliases stay usable but hidden.
+  return normalizeThinkingProfile(
+    profile,
+    context.thinkingLevelMap,
+    rowLevels?.length ? [] : mappedLevels,
+  );
 }
 
 /** Ultra is a harness mode, independent of a model's native reasoning controls. */
@@ -338,7 +343,9 @@ export function resolveProviderThinkingLevel(
       ("thinkingFormat" in compat ||
         "supportsReasoningEffort" in compat ||
         "supportedReasoningEfforts" in compat ||
-        "reasoningEffortMap" in compat)
+        "reasoningEffortMap" in compat ||
+        "thinkingLevels" in compat ||
+        "defaultThinkingLevel" in compat)
         ? compat
         : undefined,
   }));
