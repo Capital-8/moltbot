@@ -9,9 +9,10 @@ import {
   type ChannelIngressIdentitySubjectInput,
   type ResolveChannelMessageIngressParams,
 } from "openclaw/plugin-sdk/channel-ingress-runtime";
+import { evaluateSupplementalContextVisibility } from "openclaw/plugin-sdk/context-visibility-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { evaluateSupplementalContextVisibility, type ChannelGroupContext } from "../runtime-api.js";
+import type { ChannelGroupContext } from "../runtime-api.js";
 import { getFeishuRuntime } from "./runtime.js";
 import { detectIdType } from "./targets.js";
 import type { FeishuConfig } from "./types.js";
