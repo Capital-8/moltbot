@@ -22,6 +22,7 @@ import {
 import { readPackageVersion } from "./shared.js";
 import {
   assertGatewayServiceAdmissionUnchanged,
+  GatewayServiceUpdateOwnershipError,
   inspectManagedGatewayServiceBeforeUpdate,
   readGatewayServiceStateForUpdate,
   resolveUpdatedGatewayRestartPort,
@@ -33,7 +34,7 @@ function stoppedGatewayGuidance(reason: string, env: NodeJS.ProcessEnv): string 
 }
 
 export async function restoreRepairGateway(params: {
-  originalRunId?: string;
+  originalRunId: string;
   repairRunId: string;
   root: string;
   config: OpenClawConfig;
@@ -47,8 +48,8 @@ export async function restoreRepairGateway(params: {
   verification?: UpdateRunRecord["verification"];
 }> {
   const { env, phase, originalRunId } = params;
-  const runIds = originalRunId ? [originalRunId, params.repairRunId] : [params.repairRunId];
-  const original = () => (originalRunId ? getUpdateRun(originalRunId, { env }) : undefined);
+  const runIds = [originalRunId, params.repairRunId];
+  const original = () => getUpdateRun(originalRunId, { env });
   const risk = () => {
     const recovery = original()?.verification.recovery;
     return recovery?.serviceRestartSafe === false ? recovery.dataAtRisk : undefined;
@@ -85,14 +86,6 @@ export async function restoreRepairGateway(params: {
     assertDoctorServiceSelection(env, state.env);
     const verdict = await inspectManagedGatewayServiceBeforeUpdate({ root: params.root, state });
     assertCurrent();
-    if (!originalRunId) {
-      return {
-        restart: false,
-        ...(verdict.kind === "owned" && !state.running
-          ? { warning: stoppedGatewayGuidance("no pending update-owned stop was recorded", env) }
-          : {}),
-      };
-    }
     if (verdict.kind !== "owned") {
       throw new Error(
         "Recovered update's Gateway service ownership could not be verified. Run openclaw gateway status --deep.",
@@ -192,6 +185,11 @@ export async function restoreRepairGateway(params: {
   }).catch((error: unknown) => {
     if (hasCommandProcessCleanupError(error) || risk()) {
       throw error;
+    }
+    // An unmanaged service (for example a non-default state dir) is not this
+    // repair's to start; name the next step instead of failing the repair.
+    if (error instanceof GatewayServiceUpdateOwnershipError) {
+      return { restart: false, warning: stoppedGatewayGuidance(error.message, env) };
     }
     throw new Error(
       `Gateway recovery after update repair failed: ${formatErrorMessage(error)}. After resolving the failure, start it with \`${formatCliCommand("openclaw gateway start", env)}\`, then check \`${formatCliCommand("openclaw gateway status --deep", env)}\`.`,

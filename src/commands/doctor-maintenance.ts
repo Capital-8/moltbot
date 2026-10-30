@@ -180,6 +180,7 @@ export async function beginDoctorMaintenance(params: DoctorMaintenanceParams) {
             params.options.repair !== true &&
             params.options.yes !== true) ||
           resolveDoctorRepairMode(params.options, env).updateInProgress,
+        reportStopped: params.reportStoppedService === true,
       });
       if (decision.warning) {
         warn(decision.warning);

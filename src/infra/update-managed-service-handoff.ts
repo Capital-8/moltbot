@@ -370,7 +370,9 @@ let foregroundParkFlight;
 let foregroundRespawn = false;
 async function assertForegroundOrigin(closed = false) {
   assertGatewayParkOwner();
-  await runLedger.assertForegroundUpdateOrigin(params.foregroundOrigin, closed);
+  // Parking precedes the updater, so the installed runtime still owns origin checks.
+  const { assertForegroundUpdateOrigin } = await import(pathToFileURL(params.recoveryModulePath).href);
+  await assertForegroundUpdateOrigin(params.foregroundOrigin, closed);
   assertGatewayParkOwner();
 }
 async function parkForegroundGateway() {
@@ -524,6 +526,8 @@ ${HANDOFF_OWNED_COMMAND_SCRIPT}
   const controlDeadlineAt = performance.now() + params.parentExitTimeoutMs;
   try {
     if (params.action === "update" && params.runId) {
+      // Refuse before ownership transfer when the installation it would update is incomplete.
+      if (!fs.existsSync(params.recoveryModulePath)) throw new Error("installed runtime is unavailable: " + params.recoveryModulePath);
       // Bookkeeping, including lazy fs-safe loads, must survive a missing install.
       // Terminal writes prefer the fresh candidate after any schema migration.
       runLedger = handoffLedger;

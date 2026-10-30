@@ -239,6 +239,13 @@ it.each([
   await repair();
   expect(service.start).not.toHaveBeenCalled();
   expect(healthApi.waitForGatewayHealthyRestart).not.toHaveBeenCalled();
+  if (["operator stop", "successful restart", "later settled run"].includes(reason)) {
+    // No pending update-owned stop: Doctor maintenance owns the stopped-service report.
+    expect(defaultRuntime.writeJson).toHaveBeenCalledWith(
+      expect.objectContaining({ restart: false }),
+    );
+    return;
+  }
   expect(defaultRuntime.writeJson).toHaveBeenCalledWith(
     expect.objectContaining({
       restart: false,

@@ -411,6 +411,8 @@ async function updateFinalizeCommandInternal(
       options: { repair: true, nonInteractive: true, json: opts.json },
       runtime: { ...defaultRuntime, log: defaultRuntime.error },
       serviceInspectionDeadlineAtMs,
+      // An update-owned stop is restored below; Doctor only reports other stopped services.
+      reportStoppedService: lifecycle.ownsUpdateRepairRun && !interruptedGateway,
     });
     lifecycle.serviceUpdateVerdict = maintenance?.serviceUpdateVerdict;
     // Fresh Doctor owns database fences; the parent retains service custody.
@@ -530,13 +532,11 @@ async function updateFinalizeCommandInternal(
     );
 
     const gateway =
-      (interruptedGateway || lifecycle.ownsUpdateRepairRun) &&
-      pluginUpdate.status !== "error" &&
-      !retained
+      interruptedGateway && pluginUpdate.status !== "error" && !retained
         ? await lifecycle.run("gatewayRestoration", async (phase) => {
             const restore = (assertCurrent: () => void) =>
               restoreRepairGateway({
-                originalRunId: interruptedGateway?.runId,
+                originalRunId: interruptedGateway.runId,
                 repairRunId: invokingRunId,
                 root,
                 config: configSnapshot.config,
