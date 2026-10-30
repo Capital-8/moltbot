@@ -131,12 +131,13 @@ it("binds a sole retained sibling when the original identity is unmatched", asyn
   }
 });
 
-it("leaves selector-less published requests unresolved through first private admission", async () => {
+it("deterministically binds selector-less published requests through first private admission", async () => {
   const root = tempDirs.make("rehearsal-missing-selector-");
   const stateDir = path.join(root, "source-state");
+  const externalStoreKey = path.join(root, "external-config", "cron", "jobs.json");
   const source = await prepareSource(root, [
     path.join(stateDir, "cron", "jobs.json"),
-    path.join(root, "external-config", "cron", "jobs.json"),
+    externalStoreKey,
   ]);
   const sourceBytes = await fs.readFile(source.databasePath);
   const targetStateDir = path.join(root, "private");
@@ -152,6 +153,6 @@ it("leaves selector-less published requests unresolved through first private adm
     ...process.env,
     ...buildUpdateRehearsalPathEnv(targetStateDir),
   });
-  expect(result.boundStoreKey).toBeUndefined();
+  expect(result.boundStoreKey).toBe(externalStoreKey);
   expect(await fs.readFile(source.databasePath)).toEqual(sourceBytes);
 });

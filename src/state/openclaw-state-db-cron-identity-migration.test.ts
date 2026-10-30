@@ -9,6 +9,7 @@ import {
   migrateCronDefaultStoreIdentity,
   readCronDefaultStoreKeyInDatabase,
   readCronStorePartitionInventoryInDatabase,
+  resolveCronIdentityMigrationStoreKey,
   resolveLegacyCronDefaultStoreKey,
   selectCronDefaultStoreIdentityInDatabase,
 } from "./openclaw-state-db-cron-identity-migration.js";
@@ -37,6 +38,40 @@ it("inventories a pre-fold-in database without machine state", () => {
       proactiveReceipts: 0,
     },
   ]);
+});
+
+it("chooses the richest moved cron partition with a stable tie-break", () => {
+  const partition = (
+    storeKey: string,
+    jobs: number,
+    history = 0,
+  ): ReturnType<typeof readCronStorePartitionInventoryInDatabase>[number] => ({
+    storeKey,
+    jobs,
+    scratch: 0,
+    receipts: 0,
+    history,
+    quarantine: 0,
+    proactiveReceipts: 0,
+  });
+  expect(
+    resolveCronIdentityMigrationStoreKey(
+      [partition("/older/cron/jobs.json", 4), partition("/richer/cron/jobs.json", 5)],
+      "/moved/cron/jobs.json",
+    ),
+  ).toBe("/richer/cron/jobs.json");
+  expect(
+    resolveCronIdentityMigrationStoreKey(
+      [partition("/z/cron/jobs.json", 1, 2), partition("/a/cron/jobs.json", 1, 2)],
+      "/moved/cron/jobs.json",
+    ),
+  ).toBe("/a/cron/jobs.json");
+  expect(
+    resolveCronIdentityMigrationStoreKey(
+      [partition("/richer/cron/jobs.json", 5), partition("/current/cron/jobs.json", 1)],
+      "/current/cron/jobs.json",
+    ),
+  ).toBe("/current/cron/jobs.json");
 });
 
 function seedPartition(db: DatabaseSync, storeKey: string, jobs: boolean) {
@@ -166,7 +201,7 @@ it.each([32, 33])(
   },
 );
 
-it("leaves multiple already-moved partitions unresolved", async () => {
+it("selects the richest of multiple already-moved partitions without deleting siblings", async () => {
   const fixture = legacyStore(true, 33);
   const secondStoreKey = path.join(fixture.stateDir, "other-cron", "jobs.json");
   {
@@ -176,16 +211,21 @@ it("leaves multiple already-moved partitions unresolved", async () => {
       VALUES (?, 'other-job', 'Other migration job', 0, 'agentTurn', '{}', '{}', 1)`).run(
       secondStoreKey,
     );
+    db.prepare(`INSERT INTO cron_jobs
+      (store_key, job_id, name, enabled, payload_kind, job_json, state_json, updated_at)
+      VALUES (?, 'other-job-2', 'Second migration job', 0, 'agentTurn', '{}', '{}', 1)`).run(
+      secondStoreKey,
+    );
   }
   const moved = path.join(fixture.root, "already-moved");
   renameSync(fixture.stateDir, moved);
   const options = { env: { OPENCLAW_STATE_DIR: moved } };
   await withStateMigrationBackupForTest(options, () => openState(options));
   const migrated = openState(options);
-  expect(readCronDefaultStoreKeyInDatabase(migrated.db)).toBeUndefined();
+  expect(readCronDefaultStoreKeyInDatabase(migrated.db)).toBe(secondStoreKey);
   expect(readCronStorePartitionInventoryInDatabase(migrated.db)).toMatchObject([
     { storeKey: fixture.storeKey, jobs: 1 },
-    { storeKey: secondStoreKey, jobs: 1 },
+    { storeKey: secondStoreKey, jobs: 2 },
   ]);
 });
 

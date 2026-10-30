@@ -86,6 +86,35 @@ export function resolveUnboundCronDefaultStoreKey(
     : undefined;
 }
 
+const cronPartitionEvidenceFields = [
+  "jobs",
+  "proactiveReceipts",
+  "scratch",
+  "receipts",
+  "history",
+  "quarantine",
+] as const;
+
+/** Upgrades choose the richest retained partition deterministically and leave every sibling intact. */
+export function resolveCronIdentityMigrationStoreKey(
+  inventory: readonly CronStorePartitionInventory[],
+  legacyDefaultStoreKey: string,
+): string {
+  const proven = resolveUnboundCronDefaultStoreKey(inventory, legacyDefaultStoreKey);
+  if (proven !== undefined) {
+    return proven;
+  }
+  return inventory.toSorted((left, right) => {
+    for (const field of cronPartitionEvidenceFields) {
+      const difference = right[field] - left[field];
+      if (difference !== 0) {
+        return difference;
+      }
+    }
+    return left.storeKey < right.storeKey ? -1 : left.storeKey > right.storeKey ? 1 : 0;
+  })[0]!.storeKey;
+}
+
 const keyedTables = [
   ["cron_jobs", "jobs"],
   ["cron_job_scratch", "scratch"],
@@ -303,14 +332,8 @@ export function migrateCronDefaultStoreIdentity(
       storeKey = options.legacyDefaultStoreKey;
     } else {
       const inventory = readCronStorePartitionInventoryInDatabase(db, options.sourceTables);
-      storeKey =
-        resolveUnboundCronDefaultStoreKey(inventory, options.legacyDefaultStoreKey) ??
-        (inventory.length === 1 ? inventory[0]?.storeKey : undefined);
+      storeKey = resolveCronIdentityMigrationStoreKey(inventory, options.legacyDefaultStoreKey);
     }
-  }
-  // Multiple moved partitions have no provable default. Doctor can bind an explicit choice.
-  if (storeKey === undefined) {
-    return false;
   }
   executeSqliteQuerySync(
     db,
