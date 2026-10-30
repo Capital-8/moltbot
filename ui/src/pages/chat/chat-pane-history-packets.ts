@@ -69,12 +69,22 @@ export abstract class ChatPaneHistoryPackets extends ChatPaneSnapshotHydration {
         ? state.chatHistoryPagination.hasMore && state.chatHistoryPagination.olderCursor
         : state.chatHistoryPagination.newerCursor;
     let root = edge();
-    const isCurrent = () =>
-      !signal.aborted &&
-      ownsIntent() &&
-      owner === this.stagedHistory &&
-      read.isCurrent() &&
-      edge() === root;
+    const settleForegroundRead = () => {
+      if (signal.aborted || !ownsIntent() || owner !== this.stagedHistory) {
+        return false;
+      }
+      if (read.isCurrent() && edge() === root) {
+        return true;
+      }
+      // A refresh retires this private chain, not the reader's action. Keep its
+      // retry outcome visible; retired consumers never publish into successors.
+      this.recordHistoryPacketFailure(
+        state,
+        direction,
+        new Error(t("chat.thread.earlierInterrupted")),
+      );
+      return false;
+    };
     const packets: StagedOlderHistoryPage[] = [];
     let overflow: StagedOlderHistoryPage | null = null;
     let failure: unknown;
@@ -104,7 +114,7 @@ export abstract class ChatPaneHistoryPackets extends ChatPaneSnapshotHydration {
         const limit = staged?.limit ?? ("limit" in selector ? selector.limit : undefined);
         let result = staged?.result ?? (await read.read(selector, signal));
         staged = null;
-        if (!isCurrent()) {
+        if (!settleForegroundRead()) {
           return false;
         }
         if (!result) {
@@ -182,12 +192,12 @@ export abstract class ChatPaneHistoryPackets extends ChatPaneSnapshotHydration {
         selector = { cursor };
       }
     } catch (error) {
-      if (!isCurrent()) {
+      if (!settleForegroundRead()) {
         return false;
       }
       failure = error;
     }
-    if (!isCurrent()) {
+    if (!settleForegroundRead()) {
       return false;
     }
     // Reader/live publication may have changed capacity during a later reply.

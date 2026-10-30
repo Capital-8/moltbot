@@ -232,12 +232,26 @@ it.each(["around", "older", "newer"] as const)(
   },
 );
 
-it.each(["cursor", "projection", "connection", "route"] as const)(
-  "discards a collected packet prefix after %s supersession",
-  async (change) => {
+it.each(
+  ["cursor", "projection", "connection", "route", "hidden"].flatMap((change) =>
+    ["resolved", "rejected"].map((outcome) => ({ change, outcome })),
+  ),
+)(
+  "discards a collected packet prefix after $change supersession ($outcome)",
+  async ({ change, outcome }) => {
     const second = createDeferred<ChatHistoryResult>();
     const request = stagedPagesRequest({ 4: () => second.promise });
     const { pane, state } = createStagedPrefetchPane(request);
+    const runId = "superseded-input";
+    reduceChatSessionProjection(state, {
+      type: "sendPending",
+      runId,
+      message: {
+        role: "user",
+        content: "Not yet admitted",
+        __openclaw: { idempotencyKey: `${runId}:user` },
+      },
+    });
     const loading = pane.loadOlderMessages();
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     if (change === "cursor") {
@@ -252,11 +266,37 @@ it.each(["cursor", "projection", "connection", "route"] as const)(
     if (change === "route") {
       state.sessionKey = "agent:main:successor";
     }
+    if (change === "hidden") {
+      pane.presented = false;
+    }
     const before = state.chatMessages;
-    second.resolve(historyPage([3, 4], pagination(8, 6)));
+    const published = vi.spyOn(state, "chatMessages", "set");
+    const durable = Object.assign(nativeHistoryMessage(3, "Not yet admitted"), {
+      __openclaw: { seq: 3, idempotencyKey: `${runId}:user` },
+    });
+    if (outcome === "resolved") {
+      second.resolve({
+        ...historyPage([3, 4], pagination(8, 6)),
+        messages: [durable, nativeHistoryMessage(4)],
+      });
+    } else {
+      second.reject(new Error("obsolete private packet"));
+    }
     await expect(loading).resolves.toBe(false);
     expect(state.chatMessages).toBe(before);
+    expect(published).not.toHaveBeenCalled();
     expect(pane.stagedHistory.page).toBeNull();
+    if (change === "cursor" || change === "projection") {
+      expect(pane.history.olderError).toBe("History refreshed before this page loaded. Try again.");
+      expect(
+        getChatSessionProjection(state).entries.some(
+          (entry) => entry.pending && entry.pendingRunId === runId,
+        ),
+      ).toBe(change === "cursor");
+    } else {
+      expect(pane.history.olderError).toBeNull();
+      expect(state.lastError).toBeNull();
+    }
   },
 );
 

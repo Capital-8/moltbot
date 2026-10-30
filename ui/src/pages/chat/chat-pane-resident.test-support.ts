@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import { CHAT_HISTORY_REQUEST_LIMIT } from "./chat-history-request-params.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import {
   appendChatThread,
@@ -15,7 +16,8 @@ export function residentPane(
   let tailOverride: ChatHistoryResult | undefined;
   let cursorGate: Promise<void> | undefined;
   let tailGate: Promise<void> | undefined;
-  const requests: Array<{ cursor?: string; messageId?: string; offset?: number }> = [];
+  const requests: Array<{ cursor?: string; messageId?: string; offset?: number; limit?: number }> =
+    [];
   const rows = (start: number, end: number) => {
     const messages = Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => {
       const seq = start + index;
@@ -34,12 +36,13 @@ export function residentPane(
   // Primitive request facts only: the harness must not retain response bodies.
   const request = async (
     _method: string,
-    selector: { cursor?: string; messageId?: string; offset?: number },
+    selector: { cursor?: string; messageId?: string; offset?: number; limit?: number },
   ) => {
     requests.push({
       cursor: selector.cursor,
       messageId: selector.messageId,
       offset: selector.offset,
+      limit: selector.limit,
     });
     if (selector.offset !== undefined) {
       throw new Error("Unexpected offset continuation");
@@ -53,13 +56,14 @@ export function residentPane(
       const seq = Number(selector.messageId.replace("source-", ""));
       return page(seq, seq);
     }
+    const limit = selector.limit ?? CHAT_HISTORY_REQUEST_LIMIT;
     if (selector.cursor?.startsWith("before-")) {
       const end = Number(selector.cursor.slice(7)) - 1;
-      return page(Math.max(1, end - 79), end);
+      return page(Math.max(1, end - limit + 1), end);
     }
     if (selector.cursor?.startsWith("after-")) {
       const start = Number(selector.cursor.slice(6)) + 1;
-      return page(start, Math.min(total, start + 79));
+      return page(start, Math.min(total, start + limit - 1));
     }
     if (selector.cursor) {
       throw new Error("Unexpected cursor");

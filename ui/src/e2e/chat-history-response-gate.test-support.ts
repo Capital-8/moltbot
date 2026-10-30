@@ -140,23 +140,23 @@ export async function sampleControlledHistoryAdmission(
     // No response is admitted during this phase. Normalize observed reader motion
     // only, then freeze that correction before admission can produce scroll writes.
     const motion = await bubble.evaluateHandle((element) => {
-      const thread = element.closest<HTMLElement>(".chat-thread")!;
+      const scrollElement = element.closest<HTMLElement>(".chat-thread")!;
       const pane = element.closest<HTMLElement>("openclaw-chat-pane") as HTMLElement & {
         state: { chatIsProgrammaticScroll: () => boolean; chatIsMaintenanceScroll: () => boolean };
       };
-      let prior = thread.scrollTop;
+      let prior = scrollElement.scrollTop;
       let invalid = false;
       let delta = 0;
       const onScroll = () => {
         invalid ||= pane.state.chatIsProgrammaticScroll() || pane.state.chatIsMaintenanceScroll();
-        const consumed = thread.scrollTop - prior;
-        prior = thread.scrollTop;
+        const consumed = scrollElement.scrollTop - prior;
+        prior = scrollElement.scrollTop;
         delta += consumed;
         (window as AnchorWindow).prependFrames.readerDelta += consumed;
       };
-      thread.addEventListener("scroll", onScroll);
+      scrollElement.addEventListener("scroll", onScroll);
       return () => {
-        thread.removeEventListener("scroll", onScroll);
+        scrollElement.removeEventListener("scroll", onScroll);
         return { invalid, delta };
       };
     });
