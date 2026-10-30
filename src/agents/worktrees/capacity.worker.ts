@@ -95,14 +95,12 @@ function reserveWorktreeCapacityInDatabase(
       .where("scope", "=", WORKTREE_CAPACITY_RESERVATION_SCOPE),
   ).rows;
   const pending = new Map<string, { bytes: number; reserve: number; key: string }>();
-  let own:
-    | { payload: Record<string, unknown>; reservations: WorktreeVolumeReservation[] }
-    | undefined;
   const now = Date.now();
   for (const row of rows) {
-    const isOwn = row.lease_key === key && row.owner === key;
+    if (row.lease_key === key && row.owner === key) {
+      continue;
+    }
     if (
-      !isOwn &&
       readStateLeaseProcessOwnerStatus(
         parseStateLeaseProcessOwner(row.payload_json),
         row.heartbeat_at ?? undefined,
@@ -124,12 +122,7 @@ function reserveWorktreeCapacityInDatabase(
         "Managed worktree capacity lease is unreadable; retry after its owner settles.",
       );
     }
-    const reservations = readReservations(payload);
-    if (isOwn) {
-      own = { payload, reservations };
-      continue;
-    }
-    for (const reservation of reservations) {
+    for (const reservation of readReservations(payload)) {
       const previous = pending.get(reservation.device);
       pending.set(reservation.device, {
         bytes: (previous?.bytes ?? 0) + reservation.bytes,
@@ -144,32 +137,6 @@ function reserveWorktreeCapacityInDatabase(
     const other = pending.get(String(device));
     const required = Math.max(reserve, other?.reserve ?? 0) + volume.bytes + (other?.bytes ?? 0);
     if (!Number.isSafeInteger(Math.ceil(required)) || volume.available < required) {
-      if (own) {
-        const { payload, reservations: previous } = own;
-        // A smaller request settles preceding native writes even when peers prevent new admission.
-        // Keeping their completed byte debt would make concurrent postchecks refuse one another.
-        const settled = previous.map((reservation) => ({
-          ...reservation,
-          bytes: Math.min(
-            reservation.bytes,
-            Math.ceil(volumes.get(Number(reservation.device))?.bytes ?? 0),
-          ),
-        }));
-        if (settled.some((reservation, index) => reservation.bytes < previous[index]!.bytes)) {
-          executeSqliteQuerySync(
-            db,
-            k
-              .updateTable("state_leases")
-              .set({
-                payload_json: JSON.stringify({ ...payload, worktreeCapacity: settled }),
-                updated_at: now,
-              })
-              .where("scope", "=", WORKTREE_CAPACITY_RESERVATION_SCOPE)
-              .where("lease_key", "=", key)
-              .where("owner", "=", key),
-          );
-        }
-      }
       const message = `Insufficient disk space near ${volume.path} for ${purpose}: ${formatDiskSpaceBytes(volume.available)} available; approximately ${formatDiskSpaceBytes(required)} required including safety reserve and pending managed worktree writes. Wait for cleanup or free caches, then retry.`;
       return { admitted: false, message, ...(other ? { reservationKey: other.key } : {}) };
     }
