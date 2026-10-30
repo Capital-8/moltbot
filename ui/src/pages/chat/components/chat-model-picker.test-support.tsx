@@ -45,12 +45,8 @@ export function mountModelPicker(params: Partial<PickerProps>, options?: MountSo
   flush();
   return { ...view, update };
 }
-export async function waitForModelMenu(container: HTMLElement) {
-  await vi.dynamicImportSettled();
-  await waitForSolid(() =>
-    expect(container.querySelector(".chat-controls__model-menu")).not.toBeNull(),
-  );
-}
+export const waitForModelMenu = (container: HTMLElement) =>
+  waitForSolid(() => expect(container.querySelector(".chat-controls__model-menu")).not.toBeNull());
 
 export function expandModelProviders(container: HTMLElement) {
   for (const toggle of container.querySelectorAll<HTMLButtonElement>(

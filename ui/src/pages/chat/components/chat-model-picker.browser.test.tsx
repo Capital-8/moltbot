@@ -106,8 +106,7 @@ it("leaves touch pointerdown uncancelled for native model-picker activation", ()
 it("opens during activation and preserves filter focus and query across catalog rerenders", async () => {
   const { composer, open, params, update, trigger } = mountPicker();
   expect(container.querySelector<HTMLElement>(modelControlSelector("option"))).toBeNull();
-  expect(container.querySelector("[data-anchored-overlay]")!.matches(":popover-open")).toBe(false);
-  expect(getSearch().checkVisibility()).toBe(false);
+  expect(container.querySelector(".chat-controls__model-menu")).toBeNull();
   let visibleAtActivation = false;
   container.addEventListener(
     "click",

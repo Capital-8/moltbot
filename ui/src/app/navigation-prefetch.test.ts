@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 function setup(
-  routeId?: "advanced" | "chat" | "dashboard" | "workboard" | "new-session",
+  routeId?: "advanced" | "dashboard" | "workboard" | "new-session",
   sidebarAgentsMode?: "chip" | "roster",
 ) {
   const currentLocation = {
@@ -280,37 +280,6 @@ it("keeps declared next interactions as the route's only automatic idle work", a
   ]);
   expect(fixture.preloadRoute).not.toHaveBeenCalled();
 });
-
-it.each(["chat", "dashboard", "new-session"] as const)(
-  "downloads closed controls without evaluating them before next-route speculation on %s",
-  async (route) => {
-    const controls = ["assets/controls-1234abcd.js", "assets/controls-1234abcd.css"];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ ...manifest, "chat-next": controls, "new-session-next": controls }),
-      })),
-    );
-    const fixture = setup(route, "chip");
-    fixture.outlet.presentationSettled = true;
-    fixture.transcript.ready = true;
-    await idle();
-    expect(hints().map((link) => [link.rel, link.as, link.href])).toEqual([
-      ["modulepreload", undefined, new URL(`/control/${controls[0]}`, location.origin).href],
-      ["preload", "style", new URL(`/control/${controls[1]}`, location.origin).href],
-    ]);
-    expect(fixture.preloadRoute).not.toHaveBeenCalled();
-    expect(document.querySelector("script")).toBeNull();
-    hints().forEach((link) => link.dispatchEvent(new Event("load")));
-    await idle();
-    expect(hints().some((link) => link.href.endsWith("/assets/new-1234abcd.js"))).toBe(
-      route !== "new-session",
-    );
-    fixture.stop();
-    expect(hints()).toHaveLength(0);
-  },
-);
 
 it.each(["chip", "roster"] as const)(
   "warms Chat without evaluating it only for the New Session roster (%s)",

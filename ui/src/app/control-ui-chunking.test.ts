@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { build } from "vite";
 import { describe, expect, it } from "vitest";
+import { collectControlUiBootAssets } from "../../config/control-ui-boot-preloads.ts";
 import {
   controlUiBootManifestKey,
   controlUiCodeSplitting,
@@ -39,6 +40,48 @@ function buildFixture(
 }
 
 describe("Control UI build chunking", () => {
+  it("downloads closed controls and their static dependencies with only their owning routes", async () => {
+    const effort = modulePath("../pages/chat/components/chat-effort-picker-panel.tsx");
+    const plus = modulePath("../pages/chat/components/chat-composer-plus-menu-content.tsx");
+    const header = modulePath("../pages/chat/components/chat-header-session-menu-content.tsx");
+    const nested = "\0closed-control-dependency";
+    const rare = "\0rare-control";
+    const entry = "\0closed-control-preloads";
+    const built = await buildFixture(
+      entry,
+      new Map([
+        [
+          entry,
+          `export const effort = () => import(${JSON.stringify(effort)}); export const plus = () => import(${JSON.stringify(plus)}); export const header = () => import(${JSON.stringify(header)});`,
+        ],
+        [effort, 'export const render = () => "effort";'],
+        [
+          plus,
+          `export { render } from ${JSON.stringify(nested)}; export const rare = () => import(${JSON.stringify(rare)});`,
+        ],
+        [header, 'export const render = () => "header";'],
+        [nested, 'export const render = () => "nested";'],
+        [rare, 'export const render = () => "rare";'],
+      ]),
+    );
+    if (Array.isArray(built) || !("output" in built)) {
+      throw new Error("Expected one production bundle");
+    }
+    const assets = collectControlUiBootAssets(
+      Object.fromEntries(built.output.map((file) => [file.fileName, file])),
+    );
+    const chunkFor = (id: string) =>
+      built.output.find((file) => file.type === "chunk" && id in file.modules)!.fileName;
+    for (const id of [effort, plus, nested]) {
+      expect(assets.interactionOnly.chat.has(chunkFor(id))).toBe(true);
+      expect(assets.interactionOnly.new.has(chunkFor(id))).toBe(true);
+      expect(assets.initial.has(chunkFor(id))).toBe(false);
+    }
+    expect(assets.interactionOnly.chat.has(chunkFor(header))).toBe(true);
+    expect(assets.new.has(chunkFor(header))).toBe(false);
+    expect(assets.chat.has(chunkFor(rare))).toBe(false);
+    expect(assets.new.has(chunkFor(rare))).toBe(false);
+  });
   it("keeps the creator runtime and its copy outside shared admission and virtualizer chunks", async () => {
     const owner = modulePath("../pages/templates/creator-owner.ts");
     const flow = modulePath("../pages/templates/creator-flow.ts");

@@ -66,26 +66,14 @@ export function connectShellIdle(
       return intent;
     }
     const currentRoute = router.getState().matches[0]?.routeId;
-    if (
-      currentRoute === "new-session" &&
-      context.theme.settings.sidebarAgentsMode === "roster" &&
-      pending.has("roster-next")
-    ) {
-      return "roster-next";
-    }
     const currentNext =
-      currentRoute && isSessionRouteId(currentRoute)
-        ? "chat-next"
+      currentRoute === "new-session" && context.theme.settings.sidebarAgentsMode === "roster"
+        ? "roster-next"
         : currentRoute
           ? `${currentRoute}-next`
           : undefined;
     if (currentNext && manifest?.[currentNext]) {
-      if (pending.has(currentNext)) {
-        return currentNext;
-      }
-      if (currentNext !== "chat-next" && currentNext !== "new-session-next") {
-        return undefined;
-      }
+      return pending.has(currentNext) ? currentNext : undefined;
     }
     return pending.has("new-session") ? "new-session" : undefined;
   };
@@ -181,10 +169,9 @@ export function connectShellIdle(
         }
         seen.add(href);
         const link = document.createElement("link");
-        // Prepare the module graph without evaluating closed controls.
         link.rel = file.endsWith(".css") ? "preload" : "modulepreload";
-        if (link.rel === "preload") {
-          link.as = file.endsWith(".css") ? "style" : "script";
+        if (file.endsWith(".css")) {
+          link.as = "style";
         }
         link.crossOrigin = "";
         link.fetchPriority = "low";

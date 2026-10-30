@@ -1,12 +1,6 @@
 import type { IndexHtmlTransformContext, Plugin } from "vite";
 import { collectControlUiStaticAssets } from "./control-ui-boot-preloads.ts";
 
-const composerControls = [
-  "pages/chat/components/chat-model-picker-panel.tsx",
-  "pages/chat/components/chat-effort-picker-panel.tsx",
-  "pages/chat/components/chat-composer-plus-menu-content.tsx",
-];
-
 // Name each initial presentation or bounded next interaction explicitly; never
 // walk optional dynamic children such as editors, terminals, or board widgets.
 const entries = {
@@ -31,13 +25,6 @@ const entries = {
   portals: ["pages/portals/portals-page.tsx"],
   palette: ["components/command-palette.tsx"],
   "model-picker": ["pages/chat/components/chat-model-picker-panel.tsx"],
-  "new-session-next": composerControls,
-  "chat-next": [
-    ...composerControls,
-    "pages/chat/components/chat-composer-microphone-menu.tsx",
-    "pages/chat/components/chat-header-panel-menu-content.tsx",
-    "pages/chat/components/chat-header-session-menu-content.tsx",
-  ],
   appearance: [
     "pages/config/config-page.tsx",
     "components/settings-sidebar-shell.tsx",
