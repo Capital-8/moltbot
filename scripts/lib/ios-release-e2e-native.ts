@@ -334,7 +334,6 @@ export async function createNativeDependencies(options: {
         }
       });
     }
-    const nativeStarted = performance.now();
     const buildArgs = [
       "-project",
       "apps/ios/OpenClaw.xcodeproj",
@@ -356,7 +355,8 @@ export async function createNativeDependencies(options: {
     ];
     let derivedDataPath = "";
     let xctestrunPath = "";
-    if (!options.gatewayOnly) {
+    const prepareNativeBuild = async (signal = options.signal) => {
+      const nativeStarted = performance.now();
       const { prepareIOSReleaseNativeBuild } = await import("./ios-release-e2e-build.js");
       const sdkVersion = await command("xcode-version", "xcrun", [
         "--sdk",
@@ -383,7 +383,7 @@ export async function createNativeDependencies(options: {
           },
           assertCurrentSource,
           build: async (destination) => {
-            await command("native-generate", "pnpm", ["ios:gen"]);
+            await command("native-generate", "pnpm", ["ios:gen"], { signal });
             await command(
               "native-build",
               "xcodebuild",
@@ -396,7 +396,7 @@ export async function createNativeDependencies(options: {
                 ...IOS_RELEASE_TESTS.map((test) => `-only-testing:${test}`),
                 "build-for-testing",
               ],
-              { timeoutMs: 1_800_000 },
+              { timeoutMs: 1_800_000, signal },
             );
           },
         }),
@@ -405,6 +405,9 @@ export async function createNativeDependencies(options: {
       xctestrunPath = build.xctestrunPath;
       options.proof.nativeBuildReused = build.reused;
       options.proof.nativeBuildMs = performance.now() - nativeStarted;
+    };
+    if (options.buildOnly || options.mode === "compare") {
+      await prepareNativeBuild();
     }
     return {
       assertCurrentSource,
@@ -825,6 +828,12 @@ export async function createNativeDependencies(options: {
                     await command("simulator-boot", "xcrun", ["simctl", "boot", udid], {
                       signal: fixtureSignal,
                     });
+                    if (options.mode === "stock") {
+                      // Keep setupStatus warmup and device cleanup in the fixture; let the
+                      // same fresh OS initialize during compilation before issuing credentials.
+                      await prepareNativeBuild(fixtureSignal);
+                      requireLiveFixture();
+                    }
                     await command(
                       "simulator-ready",
                       "xcrun",

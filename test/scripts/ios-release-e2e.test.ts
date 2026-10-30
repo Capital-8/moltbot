@@ -795,6 +795,7 @@ it.each([
   "gateway-preflight-cleanup-failure",
   "build-unjoined",
   "build-exit",
+  "build-gateway-exit",
   "boot-timeout",
   "headroom-timeout",
   "cancel-during-headroom",
@@ -1105,9 +1106,6 @@ it.each([
     const args = options.args as string[];
     if (args.includes("scripts/e2e/mock-openai-server.mjs")) {
       expect(simulatorReady).toBe(false);
-      if (scenario !== "gateway-only") {
-        expect(lifecycle).toContain("native-build-complete");
-      }
       lifecycle.push("mock-start");
       requestLog = options.env.MOCK_REQUEST_LOG;
       stdout.write("mock-openai listening on 20001\n");
@@ -1184,6 +1182,8 @@ it.each([
         expect(options.signal.aborted).toBe(false);
       }
       stdout.write(`11111111-2222-3333-4444-${String(++created).padStart(12, "0")}`);
+    } else if (args[1] === "boot") {
+      lifecycle.push("simulator-boot");
     } else if (args.includes("bootstatus")) {
       lifecycle.push("boot-wait");
       await Promise.resolve();
@@ -1207,7 +1207,9 @@ it.each([
       if (scenario !== "native-build-only") {
         expect(preflightCleanup).toHaveBeenCalledOnce();
         expect(lifecycle).toContain("gateway-preflight-rpc");
+        expect(lifecycle).toContain("simulator-boot");
       }
+      lifecycle.push("native-build-start");
       appContainer = path.join(
         path.dirname(args[args.indexOf("-derivedDataPath") + 1]!),
         "app-container",
@@ -1218,6 +1220,11 @@ it.each([
       if (scenario === "build-exit") {
         stderr.write("BUILD FAILED: private setup code and private path\n");
         return 65;
+      }
+      if (scenario === "build-gateway-exit") {
+        exitGateway(17);
+        expect(options.signal.aborted).toBe(true);
+        throw commandFailure("ABORT_ERR");
       }
       lifecycle.push("native-build-complete");
     } else if (args.includes("test-without-building")) {
@@ -1433,14 +1440,6 @@ it.each([
     [scenario === "invalid-xcode-output", diagnostic("xcode-version", "failed")],
     [invalidRuntime, diagnostic("simulator-runtime", "not-found")],
     [
-      scenario === "build-unjoined",
-      diagnostic("native-build", "timeout", { errorCode: "ETIMEDOUT" }),
-    ],
-    [
-      scenario === "build-exit",
-      diagnostic("native-build", "exit", { exitCode: 65, context: ["build-failed"] }),
-    ],
-    [
       failedInstall,
       diagnostic("gateway-install", scenario === "gateway-install-unjoined" ? "timeout" : "failed"),
     ],
@@ -1578,6 +1577,28 @@ it.each([
     expect(instances).toHaveLength(1);
     expect(instances[0]?.cleanup).toHaveBeenCalledOnce();
     expect(JSON.stringify(report)).not.toContain("private");
+    if (failedBuild) {
+      const unjoined = scenario === "build-unjoined";
+      expectTrial(report, {
+        status: "failed",
+        errors: unjoined ? ["preparation-timeout", "cleanup-failed"] : ["preparation-failed"],
+        diagnostics: containing([
+          scenario === "build-gateway-exit"
+            ? diagnostic("gateway-start", "exit", { exitCode: 17, context: [] })
+            : unjoined
+              ? diagnostic("native-build", "timeout", { errorCode: "ETIMEDOUT", context: [] })
+              : diagnostic("native-build", "exit", { exitCode: 65, context: ["build-failed"] }),
+        ]),
+      });
+      expect(created).toBe(1);
+      expect(joinedMocks).toBe(1);
+      expect(lifecycle.at(-1)).toBe("simulator-delete");
+      expect(lifecycle).not.toContain("setup-code");
+      expect(lifecycle).not.toContain("live-test");
+      expect(report.complete).toBe(!unjoined);
+      expect(proof.resourcesPreserved).toBe(unjoined ? true : undefined);
+      return;
+    }
     if (scenario.includes("handshake-") || scenario.startsWith("setup-code-closed-")) {
       const recovered = scenario.endsWith("-retry");
       const exhausted = scenario === "setup-code-handshake-exhausted";
@@ -1919,6 +1940,8 @@ it.each([
       ["gateway-start", "boot-ready"],
       ["gateway-start", "setup-status"],
       ["setup-status-ready", "simulator-create"],
+      ["simulator-boot", "native-build-start"],
+      ["native-build-complete", "boot-ready"],
       ["boot-ready", "headroom-ready"],
       ["headroom-ready", "setup-code"],
       ["setup-code", "live-test"],
@@ -2049,6 +2072,7 @@ it.each([
     if (
       scenario === "cleanup-failure" ||
       scenario === "test-unjoined" ||
+      scenario === "build-unjoined" ||
       scenario === "status-unjoined-gateway-exit"
     ) {
       // This is the outer owner's cleanup call after the trial loop has stopped.
