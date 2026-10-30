@@ -1,7 +1,10 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
-import { renderAssistantRequestFailureCopy } from "../agents/failover/assistant-request-failure-copy.js";
+import {
+  renderAssistantRequestFailureCopy,
+  renderRecordedAssistantFailureCopy,
+} from "../agents/failover/assistant-request-failure-copy.js";
 import { renderCodexAppServerFailureCopy } from "../agents/failover/user-copy.js";
+import { isHostMissingReplyNoticeText } from "../agents/reply-completion.js";
 import {
   appendSessionTranscriptReport,
   type SessionTranscriptWriteScope,
@@ -12,8 +15,9 @@ import { withSessionTranscriptWriteAssertion } from "../config/sessions/transcri
 import { formatErrorMessage } from "../infra/errors.js";
 import { classifyGatewayStorageFailure } from "../infra/sqlite-error-diagnostics.js";
 import { redactSensitiveText } from "../logging/redact.js";
+import { isProviderRefusalNoticeText } from "../shared/assistant-error-format.js";
 import { resolveSessionStartupErrorPresentation } from "../shared/session-startup-error-presentation.js";
-import { sanitizeSessionRunError } from "./session-run-error-format.js";
+import { sanitizeSessionRunError, truncateSessionRunError } from "./session-run-error-format.js";
 import { STATE_CONTENTION_SUMMARY } from "./session-run-error-presentation.js";
 
 const RUN_FAILED_BEFORE_REPLY_TRANSCRIPT_TYPE = "run-failed-before-reply";
@@ -33,8 +37,9 @@ export async function recordGatewaySessionRunFailure(
 ): Promise<void> {
   const { runId } = params;
   const storageFailure = classifyGatewayStorageFailure(params.error);
-  const error = truncateUtf16Safe(sanitizeSessionRunError(params.error), 512) || "unknown error";
-  const diagnostic = truncateUtf16Safe(
+  const sanitized = sanitizeSessionRunError(params.error) || "unknown error";
+  const error = truncateSessionRunError(sanitized, 512);
+  const diagnostic = truncateSessionRunError(
     redactSensitiveText(formatErrorMessage(params.error), { mode: "tools" }),
     512,
   );
@@ -46,8 +51,16 @@ export async function recordGatewaySessionRunFailure(
         ? STATE_CONTENTION_SUMMARY
         : (renderAssistantRequestFailureCopy({ storageFailure }) ??
           startupFailure?.message ??
-          renderCodexAppServerFailureCopy(error) ??
-          `Your request couldn't be completed: ${error}`),
+          renderCodexAppServerFailureCopy(sanitized) ??
+          (isProviderRefusalNoticeText(sanitized)
+            ? `Your request couldn't be completed: ${sanitized}`
+            : undefined) ??
+          (isHostMissingReplyNoticeText(sanitized) ? sanitized : undefined) ??
+          renderRecordedAssistantFailureCopy(
+            { errorMessage: sanitized },
+            { includeRawFormatDetails: false },
+          ) ??
+          "Your request couldn't be completed."),
     display: params.suppressErrorNotice !== true,
     excludeFromContext: true,
     details: {
