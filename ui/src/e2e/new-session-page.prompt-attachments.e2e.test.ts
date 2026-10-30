@@ -96,7 +96,6 @@ suite.define(() => {
       await permission.click();
       await firstPage.locator('[data-chat-permission-option="read-only"]').click();
       await pollAttribute(permission, "data-chat-select-value").toBe("read-only");
-      // Rendered selection precedes the debounced durable draft transaction.
       await waitForCommittedNewSessionDraft(
         firstPage,
         "restore this prompt after restart and incognito",
@@ -695,18 +694,6 @@ suite.define(() => {
     async (recovery) => {
       await withNewSessionPage(async (page) => {
         const quota = recovery === "quota";
-        if (quota) {
-          await page.addInitScript(() => {
-            const setItem = Object.getOwnPropertyDescriptor(Storage.prototype, "setItem")
-              ?.value as Storage["setItem"];
-            Storage.prototype.setItem = function (key: string, value: string) {
-              if (key.startsWith("openclaw.control.chatComposer.v2:")) {
-                throw new DOMException("Quota exceeded", "QuotaExceededError");
-              }
-              return setItem.call(this, key, value);
-            };
-          });
-        }
         const sessionId = quota ? "storage-failed-initial-turn" : "rejected-first-message";
         const sessionKey = `agent:main:${sessionId}`;
         const message = "Keep this rejected message";
@@ -737,6 +724,21 @@ suite.define(() => {
           },
         });
         await page.goto(`${suite.server.baseUrl}new`);
+        const quotaFailure = await page.evaluateHandle((failWrites) => {
+          const proof = { rejections: 0 };
+          if (failWrites) {
+            const setItem = Object.getOwnPropertyDescriptor(Storage.prototype, "setItem")
+              ?.value as Storage["setItem"];
+            Storage.prototype.setItem = function (key: string, value: string) {
+              if (key.startsWith("openclaw.control.chatComposer.v4:")) {
+                proof.rejections += 1;
+                throw new DOMException("Quota exceeded", "QuotaExceededError");
+              }
+              return setItem.call(this, key, value);
+            };
+          }
+          return proof;
+        }, quota);
         const composer = page.locator(".new-session-page__message");
         await composer.fill(message);
         await pastePng(composer);
@@ -747,7 +749,9 @@ suite.define(() => {
           timeout: 30_000,
         });
         await expectRejectedTurn(page, message, runError);
-        if (!quota) {
+        if (quota) {
+          expect(await quotaFailure.evaluate((proof) => proof.rejections)).toBeGreaterThan(0);
+        } else {
           await page.reload();
           await expectRejectedTurn(page, message, runError);
         }
