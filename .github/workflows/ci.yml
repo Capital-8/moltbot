@@ -1,5 +1,5 @@
 name: CI
-run-name: iOS screenshot compiler command preflight (no compilation or upload)
+run-name: iOS screenshot baseline index count (build only, no upload)
 on:
   workflow_dispatch: {}
 permissions:
@@ -9,14 +9,17 @@ concurrency:
   cancel-in-progress: false
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  IOS_SCREENSHOT_FASTLANE_VERSION: 2.241.1
   IOS_SCREENSHOT_NODE_VERSION: 24.22.1
   IOS_SCREENSHOT_XCODE_VERSION: Xcode 27.1 Build version 27A9275
 jobs:
-  index-store-preflight:
+  index-store-baseline:
     runs-on: xcode-27-xlarge
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       HISTORICAL_TARGET: "false"
+      BUNDLE_DEPLOYMENT: "true"
+      BUNDLE_GEMFILE: ${{ github.workspace }}/apps/ios/Gemfile
     steps:
       - name: Checkout frozen diagnostic source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -32,6 +35,19 @@ jobs:
           sparse-checkout: |-
             .github
             scripts
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@824c0e29fdfc7d689c191c27acc969d2d04b7dd8
+        with:
+          ruby-version: 4.0.7
+          bundler: 4.0.23
+          bundler-cache: false
+          working-directory: apps/ios
+      - name: Install locked Fastlane bundle
+        working-directory: apps/ios
+        run: |
+          bundle _4.0.23_ install --jobs 4 --retry 3
+          bundle _4.0.23_ check
+          bundle _4.0.23_ exec fastlane --version
       - name: Select Xcode
         id: select-xcode
         run: |
@@ -44,15 +60,38 @@ jobs:
           cache-mode: restore
           install-bun: "false"
           node-version: ${{ env.IOS_SCREENSHOT_NODE_VERSION }}
-      - name: Install pinned XcodeGen
-        run: |-
-          ./scripts/install-xcodegen.sh "$RUNNER_TEMP/openclaw-swift-tools"
-          echo "$RUNNER_TEMP/openclaw-swift-tools" >> "$GITHUB_PATH"
+      - name: Install iOS screenshot tooling
+        run: |
+          swift_tools_dir="$RUNNER_TEMP/openclaw-swift-tools"
+          ./scripts/install-xcodegen.sh "$swift_tools_dir"
+          ./scripts/install-swift-tools.sh "$swift_tools_dir"
+          echo "$swift_tools_dir" >> "$GITHUB_PATH"
+          "$swift_tools_dir/xcodegen" --version
+          "$swift_tools_dir/swiftformat" --version
+          "$swift_tools_dir/swiftlint" version
+      - name: Install Watch Rust toolchain
+        id: watch-rust-toolchain
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          watch_toolchain="$(awk -F '"' '/^channel =/ { print $2; exit }' apps/shared/OpenClawWatchRTC/rust-toolchain.toml)"
+          test -n "$watch_toolchain"
+          rustup toolchain install "$watch_toolchain" --profile minimal --component rust-src
       - name: Identify iOS native cache inputs
         id: ios-cache-inputs
         run: |
           echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           echo "OPENCLAW_WATCH_RTC_CACHE_DIR=$RUNNER_TEMP/openclaw-watch-rtc-libraries" >> "$GITHUB_ENV"
+      - name: Restore Watch RTC build inputs
+        id: watch-rtc-cache
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ${{ runner.temp }}/openclaw-watch-rtc-libraries
+          key: watch-rtc-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ios-cache-inputs.outputs.xcode }}-${{ hashFiles('apps/shared/OpenClawWatchRTC/Cargo.lock', 'apps/shared/OpenClawWatchRTC/Cargo.toml', 'apps/shared/OpenClawWatchRTC/rust-toolchain.toml', 'apps/shared/OpenClawWatchRTC/build.sh', 'apps/shared/OpenClawWatchRTC/src/**', 'apps/ios/project.yml') }}
       - name: Restore screenshot source packages
         id: ios-packages-cache
         continue-on-error: true
@@ -61,37 +100,13 @@ jobs:
         with:
           path: apps/ios/build/SnapshotDerivedData/SourcePackages
           key: ios-screenshot-packages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ios-cache-inputs.outputs.xcode }}-${{ hashFiles('apps/ios/**/Package.resolved', 'apps/ios/project.yml', 'apps/shared/**/Package*.swift', 'apps/shared/**/Package.resolved', 'apps/swabble/Package*.swift', 'apps/swabble/Package.resolved') }}
-      - name: Generate the normal iOS project
-        run: pnpm ios:gen
-      - name: Inspect baseline and disabled compiler plans without compiling
-        run: |-
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/index-store-settings"
-          xcodebuild -version
-          sysctl -n hw.ncpu hw.memsize
-          for variant in baseline disabled; do
-            settings=(-dry-run build-for-testing)
-            if [[ "$variant" == disabled ]]; then settings+=(COMPILER_INDEX_STORE_ENABLE=NO); fi
-            xcodebuild -project apps/ios/OpenClaw.xcodeproj -scheme OpenClawUITests -configuration Debug \
-              -derivedDataPath apps/ios/build/SnapshotDerivedData -destination 'generic/platform=iOS Simulator' \
-              "ARCHS=$(uname -m)" ONLY_ACTIVE_ARCH=YES "${settings[@]}" \
-              > "$RUNNER_TEMP/index-store-settings/$variant.log"
-          done
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          for(const variant of ['baseline','disabled']) {
-            const text=fs.readFileSync(process.env.RUNNER_TEMP+'/index-store-settings/'+variant+'.log','utf8');
-            const commands=text.split('\n').filter(line=>/ -module-name /.test(line) && /swiftc|SwiftDriver/.test(line));
-            const indexCommands=commands.filter(line=>line.includes('-index-store-path'));
-            console.log(JSON.stringify({variant,swiftCompilerCommands:commands.length,swiftIndexCommands:indexCommands.length}));
-            console.log(commands.slice(0,2).join('\n'));
-          }
-          NODE
-      - name: Retain effective settings
+      - name: Build baseline screenshot products and count index output
+        run: node scripts/ios-resource-timeline.mjs --output "$RUNNER_TEMP/ios-index-probe/resources.jsonl" -- node scripts/ios-screenshot-index-probe.mjs
+      - name: Retain baseline compiler and resource evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ios-index-store-settings-${{ github.run_id }}
-          path: ${{ runner.temp }}/index-store-settings
-          if-no-files-found: error
+          name: ios-index-baseline-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-index-probe
+          if-no-files-found: warn
           retention-days: 14
