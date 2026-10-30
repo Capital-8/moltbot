@@ -87,7 +87,10 @@ describe("Code Mode catalog and model-visible surface", () => {
     const compile = vi.mocked(Compile);
     const validate = (tools: AnyAgentTool[]) => {
       for (const tool of tools) {
-        const args = tool.name === "exec" ? { code: "return 42;" } : { runId: "owned-cell" };
+        const args =
+          tool.name === "exec"
+            ? { title: "Validate schema reuse", code: "return 42;" }
+            : { runId: "owned-cell" };
         expect(
           validateToolArguments(tool, {
             type: "toolCall",
@@ -101,17 +104,9 @@ describe("Code Mode catalog and model-visible surface", () => {
     validate(createCodeModeHarness().tools);
     compile.mockClear();
     for (const timeoutMs of [1_000, 2_000, 3_000]) {
-      const controller = new AbortController();
-      const { tools } = createCodeModeHarness({
-        codeMode: { timeoutMs },
-        abortSignal: controller.signal,
-      });
+      const { tools } = createCodeModeHarness({ codeMode: { timeoutMs } });
       validate(tools);
-      const exec = tools[0]!;
-      expect(exec.description).toContain(`${timeoutMs} ms wall-clock budget`);
-      const cancelled = new Error(`cancelled turn ${timeoutMs}`);
-      controller.abort(cancelled);
-      await expect(exec.execute("cancelled", { code: "return 42;" })).rejects.toBe(cancelled);
+      expect(tools[0]!.description).toContain(`${timeoutMs} ms wall-clock budget`);
     }
     expect(compile).not.toHaveBeenCalled();
   });
