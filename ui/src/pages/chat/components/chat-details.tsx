@@ -492,7 +492,7 @@ export function ChatDetails(props: ChatDetailsViewProps) {
     mountSurface(layout);
     position(layout);
   };
-  createResizeObserver(
+  const resizeTargets = createMemo(
     () =>
       [
         props.elements?.pane,
@@ -501,8 +501,13 @@ export function ChatDetails(props: ChatDetailsViewProps) {
         props.elements?.footer,
         props.elements?.getComposerInput?.(),
       ].filter((element): element is HTMLElement => Boolean(element)),
-    reposition,
+    {
+      equals: (before, after) =>
+        before.length === after.length &&
+        before.every((element, index) => element === after[index]),
+    },
   );
+  createResizeObserver(resizeTargets, reposition);
   onSettled(() => {
     props.setRef({ open: openFrom, close: () => close(true) });
     const pane = layoutElements()?.pane;
