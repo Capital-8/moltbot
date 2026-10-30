@@ -160,16 +160,7 @@ describe("refreshSlashCommands", () => {
     // A changed execution root is a different catalog, never the cached one.
     await refreshScoped('["wt",null]');
     expect(commandByName("rebound_session_skill")).toBeDefined();
-    // Explicit invalidation of the scoped entry forces a fresh read.
-    invalidateSessionSlashCommands(client, {
-      agentId: "main",
-      sessionKey,
-      sessionSkillScope: '["wt",null]',
-    });
-    request.mockResolvedValueOnce(commandResult("refreshed_session_skill"));
-    await refreshScoped('["wt",null]');
-    expect(commandByName("refreshed_session_skill")).toBeDefined();
-    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("never sends a project with an existing session's catalog request", async () => {

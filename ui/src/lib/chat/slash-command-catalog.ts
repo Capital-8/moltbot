@@ -17,9 +17,10 @@ type RemoteSlashCommandCacheEntry = {
   inFlight?: Promise<SlashCommandDef[]>;
 };
 
+// Logical session (agent + session key) -> catalog variant (project or execution root).
 const remoteSlashCommandCache = new WeakMap<
   GatewayBrowserClient,
-  Map<string, RemoteSlashCommandCacheEntry>
+  Map<string, Map<string, RemoteSlashCommandCacheEntry>>
 >();
 
 type RemoteSlashCommandScope = {
@@ -34,13 +35,8 @@ type RemoteSlashCommandScope = {
   sessionSkillScope?: string;
 };
 
-function remoteSlashCommandCacheKey(scope: RemoteSlashCommandScope): string {
-  return JSON.stringify([
-    scope.agentId ?? null,
-    scope.sessionKey ?? null,
-    scope.projectId ?? null,
-    scope.sessionSkillScope ?? null,
-  ]);
+function sessionCacheKey(scope: { agentId?: string; sessionKey?: string }): string {
+  return JSON.stringify([scope.agentId ?? null, scope.sessionKey ?? null]);
 }
 
 function loadRemoteSlashCommands(
@@ -63,8 +59,13 @@ function loadRemoteSlashCommands(
     cache = new Map();
     remoteSlashCommandCache.set(client, cache);
   }
-  const key = remoteSlashCommandCacheKey(scope);
-  const cached = cache.get(key);
+  let variants = cache.get(sessionCacheKey(scope));
+  if (!variants) {
+    variants = new Map();
+    cache.set(sessionCacheKey(scope), variants);
+  }
+  const key = JSON.stringify([projectId ?? null, scope.sessionSkillScope ?? null]);
+  const cached = variants.get(key);
   const now = Date.now();
   if (cached?.commands && cached.expiresAt > now) {
     return Promise.resolve(cached.commands);
@@ -101,16 +102,20 @@ function loadRemoteSlashCommands(
       delete entry.inFlight;
     });
   entry.inFlight = inFlight;
-  cache.set(key, entry);
+  variants.set(key, entry);
   return inFlight;
 }
 
+/**
+ * Retires every cached variant of one session. A late commands.list result settles into the
+ * detached entry, so it can neither apply nor repopulate the cache.
+ */
 export function invalidateSessionSlashCommands(
   client: GatewayBrowserClient,
-  scope: { agentId?: string; sessionKey: string; sessionSkillScope?: string },
+  scope: { agentId?: string; sessionKey: string },
 ): void {
   refreshSeq += 1;
-  remoteSlashCommandCache.get(client)?.delete(remoteSlashCommandCacheKey(scope));
+  remoteSlashCommandCache.get(client)?.delete(sessionCacheKey(scope));
 }
 
 export function applyRemoteSlashCommandsResult(

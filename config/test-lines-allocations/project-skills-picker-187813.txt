@@ -1,2 +1,2 @@
-# Selected-project skill preview, invocation and Gateway custody regressions for #187813.
-509
+# Selected-project skill preview, invocation, Gateway custody and session catalog invalidation regressions for #187813.
+563

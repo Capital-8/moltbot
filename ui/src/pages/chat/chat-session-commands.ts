@@ -29,8 +29,7 @@ export async function refreshChatCommands(host: ChatPageHost) {
 
 /** Agent-scoped metadata commands stand in only for sessions without a project root. */
 export function applyChatMetadataCommands(host: ChatPageHost, result: ChatMetadataResult) {
-  const sessionSkillScope = resolveSessionSkillScope(host);
-  if (!sessionSkillScope || !host.client) {
+  if (!resolveSessionSkillScope(host) || !host.client) {
     applyRemoteSlashCommandsResult(result);
     return;
   }
@@ -38,7 +37,6 @@ export function applyChatMetadataCommands(host: ChatPageHost, result: ChatMetada
   invalidateSessionSlashCommands(host.client, {
     agentId: resolveChatAgentId(host) ?? undefined,
     sessionKey: host.sessionKey,
-    sessionSkillScope,
   });
   void refreshChatCommands(host);
 }
