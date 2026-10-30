@@ -1634,6 +1634,13 @@ async function setupColdFirstModelPicker(page: Page) {
       }
     };
     document.addEventListener("click", recordClick, true);
+    const recordSearchFocus = (event: FocusEvent) => {
+      if (event.target instanceof Element && event.target.matches("[data-chat-model-search]")) {
+        performance.mark("model-picker:native-search-focus", { startTime: event.timeStamp });
+        document.removeEventListener("focus", recordSearchFocus, true);
+      }
+    };
+    document.addEventListener("focus", recordSearchFocus, true);
   });
 }
 
@@ -1655,13 +1662,22 @@ async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence>
     const readyAt = performance.getEntriesByName("model-picker:first-ready")[0]?.startTime;
     const clickedAt = performance.getEntriesByName("model-picker:native-click")[0]?.startTime;
     const observedAt = performance.getEntriesByName("model-picker:observed-click")[0]?.startTime;
-    if (readyAt === undefined || clickedAt === undefined || observedAt === undefined) {
-      throw new Error("Cold first-open readiness/native click was not recorded");
+    const focusedAt = performance.getEntriesByName("model-picker:native-search-focus")[0]
+      ?.startTime;
+    if (
+      readyAt === undefined ||
+      clickedAt === undefined ||
+      observedAt === undefined ||
+      focusedAt === undefined
+    ) {
+      throw new Error("Cold first-open readiness/native click/search focus was not recorded");
     }
     return {
       firstReadyAtMs: readyAt,
       nativeClickAtMs: clickedAt,
       nativeClickObservedAtMs: observedAt,
+      nativeSearchFocusAtMs: focusedAt,
+      nativeClickToSearchFocusMs: focusedAt - clickedAt,
       firstReadyToActionMs: clickedAt - readyAt,
     };
   });
