@@ -412,7 +412,7 @@ export async function commitPreparedSessionWorkspace(params: {
   missingSessionMessage: string;
 }): Promise<SessionEntry> {
   const { prepared } = params;
-  const bind = async (assertSourceCurrent: SessionSourceAssertion) => {
+  const bind = async (assertSourceCurrent: SessionSourceAssertion, signal?: AbortSignal) => {
     const assertCurrent = composeSessionSourceAssertion([
       params.assertCurrent,
       assertSourceCurrent,
@@ -436,6 +436,7 @@ export async function commitPreparedSessionWorkspace(params: {
       },
       {
         ...sessionEntryCommitGuardOptions(assertCurrent),
+        signal,
         requireWriteSuccess: true,
         skipMaintenance: true,
         onCommitted: params.onCommitted,

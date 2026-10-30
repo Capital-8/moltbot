@@ -30,6 +30,8 @@ import type { CapturedSessionEntryReadSource } from "./session-entry-read-source
 import type { InternalSessionEntry as SessionEntry } from "./types.js";
 
 export type SqliteSessionEntryPatchOptions = SessionEntryPatchOptions & {
+  /** Cancel only a waiting writer; admitted writes retain their ordinary settlement. */
+  signal?: AbortSignal;
   /** Closed operations can acknowledge completion without returning the entry. */
   result?: "none";
   /** Exact captured writer under its caller's foreground reservation; never a new owner. */

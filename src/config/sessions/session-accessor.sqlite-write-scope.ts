@@ -12,7 +12,9 @@ import {
 export function withPreparedSqliteWriteScope<T>(
   scope: Parameters<typeof withPreparedSqliteScope>[0],
   run: (resolved: ResolvedSqliteScope, sharedWriteReserved: boolean) => T | Promise<T>,
+  signal?: AbortSignal,
 ): T | Promise<T> {
+  signal?.throwIfAborted();
   const admission = isMainThread ? resolveSqliteWriteAdmissionScope(scope) : undefined;
   if (!admission?.shared) {
     return withPreparedSqliteScope(scope, (resolved) => run(resolved, false));
@@ -28,5 +30,7 @@ export function withPreparedSqliteWriteScope<T>(
         return run(resolved, true);
       }),
     true,
+    undefined,
+    signal,
   );
 }

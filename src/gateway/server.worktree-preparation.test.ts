@@ -2,20 +2,33 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
-import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  nextEventLoopTurn,
+  withinTest,
+} from "../../test/helpers/promise.js";
 import { resolveBootstrapContextForRun } from "../agents/bootstrap-files.js";
 import * as worktreeGit from "../agents/worktrees/git.js";
 import { requireGit } from "../agents/worktrees/git.js";
 import { getRegistryWorktree } from "../agents/worktrees/registry.test-support.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
+import {
+  loadSessionEntryReadOnly,
+  replaceSessionEntry,
+} from "../config/sessions/session-accessor.sqlite-entry.js";
+import * as sessionWrites from "../config/sessions/session-accessor.sqlite-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import bootstrapExtraFilesHook from "../hooks/bundled/bootstrap-extra-files/handler.js";
 import { registerInternalHook, unregisterInternalHook } from "../hooks/internal-hooks.js";
 import * as backoff from "../infra/backoff.js";
 import { withProjectCheckoutLifecycle } from "../projects/project-checkout.js";
 import { registerProjectRegistry } from "../projects/project-registry.js";
+import { SQLITE_SESSION_WRITER_QUEUES } from "../state/openclaw-agent-write-admission-state.js";
+import { runOpenClawAgentWriteAdmission } from "../state/openclaw-agent-write-admission.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { createRequestGate } from "./server-methods.request-gate.test-support.js";
+import { commitPreparedSessionWorkspace } from "./session-lifecycle-preparation.js";
 import { prepareSessionWorktree } from "./session-worktree-preparation.js";
 
 async function initializeWorkspace(workspace: string) {
@@ -317,3 +330,109 @@ it("shares source waiting through preparation and final binding without charging
     }
   });
 });
+
+it.for(["canonical", "shared"] as const)(
+  "rejects a cancelled final workspace binding before an unrelated writer releases (%s)",
+  { timeout: 20_000 },
+  async (store, { signal }) => {
+    await withOpenClawTestState({ label: "binding-cancellation" }, async (state) => {
+      await initializeWorkspace(state.workspaceDir);
+      const project = await registerProjectRegistry({ path: state.workspaceDir });
+      const cfg: OpenClawConfig = {
+        agents: { defaults: { workspace: state.workspaceDir } },
+        worktreeAcceleration: false,
+      };
+      setRuntimeConfigSnapshot(cfg);
+      const target = {
+        agentId: "main",
+        sessionKey: "agent:main:binding-cancellation",
+        storePath:
+          store === "canonical"
+            ? path.join(state.stateDir, "agents", "main", "agent", "openclaw-agent.sqlite")
+            : path.join(state.sessionsDir(), "sessions.sqlite"),
+      };
+      const entry = { sessionId: "binding-cancellation", updatedAt: 1, projectId: project.id };
+      await replaceSessionEntry(target, entry);
+      const controller = new AbortController();
+      const reason = new Error("cancel final workspace binding");
+      const prepared = await prepareSessionWorktree({
+        cfg,
+        target: {
+          ...target,
+          key: target.sessionKey,
+          entry,
+          projectId: project.id,
+          sandboxRequired: true,
+        },
+        workspace: state.workspaceDir,
+        name: "binding-cancellation",
+        baseRef: "HEAD",
+        runSetupScript: false,
+        signal: controller.signal,
+      });
+      assert(prepared.ok, JSON.stringify(prepared));
+      const { withCommit, worktree, sessionRoot } = prepared.value;
+      assert(withCommit && worktree && sessionRoot);
+      const holderGate = createRequestGate();
+      const database = sessionWrites.toDatabaseOptions(sessionWrites.resolveSqliteScope(target));
+      const holder = runOpenClawAgentWriteAdmission(database, holderGate.pause);
+      const queued = createDeferred<{ pending: Promise<unknown> }>();
+      let binding: Promise<unknown> | undefined;
+      let commit: Promise<unknown> | undefined;
+      let bindingOutcome: unknown;
+      const updater = vi.fn();
+      try {
+        await withinTest(holderGate.entered, signal);
+        commit = commitPreparedSessionWorkspace({
+          prepared: {
+            ...prepared.value,
+            // Observe binding settlement inside the original source-custody callback.
+            withCommit: (run) =>
+              withCommit(async (assertCurrent, sourceSignal) => {
+                const pending = run(assertCurrent, sourceSignal);
+                queued.resolve({ pending });
+                return await pending;
+              }),
+          },
+          target,
+          assertCurrent: () => controller.signal.throwIfAborted(),
+          assertEntry: updater,
+          projectId: project.id,
+          missingSessionMessage: "Session disappeared during binding",
+        });
+        void commit.catch(() => {});
+        ({ pending: binding } = await withinTest(queued.promise, signal));
+        void binding.then(
+          (value) => {
+            bindingOutcome = value;
+          },
+          (error: unknown) => {
+            bindingOutcome = error;
+          },
+        );
+        expect(SQLITE_SESSION_WRITER_QUEUES.get(database.path!)?.pending).toHaveLength(1);
+        controller.abort(reason);
+        await withinTest(nextEventLoopTurn(), signal);
+        expect(bindingOutcome).toBe(reason);
+        expect(updater).not.toHaveBeenCalled();
+      } finally {
+        holderGate.release();
+        await Promise.allSettled([
+          holder,
+          ...(binding ? [binding] : []),
+          ...(commit ? [commit] : []),
+        ]);
+        if (!commit) {
+          await prepared.value.rollback?.();
+        }
+        await nextEventLoopTurn();
+        const saved = loadSessionEntryReadOnly(target);
+        expect(saved?.worktree).toBeUndefined();
+        expect(saved?.sessionRoot).toBeUndefined();
+        expect(getRegistryWorktree(process.env, worktree.id)?.removedAt).toBeDefined();
+        await expect(fs.stat(sessionRoot)).rejects.toMatchObject({ code: "ENOENT" });
+        expect(SQLITE_SESSION_WRITER_QUEUES.has(database.path!)).toBe(false);
+      }
+    });
+  },
+);
