@@ -7,6 +7,7 @@ import { pipeline, type Readable } from "node:stream";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { spawnWithInheritedOomScore } from "../linux-oom-score.js";
+import { releaseProcessStdin } from "../release-stdin.js";
 import { serializeBrokerError } from "../spawn-broker/protocol.js";
 import type { SpawnStdioEntry } from "../spawn-secret-input.js";
 import { GRACEFUL_CANCEL_TIMEOUT_MS } from "./cancellation-policy.js";
@@ -107,7 +108,7 @@ export function runServiceChildGroupAnchor(): void {
 
   const finish = (code: number) => {
     process.exitCode = code;
-    process.stdin.destroy();
+    releaseProcessStdin();
     const disconnect = () => {
       // end() flushes the receipt; destroy() also releases the readable socket.
       control?.off("close", disconnect);
@@ -680,14 +681,13 @@ export function runServiceChildGroupAnchor(): void {
       const stopInput = () => {
         input.unpipe(destination);
         input.off("end", endInput);
-        input.destroy();
+        releaseProcessStdin();
         if (!inputClosed) {
           inputClosed = true;
           void send({ type: "stdin-closed" });
         }
       };
-      destination.once("error", stopInput);
-      destination.once("close", stopInput);
+      destination.once("error", stopInput).once("close", stopInput);
       // Own EOF explicitly: pipe's default end check initializes global Bun output writers.
       input.pipe(destination, { end: false });
       if (input.readableEnded) {
