@@ -3325,3 +3325,8 @@ td.data-table-key-col {
 .sidebar-recent-session--colored .session-row-trail {
   color: var(--session-row-muted, var(--muted));
 }
+
+/* A tighter pair leaves room between its run outline and the title. */
+.sidebar-recent-session .session-owner-stack {
+  width: 26px;
+}

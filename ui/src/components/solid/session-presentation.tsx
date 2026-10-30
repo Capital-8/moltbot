@@ -89,7 +89,7 @@ function SessionAttentionIcon(props: { attention: SidebarSessionAttention; size:
     </Show>
   );
 }
-const PAIR_TRACE_PATH = "M0,-9.798A11,11 0 1 1 0,9.798A11,11 0 1 1 0,-9.798Z";
+const PAIR_TRACE_PATH = "M0 -9.165A10 10 0 1 1 0 9.165A10 10 0 1 1 0 -9.165Z";
 export function SessionGlyph(props: {
   content: JSX.Element;
   running: boolean;
