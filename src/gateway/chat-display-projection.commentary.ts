@@ -17,6 +17,7 @@ export function projectAssistantCommentaryFallbacks(
   if (
     !entry ||
     entry.role !== "assistant" ||
+    entry.display === false ||
     !Array.isArray(entry.content) ||
     entry.stopReason === "error" ||
     typeof entry.errorMessage === "string"

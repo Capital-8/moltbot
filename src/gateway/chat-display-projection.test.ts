@@ -560,19 +560,38 @@ const terminal = (runId = "run-a") => ({
 const projectedIds = (messages: unknown[]) =>
   projectChatDisplayMessages(messages).map((message) => message["__openclaw"]);
 
-it("drops invisible assistant attempts without pending recovery", () => {
-  const emptyAttempt = (id: string, stopReason: "length" | "stop") =>
-    assistant([text(""), { type: "thinking", thinking: "" }], {
-      stopReason,
-      __openclaw: { id, runId: "run-empty" },
-    });
+it.each(["length", "stop"])("hides empty %s attempts only from history", (stopReason) => {
+  const empty = assistant([text("")], { stopReason, __openclaw: { runId: "run-empty" } });
+  const thinking = { ...empty, content: [text(""), { type: "thinking", thinking: "" }] };
+  const toolMessage = assistant([tool], { stopReason });
+  expect(projectStable([user, empty, thinking, toolMessage, answer])).toEqual([
+    user,
+    toolMessage,
+    answer,
+  ]);
+  expect(projectChatDisplayMessage(empty)).toEqual(empty);
+  expect(projectStable([empty], { assistantErrorPending: true })).toEqual([empty]);
+});
+
+it.each(["length", "stop"])("retains keyed commentary from a %s attempt", (stopReason) => {
+  const commentary = assistant([phasedText("Running it now.", "commentary")], { stopReason });
+  const options = { includeCommentaryFallbacks: true };
+  const projected = projectStable([user, commentary, terminal()], options);
+  expect(projected).toHaveLength(3);
+  expect(projected[1]).toMatchObject({
+    content: [text("Running it now.")],
+    openclawStreamFallback: { source: "segment", itemId: "commentary" },
+  });
+  expect(readRunFailureNotice(projected[2])).toEqual({
+    runId: "run-a",
+    summary: "Recovery exhausted.",
+  });
+  expect(projectStable([commentary])).toEqual([]);
+  expect(projectStable([{ ...commentary, display: false }], options)).toEqual([]);
+  expect(projectChatDisplayMessage({ ...commentary, display: false }, options)).toBeUndefined();
   expect(
-    projectStable([
-      user,
-      emptyAttempt("empty-primary", "length"),
-      emptyAttempt("empty-fallback", "stop"),
-    ]),
-  ).toEqual([user]);
+    projectStable([assistant([phasedText("", "commentary")], { stopReason })], options),
+  ).toEqual([]);
 });
 
 const legacyGuidance = "The provider stopped this request as a safety precaution (misalignment).";

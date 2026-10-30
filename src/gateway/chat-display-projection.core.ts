@@ -29,6 +29,7 @@ import {
   isOpenClawMessageToolMirrorAssistantMessage,
   isTranscriptOnlyOpenClawAssistantMessage,
 } from "../shared/transcript-only-openclaw-assistant.js";
+import { projectAssistantCommentaryFallbacks } from "./chat-display-projection.commentary.js";
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   extractAssistantTextForSilentCheck,
@@ -65,6 +66,7 @@ import { projectTranscriptImageArtifacts } from "./transcript-image-artifacts.js
 export type ChatDisplayProjectionOptions = {
   resolveCronJobName?: (jobId: string) => string | undefined;
   includeCommentaryFallbacks?: boolean;
+  preserveEmptyCompleted?: boolean;
   includePluginSteering?: boolean;
   maxChars?: number;
   toolResultMaxChars?: number;
@@ -393,11 +395,16 @@ export function createChatHistoryRecoveryProjection(options?: ChatHistoryRecover
     }
     const hasVisibleAssistant = hasVisibleAssistantDisplayContent(message);
     if (
+      !options?.preserveEmptyCompleted &&
       message.role === "assistant" &&
       (message.stopReason === "stop" || message.stopReason === "length") &&
       !hasVisibleAssistant &&
       !unseenPending &&
-      pendingIndexes.length === 0
+      pendingIndexes.length === 0 &&
+      // Commentary is not a final answer, but its fallback owner may retain it.
+      (!options?.includeCommentaryFallbacks ||
+        projectAssistantCommentaryFallbacks(message, Number.MAX_SAFE_INTEGER).fallbacks.length ===
+          0)
     ) {
       messages.pop();
       return;
@@ -514,7 +521,12 @@ function projectEmptyAssistantErrorMessages(
 
 type ChatHistoryRecoveryOptions = Pick<
   ChatDisplayProjectionOptions,
-  "maxChars" | "stripEnvelope" | "assistantErrorPending" | "subagentCoordination"
+  | "maxChars"
+  | "stripEnvelope"
+  | "assistantErrorPending"
+  | "subagentCoordination"
+  | "includeCommentaryFallbacks"
+  | "preserveEmptyCompleted"
 >;
 
 export function prepareChatHistoryRecoveryMessages(
@@ -644,7 +656,11 @@ export function projectChatDisplayMessage(
   message: unknown,
   options?: ChatDisplayProjectionOptions,
 ): Record<string, unknown> | undefined {
-  const projected = projectChatDisplayMessages([message], options);
+  // Empty completed content still carries the live terminal message contract.
+  const projected = projectChatDisplayMessages([message], {
+    ...options,
+    preserveEmptyCompleted: true,
+  });
   if (
     !options?.includeCommentaryFallbacks ||
     !projected.some((entry) => entry.openclawStreamFallback)
