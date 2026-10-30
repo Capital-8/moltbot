@@ -551,6 +551,7 @@ suite.define(() => {
           const anchors: Array<{
             direction: string;
             source: number;
+            residentEdge: number;
             frames: number;
             maxDrift: number;
             positions: Array<number | null>;
@@ -559,21 +560,23 @@ suite.define(() => {
           let negativeCalibration:
             | Awaited<ReturnType<typeof detectNonInputHistoryShift>>
             | undefined;
-          const watchAnchor = async (direction: string, source: number) => {
-            const bubble = selectedPane.locator(".chat-bubble").filter({
-              hasText: `Synthetic loading proof message ${source}.`,
-            });
-            await bubble.waitFor();
-            const finish = await sampleControlledHistoryAdmission(
+          const watchAnchor = async (direction: string, residentEdge: number) => {
+            const { source, bubble, finish } = await sampleControlledHistoryAdmission(
               page,
-              bubble,
-              anchors.length === 0,
+              thread,
+              {
+                direction,
+                residentEdge,
+                readResident: residentNumbers,
+                readerCalibration: anchors.length === 0,
+              },
             );
             return async () => {
               const sample = await finish();
               anchors.push({
                 direction,
                 source,
+                residentEdge,
                 ...sample,
               });
               if (!negativeCalibration) {

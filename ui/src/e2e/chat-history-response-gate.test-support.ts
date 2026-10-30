@@ -99,13 +99,44 @@ export async function installHistoryResponseGate(page: Page, sessionKey: string)
 
 export async function sampleControlledHistoryAdmission(
   page: Page,
-  bubble: Locator,
-  readerCalibration: boolean,
+  thread: Locator,
+  options: {
+    direction: string;
+    residentEdge: number;
+    readResident: () => Promise<number[]>;
+    readerCalibration: boolean;
+  },
 ) {
   await waitForChatScrollIdle(page);
+  const resident = await options.readResident();
+  expect(
+    options.direction === "older" ? resident[0] : resident.at(-1),
+    "held response has not published before the reader sample",
+  ).toBe(options.residentEdge);
+  // A virtualizer's estimated end need not render the resident edge.
+  // Sample the actual visible reader, matching the prepend anchor owner.
+  const source = await thread.evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    for (const bubble of element.querySelectorAll(".chat-bubble")) {
+      const rect = bubble.getBoundingClientRect();
+      const match = bubble.textContent?.match(/Synthetic loading proof message (\d+)\./u);
+      if (match && rect.bottom > viewport.top && rect.top < viewport.bottom) {
+        return Number(match[1]);
+      }
+    }
+    return null;
+  });
+  if (source === null) {
+    throw new Error("No rendered reader intersects the transcript viewport");
+  }
+  expect(resident).toContain(source);
+  const bubble = thread.locator(".chat-bubble").filter({
+    hasText: `Synthetic loading proof message ${source}.`,
+  });
+  await bubble.waitFor();
   const probe = await sampleHistoryAnchor(bubble);
   let readerMotion = 0;
-  if (readerCalibration) {
+  if (options.readerCalibration) {
     // No response is admitted during this phase. Normalize observed reader motion
     // only, then freeze that correction before admission can produce scroll writes.
     const motion = await bubble.evaluateHandle((element) => {
@@ -137,7 +168,7 @@ export async function sampleControlledHistoryAdmission(
     expect(result.delta).toBeGreaterThan(0);
     readerMotion = result.delta;
   }
-  return async () => {
+  const finish = async () => {
     await waitForChatScrollIdle(page);
     const positions = await probe.evaluate((stop) => stop());
     await probe.dispose();
@@ -149,6 +180,7 @@ export async function sampleControlledHistoryAdmission(
     );
     return { positions, frames: positions.length, maxDrift, readerMotion };
   };
+  return { source, bubble, finish };
 }
 
 export async function detectNonInputHistoryShift(page: Page, bubble: Locator) {
