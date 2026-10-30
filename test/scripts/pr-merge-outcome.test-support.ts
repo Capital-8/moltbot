@@ -56,6 +56,9 @@ export function createMergeOutcomeFixtureHarness() {
   const unknownProjection = { mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN" };
   const gitEnv = {
     PATH: process.env.PATH,
+    // Keep native Git guard policy while isolating Git's global/system configuration.
+    HOME: process.env.HOME,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_ALLOW_PROTOCOL: "file",
