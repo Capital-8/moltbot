@@ -1,15 +1,8 @@
 import { readSessionMessageIdentity } from "@openclaw/gateway-client/browser";
-import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Accessor } from "solid-js";
 import { CHAT_PENDING_INPUT_MESSAGE_PREFIX } from "../../../../../packages/gateway-protocol/src/schema/chat-history-constants.js";
-import { isToolCallContentType } from "../../../../../src/chat/tool-content.js";
 import { parseMarkdownJson } from "../../../components/markdown-json.ts";
 import type { MarkdownRenderOptions } from "../../../components/markdown-render-options.ts";
-import {
-  prewarmSanitizedMarkdown,
-  type MarkdownPrewarmMode,
-} from "../../../components/markdown.ts";
-import { resolveMessageDisplayMarkdown } from "../../../lib/chat/message-display.ts";
 import { extractThinkingCached } from "../../../lib/chat/message-extract.ts";
 import {
   isStandaloneToolMessageForDisplay,
@@ -17,7 +10,6 @@ import {
 } from "../../../lib/chat/message-normalizer.ts";
 import { extractToolCardsCached, isToolCardError } from "../../../lib/chat/tool-cards.ts";
 import { isProviderVoiceTranscript } from "../chat-assistant-reply.ts";
-import { resolveCappedMessageId } from "../chat-message-recovery.ts";
 import { isPendingSendMessage } from "../chat-thread-items.ts";
 import { workspaceResultConflictFromTranscript } from "../workspace-conflict.ts";
 import { readAsyncQuestions } from "./chat-async-question-content.ts";
@@ -27,7 +19,6 @@ import {
   type ChatMessageRenderPreparation,
   prepareChatMessageRender,
 } from "./chat-message-markdown-view.tsx";
-import { prepareMarkdownMediaSource } from "./chat-message-media-markdown.ts";
 import { type AttachmentItem, projectMessageMedia } from "./chat-message-media.ts";
 import { isSentPastedTextAttachment } from "./chat-pasted-text.ts";
 import { isSentCommentAttachment } from "./chat-sent-comments.ts";
@@ -139,7 +130,7 @@ export function createMessageMediaOptions(
   };
 }
 
-function messageMarkdownRenderOptions(
+export function messageMarkdownRenderOptions(
   role: string,
   preparation: Pick<ChatMessageRenderPreparation, "displayMarkdown" | "humanMentions">,
   markdown: string | null,
@@ -156,61 +147,6 @@ function messageMarkdownRenderOptions(
     tableInteractions: "enabled",
     linkFavicons: Boolean(opts.fetchLinkFavicon) && !opts.isStreaming,
   };
-}
-
-/** Warm settled text only; media resources and recovered messages keep their visible lifecycle. */
-export function prewarmGroupedMessage(
-  message: unknown,
-  opts: Pick<GroupedMessageOptions, "onOpenImage" | "fetchLinkFavicon">,
-  mode: MarkdownPrewarmMode = "cold-fragment",
-): boolean {
-  const role = asNullableRecord(message)?.role;
-  if ((role !== "user" && role !== "assistant") || resolveCappedMessageId(message, role)) {
-    return false;
-  }
-  const prepared = prepareChatMessageRender(message);
-  // Media text uses the same slots as the visible renderer, without mounting resources.
-  if (
-    prepared.normalizedMessage.content.some(
-      (part) =>
-        part.type !== "text" &&
-        part.type !== "thinking" &&
-        part.type !== "image" &&
-        part.type !== "canvas" &&
-        !isToolCallContentType(part.type),
-    )
-  ) {
-    return false;
-  }
-  const ordered =
-    role === "assistant" &&
-    Boolean(prepared.displayMarkdown) &&
-    prepared.normalizedMessage.content.some((part) => part.type === "image");
-  const markdown = ordered
-    ? resolveMessageDisplayMarkdown(message, {
-        ...prepared.normalizedMessage,
-        content: [
-          {
-            type: "text",
-            text: prepareMarkdownMediaSource(
-              projectMessageMedia(message, prepared.normalizedMessage.content).orderedContent,
-            ).markdown,
-          },
-        ],
-      })
-    : prepared.displayMarkdown;
-  return (
-    Boolean(markdown) &&
-    !parseMarkdownJson(markdown) &&
-    prewarmSanitizedMarkdown(
-      markdown,
-      messageMarkdownRenderOptions(role, prepared, prepared.displayMarkdown, {
-        ...opts,
-        isStreaming: false,
-      }),
-      mode,
-    )
-  );
 }
 
 export function prepareGroupedMessage(

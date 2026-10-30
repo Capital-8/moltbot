@@ -44,7 +44,8 @@ export class TranscriptInitialRange {
       element: HTMLElement,
       entry: ResizeObserverEntry | undefined,
     ) => number,
-    private readonly prewarmRow?: (index: number, mode: MarkdownPrewarmMode) => boolean,
+    private readonly prewarmRow?: (index: number, mode: MarkdownPrewarmMode) => boolean | undefined,
+    private readonly invalidatePreparation: () => void = invalidate,
   ) {
     this.tailRows = initialOffset === null ? 1 : 0;
   }
@@ -254,7 +255,7 @@ export class TranscriptInitialRange {
           if (!this.preparedRowKeys.has(key)) {
             this.refresh();
           }
-          this.invalidate();
+          this.invalidatePreparation();
           this.queuePreparation();
         }
       });
@@ -398,8 +399,15 @@ export class TranscriptInitialRange {
             break;
           }
           const mode = this.idleStep <= 8 ? "fragment" : "idle-html";
-          if (!rendered.has(row.key) && this.prewarmRow?.(index, mode)) {
-            continue;
+          if (!rendered.has(row.key) && this.prewarmRow) {
+            const warmed = this.prewarmRow(index, mode);
+            if (warmed === undefined) {
+              this.queuePreparation();
+              return;
+            }
+            if (warmed) {
+              continue;
+            }
           }
           this.idleStep++;
         }
@@ -461,12 +469,16 @@ export class TranscriptInitialRange {
         canMaterialize ||= Boolean(canPrepareRow);
         // Distant HTML must not evict the nearby fragments needed by the next scroll.
         const mode = arrivingViewport || step <= 8 ? "fragment" : "html";
-        for (
-          let warming =
-            prewarm && moving && !rendered.has(row.key) && this.prewarmRow?.(index, mode);
-          warming;
-          warming = this.prewarmRow?.(index, mode)
-        ) {
+        const warm = () =>
+          prewarm && moving && !rendered.has(row.key) && this.prewarmRow
+            ? this.prewarmRow(index, mode)
+            : false;
+        for (let warming = warm(); warming !== false; warming = warm()) {
+          // An unloaded preparation module yields this slice without advancing the row.
+          if (warming === undefined) {
+            this.queuePreparation();
+            return;
+          }
           // The shared cache owns readiness; no DOM or range invalidation is needed.
           if (warmOnly) {
             warmed = true;

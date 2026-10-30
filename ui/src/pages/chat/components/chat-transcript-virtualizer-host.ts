@@ -185,6 +185,9 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       () => this.connected && this.renderer.isPresented(),
       (element, entry) => this.presentation.measureElement(element, entry),
       (index, mode) => this.renderer.prewarmRow(index, mode),
+      // Coalesce completion with measured geometry instead of mounting a second
+      // range in the ResizeObserver delivery's microtask checkpoint.
+      () => this.presentation.commitChange(invalidate, true),
     );
     this.mcpAppUnmountGate = createMcpAppUnmountGate(invalidate);
     this.positionRail = createPositionRailGutter(

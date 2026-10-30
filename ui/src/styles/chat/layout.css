@@ -648,21 +648,6 @@ openclaw-pending-session-create {
   }
 }
 
-/* Virtual-core retains the geometry; parked DOM need not follow every size correction. */
-.chat-virtual-row[data-prepared-row] {
-  display: none;
-  position: absolute;
-  top: 0;
-  content-visibility: hidden;
-  opacity: 0;
-}
-
-/* The one admitted preparation needs real layout before its resize receipt. */
-.chat-virtual-row[data-preparing-row] {
-  display: flow-root;
-  content-visibility: visible;
-}
-
 /* Small notice rows must enter at their real height, not the virtual estimate. */
 .chat-virtual-row:has(> .chat-notice) {
   content-visibility: visible;

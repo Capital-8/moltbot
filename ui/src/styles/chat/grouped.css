@@ -117,10 +117,6 @@
   margin-block-end: var(--chat-run-block-gap);
 }
 
-.chat-group.chat-group--frame-fragment {
-  margin-block-end: calc(var(--chat-run-block-gap) - 2px);
-}
-
 .chat-group.tool.chat-group--with-footer > .chat-group-messages {
   max-width: var(--chat-message-column-max);
 }

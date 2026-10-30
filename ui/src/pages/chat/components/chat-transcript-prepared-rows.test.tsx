@@ -3,10 +3,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mountSolid } from "../../../test-helpers/solid-render.tsx";
 import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
-import {
-  prepareGroupedMessage,
-  prewarmGroupedMessage,
-} from "./chat-message-bubble-presentation.ts";
+import { prepareGroupedMessage } from "./chat-message-bubble-presentation.ts";
 import { GroupedMessage } from "./chat-message-bubble-view.tsx";
 import { prepareChatMessageRender } from "./chat-message-markdown-view.tsx";
 import { prepareMessageMarkdown } from "./chat-message-text-preparation.ts";
@@ -16,6 +13,7 @@ import { emitTranscriptResize } from "./chat-transcript-fixture.test-support.tsx
 import { ChatTranscriptRenderer } from "./chat-transcript-layout-solid.tsx";
 import type { TranscriptRow } from "./chat-transcript-layout.ts";
 import { GuardedTranscriptItem } from "./chat-transcript-render-guard.ts";
+import { prewarmGroupedMessage } from "./chat-transcript-row-prewarm.ts";
 import { ChatSessionVirtualizerHost } from "./chat-transcript-virtualizer-host.ts";
 import {
   installTranscriptDomMocks,
@@ -297,6 +295,7 @@ it("warms HTML and nearby geometry without distant DOM", async () => {
   for (let turn = 0; turn < 160; turn++) {
     await view.idle(10, 1);
   }
+  await view.frame(1, false);
   // The first fast scroll can cross more than the retained geometry window.
   expect(prewarmGroupedMessage(view.groups[200]!.messages[0]!.message, {})).toBe(false);
   expect(view.container.querySelector('[data-virtual-row-key="fragment:20"]')).not.toBeNull();
@@ -697,11 +696,13 @@ it("prepares ahead during scrolling and waits for measurement before admitting a
   expect(Number(preparing!.dataset.index)).toBeGreaterThan(Math.max(...activeIndexes()));
   await view.frame(2, false);
   expect(view.renderRow.mock.calls).toHaveLength(rendered);
+  const draws = view.draw.mock.calls.length;
   emitTranscriptResize(preparing!, 800, 100);
   await settle();
-  // Measurement releases this row immediately; the next admission still
-  // waits for the next frame's preparation budget.
-  expect(view.container.querySelectorAll("[data-preparing-row]")).toHaveLength(0);
+  // A measured preparation must not publish a second range inside the same
+  // observer delivery. Completion shares the next frame's geometry commit.
+  expect(view.container.querySelectorAll("[data-preparing-row]")).toHaveLength(1);
+  expect(view.draw.mock.calls).toHaveLength(draws);
   expect(view.renderRow.mock.calls).toHaveLength(rendered);
   await view.frame(1, false);
   expect(view.renderRow.mock.calls).toHaveLength(rendered + 1);

@@ -1,6 +1,7 @@
 import { dynamic, render, type JSX } from "@solidjs/web";
 import { createMemo, createSignal, For, onSettled, runWithOwner, Show, useContext } from "solid-js";
 import type { MarkdownPrewarmMode } from "../../../components/markdown.ts";
+import { createIdleImport } from "../../../lib/idle-import.ts";
 import { PRESENTATION_CHANGED_EVENT, type PresentationBinding } from "../../../lib/presentation.ts";
 import { ApplicationProvider } from "../../../lib/reactive/context.ts";
 import { elementRef } from "../../../lib/reactive/element-ref.ts";
@@ -14,8 +15,6 @@ import {
   type SolidRenderLifecycle,
 } from "../solid-render-lifecycle.ts";
 import { ChatLazyBoundary } from "./chat-lazy-boundary.tsx";
-import type { GroupedMessageOptions } from "./chat-message-bubble-options.ts";
-import { prewarmGroupedMessage } from "./chat-message-bubble-presentation.ts";
 import {
   TranscriptRowKeyContext,
   type TranscriptContent,
@@ -27,6 +26,15 @@ import { transcriptArraysEqual } from "./chat-transcript-memo.ts";
 import { TranscriptMessageElementsContext } from "./chat-transcript-message-elements.ts";
 import { GuardedTranscriptItem } from "./chat-transcript-render-guard.ts";
 import { nativeRows, type NativeTranscriptView } from "./chat-transcript-rows.ts";
+
+type PrewarmModule = typeof import("./chat-transcript-row-prewarm.ts");
+let prewarmModule: PrewarmModule | null | undefined;
+const prewarmImport = createIdleImport(
+  () => import("./chat-transcript-row-prewarm.ts"),
+  (loaded) => {
+    prewarmModule = loaded;
+  },
+);
 
 function NativeRow(props: { value: NativeTranscriptView }): JSX.Element {
   const Row = dynamic(() => nativeRows[props.value.kind]);
@@ -148,6 +156,15 @@ function TranscriptRows(props: {
                     style={{
                       "contain-intrinsic-block-size": `${virtualRow().size}px`,
                       "min-height": `${props.snapshot.layout.rowMinimum(index())}px`,
+                      display: active() ? undefined : preparing() ? "flow-root" : "none",
+                      position: active() ? undefined : "absolute",
+                      top: active() ? undefined : "0",
+                      opacity: active() ? undefined : "0",
+                      "content-visibility": preparing()
+                        ? "visible"
+                        : active()
+                          ? undefined
+                          : "hidden",
                     }}
                     data-index={String(virtualRow().index)}
                     data-virtual-row-key={row()?.key}
@@ -179,7 +196,7 @@ export class ChatTranscriptRenderer {
     renderer: unknown;
     getContent: (index: number) => TranscriptContent;
   };
-  private prewarming = new WeakMap<TranscriptRow, { mode: MarkdownPrewarmMode; next: number }>();
+  private prewarming?: ReturnType<PrewarmModule["createTranscriptRowPrewarmer"]>;
   private element?: HTMLDivElement;
   private column?: HTMLDivElement;
   private accepted?: TranscriptLayoutProps;
@@ -201,63 +218,28 @@ export class ChatTranscriptRenderer {
   ) {
     // Geometry commits reuse content; a replaced row or renderer still refreshes it.
     if (this.contentSource?.rows !== rows || this.contentSource.renderer !== renderer) {
-      this.prewarming = new WeakMap();
+      this.prewarming = undefined;
       this.contentSource = { rows, renderer, getContent: (index) => renderer(rows[index]!) };
     }
     return this.contentSource.getContent;
   }
 
-  prewarmRow(index: number, mode: MarkdownPrewarmMode = "cold-fragment"): boolean {
-    const row = this.contentSource?.rows[index];
-    if (!row) {
+  prewarmRow(index: number, mode: MarkdownPrewarmMode = "cold-fragment"): boolean | undefined {
+    const source = this.contentSource;
+    const row = source?.rows[index];
+    if (!source || !row || prewarmModule === null) {
       return false;
     }
-    let progress = this.prewarming.get(row);
-    if (!progress || progress.mode !== mode) {
-      progress = { mode, next: 0 };
-      this.prewarming.set(row, progress);
+    if (!prewarmModule) {
+      // Pending code yields the current preparation slice; visible rows still render normally.
+      void prewarmImport.load().catch(() => {
+        // Visible rendering remains available; the shared loader retries when online.
+        prewarmModule = null;
+      });
+      return undefined;
     }
-    const content = this.contentSource?.getContent(index);
-    const view = content instanceof GuardedTranscriptItem ? content.native : undefined;
-    // Restoring every source in an atomic row larger than the fragment cache
-    // would evict its own earlier work forever. Restore a bounded prefix of
-    // eight sources; the shared cache still caps all rows at 32 fragments.
-    let position = 0;
-    const prewarm = (
-      message: unknown,
-      options: Pick<GroupedMessageOptions, "onOpenImage" | "fetchLinkFavicon">,
-    ) => {
-      const currentMode = mode === "fragment" && position >= 8 ? "cold-fragment" : mode;
-      if (position++ < progress.next) {
-        return false;
-      }
-      // Finish this pass even if a large row evicts its earlier HTML entries.
-      progress.next = position;
-      return prewarmGroupedMessage(message, options, currentMode);
-    };
-    if (view?.kind === "group" && !view.group.isStreaming) {
-      for (const message of view.group.messages) {
-        if (prewarm(message.message, view.options)) {
-          return true;
-        }
-      }
-    } else if (view?.kind === "frame" && view.frame.outcome.kind === "completed") {
-      // Only this fragment's visible groups participate; collapsed work stays cold.
-      // Admit one message per callback so a whole run cannot consume the slice.
-      for (const part of view.frame.parts) {
-        if (part.kind !== "group" || part.isStreaming) {
-          continue;
-        }
-        const options = view.options.renderGroupOptions(part);
-        for (const message of part.messages) {
-          if (prewarm(message.message, options)) {
-            return true;
-          }
-        }
-      }
-    }
-    this.prewarming.delete(row);
-    return false;
+    this.prewarming ??= prewarmModule.createTranscriptRowPrewarmer();
+    return this.prewarming(row, source.getContent(index), mode);
   }
 
   get columnElement(): HTMLDivElement | undefined {
@@ -456,7 +438,7 @@ export class ChatTranscriptRenderer {
     this.lifecycle = undefined;
     this.accepted = undefined;
     this.contentSource = undefined;
-    this.prewarming = new WeakMap();
+    this.prewarming = undefined;
     this.committed = undefined;
     this.commitQueued = false;
     this.layoutEffects.clear();
