@@ -78,9 +78,9 @@ export function renderPluginDetailShell(props: {
           <div class="plugin-catalog-detail__actions">{props.titleAction ?? undefined}</div>
         </div>
       </div>
-      {props.recommendations}
       <div class="plugin-catalog-detail__content">
         <div class="plugin-catalog-detail__main">
+          {props.recommendations}
           <section class="plugin-catalog-detail__panel">{props.panel}</section>
           {props.readme ? (
             <section class="plugin-catalog-detail__readme-section">

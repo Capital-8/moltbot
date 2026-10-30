@@ -193,9 +193,10 @@ describeControlUiE2e("recommended plugin prompts (mock Gateway boundary)", () =>
           return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
         });
         return {
-          afterHeader: panel.previousElementSibling?.classList.contains(
-            "plugin-catalog-detail__hero",
-          ),
+          inMain: panel.parentElement?.classList.contains("plugin-catalog-detail__main"),
+          afterHeader: panel
+            .closest(".plugin-catalog-detail__content")
+            ?.previousElementSibling?.classList.contains("plugin-catalog-detail__hero"),
           white: getComputedStyle(
             panel.querySelector(".plugin-recommended-prompts__text > span:last-child")!,
           ).color,
@@ -206,6 +207,7 @@ describeControlUiE2e("recommended plugin prompts (mock Gateway boundary)", () =>
       });
       await proof(page, "before-install");
       expect(geometry).toMatchObject({
+        inMain: true,
         afterHeader: true,
         white: "rgb(255, 255, 255)",
         fits: true,
