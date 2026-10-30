@@ -541,7 +541,7 @@ export async function runManagedCommand(options) {
       expected,
       hosts,
       filters = ["retry", "relaunch"],
-      managedFailure: "cleanup-inspection" | "bootout" | undefined = undefined,
+      managedFailure?: "cleanup-inspection" | "bootout",
     ) => {
       const f = fixture("", "3", events);
       const contents = path.join(f.root, "Fixture.app/Contents");
