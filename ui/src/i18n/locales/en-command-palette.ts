@@ -45,6 +45,7 @@ const enCommandPalette = {
       settings: "Settings",
       agents: "Agents",
       desktop: "Desktop",
+      diagnose: "Diagnose a problem",
     },
     descriptions: {
       verboseMode: "Toggle verbose mode.",
