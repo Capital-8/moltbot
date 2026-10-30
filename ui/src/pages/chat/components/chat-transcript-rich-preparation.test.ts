@@ -115,7 +115,7 @@ it("prepares a rich row at the saved reading offset before admitting its range",
   }
 });
 
-it("keeps recovery visible when initial measurement reaches a rich row", async () => {
+it("keeps initial rows hidden while preparing rich content and reveals failed recovery", async () => {
   const pending = delayedRichPresentation();
   const view = threadFixture(
     threadProps("measured-rich-history", undefined, [
@@ -136,7 +136,7 @@ it("keeps recovery visible when initial measurement reaches a rich row", async (
     expect(view.container.textContent).not.toContain("Earlier measured image");
     expect(view.container.querySelector(".chat-group.user")).toBe(tail);
     const inner = view.container.querySelector<HTMLDivElement>(".chat-thread-inner")!;
-    expect(inner.style.visibility).not.toBe("hidden");
+    expect(inner.style.visibility).toBe("hidden");
     pending.reject(new Error("Measured rich presentation unavailable"));
     await waitForSolid(() =>
       expect(view.container.textContent).toContain("Measured rich presentation unavailable"),

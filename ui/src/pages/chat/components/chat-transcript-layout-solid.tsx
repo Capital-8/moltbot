@@ -242,11 +242,13 @@ export class ChatTranscriptRenderer {
 
   syncInitialPosition(): void {
     if (this.element && this.accepted) {
-      this.element.style.visibility = this.accepted.richPreparation
-        ? ""
-        : this.accepted.initialPositionPending()
-          ? "hidden"
-          : "";
+      // Only failed imports reveal an unplaced tail so its recovery action stays reachable.
+      this.element.style.visibility =
+        this.accepted.richPreparation?.status === "error"
+          ? ""
+          : this.accepted.initialPositionPending()
+            ? "hidden"
+            : "";
     }
   }
 
@@ -328,11 +330,12 @@ export class ChatTranscriptRenderer {
     if (!this.element) {
       const element = document.createElement("div");
       element.className = "chat-thread-inner chat-thread-inner--virtual";
-      element.style.visibility = next.richPreparation
-        ? ""
-        : next.initialPositionPending()
-          ? "hidden"
-          : "";
+      element.style.visibility =
+        next.richPreparation?.status === "error"
+          ? ""
+          : next.initialPositionPending()
+            ? "hidden"
+            : "";
       this.element = element;
       // This retained transcript island outlives the computation that introduces its DOM.
       // Its session owner disposes the detached root, including while the pane is parked.
