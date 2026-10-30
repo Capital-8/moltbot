@@ -171,8 +171,24 @@ it.each(["session.message", "sessions.changed"])(
   },
 );
 
-it("preserves built source bytes and native dynamic imports in the main isolate and workers", async () => {
+it("loads parameter-property instrumentation while preserving built source and dynamic imports in all isolates", async () => {
   const root = temporary.make("team-stress-native-source-");
+  fs.mkdirSync(path.join(root, "scripts", "perf"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src"));
+  fs.symlinkSync(
+    fileURLToPath(new URL("../../node_modules", import.meta.url)),
+    path.join(root, "node_modules"),
+    "junction",
+  );
+  const loader = pathToFileURL(path.join(root, "scripts", "perf", "team-shape-stress-loader.mjs"));
+  fs.copyFileSync(
+    new URL("../../scripts/perf/team-shape-stress-loader.mjs", import.meta.url),
+    loader,
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "instrumentation.ts"),
+    "export class Instrumentation { constructor(readonly value: number) {} }\n",
+  );
   fs.writeFileSync(path.join(root, "dependency.cjs"), "module.exports = {value: 42};");
   const source = 'export const load = () => import("./dependency.cjs");';
   fs.writeFileSync(path.join(root, "built.mjs"), source);
@@ -181,6 +197,7 @@ it("preserves built source bytes and native dynamic imports in the main isolate 
     entry,
     `import {Session} from "node:inspector/promises";
      import {Worker, isMainThread, parentPort} from "node:worker_threads";
+     import {Instrumentation} from "./src/instrumentation.ts";
      import {load} from "./built.mjs";
      const session = new Session();
      session.connect();
@@ -191,13 +208,12 @@ it("preserves built source bytes and native dynamic imports in the main isolate 
      await session.post("Debugger.enable");
      const {scriptSource} = await session.post("Debugger.getScriptSource", {scriptId});
      session.disconnect();
-     const result = {source: scriptSource, value: (await load()).default.value};
+     const result = {source: scriptSource, value: (await load()).default.value, instrumented: new Instrumentation(7).value};
      if (isMainThread) {
        const worker = new Worker(new URL(import.meta.url));
        worker.once("message", child => console.log(JSON.stringify({main: result, worker: child})));
      } else parentPort.postMessage(result);`,
   );
-  const loader = new URL("../../scripts/perf/team-shape-stress-loader.mjs", import.meta.url);
   const { stdout } = await executeFile(
     resolveTestNodeExecPath(),
     ["--import", loader.href, entry],
@@ -207,8 +223,8 @@ it("preserves built source bytes and native dynamic imports in the main isolate 
     },
   );
   expect(JSON.parse(stdout)).toEqual({
-    main: { source, value: 42 },
-    worker: { source, value: 42 },
+    main: { source, value: 42, instrumented: 7 },
+    worker: { source, value: 42, instrumented: 7 },
   });
 });
 
