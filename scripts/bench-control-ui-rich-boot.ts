@@ -749,7 +749,8 @@ try {
             throw new Error("Reload retained the failed rich preparation");
           }
           const documentCount = server.requests.filter(
-            (request) => request.url === documentPath,
+            (request) =>
+              request.method === "GET" && new URL(request.url, baseUrl).pathname === documentPath,
           ).length;
           if (documentCount !== 2 || page.url() !== controlUiSessionUrl(baseUrl, sessionKey)) {
             throw new Error("Recovery did not reload the same session exactly once");
