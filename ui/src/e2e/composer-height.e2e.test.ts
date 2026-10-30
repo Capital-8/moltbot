@@ -141,6 +141,19 @@ suite.define(() => {
         const artifacts = createControlUiE2eArtifactDir(
           `composer-height-mobile-${width}-${height}`,
         );
+        // Record every rendering opportunity while typing: growth must never bounce.
+        await editor.evaluate((el) => {
+          const input = el.closest(".agent-chat__input")!;
+          const frames: { height: number; bottom: number }[] = [];
+          Object.assign(window, { composerTypingFrames: frames });
+          const tick = () => {
+            frames.push({ height: el.clientHeight, bottom: input.getBoundingClientRect().bottom });
+            if (el.isConnected) {
+              requestAnimationFrame(tick);
+            }
+          };
+          requestAnimationFrame(tick);
+        });
         const seen = new Set<number>();
         // Typed prose wraps on its own; each word is a real keystroke sequence.
         for (const word of "Mobile drafts should keep growing while I type, up to three full lines, and then scroll inside the composer instead of covering the conversation above it".split(
@@ -158,6 +171,18 @@ suite.define(() => {
         }
         // Typing only adds lines, so the set keeps them in order.
         expect([...seen]).toEqual([1, 2, 3, 4]);
+        const frames = await page.evaluate(
+          // SAFETY: The sampler installed above owns this test-only array.
+          () =>
+            (window as unknown as { composerTypingFrames: { height: number; bottom: number }[] })
+              .composerTypingFrames,
+        );
+        expect(frames.length).toBeGreaterThan(30);
+        // No frame shrinks the draft or moves the composer's bottom edge.
+        expect(frames.filter((frame, i) => i > 0 && frame.height < frames[i - 1].height)).toEqual(
+          [],
+        );
+        expect(new Set(frames.map((frame) => Math.round(frame.bottom))).size).toBe(1);
         const capped = await measure();
         await page.screenshot({ path: `${artifacts}/scrolling.png` });
         expect(capped.overflow).toBeGreaterThan(0);
