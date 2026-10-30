@@ -619,7 +619,7 @@ try {
       };
     }
     let modelPickerAssets: string[] = [];
-    if (scenarios.some((scenario) => scenario.firstOpenPhase)) {
+    if (scenarios.some((scenario) => scenario.firstOpenAssetGroup === "model-picker")) {
       const descriptor = /id="openclaw-navigation-preloads" content="([^"]+)"/u.exec(html)?.[1];
       if (!descriptor) {
         throw new Error("Cold picker proof requires the built navigation descriptor");
@@ -1334,8 +1334,8 @@ try {
             if (scenario.firstOpenPhase) {
               const evidence = result.scenarioEvidence!;
               const readyAt = evidence.firstReadyAtMs;
-              const clickedAt = evidence.nativeClickAtMs;
-              if (typeof readyAt !== "number" || typeof clickedAt !== "number") {
+              const activatedAt = evidence.nativeActivationAtMs ?? evidence.nativeClickAtMs;
+              if (typeof readyAt !== "number" || typeof activatedAt !== "number") {
                 throw new Error("Cold first-open did not retain its phase boundaries");
               }
               // Read resources and write artifacts after the existing action metric cutoff.
@@ -1355,9 +1355,9 @@ try {
                 }),
               }));
               const { endedAt, resources } = observed;
-              const urls = slot.modelPickerAssets.map(
-                (file) => new URL(file, slot.server.baseUrl).href,
-              );
+              const urls = scenario.firstOpenAssetGroup
+                ? slot.modelPickerAssets.map((file) => new URL(file, slot.server.baseUrl).href)
+                : undefined;
               const requests = firstOpenRequests;
               const artifact = `${artifactPrefix}.first-open-network.json`;
               await writeFile(
@@ -1366,25 +1366,47 @@ try {
                   {
                     phase: scenario.firstOpenPhase,
                     firstReadyAtMs: readyAt,
-                    nativeClickAtMs: clickedAt,
+                    nativeActivationAtMs: activatedAt,
+                    ...(typeof evidence.nativeClickAtMs === "number"
+                      ? { nativeClickAtMs: evidence.nativeClickAtMs }
+                      : {}),
                     actionEndAtMs: endedAt,
-                    requiredAssets: urls,
-                    requiredCompletedBeforeClick: urls.every((url) =>
-                      resources.some(
-                        (entry) =>
-                          entry.url === url &&
-                          entry.responseEnd > 0 &&
-                          entry.responseEnd <= clickedAt,
-                      ),
-                    ),
+                    ...(urls
+                      ? {
+                          requiredAssets: urls,
+                          requiredCompletedBeforeClick: urls.every((url) =>
+                            resources.some(
+                              (entry) =>
+                                entry.url === url &&
+                                entry.responseEnd > 0 &&
+                                entry.responseEnd <= activatedAt,
+                            ),
+                          ),
+                        }
+                      : {}),
                     requests,
                     resources,
                     clock: qualifyRouteNetworkClock(requests, before.NavigationStart!, resources),
-                    beforeClick: routeNetworkPhase(requests, before.NavigationStart!, 0, clickedAt),
+                    ...(typeof evidence.nativeClickAtMs === "number"
+                      ? {
+                          beforeClick: routeNetworkPhase(
+                            requests,
+                            before.NavigationStart!,
+                            0,
+                            activatedAt,
+                          ),
+                        }
+                      : {}),
+                    beforeActivation: routeNetworkPhase(
+                      requests,
+                      before.NavigationStart!,
+                      0,
+                      activatedAt,
+                    ),
                     action: routeNetworkPhase(
                       requests,
                       before.NavigationStart!,
-                      clickedAt,
+                      activatedAt,
                       endedAt,
                     ),
                   },

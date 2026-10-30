@@ -121,6 +121,8 @@ export type InteractionScenario = {
   expected: string;
   /** Opt-in cold first-open cells; existing scenarios retain full warm preparation. */
   firstOpenPhase?: "ready" | "idle";
+  /** Optional complete asset closure published by the built navigation descriptor. */
+  firstOpenAssetGroup?: "model-picker";
   /** Deliberately perturbs execution; exclude its timing from performance comparisons. */
   diagnostic?: string;
   /** Run only when its ID is explicitly named in --steps. */
@@ -1613,6 +1615,188 @@ async function prepareFirstModelPicker(page: Page) {
   }
 }
 
+const routeControlFixtureOverrides: NonNullable<InteractionScenario["fixtureOverrides"]> = (
+  _sandbox,
+  base,
+) => ({
+  featureMethods: [...defaultControlUiFeatureMethods, "board.get"],
+  sessions: base.sessions.map((session) =>
+    session.key === sessionKeys[0]
+      ? {
+          ...session,
+          thinkingLevels: [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High" },
+          ],
+          thinkingDefault: "low",
+        }
+      : session,
+  ),
+  methodResponses: {
+    "board.get": {
+      sessionKey: sessionKeys[0],
+      revision: 1,
+      tabs: [{ tabId: "main", title: "Dashboard", position: 0, chatDock: "right" }],
+      widgets: [],
+    },
+  },
+});
+
+type ColdRouteControl = {
+  id: string;
+  trigger: string;
+  content: string;
+  keepsTriggerFocus?: boolean;
+  revealOnFocus?: boolean;
+  dashboard?: boolean;
+};
+
+function coldRouteControlScenario(control: ColdRouteControl): InteractionScenario {
+  const triggerSelector = `${activePane} ${control.trigger}`;
+  return {
+    id: control.id,
+    route: controlUiSessionPath(sessionKeys[0]),
+    expected:
+      "The unopened control exposes real content and its expected focus on first activation.",
+    explicitOnly: true,
+    firstOpenPhase: "ready",
+    fixtureOverrides: routeControlFixtureOverrides,
+    setup: async (page) => {
+      await page.addInitScript(
+        ({ triggerSelector: selector, content, keepsTriggerFocus }) => {
+          const recordReady = () => {
+            const composer = document.querySelector<HTMLElement>(
+              ".chat-pane-cache__pane--active .agent-chat__input textarea",
+            );
+            if (window.openclawControlUi?.snapshot().ready && composer?.checkVisibility()) {
+              performance.mark("route-control:first-ready");
+            } else {
+              requestAnimationFrame(recordReady);
+            }
+          };
+          requestAnimationFrame(recordReady);
+          const recordActivation = (event: KeyboardEvent) => {
+            if (
+              event.key !== "Enter" ||
+              event.repeat ||
+              !(event.target instanceof Element) ||
+              !event.target.closest(selector)
+            ) {
+              return;
+            }
+            const trigger = event.target.closest<HTMLElement>(selector)!;
+            performance.mark("route-control:native-activation", { startTime: event.timeStamp });
+            performance.mark("route-control:observed-activation");
+            document.removeEventListener("keydown", recordActivation, true);
+            let contentRecorded = false;
+            let focusRecorded = false;
+            const observeOpen = () => {
+              const surfaceId = trigger.getAttribute("aria-controls");
+              const surface = surfaceId ? document.getElementById(surfaceId) : null;
+              if (surface?.checkVisibility()) {
+                if (
+                  !contentRecorded &&
+                  [...surface.querySelectorAll<HTMLElement>(content)].some((node) =>
+                    node.checkVisibility(),
+                  )
+                ) {
+                  performance.mark("route-control:raf-observed-content");
+                  contentRecorded = true;
+                }
+                const focused = document.activeElement;
+                const focusSatisfied = keepsTriggerFocus
+                  ? focused === trigger
+                  : focused instanceof HTMLElement &&
+                    focused !== surface &&
+                    surface.contains(focused) &&
+                    focused.checkVisibility();
+                if (!focusRecorded && focusSatisfied) {
+                  performance.mark("route-control:raf-observed-focus");
+                  focusRecorded = true;
+                }
+              }
+              if (!contentRecorded || !focusRecorded) {
+                requestAnimationFrame(observeOpen);
+              }
+            };
+            requestAnimationFrame(observeOpen);
+          };
+          document.addEventListener("keydown", recordActivation, true);
+        },
+        {
+          triggerSelector,
+          content: control.content,
+          keepsTriggerFocus: control.keepsTriggerFocus ?? false,
+        },
+      );
+    },
+    prepare: async (page) => {
+      await page.waitForFunction(
+        () => performance.getEntriesByName("route-control:first-ready").length > 0,
+      );
+      if (control.dashboard) {
+        await openInteractionPanel(page);
+      }
+    },
+    run: async (page) => {
+      const trigger = page
+        .locator(control.revealOnFocus ? triggerSelector : `${triggerSelector}:visible`)
+        .first();
+      // Focus reveals the microphone affordance; it remains inside the action CPU interval.
+      await trigger.focus();
+      await trigger.waitFor({ state: "visible" });
+      const surfaceId = await trigger.getAttribute("aria-controls");
+      if (!surfaceId) {
+        throw new Error(`Control has no owned popup: ${triggerSelector}`);
+      }
+      const surface = page.locator(`[id=${JSON.stringify(surfaceId)}]`);
+      if (await surface.isVisible()) {
+        throw new Error(`First-use control was already open: ${triggerSelector}`);
+      }
+      await trigger.press("Enter");
+      await surface.locator(control.content).first().waitFor({ state: "visible" });
+      await page.waitForFunction(
+        () =>
+          performance.getEntriesByName("route-control:raf-observed-content").length > 0 &&
+          performance.getEntriesByName("route-control:raf-observed-focus").length > 0,
+      );
+      const evidence = await page.evaluate(() => {
+        const mark = (name: string) => {
+          const value = performance.getEntriesByName(`route-control:${name}`)[0]?.startTime;
+          if (value === undefined) {
+            throw new Error(`Missing cold control mark: ${name}`);
+          }
+          return value;
+        };
+        const ready = mark("first-ready");
+        const activation = mark("native-activation");
+        const content = mark("raf-observed-content");
+        const focus = mark("raf-observed-focus");
+        return {
+          firstReadyAtMs: ready,
+          nativeActivationAtMs: activation,
+          nativeActivationObservedAtMs: mark("observed-activation"),
+          rafObservedContentAtMs: content,
+          rafObservedFocusAtMs: focus,
+          nativeActivationToRafObservedContentMs: content - activation,
+          nativeActivationToRafObservedFocusMs: focus - activation,
+          firstReadyToActivationMs: activation - ready,
+          openedControls: 1,
+        };
+      });
+      await page.keyboard.press("Escape");
+      await surface.waitFor({ state: "hidden" });
+      await page.waitForFunction(
+        (id) =>
+          document.activeElement ===
+          document.querySelector(`[aria-controls=${JSON.stringify(id)}]`),
+        surfaceId,
+      );
+      return { ...evidence, dismissedControls: 1 };
+    },
+  };
+}
+
 async function setupColdFirstModelPicker(page: Page) {
   await page.addInitScript(() => {
     const triggerSelector = ".chat-pane-cache__pane--active [data-chat-model-select]";
@@ -2889,35 +3073,41 @@ export const interactionScenarios: readonly InteractionScenario[] = [
       }
     },
   },
+  coldRouteControlScenario({
+    id: "chat-effort-first-ready-open",
+    trigger: "[data-chat-thinking-select]",
+    content: "[data-chat-thinking-slider]",
+    keepsTriggerFocus: true,
+  }),
+  coldRouteControlScenario({
+    id: "chat-attach-first-ready-open",
+    trigger: ".agent-chat__input-btn--attach",
+    content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+  }),
+  coldRouteControlScenario({
+    id: "chat-microphone-first-ready-open",
+    trigger: ".chat-talk-input-picker__trigger",
+    content: ".chat-talk-input-picker__heading",
+    revealOnFocus: true,
+  }),
+  coldRouteControlScenario({
+    id: "chat-dashboard-menu-first-ready-open",
+    trigger: ".chat-dashboard-menu__trigger",
+    content: '[data-value="dashboard-expand"]',
+    dashboard: true,
+  }),
+  coldRouteControlScenario({
+    id: "chat-session-menu-first-ready-open",
+    trigger: ".chat-header-session-menu__trigger",
+    content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
+  }),
   {
     id: "chat-route-controls-first-open",
     route: controlUiSessionPath(sessionKeys[0]),
     expected:
       "Effort, attachment, microphone, Dashboard, and session menus open with real content, preserve keyboard focus, and dismiss on Escape.",
     explicitOnly: true,
-    fixtureOverrides: (_sandbox, base) => ({
-      featureMethods: [...defaultControlUiFeatureMethods, "board.get"],
-      sessions: base.sessions.map((session) =>
-        session.key === sessionKeys[0]
-          ? {
-              ...session,
-              thinkingLevels: [
-                { id: "low", label: "Low" },
-                { id: "high", label: "High" },
-              ],
-              thinkingDefault: "low",
-            }
-          : session,
-      ),
-      methodResponses: {
-        "board.get": {
-          sessionKey: sessionKeys[0],
-          revision: 1,
-          tabs: [{ tabId: "main", title: "Dashboard", position: 0, chatDock: "right" }],
-          widgets: [],
-        },
-      },
-    }),
+    fixtureOverrides: routeControlFixtureOverrides,
     prepare: prepareChat,
     run: async (page) => {
       const pane = page.locator(activePane);
@@ -2985,6 +3175,7 @@ export const interactionScenarios: readonly InteractionScenario[] = [
     expected: "The unopened model picker focuses and filters without an intentional idle wait.",
     explicitOnly: true,
     firstOpenPhase: "ready",
+    firstOpenAssetGroup: "model-picker",
     setup: setupColdFirstModelPicker,
     prepare: prepareColdFirstModelPicker,
     run: runColdFirstModelPicker,
@@ -2995,6 +3186,7 @@ export const interactionScenarios: readonly InteractionScenario[] = [
     expected: "The unopened model picker focuses and filters after native idle warming.",
     explicitOnly: true,
     firstOpenPhase: "idle",
+    firstOpenAssetGroup: "model-picker",
     setup: setupColdFirstModelPicker,
     prepare: prepareColdFirstModelPicker,
     run: runColdFirstModelPicker,
