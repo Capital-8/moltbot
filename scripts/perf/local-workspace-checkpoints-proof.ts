@@ -225,15 +225,15 @@ async function child() {
       assert.equal(read(canonical), "guest001\n");
       await observe("projection", async (action) => {
         if (action.kind === "scan") {
+          const roots = action.filesystem?.changedRoots;
           assert(
-            action.filesystem?.changedRoots?.includes("source.txt"),
+            roots,
             "Accepted guest edits must carry their changed root into the older host checkpoint",
           );
+          assert(roots.includes("source.txt"), "Changed source must be scanned");
           assert(
-            action.filesystem.changedRoots.every(
-              (root) => root === ".git" || root === "source.txt",
-            ),
-            "Direction changes must retain incremental scanning",
+            !roots.includes(".gitignore"),
+            "Direction changes must leave unchanged tracked paths outside the scan",
           );
         }
       });
