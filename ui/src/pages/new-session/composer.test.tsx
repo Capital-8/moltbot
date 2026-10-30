@@ -9,6 +9,7 @@ import {
   getSkillCommandCompletions,
   replaceSlashCommands,
 } from "../../lib/chat/commands.ts";
+import { createFrameClock } from "../../test-helpers/animation-frame-clock.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { waitForFast } from "../../test-helpers/wait-for.ts";
 import { adjustTextareaHeight } from "../chat/components/chat-composer-dom.ts";
@@ -72,23 +73,16 @@ afterEach(() => {
 
 describe("new-session placeholder animation", () => {
   it("preserves animation progress through draft refreshes and cancels it with the input", () => {
-    let nextFrame = 0;
-    const frames = new Map<number, FrameRequestCallback>();
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      frames.set(++nextFrame, callback);
-      return nextFrame;
-    });
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const framesClock = createFrameClock();
+    const frames = framesClock.frames;
+    vi.stubGlobal("requestAnimationFrame", framesClock.request);
+    vi.stubGlobal("cancelAnimationFrame", framesClock.cancel);
     const view = renderComposer();
     document.body.append(view.container);
     const textarea = getComposerTextarea(view.composer);
     const target = textarea.getAttribute("aria-label")!;
     const advance = (timestamp: number) => {
-      const callbacks = [...frames.values()];
-      frames.clear();
-      for (const callback of callbacks) {
-        callback(timestamp);
-      }
+      framesClock.flush(timestamp);
       flush();
     };
 
@@ -500,17 +494,26 @@ describe("new-session composer sizing lifecycle", () => {
     expect(textarea.style.height).toBe("150px");
   });
 
-  it("keeps one observer across controlled updates and remeasures programmatic drafts", async () => {
-    const observe = vi.fn();
-    const disconnect = vi.fn();
-    const resizeObserverConstructed = vi.fn();
-    class TestResizeObserver {
+  it("keeps its sizing observers across controlled updates and remeasures programmatic drafts", async () => {
+    const observers = new Set<TestResizeObserver>();
+    class TestResizeObserver implements ResizeObserver {
+      readonly targets = new Set<Element>();
       constructor() {
-        resizeObserverConstructed();
+        observers.add(this);
       }
-      observe = observe;
-      disconnect = disconnect;
+      observe = (target: Element) => this.targets.add(target);
+      unobserve = (target: Element) => this.targets.delete(target);
+      disconnect = () => this.targets.clear();
     }
+    const observedTargets = () => {
+      const targets = new Set<Element>();
+      for (const observer of observers) {
+        for (const target of observer.targets) {
+          targets.add(target);
+        }
+      }
+      return targets;
+    };
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     const composerTextarea = createNewSessionComposerTextarea();
     const onInput = vi.fn();
@@ -525,8 +528,11 @@ describe("new-session composer sizing lifecycle", () => {
         return 42;
       },
     });
-    await Promise.resolve();
+    // The shared layout attaches after Solid, then schedules the initial cap.
+    await waitForFast(() => expect(observedTargets().has(textarea)).toBe(true));
     const readsAfterAttach = scrollHeightReads;
+    const targetsAfterAttach = observedTargets();
+    expect(targetsAfterAttach.has(textarea)).toBe(true);
 
     textarea.value = "typed";
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
@@ -536,8 +542,7 @@ describe("new-session composer sizing lifecycle", () => {
     await Promise.resolve();
 
     expect(first.container.querySelector("textarea")).toBe(textarea);
-    expect(resizeObserverConstructed).toHaveBeenCalledOnce();
-    expect(disconnect).not.toHaveBeenCalled();
+    expect(observedTargets()).toEqual(targetsAfterAttach);
     expect(scrollHeightReads).toBe(readsAfterInput);
 
     first.rerenderWithMessage("restored programmatically");
@@ -545,10 +550,16 @@ describe("new-session composer sizing lifecycle", () => {
 
     expect(scrollHeightReads).toBeGreaterThan(readsAfterInput);
     expect(readsAfterAttach).toBeGreaterThan(0);
-    expect(resizeObserverConstructed).toHaveBeenCalledOnce();
-    expect(disconnect).not.toHaveBeenCalled();
+    expect(observedTargets()).toEqual(targetsAfterAttach);
     composerTextarea.disconnect();
-    expect(disconnect).toHaveBeenCalledOnce();
+    expect(composerTextarea.getTextarea()).toBeNull();
+    first.unmount();
+    expect(observedTargets().size).toBe(0);
+    expect(first.container.querySelector('[role="separator"]')).toBeNull();
+    const readsAfterUnmount = scrollHeightReads;
+    composerTextarea.syncDraft("late restore");
+    await Promise.resolve();
+    expect(scrollHeightReads).toBe(readsAfterUnmount);
     first.container.remove();
   });
 });

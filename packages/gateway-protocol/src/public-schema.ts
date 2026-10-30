@@ -4,8 +4,8 @@ export * from "./schema/session-processes.js";
 export * from "./schema/sessions-provider-review.js";
 export * from "./schema/human-mentions.js";
 export * from "./schema/presence.js";
-export * from "./schema/claws.js";
-export * from "./schema/claw-drafts.js";
+export * from "./schema/templates.js";
+export * from "./schema/template-drafts.js";
 export * from "./public-schema-push.js";
 export * from "./public-schema-users.js";
 export * from "./public-schema-plugins.js";
@@ -258,8 +258,6 @@ export {
   SessionWorktreeInfoSchema,
   SessionsCreateParamsSchema,
   SessionsCreateResultSchema,
-  SessionsRecoverParamsSchema,
-  SessionsRecoverResultSchema,
   SessionsDispatchParamsSchema,
   SessionsDispatchResultSchema,
   SessionsReclaimParamsSchema,
@@ -410,6 +408,7 @@ export {
   TalkClientCloseParamsSchema,
   TalkClientMutationResultSchema,
   TalkAgentControlResultSchema,
+  TalkClientSayParamsSchema,
   TalkClientSteerParamsSchema,
   TalkClientToolCallParamsSchema,
   TalkClientToolCallResultSchema,
@@ -524,6 +523,7 @@ export {
   SkillWorkshopChangeSchema,
   SkillWorkshopSkillSummarySchema,
   SkillWorkshopArchivedSkillSchema,
+  SkillWorkshopDraftSchema,
   SkillsWorkshopListParamsSchema,
   SkillsWorkshopListResultSchema,
   SkillsWorkshopChangesParamsSchema,
@@ -556,6 +556,7 @@ export {
   CronDeliveryPreviewSchema,
   CronUpdateParamsSchema,
   CronRemoveParamsSchema,
+  CronBindParamsSchema,
   CronRunParamsSchema,
   CronRunsParamsSchema,
   CronHistoryParamsSchema,
@@ -640,9 +641,12 @@ export {
   ChatToolTitlesResultSchema,
   ChatPredictParamsSchema,
   ChatPredictResultSchema,
+  ChatPendingInputsDismissParamsSchema,
+  ChatPendingInputsDismissResultSchema,
   UpdateRunParamsSchema,
   UpdateRunRecordSchema,
   UpdateRunResultSchema,
+  UpdateRecoveryCleanupParamsSchema,
   UpdateRunsGetParamsSchema,
   UpdateRunsGetResultSchema,
   UpdateRunsListParamsSchema,

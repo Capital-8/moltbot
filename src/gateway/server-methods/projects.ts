@@ -66,11 +66,14 @@ import {
   assertMemoryProjectStoresCurrent,
   loadProjectRecentCandidates,
   loadProjectSessionStore,
+  ProjectListingChangedError,
   readMemoryProjectStores,
-  type MemoryProjectStores,
 } from "./projects-session-store.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams, defineValidatedGatewayHandler } from "./validation.js";
+
+// Config republications are rare; repeated races mean the caller should try again later.
+const PROJECTS_LIST_ATTEMPTS = 3;
 
 function projectCheckoutError(error: unknown) {
   return errorShape(
@@ -138,23 +141,24 @@ export const projectsHandlers: GatewayRequestHandlers = {
       return;
     }
     const diagnostics = startProjectsListDiagnostics(context);
-    const cfg = context.getRuntimeConfig();
-    const defaultRepository = configuredDefaultRepository(cfg);
-    const requesterProfileId = client?.authenticatedUserProfile?.profileId;
-    const requesterUserId = client?.authenticatedUserId;
-    const assertCurrent = () => {
-      if (
-        client?.authenticatedUserProfile?.profileId !== requesterProfileId ||
-        client?.authenticatedUserId !== requesterUserId ||
-        context.getRuntimeConfig() !== cfg
-      ) {
-        throw new Error("Project access changed while preparing the listing. Retry the request.");
-      }
-    };
-    const list = async (
-      memoryStores: MemoryProjectStores,
-      assertMemoryCurrent: (keys: ReadonlySet<string>) => void,
-    ) => {
+    // Each attempt binds one config publication; a race restarts the read instead of failing it.
+    const list = async () => {
+      const cfg = context.getRuntimeConfig();
+      const defaultRepository = configuredDefaultRepository(cfg);
+      const requesterProfileId = client?.authenticatedUserProfile?.profileId;
+      const requesterUserId = client?.authenticatedUserId;
+      const assertCurrent = () => {
+        if (
+          client?.authenticatedUserProfile?.profileId !== requesterProfileId ||
+          client?.authenticatedUserId !== requesterUserId ||
+          context.getRuntimeConfig() !== cfg
+        ) {
+          throw new ProjectListingChangedError();
+        }
+      };
+      const memoryStores = readMemoryProjectStores(assertCurrent);
+      const assertMemoryCurrent = (keys: ReadonlySet<string>) =>
+        assertMemoryProjectStoresCurrent(memoryStores, keys, assertCurrent);
       const registryProjects = await listProjectRegistry(cfg);
       diagnostics?.mark("sessions");
       const projects = registryProjects.map(sanitizeProjectRecord);
@@ -171,16 +175,21 @@ export const projectsHandlers: GatewayRequestHandlers = {
         do {
           await projection.prepareSelection({ metadataOnly: true });
         } while (projection.needsSelectionPreparation({ metadataOnly: true }));
+        await projection.prepareMembership();
         if (getSessionRowProjection(context) !== projection || projection.state.cfg !== cfg) {
-          throw new Error(
-            "Session projection changed while preparing the listing. Retry the request.",
-          );
+          throw new ProjectListingChangedError();
         }
         sessions = loadProjectSessionStore(projection, memoryStores);
         store = sessions.store;
       }
       if (params.includeObserved && canWrite()) {
-        observedProjects = await listObservedProjects(context, client, store, diagnostics);
+        observedProjects = await listObservedProjects(
+          context,
+          client,
+          store,
+          diagnostics,
+          sessions?.readMembership,
+        );
       }
       diagnostics?.mark("recents");
       const profileId = client?.authenticatedUserProfile?.profileId;
@@ -206,9 +215,7 @@ export const projectsHandlers: GatewayRequestHandlers = {
         projection &&
         (getSessionRowProjection(context) !== projection || projection.state.cfg !== cfg)
       ) {
-        throw new Error(
-          "Session projection changed while preparing the listing. Retry the request.",
-        );
+        throw new ProjectListingChangedError();
       }
       recentCandidates?.assertCurrent(recentSessions);
       if (writable && observedProjects) {
@@ -244,10 +251,24 @@ export const projectsHandlers: GatewayRequestHandlers = {
       );
     };
     try {
-      const stores = readMemoryProjectStores(assertCurrent);
-      await list(stores, (keys) => assertMemoryProjectStoresCurrent(stores, keys, assertCurrent));
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await list();
+          return;
+        } catch (error) {
+          if (!(error instanceof ProjectListingChangedError) || attempt >= PROJECTS_LIST_ATTEMPTS) {
+            throw error;
+          }
+        }
+      }
     } catch (error) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(error)));
+      respond(
+        false,
+        undefined,
+        error instanceof ProjectListingChangedError
+          ? errorShape(ErrorCodes.UNAVAILABLE, error.message, { retryable: true })
+          : errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(error)),
+      );
     } finally {
       diagnostics?.finish();
     }
@@ -279,8 +300,7 @@ export const projectsHandlers: GatewayRequestHandlers = {
         return;
       }
       assertCurrent();
-      const { resolveSessionProjectCheckoutOptions } =
-        await import("../session-worktree-preparation.js");
+      const { resolveSessionProjectCheckoutOptions } = await import("../session-project-source.js");
       const options = await resolveSessionProjectCheckoutOptions({
         cfg,
         projectId: params.projectId,
