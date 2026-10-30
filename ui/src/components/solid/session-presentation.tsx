@@ -56,6 +56,10 @@ function SessionAttentionIcon(props: { attention: SidebarSessionAttention; size:
           class={[
             "sidebar-session-attention__icon",
             `sidebar-session-attention__icon--${props.attention.kind}`,
+            {
+              "sidebar-session-attention__icon--inherited":
+                props.attention.kind === "error" && props.attention.childLabel !== undefined,
+            },
           ]}
           data-session-attention={props.attention.kind}
           role={label() ? "img" : undefined}
