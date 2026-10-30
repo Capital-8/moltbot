@@ -193,11 +193,11 @@ suite.define(() => {
       backSize: [18, 18],
       centerDelta: 0,
       frontSize: [18, 18],
-      overlap: 8,
-      reveal: 10,
+      overlap: 10,
+      reveal: 8,
       slotWidth: 20,
-      stackSize: [28, 20],
-      textGap: 4,
+      stackSize: [26, 20],
+      textGap: 5,
     });
     await expectBrowser(overflowRow.locator(".session-owner-stack__overflow")).toHaveText("+2");
     const [collaborative, single] = await Promise.all(

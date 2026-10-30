@@ -73,7 +73,7 @@ suite.define(() => {
 
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
         await sidebarRow.getByText("Disk monitor", { exact: true }).waitFor();
-        await expectAccessibleBadge("ok", "Placement: active");
+        await expect.poll(() => cloudBadge.count()).toBe(0);
 
         for (const [status, freeMb, title] of [
           ["warning", 247, "Cloud session disk space is low"],
@@ -88,8 +88,28 @@ suite.define(() => {
           await expectAccessibleBadge(status, `Placement: active · ${title}`);
         }
 
+        const placementArtwork = await cloudBadge
+          .locator(".session-css-icon")
+          .evaluate((element) => {
+            const mask = getComputedStyle(element).maskImage.match(
+              /data:image\/svg\+xml,([^"\s]+)"/u,
+            )?.[1];
+            if (!mask) {
+              throw new Error("Missing cloud placement artwork");
+            }
+            const artwork = new DOMParser().parseFromString(
+              decodeURIComponent(mask),
+              "image/svg+xml",
+            );
+            return {
+              circles: artwork.querySelectorAll("circle").length,
+              rectangles: artwork.querySelectorAll("rect").length,
+            };
+          });
+        expect(placementArtwork).toEqual({ circles: 1, rectangles: 0 });
+
         await refresh({ ...healthy, observedAtMs: observedAtMs + 3_000 });
-        await expectAccessibleBadge("ok", "Placement: active");
+        await expect.poll(() => cloudBadge.count()).toBe(0);
       },
     ));
 });
