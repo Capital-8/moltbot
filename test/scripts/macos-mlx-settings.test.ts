@@ -15,10 +15,13 @@ it("prepares the stable producer with its full frozen workspace graph and own cw
     /await run\(\s*"pnpm",\s*(\[\s*"install"[\s\S]*?\]),\s*stable,\s*240_000,\s*\)/u,
   );
   expect(call).not.toBeNull();
-  if (!call) throw new Error("Missing source-owned stable install");
+  if (!call) {
+    throw new Error("Missing source-owned stable install");
+  }
   const args: unknown = JSON.parse(call[1]!.replace(/,\s*\]$/u, "]"));
-  if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string"))
+  if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) {
     throw new Error("Install argv must be literal strings");
+  }
   // Fake pnpm receives the actual preparer argv; it never installs anything.
   const observed = JSON.parse(
     execFileSync(

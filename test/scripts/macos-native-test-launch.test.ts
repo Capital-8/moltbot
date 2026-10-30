@@ -385,9 +385,13 @@ fs.writeFileSync(out,JSON.stringify({config:{talk:{provider:'mlx'}}}));`;
           overlays[relative!] = createHash("sha256").update(content!).digest("hex");
         }
         const scripts = path.join(source, "scripts");
-        if (source === stable) fs.mkdirSync(scripts);
+        if (source === stable) {
+          fs.mkdirSync(scripts);
+        }
         // The current fixture's scripts link points at real source; never overwrite it.
-        if (source === stable) fs.writeFileSync(path.join(scripts, "tsx.mjs"), "");
+        if (source === stable) {
+          fs.writeFileSync(path.join(scripts, "tsx.mjs"), "");
+        }
       }
       // The real current tsx loader needs the ready CI install. The synthetic stable
       // producer uses its own loader/root; neither source shares dependency links.
@@ -484,18 +488,22 @@ export async function runManagedCommand(options) {
         expect(calls.filter((x) => x.tool === "managed-rejection")).toEqual(
           managedFailure === "none" ? [] : [{ tool: "managed-rejection", kind: managedFailure }],
         );
-        if (failCandidate)
+        if (failCandidate) {
           expect(result.stderr).toContain("Actual talk.config producer failed (exit 41)");
-        if (managedFailure !== "none")
+        }
+        if (managedFailure !== "none") {
           expect(result.stderr).toContain(
             managedFailure === "timeout"
               ? "synthetic joined producer timeout"
               : "synthetic indeterminate producer retirement",
           );
-        if (["stage-write", "swift-events"].includes(cleanupFailure))
+        }
+        if (["stage-write", "swift-events"].includes(cleanupFailure)) {
           expect(result.stderr).toContain("Settings Swift cleanup failed");
-        if (cleanupFailure === "keychain-exit")
+        }
+        if (cleanupFailure === "keychain-exit") {
           expect(result.stderr).toContain("security delete-keychain failed (exit 29)");
+        }
         if (cleanupFailure === "keychain-retained") {
           expect(result.stderr).toContain("Settings Keychain retirement is unverified");
           if (failCandidate) {
@@ -504,7 +512,9 @@ export async function runManagedCommand(options) {
         }
       } finally {
         // All synthetic children joined; this test owns the deliberately retained root.
-        if (!resourcesRemoved) fs.rmSync(ownedRoot, { recursive: true, force: true });
+        if (!resourcesRemoved) {
+          fs.rmSync(ownedRoot, { recursive: true, force: true });
+        }
       }
     },
   );
@@ -525,7 +535,14 @@ export async function runManagedCommand(options) {
     managedFailure?: "cleanup-inspection" | "bootout",
   ][])(
     "owns fresh app hosts and refuses incomplete proof (case %#)",
-    (events, inspection, expected, hosts, filters = ["retry", "relaunch"], managedFailure) => {
+    (
+      events,
+      inspection,
+      expected,
+      hosts,
+      filters = ["retry", "relaunch"],
+      managedFailure: "cleanup-inspection" | "bootout" | undefined = undefined,
+    ) => {
       const f = fixture("", "3", events);
       const contents = path.join(f.root, "Fixture.app/Contents");
       fs.mkdirSync(path.join(contents, "MacOS"), { recursive: true });
