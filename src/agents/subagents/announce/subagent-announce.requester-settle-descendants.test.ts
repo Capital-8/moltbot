@@ -11,7 +11,10 @@ import {
   loadSubagentRegistryFromSqlite,
   persistRegistryFixture,
 } from "../registry/subagent-registry-state.fixture.test-support.js";
-import { clearSubagentRunsReadCacheForTest } from "../registry/subagent-registry-state.js";
+import {
+  clearSubagentRunsReadCacheForTest,
+  prepareSubagentSessionListReadCache,
+} from "../registry/subagent-registry-state.js";
 import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
 import { copySubagentRunRuntimeOwner } from "../registry/subagent-run-generation.js";
 import { readChildCompletionFindings } from "./subagent-announce-output.js";
@@ -309,7 +312,12 @@ it("returns ready but unconsumed failed collectors with the failed root, without
         new Map([root, failed, consumed, healthy, killed, active].map((row) => [row.runId, row])),
       );
       const before = loadSubagentRegistryFromSqlite();
-      const report = await readChildCompletionFindings([root]);
+      // Cold topology must retain consumed receipts without hydrating full child rows.
+      subagentRuns.clear();
+      subagentRuns.set(root.runId, root);
+      clearSubagentRunsReadCacheForTest();
+      await prepareSubagentSessionListReadCache();
+      const report = await readChildCompletionFindings([subagentRuns.get(root.runId)!]);
       expect(report.isCurrent()).toBe(true);
       expect(report.text).toContain("Root provider failed");
       expect(report.text).toContain("Root saved progress");
