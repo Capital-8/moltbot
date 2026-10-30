@@ -461,6 +461,13 @@ it.each([600, 1400])(
     expect(
       parse.mock.calls.filter(([html]) => html.includes(`Idle ordinary message ${index}`)),
     ).toHaveLength(0);
+    // A first fast gesture skips beyond the immediate neighbors.
+    const jump = index + 32;
+    await view.scrollTo(jump);
+    expect(view.container.textContent).toContain(`Idle ordinary message ${jump}`);
+    expect(
+      parse.mock.calls.filter(([html]) => html.includes(`Idle ordinary message ${jump}`)),
+    ).toHaveLength(0);
   },
 );
 

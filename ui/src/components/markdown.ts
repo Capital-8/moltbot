@@ -43,7 +43,7 @@ const markdownCache = new Map<string, MarkdownCacheEntry>();
 let markdownCacheChars = 0;
 // Reconciler callers clone these pristine trees; retain recent preparation across mounts.
 const preparedFragments = new Map<MarkdownCacheEntry, DocumentFragment>();
-const PREPARED_FRAGMENT_LIMIT = 32;
+const PREPARED_FRAGMENT_LIMIT = 128;
 export type MarkdownPrewarmMode = "html" | "idle-html" | "cold-fragment" | "fragment";
 export const HIGHLIGHTABLE_CODE_RE = /<pre><code(?! class="markdown-block-art")/u;
 

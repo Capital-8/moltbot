@@ -8,6 +8,9 @@ const PREPARED_ROW_LIMIT = 24;
 // Use idle time before a fast sweep reaches distant rows. The shared HTML cache
 // still bounds admission; DOM and pristine-fragment limits stay unchanged.
 const IDLE_PREWARM_ROW_LIMIT = 2048;
+// A fast first gesture can skip dozens of rows before velocity is known.
+// Keep nearby sanitized DOM ready without mounting it or changing geometry.
+const IDLE_FRAGMENT_ROW_LIMIT = 64;
 
 /** Own initial tail placement and bounded preparation ahead of the visible range. */
 export class TranscriptInitialRange {
@@ -399,7 +402,7 @@ export class TranscriptInitialRange {
           if (!row) {
             break;
           }
-          const mode = this.idleStep <= 8 ? "fragment" : "idle-html";
+          const mode = this.idleStep <= IDLE_FRAGMENT_ROW_LIMIT ? "fragment" : "idle-html";
           if (!rendered.has(row.key) && this.prewarmRow) {
             const warmed = this.prewarmRow(index, mode);
             if (warmed === undefined) {

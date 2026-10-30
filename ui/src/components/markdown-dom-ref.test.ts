@@ -100,17 +100,17 @@ it("retains HTML-only preparation after its first visible mount", () => {
 
 it("bounds prepared DOM while keeping evicted HTML reusable", () => {
   const source = (index: number) => `bounded-idle-fragment-${index}`;
-  for (let index = 0; index < 33; index++) {
+  for (let index = 0; index < 129; index++) {
     expect(prewarmSanitizedMarkdown(source(index), {})).toBe(true);
   }
   expect(prewarmSanitizedMarkdown(source(0), {}, "fragment")).toBe(true);
-  expect(prewarmSanitizedMarkdown(source(32), {}, "fragment")).toBe(false);
-  expect(prewarmSanitizedMarkdown(source(32), {}, "fragment")).toBe(false);
-  for (let index = 1; index < 33; index++) {
+  expect(prewarmSanitizedMarkdown(source(128), {}, "fragment")).toBe(false);
+  expect(prewarmSanitizedMarkdown(source(128), {}, "fragment")).toBe(false);
+  for (let index = 1; index < 129; index++) {
     expect(prewarmSanitizedMarkdown(source(index), {}, "fragment")).toBe(true);
   }
   expect(prewarmSanitizedMarkdown(source(0), {}, "fragment")).toBe(true);
-  expect(prewarmSanitizedMarkdown(source(32), {}, "fragment")).toBe(false);
+  expect(prewarmSanitizedMarkdown(source(128), {}, "fragment")).toBe(false);
   expect(toSanitizedMarkdownHtml(source(0))).toBe(`<p>${source(0)}</p>\n`);
   for (let index = 0; index < 64; index++) {
     prewarmSanitizedMarkdown(`near-first-${index}`, {}, index < 8 ? "cold-fragment" : "html");
