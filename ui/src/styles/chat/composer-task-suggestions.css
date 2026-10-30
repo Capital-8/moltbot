@@ -108,7 +108,7 @@
   width: var(--chat-stack-icon-size, 14px);
   height: 18px;
   place-items: center;
-  color: var(--accent);
+  color: var(--muted);
 }
 
 .task-suggestion[data-failed] .task-suggestion__icon {
@@ -258,35 +258,30 @@
   opacity: 0.45;
 }
 
-/* Start: Send's fill, a compact split pill. */
+/* Start. Closed, it is a quiet accent-tinted text action beside the title.
+   Open, it is the same small primary button the question panel submits with,
+   so it carries Send's fill and ink; both read as one action with a divided
+   options trigger. */
 
 .task-suggestion .task-suggestion__start {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 12px 0 10px;
-  border: 0;
-  border-radius: var(--radius-full);
-  background: var(--primary);
-  color: var(--primary-foreground);
-  box-shadow: none;
+  gap: 4px;
+  min-height: 28px;
+  padding-block: 0;
   font-size: 12px;
-  font-weight: 550;
+  font-weight: 500;
   line-height: 1;
-  white-space: nowrap;
+  box-shadow: none;
   user-select: none;
 }
 
 .task-suggestion .task-suggestion__start--primary {
   border-start-end-radius: 0;
   border-end-end-radius: 0;
-  padding-inline-end: 10px;
 }
 
 .task-suggestion .task-suggestion__start--options {
-  padding: 0 9px 0 7px;
-  border-inline-start: 1px solid color-mix(in srgb, var(--primary-foreground) 22%, transparent);
+  padding-inline: 5px;
+  border-inline-start-width: 0;
   border-start-start-radius: 0;
   border-end-start-radius: 0;
 }
@@ -298,35 +293,53 @@
 
 /* Matches Send's hover step, which stays visible in themes that leave
    --primary-hover at the base value. */
-.task-suggestion .task-suggestion__start:hover:not(:disabled) {
+.task-suggestion .task-suggestion__start.primary:hover:not(:disabled) {
   background: var(--chat-send-hover-bg, color-mix(in srgb, var(--primary) 86%, var(--text-strong)));
   box-shadow: none;
 }
 
-.task-suggestion .task-suggestion__start:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.task-suggestion .task-suggestion__start:disabled {
+.task-suggestion .task-suggestion__start.primary:disabled {
+  border-color: transparent;
   background: var(--chat-composer-hover, color-mix(in srgb, var(--muted) 16%, transparent));
   color: var(--chat-composer-tertiary, var(--muted));
   opacity: 1;
   cursor: not-allowed;
 }
 
-.task-suggestion .task-suggestion__start--options:disabled {
+.task-suggestion .task-suggestion__start.primary.task-suggestion__start--options {
+  border-inline-start: 1px solid color-mix(in srgb, var(--primary-foreground) 22%, transparent);
+}
+
+.task-suggestion .task-suggestion__start.primary.task-suggestion__start--options:disabled {
   border-inline-start-color: color-mix(in srgb, var(--muted) 18%, transparent);
 }
 
-/* The header names the action briefly; the footer has room to say where it starts. */
-.task-suggestion__start-full,
-.task-suggestion__split[data-placement="foot"] .task-suggestion__start-short {
-  display: none;
+/* The closed row: text in the accent, no fill, a wash on hover. */
+.task-suggestion__split[data-placement="head"] .task-suggestion__start {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
 }
 
-.task-suggestion__split[data-placement="foot"] .task-suggestion__start-full {
-  display: inline;
+.task-suggestion__split[data-placement="head"] .task-suggestion__start--primary {
+  padding-inline: 9px 6px;
+}
+
+.task-suggestion__split[data-placement="head"] .task-suggestion__start:hover:not(:disabled) {
+  background: var(--chat-composer-hover, color-mix(in srgb, var(--text) 7%, transparent));
+  color: var(--accent-hover, var(--accent));
+}
+
+.task-suggestion__split[data-placement="head"] .task-suggestion__start:disabled {
+  background: transparent;
+  color: var(--chat-composer-tertiary, var(--muted));
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.task-suggestion .task-suggestion__start:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* Content */
@@ -526,14 +539,16 @@
 }
 
 .task-suggestion .task-suggestion__secondary {
-  height: 28px;
-  padding: 0 12px;
-  border-radius: var(--radius-full);
-  font-size: 12px;
+  min-height: 28px;
+  padding-block: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
 }
 
-.task-suggestion .task-suggestion__retry {
-  padding-inline: 12px;
+.task-suggestion .task-suggestion__secondary:hover:not(:disabled) {
+  background: var(--chat-composer-hover, var(--panel-hover));
+  color: var(--text);
 }
 
 /* Narrow stacks (phones, split panes): closed, the row keeps only what fits
@@ -558,20 +573,18 @@
 
   .task-suggestion__split[data-placement="foot"] .task-suggestion__start--primary {
     flex: 1 1 auto;
-    justify-content: center;
-    height: 36px;
+    min-height: 32px;
   }
 
   .task-suggestion__split[data-placement="foot"] .task-suggestion__start--options {
-    height: 36px;
-    padding-inline: 12px 13px;
+    min-height: 32px;
+    padding-inline: 10px;
   }
 
   .task-suggestion .task-suggestion__retry,
   .task-suggestion .task-suggestion__secondary {
     flex: 1 1 0;
-    justify-content: center;
-    height: 36px;
+    min-height: 32px;
   }
 }
 

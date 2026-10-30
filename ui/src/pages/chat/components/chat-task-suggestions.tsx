@@ -142,37 +142,38 @@ function TaskSuggestionCard(props: {
     }
   };
 
-  /** One split action: the header carries it while closed, the footer once open. */
+  /** One start action: a quiet text button in the closed row, the standard small
+   *  primary button (as in the question panel) in the open footer. */
   function StartAction(startProps: { placement: "head" | "foot" }) {
     const id = createUniqueId();
+    const primary = startProps.placement === "foot";
+    const buttonClass = `btn btn--sm${primary ? " primary" : ""} task-suggestion__start`;
     return (
       <div class="task-suggestion__split" data-placement={startProps.placement}>
         <button
-          class="btn primary task-suggestion__start task-suggestion__start--primary"
+          class={`${buttonClass} task-suggestion__start--primary`}
           type="button"
           disabled={busy() || !canAccept()}
           aria-label={startLabel()}
           title={
             !canAccept()
               ? t("chat.taskSuggestions.adminRequired")
-              : startProps.placement === "head"
-                ? startLabel()
-                : undefined
+              : primary
+                ? undefined
+                : startLabel()
           }
           onClick={() => accept("local")}
         >
-          <Icon name="play" />
-          <span class="task-suggestion__start-short">
-            {t(busy() ? "chat.taskSuggestions.starting" : "chat.taskSuggestions.start")}
-          </span>
-          <span class="task-suggestion__start-full">{startLabel()}</span>
+          {primary
+            ? startLabel()
+            : t(busy() ? "chat.taskSuggestions.starting" : "chat.taskSuggestions.start")}
         </button>
         <Menu
           id={`task-start-${id}`}
           placement="top-end"
           label={t("chat.taskSuggestions.startOptions")}
           disabled={busy() || !canAccept()}
-          triggerClass="btn primary task-suggestion__start task-suggestion__start--options"
+          triggerClass={`${buttonClass} task-suggestion__start--options`}
           triggerAttributes={{ title: canAccept() ? "" : t("chat.taskSuggestions.adminRequired") }}
           trigger={<Icon name="chevronDown" />}
           items={[
@@ -387,7 +388,7 @@ function TaskSuggestionCard(props: {
                 <Show when={repository()?.open}>
                   <button
                     type="button"
-                    class="btn task-suggestion__secondary"
+                    class="btn btn--sm task-suggestion__secondary"
                     onClick={() =>
                       props.view.onChangeTaskRepository?.(props.suggestion, { open: false })
                     }
@@ -396,7 +397,7 @@ function TaskSuggestionCard(props: {
                   </button>
                 </Show>
                 <button
-                  class="btn primary task-suggestion__start task-suggestion__retry"
+                  class="btn btn--sm primary task-suggestion__start task-suggestion__retry"
                   type="button"
                   disabled={
                     !canAccept() ||

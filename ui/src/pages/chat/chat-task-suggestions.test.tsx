@@ -76,9 +76,10 @@ describe("chat task suggestions", () => {
   it("starts a new session from the primary action", () => {
     const { container, onAccept, onDismiss } = renderSuggestion();
 
-    expect(container.querySelector(".task-suggestion__start")?.textContent).toContain(
-      "Start in a new session",
-    );
+    // The closed row names the action briefly; its accessible name says where it starts.
+    const rowStart = container.querySelector<HTMLButtonElement>(".task-suggestion__start")!;
+    expect(rowStart.textContent).toBe("Start");
+    expect(rowStart.getAttribute("aria-label")).toBe("Start in a new session");
 
     expect(container.querySelector(".task-suggestion")?.getAttribute("aria-label")).toBe(
       "Suggested task · in project",
