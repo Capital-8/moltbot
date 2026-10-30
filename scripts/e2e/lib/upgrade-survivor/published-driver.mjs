@@ -212,6 +212,7 @@ async function ready(name, port) {
 }
 
 function cronJobDefinition(job) {
+  // Successful runs advance updatedAtMs; it is runtime state, not the retained definition.
   return Object.fromEntries(
     [
       "id",
@@ -222,7 +223,6 @@ function cronJobDefinition(job) {
       "enabled",
       "deleteAfterRun",
       "createdAtMs",
-      "updatedAtMs",
       "schedule",
       "pacing",
       "activeHours",
