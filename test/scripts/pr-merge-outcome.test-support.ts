@@ -34,6 +34,12 @@ export function createMergeOutcomeFixtureHarness() {
   let fixtureTemplate: ReturnType<typeof createFixtureTemplate> | undefined;
   const scripts = join(process.cwd(), "scripts");
   const wrapper = readFileSync(join(scripts, "pr"), "utf8");
+  // Generated entrypoints need the wrapper's interpreter guard before sourcing helpers.
+  const shellPreambleEnd = wrapper.indexOf("\nset -euo pipefail\n");
+  if (shellPreambleEnd < 0) {
+    throw new Error("PR fixture requires the wrapper's strict-mode preamble boundary");
+  }
+  const shellPreamble = wrapper.slice(0, shellPreambleEnd);
   const workflowGitOwner = wrapper.slice(
     wrapper.indexOf("pr_batch_wrapper_git() {"),
     wrapper.indexOf("\nEOF_WRAPPER_GIT\n}") + "\nEOF_WRAPPER_GIT\n}".length,
@@ -881,7 +887,7 @@ save();
     const ghPreload = template.program("gh-preload.cjs", ghPrograms.preload);
     const shell = template.program(
       "invoke.sh",
-      `#!/usr/bin/env bash
+      `${shellPreamble}
 set -euo pipefail
 script_parent_dir="$FIXTURE_SCRIPTS"
 ${workflowGitOwner}
