@@ -183,7 +183,13 @@ export function reconcileHistoryTail(options: {
     return { messages: options.previousMessages, pagination: options.previousPagination };
   }
   const previousByIdentity = new Map<string, unknown[]>();
+  const previousSources = new Set<string>();
+  const changedSources = new Set<string>();
   for (const message of options.previousMessages) {
+    const source = nativeHistoryMessageSourceIdentity(message);
+    if (source) {
+      previousSources.add(source);
+    }
     const identity = nativeHistoryMessageIdentity(message);
     if (identity) {
       const matches = previousByIdentity.get(identity) ?? [];
@@ -194,7 +200,12 @@ export function reconcileHistoryTail(options: {
   // Identical history rows keep their render identity, including projected siblings.
   const messages = options.nextMessages.map((message) => {
     const identity = nativeHistoryMessageIdentity(message);
-    return (identity ? previousByIdentity.get(identity)?.shift() : undefined) ?? message;
+    const held = identity ? previousByIdentity.get(identity)?.shift() : undefined;
+    const source = nativeHistoryMessageSourceIdentity(message);
+    if (!held && source && previousSources.has(source)) {
+      changedSources.add(source);
+    }
+    return held ?? message;
   });
   const reconciled = { messages, pagination: options.nextPagination };
   if (!options.nextPagination.hasMore) {
@@ -240,11 +251,22 @@ export function reconcileHistoryTail(options: {
     previousStart !== null && typeof nextTotal === "number"
       ? nextTotal - previousStart + 1
       : undefined;
+  const replacedSources = new Set(
+    options.previousMessages.slice(prefix.length).map(nativeHistoryMessageSourceIdentity),
+  );
+  // Reuse occurrence matching above: removed or changed tail rows revoke every
+  // retained packet alias before refreshed bodies enter resident selection.
+  for (const remaining of previousByIdentity.values()) {
+    const source = nativeHistoryMessageSourceIdentity(remaining[0]);
+    if (source && replacedSources.has(source)) {
+      changedSources.add(source);
+    }
+  }
   return {
     messages: [...prefix, ...messages],
     retainedCoverage: true,
     pagination: {
-      ...options.previousPagination,
+      ...invalidateChatHistoryPacketSources(options.previousPagination, changedSources),
       ...(unavailable ? { needsBoundary: true as const } : {}),
       ...(nextTotal !== undefined ? { totalMessages: nextTotal } : {}),
       ...(options.previousPagination.hasMore && nextOffset !== undefined ? { nextOffset } : {}),
@@ -284,10 +306,12 @@ export function reopenChatHistoryBoundary(
           }
         : segment,
   );
+  // Boundary probes replace navigation edges, not the held source's admitted exemption.
   state.chatHistoryPagination =
     direction === "older"
       ? {
           ...pagination,
+          intrinsicSource: previous.intrinsicSource,
           segments,
           newerCursor: previous.newerCursor,
           hasNewer: previous.hasNewer,

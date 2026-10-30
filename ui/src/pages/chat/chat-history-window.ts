@@ -247,9 +247,10 @@ export function extendChatHistoryWindow(
   preparedPacket?: ChatHistorySegment,
 ): ChatHistoryPagination {
   const page = preparedPacket ?? prepareChatHistorySegment(incoming, pagination, newerCursor);
-  const held = previous.segments ?? [
-    prepareChatHistorySegment(previousMessages, previous, previous.newerCursor),
-  ];
+  const held = retainedCoverage?.segments ??
+    previous.segments ?? [
+      prepareChatHistorySegment(previousMessages, previous, previous.newerCursor),
+    ];
   const known = new Set(held.flatMap((segment) => segment.sources));
   let segments: ChatHistorySegment[];
   if (direction !== "tail" && page.sources.every((source) => known.has(source))) {
