@@ -106,5 +106,4 @@ extension GatewayEndpointStoreTests {
             try #expect(Data(contentsOf: configURL) == config)
         }
     }
-
 }

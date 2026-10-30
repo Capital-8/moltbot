@@ -5,7 +5,7 @@ import Testing
 
 extension GatewayProcessManagerTests {
     @Test(.testWaitLimit, arguments: ["::1", "my host"], [false, true])
-    func invalidCustomBindPreservesRecoveryIntent(host: String, wasActive: Bool) async throws {
+    func `invalid custom bind preserves recovery intent`(host: String, wasActive: Bool) async throws {
         let port = AppProfile.current.defaultGatewayPort
         try await self.withLaunchAgentEnvironment(port: port) {
             let manager = GatewayProcessManager()
@@ -84,7 +84,7 @@ extension GatewayProcessManagerTests {
     }
 
     @Test(.testWaitLimit)
-    func companionPortConflictStillBlocksBackgroundRecovery() async throws {
+    func `companion port conflict still blocks background recovery`() async throws {
         let port = AppProfile.current.defaultGatewayPort
         try await self.withLaunchAgentEnvironment(mode: "remote", port: port) {
             let manager = GatewayProcessManager()

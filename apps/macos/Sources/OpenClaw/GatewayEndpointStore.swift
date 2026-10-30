@@ -48,7 +48,9 @@ actor GatewayEndpointStore {
     struct LocalPortConflict: LocalizedError {
         let message: String
 
-        var errorDescription: String? { self.message }
+        var errorDescription: String? {
+            self.message
+        }
     }
 
     private static let envOverrideWarnings = LockIsolated<Set<Credential>>([])
