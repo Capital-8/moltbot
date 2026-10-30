@@ -1,2 +1,2 @@
-# Rich-row admission, retained geometry/media/focus, stale-chunk recovery, and lazy-boundary regressions.
-592
+# Rich-row admission, retained geometry/media/focus, stale-chunk recovery, and run-failure evidence.
+610

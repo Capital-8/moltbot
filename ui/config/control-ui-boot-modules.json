@@ -1,7 +1,6 @@
 {
  "shared": [
   "__vite-browser-external",
-  "apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/tool-display.json",
   "node_modules/@noble/ed25519/index.js",
   "node_modules/@noble/hashes/_md.js",
   "node_modules/@noble/hashes/_u64.js",
@@ -731,6 +730,7 @@
   "ui/src/lib/chat/slash-command-catalog.ts",
   "ui/src/lib/chat/thinking.ts",
   "ui/src/lib/chat/tool-display-icon.ts",
+  "ui/src/lib/chat/tool-display-identity.generated.json",
   "ui/src/lib/clipboard.ts",
   "ui/src/lib/config/applied-refresh.ts",
   "ui/src/lib/config/config-gateway-read.ts",

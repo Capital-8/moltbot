@@ -1,0 +1,2 @@
+# Canonical compact-tool identity parity and generated-snapshot CI routing.
+30

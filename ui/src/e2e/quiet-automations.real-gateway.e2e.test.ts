@@ -309,10 +309,28 @@ suite.define(() => {
             mode: "force",
             waitTimeoutMs: 80_000,
           });
-          // Own a rejection immediately while inspecting the concurrent browser.
-          void execution.catch(() => {});
-          await provider.waitStarted(signal);
           try {
+            const earlySettlement = await Promise.race([
+              provider.waitStarted(signal).then(() => null),
+              execution,
+            ]);
+            if (earlySettlement !== null) {
+              let error = earlySettlement.run?.error ?? "No provider request";
+              for (const secret of [
+                instance.gatewayToken,
+                instance.hookToken,
+                process.env.OPENAI_API_KEY,
+                instance.stateDir,
+                instance.homeDir,
+              ]) {
+                if (secret) {
+                  error = error.replaceAll(secret, "[redacted]");
+                }
+              }
+              proof.earlySettlement = { outcome, status: earlySettlement.run?.status, error };
+              await save();
+              throw new Error(`Automation settled before its provider request: ${error}`);
+            }
             if (inspectPending) {
               const active = await session();
               ((proof.recencyPhases ??= []) as unknown[]).push({
