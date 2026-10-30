@@ -804,9 +804,9 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   --sidebar-text-offset: calc(var(--sidebar-inset) + var(--sidebar-lead) + var(--sidebar-row-gap));
   --sidebar-session-row-inset: 2px;
   --sidebar-pad-x: 10px;
-  --sidebar-session-link-padding-block: 4px;
+  --sidebar-session-link-padding-block: 5px;
   --sidebar-session-row-floor: 30px;
-  --sidebar-title-line-height: calc(18px * var(--control-ui-text-scale));
+  --sidebar-title-line-height: calc(20px * var(--control-ui-text-scale));
   --sidebar-session-row-min-height: max(
     var(--sidebar-session-row-floor),
     calc(
@@ -1070,6 +1070,31 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   height: 22px;
 }
 
+/* A failed child load reads as one line in the child column, not a boxed alert. */
+.sidebar-session-tree__children > .sidebar-session-error.callout.danger {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 8px 6px calc(var(--sidebar-text-offset) + 3px);
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--danger);
+  font-size: calc(12px * var(--control-ui-text-scale));
+  line-height: 18px;
+}
+
+.sidebar-session-tree__children > .sidebar-session-error .sidebar-session-tree__show-more {
+  min-height: 0;
+  padding: 0;
+  color: var(--text);
+  font-size: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text) 30%, transparent);
+  text-underline-offset: 2px;
+}
+
 .sidebar-recent-sessions {
   display: flex;
   flex-direction: column;
@@ -1141,7 +1166,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   align-items: center;
   gap: 8px;
   min-height: 24px;
-  padding: 0 10px 0 var(--sidebar-inset);
+  padding: 0 9px 0 calc(var(--sidebar-inset) + 2px);
   border-radius: var(--radius-md);
   color: color-mix(in srgb, var(--muted) 72%, var(--text) 28%);
   transition:
@@ -1259,11 +1284,16 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 
 .sidebar-session-group-toggle__icon svg,
 .sidebar-session-catalog-host__count--error svg,
-.sidebar-session__archive-glyph svg,
 .sidebar-child-session-toggle__icon svg {
-  width: 11px;
-  height: 11px;
-  stroke-width: 1.8px;
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.75px;
+}
+
+.sidebar-session__archive-glyph svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 1.75px;
 }
 
 .sidebar-session-catalog-provider-icon {
@@ -1425,9 +1455,9 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 
 .sidebar-recent-sessions__label-text,
 .sidebar-session-catalog-host__label {
-  font-size: var(--control-ui-text-xs);
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  font-size: calc(11px * var(--control-ui-text-scale));
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -1465,7 +1495,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 .sidebar-session-tree__children {
-  margin-left: var(--sidebar-lead);
+  margin-left: calc(var(--sidebar-lead) + 5px);
 }
 
 .sidebar-session-tree__loading {
@@ -1476,7 +1506,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 
 .sidebar-session-tree__show-more {
   min-height: 28px;
-  padding: 6px var(--sidebar-text-offset);
+  padding: 6px var(--sidebar-text-offset) 6px calc(var(--sidebar-text-offset) + 3px);
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -1667,14 +1697,15 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 
 .sidebar-session__archive-glyph {
   display: inline-flex;
-  margin-right: 5px;
+  margin-right: 6px;
+  color: var(--muted);
   vertical-align: -2px;
 }
 
 /* Every sidebar session source renders a thread. Keep density and text styling
    here so gateway threads and native coding catalogs cannot drift apart. */
 .sidebar-recent-session {
-  --sidebar-child-session-toggle-width: max(34px, calc(36px * var(--control-ui-text-scale)));
+  --sidebar-child-session-toggle-width: max(30px, calc(30px * var(--control-ui-text-scale)));
   --session-row-bg: var(--session-row-tint, transparent);
 
   position: relative;
@@ -1691,12 +1722,11 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   transition: background var(--duration-fast) ease;
 }
 
-/* Inset only the paint: adjacent fills need breathing room without shrinking
-   click targets, moving text, or changing the list's density. */
+/* The fill covers the whole row; the list's 2px row gap keeps adjacent fills apart. */
 .sidebar-recent-session::after {
   content: "";
   position: absolute;
-  inset: 2px 0;
+  inset: 0;
   z-index: -1;
   border: 1px solid var(--session-row-border, transparent);
   border-radius: inherit;
@@ -1729,17 +1759,6 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   .sidebar-recent-session--selected
 ) {
   --session-row-muted: var(--text);
-}
-
-.sidebar-recent-session--colored::before {
-  content: "";
-  position: absolute;
-  inset-block: 5px;
-  inset-inline-start: 2px;
-  width: 3px;
-  border-radius: var(--radius-full);
-  background: var(--session-color);
-  pointer-events: none;
 }
 
 .sidebar-recent-session:hover {
@@ -1786,12 +1805,13 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 .sidebar-child-session-toggle {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 1px;
-  width: var(--sidebar-child-session-toggle-width, 31px);
+  justify-content: flex-end;
+  gap: 2px;
+  width: var(--sidebar-child-session-toggle-width, 30px);
   height: var(--sidebar-session-row-min-height);
-  flex: 0 0 var(--sidebar-child-session-toggle-width, 31px);
-  padding: 0 3px;
+  flex: 0 0 var(--sidebar-child-session-toggle-width, 30px);
+  margin-left: 2px;
+  padding: 0 9px 0 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1817,8 +1837,9 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 .sidebar-child-session-toggle__count {
-  min-width: 9px;
-  font-size: calc(9px * var(--control-ui-text-scale));
+  min-width: 7px;
+  font-size: calc(11px * var(--control-ui-text-scale));
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -1890,14 +1911,16 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 .viewer-avatar--overflow {
-  background: var(--bg-elevated);
-  color: var(--muted);
-  font-size: 8px;
-  letter-spacing: 0;
+  background: color-mix(in srgb, var(--text) 12%, var(--sidebar-bg, var(--bg)));
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .viewer-facepile--session {
-  margin-left: 1px;
+  margin-left: 4px;
 }
 
 .viewer-avatar--footer {
@@ -1915,6 +1938,8 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 .sidebar-recent-session__name {
+  --hover-marquee-fade-width: 24px;
+
   display: block;
   width: 100%;
   line-height: var(--sidebar-title-line-height);
@@ -1923,8 +1948,9 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
-  font-size: calc(13px * var(--control-ui-text-scale));
+  font-size: calc(13.5px * var(--control-ui-text-scale));
   font-weight: 500;
+  letter-spacing: -0.008em;
   color: var(--text);
 }
 
@@ -1935,12 +1961,15 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   margin-left: 6px;
 }
 
-.sidebar-recent-session--child .sidebar-recent-session__name {
-  font-size: var(--control-ui-text-sm);
+/* Child rows sit one step below their parent: 28px rows, 13px titles. The
+   min-height is restated because custom properties resolve where declared. */
+.sidebar-recent-session--child {
+  --sidebar-session-link-padding-block: 4px;
+  --sidebar-session-row-min-height: max(28px, calc(var(--sidebar-title-line-height) + 8px));
 }
 
-.sidebar-recent-session--child .session-row-trail {
-  font-size: calc(10px * var(--control-ui-text-scale));
+.sidebar-recent-session--child .sidebar-recent-session__name {
+  font-size: calc(13px * var(--control-ui-text-scale));
 }
 
 .sidebar-child-session__status {
@@ -1968,7 +1997,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 
 .sidebar-recent-session:not(.sidebar-recent-session--child) > .sidebar-recent-session__aside {
   position: absolute;
-  inset: 50% 4px auto auto;
+  inset: 50% 6px auto auto;
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -1980,7 +2009,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 
 .sidebar-recent-session:not(.sidebar-recent-session--child, .sidebar-recent-session--single-line)
   > .sidebar-recent-session__aside {
-  inset: calc(1px + max(24px, var(--sidebar-title-line-height)) / 2) 4px auto auto;
+  inset: calc(1px + max(24px, var(--sidebar-title-line-height)) / 2) 6px auto auto;
 }
 
 .sidebar-recent-session--child > .sidebar-recent-session__aside {
@@ -1997,7 +2026,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
    same link-relative geometry as toggle-less rows, so one mask fits both. */
 .sidebar-recent-session:not(.sidebar-recent-session--child):has(> .sidebar-child-session-toggle)
   > .sidebar-recent-session__aside {
-  right: calc(var(--sidebar-child-session-toggle-width) + 6px);
+  right: calc(var(--sidebar-child-session-toggle-width) + 4px);
 }
 
 .sidebar-recent-session:not(
@@ -2358,6 +2387,32 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 75%, transparent);
 }
 
+/* A row's rounded fill would bend an inset edge; draw the drop line straight in the row gap. */
+.sidebar-recent-session:is(.sidebar-zone-entry--drop-before, .sidebar-zone-entry--drop-after) {
+  box-shadow: none;
+}
+
+.sidebar-recent-session:is(
+    .sidebar-zone-entry--drop-before,
+    .sidebar-zone-entry--drop-after
+  )::before {
+  content: "";
+  position: absolute;
+  inset-inline: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--accent) 75%, transparent);
+  pointer-events: none;
+}
+
+.sidebar-recent-session.sidebar-zone-entry--drop-before::before {
+  top: -2px;
+}
+
+.sidebar-recent-session.sidebar-zone-entry--drop-after::before {
+  bottom: -2px;
+}
+
 .sidebar-customize-menu__item {
   display: flex;
   align-items: center;
@@ -2557,9 +2612,8 @@ a:is(
   --session-row-bg: var(--session-row-tint, transparent);
 
   position: relative;
-  min-height: max(32px, var(--sidebar-session-row-min-height));
-  padding: 0 10px;
-  border: 1px solid transparent;
+  min-height: var(--sidebar-session-row-min-height);
+  padding: 0 11px;
   color: var(--muted);
   transition:
     border-color var(--duration-fast) ease,
@@ -2567,13 +2621,8 @@ a:is(
     transform var(--duration-fast) ease;
 }
 
-.sidebar-zone-entry .sidebar-recent-session::after {
-  /* The host's transparent border still owns its original layout footprint. */
-  inset: 1px -1px;
-}
-
 .sidebar-zone-entry .sidebar-recent-session__link {
-  gap: 8px;
+  gap: 10px;
   padding: 3px 0;
 }
 
@@ -2603,21 +2652,39 @@ a:is(
 .sidebar-zone-entry .sidebar-recent-session:hover {
   --session-row-bg: var(--session-row-hover-tint, var(--surface-hover));
 
-  --session-row-border: color-mix(in srgb, var(--border) 72%, transparent);
-
   color: var(--text);
 }
 
 .sidebar-zone-entry .sidebar-recent-session.sidebar-recent-session--active {
   --session-row-bg: var(--surface-selected);
 
-  --session-row-border: var(--navigation-selected-border);
-
   color: var(--text-strong);
 }
 
 .sidebar-recent-session.sidebar-recent-session--active:hover {
   --session-row-bg: var(--surface-selected-hover);
+}
+
+/* An open colored row, listed or pinned, keeps its color one step stronger
+   instead of turning neutral. */
+.sidebar-recent-session--colored.sidebar-recent-session--active:not(
+    .sidebar-recent-session--selected
+  ) {
+  --session-row-bg: color-mix(
+    in srgb,
+    var(--session-color) calc(var(--session-color-tint) * 2),
+    transparent
+  );
+}
+
+.sidebar-recent-session--colored.sidebar-recent-session--active:not(
+    .sidebar-recent-session--selected
+  ):hover {
+  --session-row-bg: color-mix(
+    in srgb,
+    var(--session-color) calc(var(--session-color-tint) * 2.4),
+    transparent
+  );
 }
 
 /* Multi-select overrides both tag and active fills, including pinned rows. */
@@ -3707,13 +3774,9 @@ html.openclaw-native-web-chrome
   flex-basis: var(--sidebar-lead);
 }
 
+/* Avatars and state own the lead; the dimmed draft row already reads as a draft. */
 .sidebar-session-indicator > .session-row-draft-indicator:not(:only-child) {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  width: 9px;
-  height: 9px;
-  font-size: 6px;
+  display: none;
 }
 
 .sidebar-session-tool,
@@ -3782,7 +3845,7 @@ html.openclaw-native-web-chrome
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--control-ui-text-xs);
+  font-size: calc(12.5px * var(--control-ui-text-scale));
   line-height: 18px;
   color: var(--session-row-muted, var(--muted));
 }
@@ -3795,7 +3858,7 @@ html.openclaw-native-web-chrome
 .sidebar-recent-session__details-endcap {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
   height: 18px;
   min-width: 0;
@@ -3816,7 +3879,19 @@ html.openclaw-native-web-chrome
       .viewer-facepile,
       .session-row-trail
     ) {
-    padding-inline-end: calc((24px - 12px) / 2);
+    padding-inline-end: calc((24px - 14px) / 2 + 2px);
+  }
+
+  .shell:not(.shell--mobile-nav)
+    .sidebar-recent-session:not(.sidebar-recent-session--child, .sidebar-recent-session--team):has(
+      > .sidebar-child-session-toggle
+    )
+    .sidebar-recent-session__details-endcap:has(
+      .session-row-badges,
+      .viewer-facepile,
+      .session-row-trail
+    ) {
+    padding-inline-end: 4px;
   }
 }
 
@@ -3854,14 +3929,20 @@ html.openclaw-native-web-chrome
   color: var(--danger);
 }
 
-.sidebar-recent-session.sidebar-recent-session--attention-amber .sidebar-recent-session__name,
-.sidebar-recent-session.sidebar-recent-session--attention-amber .sidebar-recent-session__subtitle {
-  color: color-mix(in srgb, var(--warn) 82%, var(--text));
+/* Attention color lives on the leading icon; the title only gains contrast. */
+.sidebar-recent-session:is(
+    .sidebar-recent-session--attention-amber,
+    .sidebar-recent-session--attention-danger,
+    .sidebar-recent-session--unread
+  )
+  .sidebar-recent-session__name {
+  color: var(--text-strong);
 }
 
-.sidebar-recent-session.sidebar-recent-session--attention-danger .sidebar-recent-session__name,
-.sidebar-recent-session.sidebar-recent-session--attention-danger .sidebar-recent-session__subtitle {
-  color: color-mix(in srgb, var(--danger) 86%, var(--text));
+.session-row-trail__snooze {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .sidebar-recent-session__subtitle--narration {

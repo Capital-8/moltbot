@@ -145,8 +145,17 @@ openclaw-session-owner-chip .viewer-avatar__initials {
 }
 
 .sidebar-recent-session .session-owner-chip--row {
+  width: 18px;
+  height: 18px;
   border: 0;
   box-shadow: none;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.sidebar-recent-session .session-glyph--circular .session-glyph__content {
+  width: 18px;
+  height: 18px;
 }
 
 .session-owner-stack {
@@ -294,8 +303,8 @@ openclaw-session-owner-chip .viewer-avatar__initials {
 
 .session-glyph__icon,
 .session-glyph__icon > * {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .session-glyph__icon img {
@@ -304,7 +313,7 @@ openclaw-session-owner-chip .viewer-avatar__initials {
 
 .session-glyph__icon {
   display: inline-flex;
-  color: inherit;
+  color: var(--muted);
 }
 
 /* Keep artwork at its resting size inside a consistent 25px circular ring.
@@ -313,7 +322,7 @@ openclaw-session-owner-chip .viewer-avatar__initials {
   position: absolute;
   inset: -2.5px;
   box-sizing: border-box;
-  border: 1.5px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-top-color: var(--accent);
   border-radius: var(--radius-full);
   pointer-events: none;
@@ -344,7 +353,7 @@ openclaw-session-owner-chip .viewer-avatar__initials {
 }
 
 .session-glyph__trace-track {
-  stroke: color-mix(in srgb, var(--accent) 28%, transparent);
+  stroke: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* The arc covers the same share of its outline as the ring's quarter turn and
@@ -361,11 +370,11 @@ openclaw-session-owner-chip .viewer-avatar__initials {
   z-index: 1;
   top: -2px;
   right: -2px;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: var(--radius-full);
   background: currentColor;
-  box-shadow: 0 0 0 1.5px var(--bg);
+  box-shadow: 0 0 0 1.5px var(--sidebar-bg, var(--bg));
 }
 
 .session-glyph__badge--unread {
@@ -2755,14 +2764,9 @@ td.data-table-key-col {
 
 .session-row-draft-indicator {
   display: inline-grid;
-  width: 18px;
-  height: 18px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
-  font-size: 12px;
+  color: var(--muted);
 }
 
 /* Unread indicator shared by the sidebar recents list, the chat session
@@ -2775,6 +2779,12 @@ td.data-table-key-col {
   border-radius: var(--radius-full);
   background: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.sidebar-recent-session .session-unread-dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: none;
 }
 
 .session-row-aside {
@@ -2793,7 +2803,7 @@ td.data-table-key-col {
   align-items: center;
   gap: 6px;
   color: var(--session-row-muted, var(--muted));
-  font-size: var(--control-ui-text-xs);
+  font-size: calc(11px * var(--control-ui-text-scale));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   transition: opacity var(--duration-fast) ease;
@@ -2804,15 +2814,15 @@ td.data-table-key-col {
 
 .sidebar-session-fork-indicator {
   display: inline-flex;
-  margin-right: 4px;
+  margin-right: 6px;
   color: var(--muted);
   vertical-align: -2px;
 }
 
 .sidebar-session-fork-indicator svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 1.6px;
+  width: 13px;
+  height: 13px;
+  stroke-width: 1.75px;
 }
 
 /* Attribute badges (approval, cloud placement):
@@ -2820,7 +2830,7 @@ td.data-table-key-col {
 .session-row-badges {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
 }
 
@@ -2829,9 +2839,10 @@ td.data-table-key-col {
 .session-row-badge {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  color: var(--muted);
-  font-size: 10px;
+  gap: 3px;
+  color: color-mix(in srgb, var(--muted) 82%, var(--sidebar-bg, var(--bg)));
+  font-size: 11px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2840,30 +2851,10 @@ td.data-table-key-col {
   color: var(--warn);
 }
 
-.session-row-badge--pull-request[data-pull-request-state="open"],
-.session-row-badge--cloud[data-placement-state="active"] {
-  color: var(--ok);
-}
-
-.session-row-badge--pull-request[data-pull-request-state="merged"] {
-  color: var(--pr-merged);
-}
-
-.session-row-badge--pull-request[data-pull-request-state="closed"],
+/* A pull request's icon already carries its state; color is reserved for what needs action. */
 .session-row-badge--cloud[data-placement-state="failed"],
 .session-row-badge--cloud[data-disk-space-status="critical"] {
   color: var(--danger);
-}
-
-.session-row-badge--cloud:is(
-  [data-placement-state="requested"],
-  [data-placement-state="provisioning"],
-  [data-placement-state="syncing"],
-  [data-placement-state="starting"],
-  [data-placement-state="draining"],
-  [data-placement-state="reconciling"]
-) {
-  color: var(--accent);
 }
 
 .session-row-badge--cloud[data-workspace-conflicts],
@@ -2874,7 +2865,7 @@ td.data-table-key-col {
 .session-row-actions {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
+  gap: 0;
 }
 
 /* Shared icon-button box; each surface retains positioning, paint, and state. */
@@ -2897,6 +2888,7 @@ td.data-table-key-col {
 
 .session-action {
   background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, var(--sidebar-bg, var(--bg)));
   opacity: 0;
   pointer-events: none;
   transition:

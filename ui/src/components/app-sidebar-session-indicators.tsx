@@ -34,7 +34,6 @@ export function renderSidebarSessionIndicators(
     sidebarSessionBadgeFacts(
       host().sessionPullRequests,
       readSession(),
-      team(),
       readSession().pullRequest ?? readDisplay?.()?.pullRequest,
     ),
   );
@@ -135,7 +134,9 @@ export function renderSidebarSessionIndicators(
   const hasTrail = createMemo(
     () =>
       snoozed() ||
+      // A finished child's duration is history; the row keeps only live elapsed time.
       (readSession().isChild &&
+        readSession().hasActiveRun &&
         (readSession().runtimeMs != null || readSession().startedAt != null)),
   );
   const metaId = createMemo(() =>
@@ -148,8 +149,13 @@ export function renderSidebarSessionIndicators(
     <span class="sidebar-session-indicator">
       {leadingIndicator}
       {readSession().visibility === "draft" ? (
-        <span class="session-row-draft-indicator" title={t("chat.sessionSharing.draft")}>
-          👻
+        <span
+          class="session-row-draft-indicator"
+          role="img"
+          aria-label={t("chat.sessionSharing.draft")}
+          title={t("chat.sessionSharing.draft")}
+        >
+          {sessionIcon("circleDashed", 14, 1.75)}
         </span>
       ) : undefined}
     </span>
@@ -183,9 +189,15 @@ export function renderSidebarSessionIndicators(
     return hasTrail() ? (
       <span class="session-row-trail" id={metaId()}>
         {snoozed() ? (
-          t("sessionsView.snoozeWakes", {
-            time: formatSessionSnoozeWakeTime(readSession().snoozedUntil!),
-          })
+          <span
+            class="session-row-trail__snooze"
+            title={t("sessionsView.snoozeWakes", {
+              time: formatSessionSnoozeWakeTime(readSession().snoozedUntil!),
+            })}
+          >
+            {sessionIcon("moon", 13, 1.75)}
+            {formatSessionSnoozeWakeTime(readSession().snoozedUntil!, new Date(), true)}
+          </span>
         ) : currentSession.runtimeMs != null ? (
           currentSession.hasActiveRun ? (
             <ElapsedTime startMs={currentSession.runtimeSampledAt! - currentSession.runtimeMs} />
@@ -217,6 +229,7 @@ export function renderSidebarSessionIndicators(
             prop:sessionKey={readSession().key}
             prop:excludeIdentities={renderedIdentities() ?? EMPTY_VIEWER_IDENTITIES}
             prop:maxVisible={3}
+            prop:overflowInSlots={true}
             variant="session"
           />
           {team() ? originIndicators : undefined}
