@@ -38,6 +38,12 @@ retrying that rejection. Local HTTP readiness and runtime version/build identity
 can verify activation instead, with an RPC authentication warning recorded in
 the update result. This does not change Gateway authentication or pairing.
 
+Linux managed updates run in a separate user service and slice, so an agent exec's
+descendant cleanup, Gateway restarts, and the Gateway unit's memory limit do not
+own the handoff. Triage remains attached to the Gateway service. The installed
+updater must contain this change; downloading a newer candidate cannot repair an
+older launcher's process lifetime.
+
 An external supervisor's accepted native update (`update migrate`, then
 `update finish`) is recorded in update history as a succeeded run that started
 at migration. A later recorded update therefore lets `openclaw update cleanup`

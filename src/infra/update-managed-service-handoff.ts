@@ -11,7 +11,6 @@ import path from "node:path";
 import { formatInstallationTargetCommand } from "../cli/installation-target-format.js";
 import { resolveConfigPath, resolveStateDir } from "../config/paths.js";
 import { resolveServiceManagerEnv } from "../daemon/service-process-env.js";
-import { resolveSystemdServiceName } from "../daemon/systemd-service-files.js";
 import { forceKillChildProcessTree } from "../process/child-process-tree.js";
 import {
   GatewayDrainingError,
@@ -21,7 +20,6 @@ import { isPidAlive } from "../shared/pid-alive.js";
 import { SKIPPED_UPDATE_OUTCOMES } from "../shared/update-outcome.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
-import { resolveExecutableFromPathEnv } from "./executable-path.js";
 import { readActiveGatewayLockIdentity } from "./gateway-lock.js";
 import { readGatewayOwnerLease } from "./gateway-owner-lease.js";
 import { resolveInstallationTarget } from "./installation-target-context.js";
@@ -64,6 +62,11 @@ import {
   prepareManagedHandoffLeaseDatabaseIdentity,
 } from "./update-managed-service-handoff-database.js";
 import { describeManagedHandoffBlocker } from "./update-managed-service-handoff-diagnostics.js";
+import {
+  MANAGED_HANDOFF_BOOTSTRAP_SOURCE,
+  resolveSystemdHandoffLauncher,
+  writeSystemdHandoffEnvironment,
+} from "./update-managed-service-handoff-launcher.js";
 import { MANAGED_HANDOFF_LEASE_SOURCE } from "./update-managed-service-handoff-lease-source.js";
 import {
   prepareManagedHandoffLeaseStore,
@@ -106,19 +109,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const params = JSON.parse(fs.readFileSync(process.argv[2], "utf-8"));
-const requiresRequesterAcknowledgement = params.requester?.authorizationSource?.startsWith("profile:") === true;
-
-function appendLog(line) {
-  try {
-    fs.mkdirSync(path.dirname(params.logPath), { recursive: true, mode: 0o700 });
-    fs.appendFileSync(params.logPath, "[" + new Date().toISOString() + "] " + line + "\n", {
-      mode: 0o600,
-    });
-  } catch {
-    // Best effort only.
-  }
-}
+${MANAGED_HANDOFF_BOOTSTRAP_SOURCE}
 
 const { OPENCLAW_STATE_SCHEMA_SQL, assertOpenClawStateWriteAllowed, prepareManagedHandoffLeaseStore, extractSqliteTableSchema, readRestartSentinelRowSync, writeRestartSentinelRowIfRevisionSync, resolveImmutableSqliteFileUri, resolveUpdateRestartNoticeMeta, shouldPublishUpdateRestartNotice, procCgroupMembershipMatches } =
   require("./runtime/${MANAGED_HANDOFF_RUNTIME_ENTRY}");
@@ -1142,6 +1133,7 @@ async function spawnManagedServiceUpdateHandoff(
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), MANAGED_SERVICE_UPDATE_HANDOFF_TEMP_PREFIX));
   const scriptPath = path.join(dir, "handoff.cjs");
   const paramsPath = path.join(dir, "handoff.json");
+  const environmentPath = path.join(dir, "handoff.env");
   const metaPath = path.join(dir, "sentinel-meta.json");
   const triageInputPath = path.join(dir, "update-failure.json");
   const installationTarget = resolveInstallationTarget(serviceEnv);
@@ -1189,39 +1181,22 @@ async function spawnManagedServiceUpdateHandoff(
       ...(params.foregroundOrigin ? { foregroundOrigin: params.foregroundOrigin } : {}),
     },
   };
-  let spawnCommand = handoffNodeExecutable;
   const spawnArgs = [...runtimeArgs, scriptPath, paramsPath];
-  let scopeUnit: string | undefined;
-  let systemdRunPath: string | undefined;
+  let systemdScope: ReturnType<typeof resolveSystemdHandoffLauncher> | undefined;
   if (
     !params.foregroundOrigin &&
     params.supervisor === "systemd" &&
     !owner.operatorRestartWarning
   ) {
-    const systemdRun = resolveExecutableFromPathEnv(
-      "systemd-run",
-      [serviceEnv.PATH ?? "", "/usr/bin", "/bin"].join(path.delimiter),
+    systemdScope = resolveSystemdHandoffLauncher({
       serviceEnv,
-    );
-    if (!systemdRun) {
-      throw new Error("systemd-run is required to launch a transient user scope");
-    }
-    systemdRunPath = systemdRun;
-    const normalized = params.handoffId.trim().replace(/[^A-Za-z0-9_.:@-]+/gu, "-");
-    const suffix =
-      normalized.replace(/^-+|-+$/gu, "").slice(0, 80) || `${process.pid}-${Date.now()}`;
-    scopeUnit = `openclaw-${params.action ? "triage" : "update"}-${suffix}.scope`;
-    spawnArgs.unshift(
-      "--user",
-      "--scope",
-      "--collect",
-      `--unit=${scopeUnit}`,
-      ...(params.action
-        ? [`--property=PartOf=${resolveSystemdServiceName(serviceEnv)}.service`]
-        : []),
-      spawnCommand,
-    );
-    spawnCommand = systemdRun;
+      handoffId: params.handoffId,
+      triage: Boolean(params.action),
+      directory: dir,
+      environmentPath,
+      executable: handoffNodeExecutable,
+      args: spawnArgs,
+    });
   }
   const stateDatabasePath = resolveOpenClawStateSqlitePath(serviceEnv);
   const preparedEnv = resolveManagedHandoffCommandEnv(serviceEnv, metaPath, metaFile.meta.runId);
@@ -1233,6 +1208,7 @@ async function spawnManagedServiceUpdateHandoff(
   const env = params.devTarget ? applyDevUpdateTargetEnv(readyEnv, params.devTarget) : readyEnv;
 
   const helperParams = {
+    ...(systemdScope && !params.action ? { environmentPath } : {}),
     operatorRestartWarning: owner.operatorRestartWarning,
     runId: metaFile.meta.runId,
     beforePark: Boolean(params.beforePark),
@@ -1242,8 +1218,8 @@ async function spawnManagedServiceUpdateHandoff(
     runtimeArgs,
     action: params.action?.kind ?? "update",
     failure: params.action?.failure,
-    scopeUnit,
-    systemdRun: systemdRunPath,
+    scopeUnit: systemdScope?.unit,
+    systemdRun: systemdScope?.command,
     parentPid,
     parentStartIdentity,
     parentExitTimeoutMs: owner.parentExitTimeoutMs,
@@ -1293,6 +1269,7 @@ async function spawnManagedServiceUpdateHandoff(
     sensitivePaths: [
       scriptPath,
       paramsPath,
+      environmentPath,
       metaPath,
       triageInputPath,
       path.join(dir, "terminal-result.json"),
@@ -1316,6 +1293,9 @@ async function spawnManagedServiceUpdateHandoff(
     owner.releaseRequesterObserver?.();
   };
   try {
+    if (helperParams.environmentPath) {
+      await writeSystemdHandoffEnvironment(helperParams.environmentPath, env);
+    }
     helperParams.sensitivePaths.push(...stageManagedHandoffRuntime(dir));
     await fs.writeFile(scriptPath, `${HANDOFF_SCRIPT}\n`, { mode: 0o700 });
     await fs.writeFile(paramsPath, `${JSON.stringify(helperParams, null, 2)}\n`, { mode: 0o600 });
@@ -1327,12 +1307,15 @@ async function spawnManagedServiceUpdateHandoff(
     if (params.foregroundOrigin && isGatewayRestartDraining()) {
       throw new GatewayDrainingError();
     }
-    child = spawn(spawnCommand, spawnArgs, {
+    const spawnOptions = {
       cwd: dir,
       env,
       detached: true,
-      stdio: ["pipe", "pipe", "ignore"],
-    });
+      stdio: ["pipe", "pipe", "ignore"] as const,
+    };
+    child = systemdScope
+      ? spawn(systemdScope.command, systemdScope.args, spawnOptions)
+      : spawn(handoffNodeExecutable, spawnArgs, spawnOptions);
     owner.launcher = child;
     owner.closed = observeManagedServiceUpdateHandoffClose(owner, child);
     child.stdin.on("error", () => child.stdin.destroy()).once("close", () => child.stdin.destroy());
