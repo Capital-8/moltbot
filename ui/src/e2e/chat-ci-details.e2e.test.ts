@@ -176,6 +176,7 @@ async function setup(
     defer?: boolean;
     automationJobs?: CronJob[];
     readOnly?: boolean;
+    namedSessionKey?: string;
     exactSelection?: { sessionKey: string; agentId: string; sessionId: string };
   } = {},
 ) {
@@ -187,6 +188,7 @@ async function setup(
   });
   const page = await context.newPage();
   const selected = options.exactSelection;
+  const namedSessionKey = options.namedSessionKey ?? automationSessionKey;
   const pairedKeys = selected ? ["global", `agent:${selected.agentId}:global`] : [];
   const literal = selected && {
     ok: true,
@@ -194,7 +196,7 @@ async function setup(
     agentId: selected.agentId,
   };
   const gateway = await installMockGateway(page, {
-    sessionKey: selected?.sessionKey ?? automationSessionKey,
+    sessionKey: selected?.sessionKey ?? namedSessionKey,
     defaultAgentId: selected?.agentId,
     sessionScope: selected ? "global" : undefined,
     sessions: selected
@@ -208,7 +210,7 @@ async function setup(
         }))
       : [
           {
-            key: automationSessionKey,
+            key: namedSessionKey,
             sessionId: automationSessionId,
             label: "CI review",
             kind: "direct",
@@ -258,7 +260,7 @@ async function setup(
     }
     await page.goto(new URL(pathname, suite.server.baseUrl).toString());
   } else {
-    await page.goto(controlUiSessionUrl(suite.server.baseUrl, automationSessionKey));
+    await page.goto(controlUiSessionUrl(suite.server.baseUrl, namedSessionKey));
   }
   if (selected) {
     await expect
@@ -303,7 +305,8 @@ async function setup(
   if (options.defer) {
     await gateway.deferNext(DETAILS_METHOD);
   }
-  const sessionKey = selected?.sessionKey ?? (await waitForWatchedSessionKey(gateway));
+  const sessionKey =
+    selected?.sessionKey ?? (await waitForWatchedSessionKey(gateway, options.namedSessionKey));
   if (selected) {
     await expect
       .poll(
@@ -347,7 +350,7 @@ async function setup(
           }
         : {}),
     });
-    if (selected) {
+    if (selected || options.namedSessionKey) {
       await openDetailsPullRequests(page);
     }
     await page.locator(".chat-pr__actions-trigger, .chat-pr-mobile__row").first().waitFor();
@@ -398,9 +401,9 @@ suite.define(() => {
       await openDesktopPullRequestPage(page.locator(".chat-pr").first(), "checks");
     }
     const checks = await gateway.waitForRequest(DETAILS_METHOD);
-    expect.soft(checks.params).toMatchObject({
+    expect.soft(checks.params).toEqual({
       sessionKey,
-      agentId,
+      ...(sessionKey === "global" ? { agentId } : {}),
       owner: "openclaw",
       repo: "openclaw",
       number: 123456,
@@ -432,6 +435,31 @@ suite.define(() => {
       message: "Synthetic automation request captured",
     });
     await page.getByText("Synthetic automation request captured", { exact: false }).waitFor();
+  });
+
+  it("keeps CI details readable for a retained named session whose agent left the roster", async () => {
+    const sessionKey = "agent:retired:dashboard:ci-proof";
+    const { page, gateway } = await setup({ namedSessionKey: sessionKey });
+    const pane = nativePane(page);
+    await expect
+      .poll(() =>
+        pane.evaluate((element) => {
+          const current = element as HTMLElement & {
+            state?: Pick<ChatPageHost, "sessionKey" | "currentSessionId" | "agentsList">;
+          };
+          return {
+            sessionKey: current.state?.sessionKey,
+            sessionId: current.state?.currentSessionId,
+            agents: current.state?.agentsList?.agents.map((agent) => agent.id),
+          };
+        }),
+      )
+      .toEqual({ sessionKey, sessionId: automationSessionId, agents: ["main"] });
+    await pane.locator(".chat-group.assistant").getByText(historyText, { exact: true }).waitFor();
+    await openDesktopPullRequestPage(page.locator(".chat-pr").first(), "checks");
+    const checks = await gateway.waitForRequest(DETAILS_METHOD);
+    expect(checks.params).toEqual({ sessionKey, ...prTarget, headSha });
+    await expandLinuxJob(page);
   });
 
   it("saves selected-PR automation toggles and reconciles an uncertain write", async () => {

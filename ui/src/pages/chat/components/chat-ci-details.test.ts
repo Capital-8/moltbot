@@ -59,6 +59,21 @@ function mount(
   return { element, request: harness.request };
 }
 
+it("keeps the existing owner-qualified request for a bare named chat", async () => {
+  const { element, request } = mount(Promise.resolve(details("Bare named check")), {
+    sessionKey: "notes",
+    agentId: "work",
+  });
+  await waitForSolid(() => expect(element.textContent).toContain("Bare named check"));
+  expect(request.mock.calls[0]?.[1]).toEqual({
+    sessionKey: "agent:work:notes",
+    owner: pullRequest.owner,
+    repo: pullRequest.repo,
+    number: pullRequest.number,
+    headSha: pullRequest.headSha,
+  });
+});
+
 it("shows a delayed read, its failure, and a successful explicit retry", async () => {
   const read = createDeferred<ControlUiSessionPullRequestCheckDetails>();
   const { element, request } = mount(read.promise);

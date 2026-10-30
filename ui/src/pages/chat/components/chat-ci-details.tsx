@@ -24,6 +24,10 @@ import { formatUiError } from "../../../lib/format-error.ts";
 import { createGatewayConnectionLifecycle } from "../../../lib/gateway-connection-lifecycle.ts";
 import { resolveSafeExternalUrl } from "../../../lib/open-external-url.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
+import {
+  isUiGlobalSessionKey,
+  scopedSessionArtifactKey,
+} from "../../../lib/sessions/session-key.ts";
 import { defineSolidBridge, type SolidBridgeElement } from "../../../lib/solid-bridge.ts";
 import { createCiDisclosure, type ChatCiDisclosureProps } from "./chat-ci-disclosure.ts";
 import { subscribeCiGatewayUpdates } from "./chat-ci-gateway-updates.ts";
@@ -246,9 +250,13 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
     clearTimeout(refreshTimer);
     const controller = new AbortController();
     const client = scope.client;
+    // Qualified reads remain key-only when their agent is no longer configured.
+    const rawGlobal = isUiGlobalSessionKey(host.sessionKey);
     const params = {
-      sessionKey: host.sessionKey,
-      ...(host.agentId !== undefined ? { agentId: host.agentId } : {}),
+      sessionKey: rawGlobal
+        ? host.sessionKey.trim()
+        : scopedSessionArtifactKey(host.sessionKey, host.agentId),
+      ...(rawGlobal && host.agentId !== undefined ? { agentId: host.agentId } : {}),
       owner: pr.owner,
       repo: pr.repo,
       number: pr.number,

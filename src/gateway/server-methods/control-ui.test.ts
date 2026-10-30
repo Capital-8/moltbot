@@ -855,6 +855,39 @@ describe("controlUi.sessionPullRequests.checks", () => {
     },
   );
 
+  it("reads retained qualified CI details without admitting an explicit retired owner", async () => {
+    await withOpenClawTestState({ label: "ci-details-retired-owner" }, async () => {
+      const cfg: OpenClawConfig = { agents: { entries: { main: {} } } };
+      setRuntimeConfigSnapshot(cfg);
+      const sessionKey = "agent:retired:ci-details";
+      await replaceSessionEntry(
+        { agentId: "retired", sessionKey },
+        { sessionId: "retained-ci", updatedAt: 1 },
+      );
+      const load = vi
+        .spyOn(checkDetails, "loadControlUiSessionPullRequestChecks")
+        .mockResolvedValue(result);
+      const { respond, send } = fixture("sessionPullRequests.checks");
+      await send(
+        { ...params, sessionKey },
+        runtime(() => cfg),
+      );
+      expect(load).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ ...params, sessionKey, agentId: "retired" }),
+        expect.objectContaining({ sessionScope: expect.stringContaining("retained-ci") }),
+      );
+      expectReply(respond, result);
+      respond.mockClear();
+      load.mockClear();
+      await send(
+        { ...params, sessionKey, agentId: "retired" },
+        runtime(() => cfg),
+      );
+      expect(load).not.toHaveBeenCalled();
+      expectUnavailable(respond);
+    });
+  });
+
   it("pins qualified global session ownership", async () => {
     await withOpenClawTestState({ label: "ci-details-global" }, async () => {
       const cfg: OpenClawConfig = {
