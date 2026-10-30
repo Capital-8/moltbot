@@ -104,6 +104,26 @@ describe("composer border width control", () => {
     expect(shell.getBoundingClientRect().width).toBe(1081);
   });
 
+  it("avoids synchronous geometry reads for unchanged composer props", async () => {
+    await page.viewport(1440, 900);
+    const f = fixture();
+    await settled();
+    const read = vi.spyOn(f.input(), "getBoundingClientRect");
+    const transcript = f.props.getTranscriptElement?.();
+    const style = vi.spyOn(window, "getComputedStyle");
+    f.props.getTranscriptElement = () => transcript ?? null;
+    f.draw();
+    expect(read).not.toHaveBeenCalled();
+    expect(style.mock.calls.some(([element]) => element === transcript)).toBe(false);
+    f.setWidth("900px");
+    expect(read).toHaveBeenCalled();
+    await settled();
+    f.edge().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(f.onWidthChange).toHaveBeenCalledWith("880px");
+    read.mockRestore();
+    style.mockRestore();
+  });
+
   it("resets width to the opening preference and leaves no observer-owned handle after unmount", async () => {
     await page.viewport(1440, 900);
     const f = fixture();

@@ -1,4 +1,4 @@
-import { onSettled } from "solid-js";
+import { createMemo, onSettled } from "solid-js";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { createLayoutMeasurement } from "../../../lib/reactive/layout-measurement.ts";
 import { createPointerDrag } from "../../../lib/reactive/pointer-drag.ts";
@@ -28,7 +28,7 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
     }
     return parent;
   };
-  const availableWidth = (current: ComposerWidthOptions) => {
+  const availableWidth = (transcript: HTMLElement | null | undefined) => {
     const parent = region();
     const style = getComputedStyle(parent);
     const shellStyle = getComputedStyle(shell()!);
@@ -40,14 +40,13 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
       Number.parseFloat(style.paddingLeft) -
       Number.parseFloat(style.paddingRight) -
       2 * inset;
-    const transcript = current.getTranscriptElement?.();
     if (transcript?.isConnected) {
       available = Math.min(available, transcriptColumnWidth(transcript));
     }
     return Math.max(0, available);
   };
   const clampWidth = (value: number) => {
-    const available = availableWidth(options());
+    const available = availableWidth(options().getTranscriptElement?.());
     return Math.round(Math.max(Math.min(minimumWidth, available), Math.min(available, value)));
   };
   const writable = () => !retired && edge?.isConnected && Boolean(options().onComposerWidthChange);
@@ -58,13 +57,13 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
       options().onComposerWidthChange?.(value);
     }
   };
-  const measure = (current: ComposerWidthOptions) => {
+  const measure = (transcript: HTMLElement | null | undefined) => {
     const host = shell();
     const field = input();
     if (retired || !edge?.isConnected || !host || !field) {
       return;
     }
-    const available = availableWidth(current);
+    const available = availableWidth(transcript);
     const inputBox = field.getBoundingClientRect();
     const shellBox = host.getBoundingClientRect();
     edge.style.top = `${inputBox.top - shellBox.top + 18}px`;
@@ -78,28 +77,32 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
     edge.setAttribute("aria-valuemin", String(Math.min(minimumWidth, available, renderedWidth)));
     edge.setAttribute("aria-valuemax", String(Math.round(available)));
   };
-  const schedule = createLayoutMeasurement(
+  // Callback replacements and transcript row updates do not change edge geometry.
+  const geometry = createMemo(
     () => {
-      // Read each reactive prop here; callers may return a stable props object.
-      const { chatMessageMaxWidth, onComposerWidthChange, getTranscriptElement } = options();
-      return { chatMessageMaxWidth, onComposerWidthChange, getTranscriptElement };
+      const current = options();
+      return [current.chatMessageMaxWidth, current.getTranscriptElement?.()] as const;
     },
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] },
+  );
+  const schedule = createLayoutMeasurement(
+    geometry,
     (next) => {
       if (!next) {
         return;
       }
-      const width = next.chatMessageMaxWidth ?? undefined;
+      const width = next[0] ?? undefined;
       if (width !== lastWidth) {
         baseline = width;
         refreshMinimum = true;
       }
       lastWidth = width;
-      measure(next);
+      measure(next[1]);
     },
     {
       targets: (next) =>
-        [shell(), input(), shell() && region(), next?.getTranscriptElement?.()].filter(
-          (node): node is Element => Boolean(node),
+        [shell(), input(), shell() && region(), next?.[1]].filter((node): node is Element =>
+          Boolean(node),
         ),
       changeTiming: "sync",
     },
