@@ -24,7 +24,7 @@ const cleanups: Array<() => void> = [];
 beforeEach(installModelPickerLayout);
 afterEach(() => {
   panelLoad.release();
-  for (const cleanup of cleanups.splice(0).reverse()) {
+  for (const cleanup of cleanups.splice(0).toReversed()) {
     cleanup();
   }
 });
@@ -52,6 +52,18 @@ it("focuses and retains the real input before result code arrives without steali
   const closed = mountPicker();
   expect(panelLoad.started).not.toHaveBeenCalled();
   expect(closed.search.isConnected).toBe(true);
+  closed.trigger.focus();
+  closed.trigger.dispatchEvent(new PointerEvent("pointerenter", { bubbles: true }));
+  closed.trigger.dispatchEvent(
+    new PointerEvent("pointerdown", { button: 2, isPrimary: true, bubbles: true }),
+  );
+  expect(panelLoad.started).not.toHaveBeenCalled();
+  closed.trigger.dispatchEvent(
+    new PointerEvent("pointerdown", { button: 0, isPrimary: true, bubbles: true }),
+  );
+  await vi.waitFor(() => expect(panelLoad.started).toHaveBeenCalledOnce());
+  expect(closed.details.open).toBe(false);
+  expect(document.activeElement).toBe(closed.trigger);
   closed.trigger.click();
   expect(closed.details.open).toBe(true);
   expect(document.activeElement).toBe(closed.search);

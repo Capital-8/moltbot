@@ -1627,6 +1627,17 @@ async function setupColdFirstModelPicker(page: Page) {
       }
     };
     requestAnimationFrame(recordReady);
+    const recordPointerDown = (event: PointerEvent) => {
+      if (
+        event.button === 0 &&
+        event.target instanceof Element &&
+        event.target.closest(triggerSelector)
+      ) {
+        performance.mark("model-picker:native-pointerdown", { startTime: event.timeStamp });
+        document.removeEventListener("pointerdown", recordPointerDown, true);
+      }
+    };
+    document.addEventListener("pointerdown", recordPointerDown, true);
     const recordClick = (event: MouseEvent) => {
       const trigger = event.target instanceof Element && event.target.closest(triggerSelector);
       if (trigger) {
@@ -1682,6 +1693,8 @@ async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence>
   );
   const phase = await page.evaluate(() => {
     const readyAt = performance.getEntriesByName("model-picker:first-ready")[0]?.startTime;
+    const pointerDownAt = performance.getEntriesByName("model-picker:native-pointerdown")[0]
+      ?.startTime;
     const clickedAt = performance.getEntriesByName("model-picker:native-click")[0]?.startTime;
     const observedAt = performance.getEntriesByName("model-picker:observed-click")[0]?.startTime;
     const focusedAt = performance.getEntriesByName("model-picker:native-search-focus")[0]
@@ -1691,6 +1704,7 @@ async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence>
     )[0]?.startTime;
     if (
       readyAt === undefined ||
+      pointerDownAt === undefined ||
       clickedAt === undefined ||
       observedAt === undefined ||
       focusedAt === undefined ||
@@ -1700,12 +1714,15 @@ async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence>
     }
     return {
       firstReadyAtMs: readyAt,
+      nativePointerDownAtMs: pointerDownAt,
       nativeClickAtMs: clickedAt,
       nativeClickObservedAtMs: observedAt,
       nativeSearchFocusAtMs: focusedAt,
       nativeClickToSearchFocusMs: focusedAt - clickedAt,
       rafObservedFirstVisibleOptionAtMs: firstOptionAt,
       nativeClickToRafObservedFirstVisibleOptionMs: firstOptionAt - clickedAt,
+      nativePointerDownToRafObservedFirstVisibleOptionMs: firstOptionAt - pointerDownAt,
+      nativePointerDownToSearchFocusMs: focusedAt - pointerDownAt,
       firstReadyToActionMs: clickedAt - readyAt,
     };
   });

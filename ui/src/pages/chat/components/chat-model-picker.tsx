@@ -100,6 +100,12 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
   };
   // Retain the panel after first use so search and provider expansion survive dismissal.
   const [choicesMounted, mountChoices] = createSignal(false);
+  const prepareChoices = () => {
+    if (!params.disabled && !details?.open) {
+      // Activation intent evaluates the prefetched code; the open panel owns errors and retry.
+      void ChatModelPickerPanel.preload().catch(() => undefined);
+    }
+  };
   const pickerOverlay = createChatPickerOverlay((target) => {
     search.setOpen(target.open);
     params.onOpenChange?.(target.open);
@@ -198,6 +204,21 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
           aria-disabled={params.disabled ? "true" : "false"}
           aria-description={params.disabledReason}
           title={params.disabledReason?.trim() || undefined}
+          onPointerDown={(event) => {
+            if (event.button === 0 && event.isPrimary && !event.defaultPrevented) {
+              prepareChoices();
+            }
+          }}
+          onKeyDown={(event) => {
+            if (
+              !event.defaultPrevented &&
+              !event.isComposing &&
+              event.keyCode !== 229 &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              prepareChoices();
+            }
+          }}
         >
           {state().modelToolsUnavailable ? (
             <openclaw-tooltip prop:content={t("chat.modelControls.chatOnlyHelp")}>
