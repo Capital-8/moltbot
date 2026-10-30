@@ -287,7 +287,7 @@ export function createTeamScaleHistoryFixture(options: {
     options.longSessionScenario === "single-run" ||
     options.longSessionScenario === "direct-run"
   ) {
-    const runId = "long-session-single-run";
+    const singleRunId = "long-session-single-run";
     const historyMessages = messageIds.map((id, index) => {
       const first = index === 0;
       const last = index === messageIds.length - 1;
@@ -299,7 +299,7 @@ export function createTeamScaleHistoryFixture(options: {
         __openclaw: {
           id,
           seq: index + 1,
-          ...(first ? { idempotencyKey: `${runId}:user` } : { runId }),
+          ...(first ? { idempotencyKey: `${singleRunId}:user` } : { runId: singleRunId }),
           ...(first && options.sender
             ? {
                 senderIdentity: options.sender.identity,

@@ -738,7 +738,7 @@ describe("chat transcript rendering", () => {
     fixture.rerender();
     toggleTranscriptSearch(props.paneId);
     flush();
-    searchFor(fixture.searchContainer, "Find this checkpoint");
+    await searchFor(fixture.searchContainer, "Find this checkpoint");
     await flushDeferredRowPrune();
     expect(thread.scrollTop).toBe(0);
     expect(thread.textContent).toContain("Find this checkpoint");

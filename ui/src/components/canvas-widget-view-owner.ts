@@ -24,6 +24,7 @@ import {
 } from "../lib/widget-sandbox-host.ts";
 import { registerWidgetThemeFrame, postWidgetTheme } from "../lib/widget-theme.ts";
 import { forwardChatWheelToTranscript } from "../pages/chat/chat-scroll-input.ts";
+import type { CanvasWidgetViewProps } from "./canvas-widget-view.types.ts";
 import { allowWidgetPrompt, dispatchWidgetPrompt } from "./mcp-app-security.ts";
 
 type WidgetClient = NonNullable<ApplicationContext["gateway"]["snapshot"]["client"]>;
@@ -121,18 +122,6 @@ type ViewBinding = CanvasWidgetViewBinding & {
 const reportedRuntimeErrors = new Set<string>();
 // Fresh renders ping the agent; old restored history only shows the notice.
 const WIDGET_RUNTIME_ERROR_REPORT_WINDOW_MS = 10 * 60_000;
-
-export type CanvasWidgetViewProps = {
-  docId: string;
-  sessionKey: string;
-  messageTimestamp?: number;
-  title: string;
-  preferredHeight?: number;
-  onHeightChange?: (height: number | null, settled?: boolean) => number | undefined;
-  connectionGeneration: number;
-  presentationActive: boolean;
-  allowScripts: boolean;
-};
 
 export function createCanvasWidget(
   props: CanvasWidgetViewProps,
@@ -754,8 +743,6 @@ export function createCanvasWidget(
     clearView,
     syncSandbox,
     syncFrameError,
-    setFrame: (frame: HTMLIFrameElement) => {
-      frameElement = frame;
-    },
+    setFrame: (frame: HTMLIFrameElement) => (frameElement = frame),
   };
 }

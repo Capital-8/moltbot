@@ -217,9 +217,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
         // A fast scroll reaching new rows still needs them before this paint.
         const defer = redraw && !(moved || this.canAutoFollow() || offsetState.hasPendingAnchor);
         this.presentation.commitChange(
-          () => {
-            (redraw ? (this.renderPreviousRows ?? invalidate) : invalidate)();
-          },
+          () => (redraw ? (this.renderPreviousRows ?? invalidate) : invalidate)(),
           defer &&
             (offsetState.measuringOffset
               ? this.renderer.coversViewport(view.calculateRange())

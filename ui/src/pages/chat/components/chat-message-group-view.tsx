@@ -66,9 +66,7 @@ function MessageActionsRow(props: {
   let owner: HTMLDivElement | undefined;
   return (
     <div
-      ref={(element) => {
-        owner = element;
-      }}
+      ref={(element) => (owner = element)}
       class={props.class ?? "chat-group-footer-actions"}
       data-message-actions-for={props.messageKey}
     >
