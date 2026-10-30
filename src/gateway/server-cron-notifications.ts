@@ -581,7 +581,8 @@ export function dispatchGatewayCronFinishedNotifications(params: {
   if (
     params.job &&
     params.resolveCronAgent &&
-    (params.evt.status === "skipped" || (params.evt.status === "error" && params.runNotStarted))
+    ((params.evt.status === "skipped" && params.evt.triggerFired !== false) ||
+      (params.evt.status === "error" && params.runNotStarted))
   ) {
     const job = params.job;
     const resolveCronAgent = params.resolveCronAgent;

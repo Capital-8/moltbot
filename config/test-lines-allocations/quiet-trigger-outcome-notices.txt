@@ -1,0 +1,2 @@
+20
+# Keep false-trigger skips quiet at the scheduler event and notification boundaries.

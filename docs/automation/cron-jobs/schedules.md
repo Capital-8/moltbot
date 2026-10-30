@@ -324,7 +324,7 @@ old evaluation's state updates and `once` completion, including after a Gateway
 restart. The completed payload still retains its run history. An unchanged
 watcher keeps its usual `once` behavior; renaming it does not reset its condition.
 
-`fire: false` persists evaluation state and counters, then reschedules without creating run history. These quiet evaluations count as completed occurrences during restart catch-up. If a fired payload run fails, the returned `state` is **not** persisted — the next evaluation sees the previous state and can fire again, so write scripts as read-only checks and keep actions in the payload. Trigger schedules have a built-in minimum interval of 30 seconds, preserved through maintenance and Gateway restarts. Each evaluation has a 30-second wall-clock budget and up to 5 tool calls.
+`fire: false` persists evaluation state and counters, then reschedules without creating run history. A manual due run reports the skipped result in its run history but keeps the conversation quiet: no failure notice, unread change, or recency update. These quiet evaluations count as completed occurrences during restart catch-up. If a fired payload run fails, the returned `state` is **not** persisted — the next evaluation sees the previous state and can fire again, so write scripts as read-only checks and keep actions in the payload. Trigger schedules have a built-in minimum interval of 30 seconds, preserved through maintenance and Gateway restarts. Each evaluation has a 30-second wall-clock budget and up to 5 tool calls.
 
 If condition-evaluation capacity is busy, the unevaluated occurrence stays due
 through the scheduler's existing admission deferral rather than counting as a quiet check.
