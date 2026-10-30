@@ -16,6 +16,7 @@ import type {
   UpdateCandidatePluginEntry,
   UpdateCandidatePluginTreePlan,
 } from "./update-candidate-plugin-tree-schema.js";
+import type { CapturedRuntimeFile, ObservedPluginTree } from "./update-candidate-plugin-tree.js";
 import {
   relocateRuntimeSymlink,
   resolveRuntimeFileRelocator,
@@ -33,7 +34,9 @@ const isLinkUnsupported = (error: unknown) =>
  * filesystem copy-up) must match inventory before this generation can be used.
  */
 export async function linkUpdateCandidatePluginTrees(
-  plan: UpdateCandidatePluginTreePlan,
+  plan:
+    | UpdateCandidatePluginTreePlan
+    | (ObservedPluginTree<CapturedRuntimeFile> & { captured: true }),
   params: {
     targetStateDir: string;
     candidateRoot: string;
@@ -42,7 +45,9 @@ export async function linkUpdateCandidatePluginTrees(
 ): Promise<{ linked: number; copied: number } | { unusableReason: string }> {
   const targets = resolveUpdateCandidatePluginTreeTargets(plan, params);
   const { privateRoot, candidateRoot, hostLinks, relocations, destinationFor } = targets;
-  const pluginFiles = collectPluginSafetyInspectedFiles(plan.entries);
+  // Every captured file is already independent; selecting copy exceptions would reread live input.
+  const pluginFiles =
+    "captured" in plan ? new Set<string>() : collectPluginSafetyInspectedFiles(plan.entries);
   params.assertCurrent();
   await fs.mkdir(privateRoot, { recursive: true, mode: 0o700 });
   const preparedDirectories = new Map<string, Promise<string | undefined>>([
@@ -80,7 +85,7 @@ export async function linkUpdateCandidatePluginTrees(
   const counts = { linked: 0, copied: 0 };
   let unusableReason: string | undefined;
   const directories: Array<Extract<UpdateCandidatePluginEntry, { kind: "directory" }>> = [];
-  const materialize = async (entry: UpdateCandidatePluginEntry) => {
+  const materialize = async (entry: UpdateCandidatePluginEntry | CapturedRuntimeFile) => {
     const destination = destinationFor(entry.path);
     const directory = entry.kind === "directory" ? destination : path.dirname(destination);
     // A file may precede its parent's inventory entry; reuse only completed creation.
@@ -102,6 +107,14 @@ export async function linkUpdateCandidatePluginTrees(
         path.resolve(path.dirname(destination), await fs.readlink(destination)),
         { privateRoot, candidateRoot },
       );
+    } else if (!("sha256" in entry)) {
+      const relocate = resolveRuntimeFileRelocator(destination);
+      if (relocate) {
+        await fs.chmod(destination, entry.mode | 0o600);
+        await relocate(destination, entry.path, destination, relocations, params.assertCurrent);
+        await fs.chmod(destination, entry.mode);
+      }
+      counts.copied += 1;
     } else {
       let copy = pluginFiles.has(entry.path) || Boolean(resolveRuntimeFileRelocator(destination));
       if (!copy) {
@@ -149,7 +162,8 @@ export async function linkUpdateCandidatePluginTrees(
       }
     }
   };
-  const files: Array<Extract<UpdateCandidatePluginEntry, { kind: "file" }>> = [];
+  const files: Array<Extract<UpdateCandidatePluginEntry, { kind: "file" }> | CapturedRuntimeFile> =
+    [];
   const drain = async () => {
     await runUpdateCandidatePluginTasks(files.map((entry) => () => materialize(entry)));
     files.length = 0;

@@ -4,6 +4,10 @@ import { z } from "zod";
 import { UpdateCandidatePluginTreePlanSchema } from "./update-candidate-plugin-tree-schema.js";
 import { prepareUpdateCandidatePluginTrees } from "./update-candidate-plugin-tree.js";
 import { createUpdateStateInspectionReporter } from "./update-candidate-state.diagnostics.js";
+import {
+  canFallbackFromRuntimeClone,
+  captureRetainedRuntimeTree,
+} from "./update-retained-runtime-clone.js";
 import { linkUpdateCandidatePluginTrees } from "./update-retained-runtime-tree.js";
 
 export const RetainedRuntimeFilesSchema = z
@@ -59,14 +63,27 @@ export async function prepareRetainedRuntimeFiles(params: {
   const inventoryStartedAt = performance.now();
   const project = (source: string) => projectRetainedRuntimePath(params.privateRoot, source);
   const candidateRoot = project(params.sourceRoot);
-  const plan = await prepareUpdateCandidatePluginTrees({
+  const treeParameters = {
     roots: new Map(params.roots.map((source) => [source, project(source)])),
     project,
     targetStateDir: params.privateRoot,
     candidateRoot,
     retainedHostRoot: params.sourceRoot,
     retainedDependencyRoot: params.retainedDependencyRoot,
-  });
+  };
+  let plan:
+    | Awaited<ReturnType<typeof captureRetainedRuntimeTree>>
+    | Awaited<ReturnType<typeof prepareUpdateCandidatePluginTrees>>;
+  try {
+    plan = await captureRetainedRuntimeTree(treeParameters);
+  } catch (error) {
+    if (!canFallbackFromRuntimeClone(error)) {
+      throw error;
+    }
+    // Capture settles its admitted operations before rejection. Keep the sibling native helper.
+    await fs.rm(path.join(params.privateRoot, "tree"), { recursive: true, force: true });
+    plan = await prepareUpdateCandidatePluginTrees(treeParameters);
+  }
   const inventoryMs = Math.round(performance.now() - inventoryStartedAt);
   report({
     phase: `runtime retention attempt 1/1: materializing ${plan.entries.length} entries (${plan.bytes} estimated bytes) after ${inventoryMs}ms inventory`,

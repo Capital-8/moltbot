@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { assertDirectoryIdentitySync, readDirectoryIdentity } from "@openclaw/fs-safe/advanced";
@@ -11,10 +12,7 @@ import { isPackageUpdateRecoveryArtifactName } from "./package-update-backup-pat
 import { hasNodeErrorCode, isPathInside, isPathStrictlyInside } from "./path-guards.js";
 import type { UpdateCandidatePluginCodeLink } from "./update-candidate-plugin-code-links.js";
 import { copyUpdateCandidatePluginFiles } from "./update-candidate-plugin-file.js";
-import {
-  withUpdateCandidatePluginFileHashing,
-  type UpdateCandidatePluginFileHasher,
-} from "./update-candidate-plugin-hash.js";
+import { withUpdateCandidatePluginFileHashing } from "./update-candidate-plugin-hash.js";
 import { runUpdateCandidatePluginTasks } from "./update-candidate-plugin-tasks.js";
 import {
   ignoreUnresolvedPluginLink,
@@ -89,8 +87,7 @@ function assertUpdateCandidatePluginCopySource(source: string, privateRoot: stri
   }
 }
 
-/** Measure the same dependency owners and private link graph that copying will materialize. */
-export async function prepareUpdateCandidatePluginTrees(params: {
+type TreeParameters = {
   roots: Map<string, string>;
   project: (source: string) => string;
   targetStateDir: string;
@@ -100,22 +97,57 @@ export async function prepareUpdateCandidatePluginTrees(params: {
   /** Installed runtime lookups stop at the package manager's owning project. */
   retainedDependencyRoot?: string;
   onProgress?: () => void | Promise<void>;
-}): Promise<UpdateCandidatePluginTreePlan> {
+};
+type FileEntry = Extract<UpdateCandidatePluginEntry, { kind: "file" }>;
+export type CapturedRuntimeFile = Omit<FileEntry, "sha256">;
+type TreeEntry<File extends CapturedRuntimeFile> =
+  | Exclude<UpdateCandidatePluginEntry, { kind: "file" }>
+  | File;
+export type ObservedPluginTree<File extends CapturedRuntimeFile> = Omit<
+  UpdateCandidatePluginTreePlan,
+  "entries"
+> & { entries: TreeEntry<File>[] };
+
+/** Measure the same dependency owners and private link graph that copying will materialize. */
+export async function prepareUpdateCandidatePluginTrees(
+  params: TreeParameters,
+): Promise<UpdateCandidatePluginTreePlan> {
   return await withUpdateCandidatePluginFileHashing((hashFile) =>
-    prepareUpdateCandidatePluginTreesWithHashing(params, hashFile),
+    observeUpdateCandidatePluginTrees(params, {
+      file: async (file, stat) => ({
+        path: file,
+        kind: "file",
+        size: Number(stat.size),
+        mode: Number(stat.mode & 0o7777n),
+        dev: stat.dev.toString(),
+        ino: stat.ino.toString(),
+        birthtimeNs: stat.birthtimeNs.toString(),
+        mtimeNs: stat.mtimeNs.toString(),
+        ctimeNs: stat.ctimeNs.toString(),
+        uid: stat.uid.toString(),
+        gid: stat.gid.toString(),
+        sha256: await hashFile(file, stat),
+      }),
+      controlFile: async (file) => file,
+    }),
   );
 }
 
-async function prepareUpdateCandidatePluginTreesWithHashing(
-  params: Parameters<typeof prepareUpdateCandidatePluginTrees>[0],
-  hashFile: UpdateCandidatePluginFileHasher,
-): Promise<UpdateCandidatePluginTreePlan> {
+/** Discovery owns graph selection; retention can observe already-captured private bytes. */
+export async function observeUpdateCandidatePluginTrees<File extends CapturedRuntimeFile>(
+  params: TreeParameters,
+  observation: {
+    file: (file: string, stat: BigIntStats) => Promise<File>;
+    controlFile: (file: string) => Promise<string>;
+    capturedFile?: (file: string) => Promise<File> | undefined;
+  },
+): Promise<ObservedPluginTree<File>> {
   const roots = new Map(params.roots);
   const privateRoot = resolvePathViaExistingAncestorSync(path.resolve(params.targetStateDir));
   const candidateRoot = resolvePathViaExistingAncestorSync(path.resolve(params.candidateRoot));
   const scanned = new Set<string>();
   const staging = new Set<string>();
-  const footprints = new Map<string, UpdateCandidatePluginEntry>();
+  const footprints = new Map<string, TreeEntry<File>>();
   const edges = new Map<string, { target: string; real: string }>();
   const hosts = new Set<string>();
   const hostRoots = new Set<string>();
@@ -174,7 +206,11 @@ async function prepareUpdateCandidatePluginTreesWithHashing(
     invalidateRoots();
     return true;
   }
-  async function readEntry(file: string): Promise<UpdateCandidatePluginEntry> {
+  async function readEntry(file: string): Promise<TreeEntry<File>> {
+    const captured = observation.capturedFile?.(file);
+    if (captured) {
+      return await captured;
+    }
     const stat = await fs.lstat(file, { bigint: true });
     const common = {
       path: file,
@@ -183,20 +219,11 @@ async function prepareUpdateCandidatePluginTreesWithHashing(
       dev: stat.dev.toString(),
       ino: stat.ino.toString(),
     };
-    let entry: UpdateCandidatePluginEntry;
+    let entry: TreeEntry<File>;
     if (stat.isDirectory()) {
       entry = { ...common, kind: "directory" };
     } else if (stat.isFile()) {
-      entry = {
-        ...common,
-        kind: "file",
-        birthtimeNs: stat.birthtimeNs.toString(),
-        mtimeNs: stat.mtimeNs.toString(),
-        ctimeNs: stat.ctimeNs.toString(),
-        uid: stat.uid.toString(),
-        gid: stat.gid.toString(),
-        sha256: await hashFile(file, stat),
-      };
+      entry = await observation.file(file, stat);
     } else if (stat.isSymbolicLink()) {
       const target =
         process.platform === "win32"
@@ -213,17 +240,19 @@ async function prepareUpdateCandidatePluginTreesWithHashing(
     }
     return entry;
   }
-  async function recordEntry(entry: UpdateCandidatePluginEntry): Promise<void> {
+  async function recordEntry(entry: TreeEntry<File>): Promise<void> {
     footprints.set(entry.path, entry);
     await params.onProgress?.();
   }
-  async function measureEntry(file: string): Promise<UpdateCandidatePluginEntry> {
+  async function measureEntry(file: string): Promise<TreeEntry<File>> {
     const entry = await readEntry(file);
     await recordEntry(entry);
     return entry;
   }
   async function discoverHoistedDependencies(directory: string): Promise<void> {
-    const manifest = await tryReadJson<unknown>(path.join(directory, "package.json"));
+    const manifest = await tryReadJson<unknown>(
+      await observation.controlFile(path.join(directory, "package.json")),
+    );
     if (!isRecord(manifest)) {
       return;
     }
@@ -326,7 +355,9 @@ async function prepareUpdateCandidatePluginTreesWithHashing(
     }
     // Read before link discovery, so custom external stores retain their owner.
     const modules = mayContain(".modules.yaml")
-      ? await readRuntimeModulesManifest(path.join(directory, ".modules.yaml"))
+      ? await readRuntimeModulesManifest(
+          await observation.controlFile(path.join(directory, ".modules.yaml")),
+        )
       : null;
     if (typeof modules?.manifest.virtualStoreDir === "string") {
       const store = await fs.realpath(path.resolve(directory, modules.manifest.virtualStoreDir));
