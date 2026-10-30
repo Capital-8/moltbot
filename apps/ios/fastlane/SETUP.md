@@ -357,13 +357,13 @@ gh workflow run ios-store-release.yml --ref YOUR_BRANCH -f operation=screenshots
 ```
 
 The probe enables the resource timeline even if `resource_diagnostics` is false.
-After simulator cleanup, it also runs a bounded Spotlight experiment: five
-interleaved pairs copy the built products into fresh ordinary and `.noindex`
-directories, observing each for 45 seconds. `ios-spotlight-probe.json` retains
-aggregate file/index counts, matched Spotlight CPU deltas, timing, and host load.
-Only task-owned copies are removed; machine-wide indexing settings are unchanged.
-Missing ordinary-directory positive controls make the result inconclusive. These
-fresh-directory observations do not measure cold-host or release performance.
+Inside the 60-second host-idle window, it observes filesystem events from four
+named host Spotlight processes for 45 seconds. `ios-spotlight-path-probe.json`
+retains only aggregate path-category event counts, elapsed time, exit status, and
+collection limits. Raw paths and native error output are discarded. An unavailable
+observation or absent/truncated paths cannot establish that indexing was idle.
+Event counts do not measure CPU time or indexed documents. The trace runs only on
+disposable GitHub-hosted macOS; machine-wide indexing settings are unchanged.
 
 It is off by default and only configured by the screenshot job. These added waits
 are diagnostic observations, not a performance improvement; include them in any

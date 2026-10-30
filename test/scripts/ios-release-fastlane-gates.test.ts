@@ -1036,6 +1036,8 @@ def sh(command, *arguments, **options)
     raise "headroom checked before simulator cleanup" unless @owned.empty?
     @admissions << @captures
     raise "host CPU headroom unavailable" if @scenario == "watch-headroom-timeout" && @captures == 2
+  elsif args == ["node", File.join(repo_root, "scripts", "ios-spotlight-path-probe.mjs")]
+    sleep(60)
   elsif args[0, 3] == ["xcrun", "simctl", "create"]
     raise "simulator created without CPU headroom" unless @admissions.length == @created + 1
     raise "new device before old cleanup" unless @owned.empty?
