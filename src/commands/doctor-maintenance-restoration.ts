@@ -33,7 +33,6 @@ export async function resolveUnstoppedGatewayRestoration(params: {
   serviceEnv: NodeJS.ProcessEnv;
   root: string;
   leaveStopped: boolean;
-  reportStopped: boolean;
 }): Promise<{ restore: boolean; warning?: string }> {
   const { before, serviceEnv } = params;
   const verdict = before.serviceUpdateVerdict;
@@ -59,18 +58,6 @@ export async function resolveUnstoppedGatewayRestoration(params: {
     !verdict.requiresInstallRootRefresh
   ) {
     return { restore: true };
-  }
-  // Public update repair would otherwise report success over a Gateway that stays down.
-  if (
-    params.reportStopped &&
-    verdict?.kind === "owned" &&
-    before.runtimeInspected &&
-    !before.running
-  ) {
-    return {
-      restore: false,
-      warning: `Gateway service is stopped and remains stopped; update repair does not start a Gateway that a failed update or the operator stopped. Start it with \`${formatCliCommand("openclaw gateway start", serviceEnv)}\`, then check \`${formatCliCommand("openclaw gateway status --deep", serviceEnv)}\`.`,
-    };
   }
   return { restore: false };
 }

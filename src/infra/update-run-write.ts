@@ -10,7 +10,7 @@ import { completeUpdateFailureSummary } from "./update-failure-result.js";
 import { claimUpdateResultInTransaction } from "./update-result-claim.js";
 import type { UpdateResultPayload } from "./update-result-payload.js";
 import { isNeverActivatedFailedUpdate } from "./update-run-activation.js";
-import { encodeRun, isRetainedStep, type UpdateRunLedgerOptions } from "./update-run-codec.js";
+import { encodeRun, type UpdateRunLedgerOptions } from "./update-run-codec.js";
 import type { UpdateRunPhasePatch } from "./update-run-mutation.types.js";
 import { decodeRun, readUpdateRunRecord } from "./update-run-read.kernel.js";
 import {
@@ -22,30 +22,13 @@ import {
   type UpdateRunStep,
 } from "./update-run-record.js";
 import { updateRunStepKey } from "./update-run-step-key.js";
-import { updateRunStepsFromResultStep } from "./update-run-step.js";
+import { updateRunStepsFromResultStep, upsertStep } from "./update-run-step.js";
 import { recordUpdateRunVerificationRecord } from "./update-run-verification.js";
 
 export const updateRunLedgerSchema = getOpenClawStateFeatureSchemaSql("update_runs", {
   endMarker: "ON update_runs(status, created_at_ms DESC, run_id);",
   errorMessage: "Update run schema markers are missing",
 });
-
-export function upsertStep(record: UpdateRunRecord, input: UpdateRunStep): void {
-  const step = { ...input, step: updateRunStepKey(input.step) };
-  const index = record.steps.findIndex((existing) => existing.step === step.step);
-  if (index >= 0) {
-    record.steps[index] = { ...record.steps[index], ...step };
-  } else {
-    record.steps.push(step);
-  }
-  while (record.steps.length > 128) {
-    const disposable = record.steps.findIndex((entry) => !isRetainedStep(entry));
-    if (disposable < 0) {
-      throw new Error("Update run retained steps exceed the step limit");
-    }
-    record.steps.splice(disposable, 1);
-  }
-}
 
 export function applyUpdateRunPhase(
   record: UpdateRunRecord,

@@ -126,7 +126,7 @@ const { pathToFileURL } = require("node:url");
 
 ${MANAGED_HANDOFF_BOOTSTRAP_SOURCE}
 
-const { OPENCLAW_STATE_SCHEMA_SQL, assertOpenClawStateWriteAllowed, prepareManagedHandoffLeaseStore, extractSqliteTableSchema, readRestartSentinelRowSync, writeRestartSentinelRowIfRevisionSync, resolveImmutableSqliteFileUri, resolveUpdateRestartNoticeMeta, shouldPublishUpdateRestartNotice, procCgroupMembershipMatches } =
+const { OPENCLAW_STATE_SCHEMA_SQL, assertOpenClawStateWriteAllowed, prepareManagedHandoffLeaseStore, extractSqliteTableSchema, readRestartSentinelRowSync, writeRestartSentinelRowIfRevisionSync, resolveImmutableSqliteFileUri, resolveUpdateRestartNoticeMeta, shouldPublishUpdateRestartNotice, procCgroupMembershipMatches, handoffLedger, packageActivationIdentity, recoverInterruptedManagedUpdate, readManagedHandoffGatewayStop } =
   require("./runtime/${MANAGED_HANDOFF_RUNTIME_ENTRY}");
 if (!params.updateLeaseDatabaseIdentity) {
   throw new Error("Managed handoff requires its prepared lease database identity");
@@ -210,6 +210,7 @@ let parkedServiceInvocation = null;
 let parkedServiceFragment = null;
 let restorationArmed = false;
 let updaterStarted = false;
+let originalInstallationIdentity;
 let pendingServiceStop;
 let finishBeforeParkNotice;
 
@@ -315,166 +316,6 @@ async function parkGatewayService() {
       }
     });
   });
-}
-
-async function restoreGatewayService(reason, decision = params.recovery, childStatus, previousGeneration = false) {
-  if (managedUpdateLease?.action.kind !== "update" || !ownsManagedUpdateLease()) return false;
-  let expectedRevision;
-  const record = (restored) => recordManagedUpdateOutcome(
-    restored ? reason : "managed-service-handoff-restore-failed", restored, childStatus, expectedRevision,
-  );
-  const refuse = async (message) => {
-    if (message) appendLog(message);
-    await record(false);
-    return false;
-  };
-  if (decision?.serviceRestartSafe !== true || !decision.version) {
-    return refuse("recovery refused: original runtime identity could not be verified");
-  }
-  const expectedVersion = decision.version;
-  const expectedBuildId = decision.buildId;
-  const recovery = params.serviceRecovery;
-  let restored = false;
-  let serviceRunning;
-  let servicePid;
-  const ownsRecovery = () => {
-    try { return ownsManagedUpdateLease() && fs.realpathSync(params.updateLeaseKey) === params.updateLeaseKey; }
-    catch { return false; }
-  };
-  const runOwned = (...args) => ownsRecovery()
-    ? runServiceCommand(...args) : Promise.resolve({ code: 1, stdout: "", stderr: "recovery ownership lost" });
-  const restart = () => runOwnedUpdateCommand("recovery", params.recoveryCommandArgv,
-    params.recoveryTimeoutMs, params.cwd, previousGeneration
-      ? { ...process.env, OPENCLAW_ALLOW_OLDER_BINARY_DESTRUCTIVE_ACTIONS: "1" } : process.env);
-  if (!ownsRecovery()) return false;
-  // Activation may consume or replace the notification. Annotate only the
-  // observed revision; notification persistence never decides recovery safety.
-  if (childStatus) expectedRevision = await recordManagedUpdateOutcome(reason, undefined, childStatus);
-  if (recovery?.kind === "systemd") {
-    if (!pendingServiceStop || (await pendingServiceStop).code !== 0) {
-      return refuse("recovery refused: exact systemd stop did not complete");
-    }
-    const parked = await inspectSystemdService(recovery.unit);
-    // A Gateway that exits non-zero during the stop (KillMode=mixed) settles the unit
-    // into ActiveState=failed with the parked identity retained; that is still the
-    // exact parked generation and recovery stays safe. An owned candidate boot can
-    // advance inactive-unit metadata. Only a verified full-generation rollback
-    // permits recovering that later stopped invocation.
-    if (!parked || parked.Id !== recovery.unit || parked.LoadState !== "loaded" ||
-      (parked.ActiveState !== "inactive" && parked.ActiveState !== "failed") ||
-      parked.MainPID !== "0" || !(previousGeneration || isParkedSystemdGeneration(parked, true)) ||
-      !ownsRecovery()) {
-      return refuse("recovery refused: parked systemd service identity changed or stop is incomplete");
-    }
-    const started = childStatus
-      ? await restart()
-      : await runOwned("systemctl", ["--user", "start", recovery.unit]);
-    const current = ownsRecovery() && await inspectSystemdService(recovery.unit);
-    const pid = /^[1-9]\d*$/.test(current?.MainPID || "") ? Number(current.MainPID) : undefined;
-    serviceRunning = current && current.Id === recovery.unit
-      ? current.ActiveState === "active" && isPidAlive(pid) : undefined;
-    servicePid = serviceRunning ? pid : undefined;
-    restored = !started.signal && started.code === 0 && Boolean(current && current.Id === recovery.unit &&
-      current.LoadState === "loaded" && current.ActiveState === "active" &&
-      /^[1-9]\d*$/.test(current.MainPID || "") && current.MainPID !== String(params.parentPid) &&
-      isPidAlive(Number(current.MainPID)) &&
-      /^[1-9]\d*$/.test(current.ExecMainStartTimestampMonotonic || "") &&
-      current.ExecMainStartTimestampMonotonic !== parkedServiceGeneration);
-  } else if (recovery?.kind === "launchd") {
-    const target = "gui/" + recovery.uid + "/" + recovery.label;
-    const deadline = Date.now() + params.recoveryTimeoutMs;
-    const run = (args) => runOwned("launchctl", args, undefined, deadline);
-    const before = await run(["print", target]);
-    if (before.code === 0) {
-      const pid = parseLaunchdPid(before.stdout);
-      if (pid && pid !== params.parentPid) {
-        return refuse("recovery refused: launchd service has another process generation");
-      }
-    } else if (!isLaunchdNotLoaded(before)) {
-      return refuse();
-    }
-    if (childStatus) {
-      const restarted = await restart();
-      // The guarded CLI owns its restart deadline; identity inspection gets a fresh probe budget.
-      const current = ownsRecovery()
-        ? await runOwned("launchctl", ["print", target]) : null;
-      const pid = current?.code === 0
-        ? parseLaunchdPid(current.stdout) : 0;
-      serviceRunning = current?.code === 0 ? Boolean(pid && isPidAlive(pid)) : undefined;
-      servicePid = serviceRunning ? pid : undefined;
-      restored = !restarted.signal && restarted.code === 0 && Boolean(pid && pid !== params.parentPid && serviceRunning);
-    } else {
-    const enabled = await run(["enable", target]);
-    let kickstarted = false;
-    for (let inspection = enabled; enabled.code === 0 && Date.now() < deadline;) {
-      inspection = await run(["print", target]);
-      if (inspection.code === 0) {
-        const pid = parseLaunchdPid(inspection.stdout);
-        if (pid !== params.parentPid && isPidAlive(pid)) {
-          restored = true;
-          servicePid = pid;
-          break;
-        }
-        // launchd retains the old label until its ExitTimeOut-bounded teardown completes.
-        if (pid === params.parentPid) {
-          await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
-          continue;
-        }
-        if (kickstarted) break;
-        kickstarted = true;
-        inspection = await run(["kickstart", target]);
-      } else if (isLaunchdNotLoaded(inspection)) {
-        inspection = await run(["bootstrap", "gui/" + recovery.uid, recovery.plistPath]);
-      } else break;
-      if (inspection.code === 0) continue;
-      const detail = inspection.stderr || inspection.stdout;
-      if (inspection.code === 130 ||
-        /already exists in domain|operation already in progress|bootstrap failed: 37/i.test(detail)) continue;
-      if (kickstarted && isLaunchdNotLoaded(inspection)) continue;
-      if (!/bootstrap failed: 5|input\/output error/i.test(detail)) break;
-      await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
-    }
-    serviceRunning = restored;
-    }
-  } else if (recovery?.kind === "schtasks") {
-    restored = (await runOwned("schtasks.exe", ["/Run", "/TN", recovery.taskName])).code === 0;
-  }
-  // Manager liveness survives a failed readiness probe, but version facts require
-  // the new process to answer; never reuse the pre-activation runtime identity.
-  runLedger?.recordUpdateRunVerification(params.runId, {
-    serviceRunning, pid: servicePid, runningVersion: undefined, runningBuildId: undefined, versionMatch: undefined,
-    readyz: undefined, coreReady: undefined, settled: undefined, channelsReady: undefined, pluginErrors: undefined,
-  });
-  if (restored) {
-    try {
-      const { waitForGatewayUpdateRecovery } = await import(pathToFileURL(params.recoveryModulePath).href);
-      if (!ownsRecovery()) throw new Error("managed update recovery ownership was lost");
-      const health = await waitForGatewayUpdateRecovery(expectedVersion, expectedBuildId, params.recoveryTimeoutMs);
-      restored = ownsRecovery() && health.healthy === true &&
-        health.runtime?.status === "running" && health.gatewayVersion === expectedVersion &&
-        (!expectedBuildId || health.gatewayBuildId === expectedBuildId);
-      if (restored && serviceStoppedAtMs !== undefined) serviceDowntimeMs = Math.max(0, Date.now() - serviceStoppedAtMs);
-      runLedger?.recordUpdateRunVerification(params.runId, {
-        serviceRunning: health.runtime?.status === "running",
-        pid: typeof health.runtime?.pid === "number" ? health.runtime.pid : undefined,
-        runningVersion: health.gatewayVersion ?? undefined,
-        runningBuildId: health.gatewayBuildId ?? undefined,
-        versionMatch: health.gatewayVersion === expectedVersion && (!expectedBuildId || health.gatewayBuildId === expectedBuildId),
-        settled: health.healthy === true,
-        channelsReady: health.healthy === true && !health.channelProbeErrors?.length,
-        pluginErrors: health.activatedPluginErrors?.map((error) => JSON.stringify(error)) ?? [],
-      });
-    } catch (error) {
-      appendLog("Gateway recovery readiness failed: " + String(error));
-      restored = false;
-    }
-  }
-  appendLog("gateway service recovery " + (restored ? "succeeded (readiness and runtime identity verified)" : "failed"));
-  const recorded = await record(restored);
-  if (!recorded) {
-    appendLog("managed update restoration result could not be durably recorded");
-  }
-  return restored;
 }
 
 async function finishGatewayServicePark() {
@@ -629,42 +470,7 @@ function killOwnedCommand(child) {
 
 ${HANDOFF_OWNED_COMMAND_SCRIPT}
 
-async function collectUpdateFailureTriage() {
-  try {
-    if (!triageFailure || !ownsManagedUpdateLease()) return;
-    // Diagnostic reads share this boundary so they cannot bypass terminal cleanup.
-    await captureManagedUpdateResult();
-    appendLog("If triage is unavailable, run " + params.triageRecoveryCommand + " on the Gateway host.");
-    // The helper and outer updater start from the same installation. Preserve
-    // its complete export; absent exports have only the helper's observed failure.
-    const recordedFailure = fs.existsSync(params.triageContextPath);
-    if (recordedFailure) {
-      appendLog("Saved update failure: " + params.triageContextPath);
-      appendLog("Reuse this diagnostic context on the Gateway host: " + params.triageContextCommand);
-    }
-    const failure = recordedFailure
-      ? JSON.parse(fs.readFileSync(params.triageContextPath, "utf8"))
-      : { error: "Managed update failed: " + (triageFailure.payload?.stats?.reason || triageFailure.reason) };
-    const recovery = typeof triageFailure.restored === "boolean"
-      ? "Service recovery " + (triageFailure.restored ? "succeeded." : "failed.")
-      : "Service recovery outcome was not recorded; inspect the handoff log before restarting.";
-    failure.error = [failure.error, recovery, triageFailure.recoveryReason].filter(Boolean).join("\n");
-    // Keep the canonical export intact even when installed triage cannot start.
-    // Only this private annotated input is removed with the helper's other files.
-    fs.writeFileSync(params.triageInputPath, JSON.stringify(failure), { mode: 0o600, flag: "wx" });
-    appendLog("starting diagnostic-only update triage after service recovery settled");
-    const exit = await runOwnedUpdateCommand(
-      "diagnostic",
-      [...params.triageCommandArgv, "--update-result", params.triageInputPath],
-      Math.min(params.recoveryTimeoutMs, 60_000),
-    );
-    appendLog(!exit.signal && exit.code === 0
-      ? "update triage completed; diagnostic report is above"
-      : "update triage could not complete; " + params.triageHint);
-  } catch (error) {
-    appendLog("update triage could not complete: " + String(error) + "; " + params.triageHint);
-  }
-}
+
 
 
 (async () => {
@@ -718,9 +524,10 @@ async function collectUpdateFailureTriage() {
   const controlDeadlineAt = performance.now() + params.parentExitTimeoutMs;
   try {
     if (params.action === "update" && params.runId) {
-      // Admission and stop recording use the serving runtime. Terminal writes after
-      // the updater starts must load the installed runtime in a fresh process.
-      runLedger = await import(pathToFileURL(params.recoveryModulePath).href);
+      // Bookkeeping, including lazy fs-safe loads, must survive a missing install.
+      // Terminal writes prefer the fresh candidate after any schema migration.
+      runLedger = handoffLedger;
+      originalInstallationIdentity = packageActivationIdentity(params.updateLeaseKey, true);
       for (const name of ["adoptUpdateRun", "finishUpdateRun", "getUpdateRun", "recordUpdateRunStep", "recordUpdateRunVerification"]) {
         if (typeof runLedger[name] !== "function") throw new Error("managed update ledger writer is unavailable");
       }
@@ -907,6 +714,10 @@ async function collectUpdateFailureTriage() {
     // Sentinels and diagnostic exports never authorize activation.
     let result = null;
     try { if (!outputOverflow) result = JSON.parse(updaterOutput); } catch {}
+    if ((exit.signal || !result) && shouldRecoverInterruptedUpdater()) {
+      await recoverInterruptedUpdater();
+      return;
+    }
     if (!exit.signal && ownsManagedUpdateLease() && result?.status === "skipped" &&
       result.reason === "update-ledger-busy" && result.root === undefined && result.runId === undefined &&
       ((result.mode === "unknown" && exit.code === 0) || (result.mode === "finalize" && exit.code === 1))) {
@@ -1169,6 +980,12 @@ async function spawnManagedServiceUpdateHandoff(
       "gateway",
       "restart",
       "--preserve-definition",
+      "--json",
+    ]),
+    finalizeCommandArgv: resolveManagedServiceCliArgv(commandRuntime, [
+      "update",
+      "finalize",
+      "--yes",
       "--json",
     ]),
     recoveryTimeoutMs: owner.recoveryTimeoutMs,
