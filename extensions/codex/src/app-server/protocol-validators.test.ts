@@ -186,7 +186,7 @@ describe("readCodexTurnCompletedNotification", () => {
         ...notification,
         error: {
           ...notification.error,
-          codexErrorInfo: { activeTurnNotSteerable: { turnKind: 12 } },
+          codexErrorInfo: 12,
         },
       }),
     ).toBeUndefined();
