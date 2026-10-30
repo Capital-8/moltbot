@@ -135,7 +135,7 @@ export async function runMlxSettingsProducer(options: {
   } catch (error) {
     observation.processesRetired = !hasUnjoinedWork(error);
     if (state.error && state.error !== error) {
-      throw new Error(state.error.message, { cause: new AggregateError([state.error, error]) });
+      throw new AggregateError([state.error, error], state.error.message, { cause: error });
     }
     throw error;
   } finally {

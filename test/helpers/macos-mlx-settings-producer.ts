@@ -71,7 +71,11 @@ await new Promise<void>((resolve, reject) => {
   process.once("disconnect", onDisconnect);
   void notify("ready").catch((error: unknown) => {
     clear();
-    reject(error);
+    reject(
+      error instanceof Error
+        ? error
+        : new Error("Settings producer readiness delivery failed", { cause: error }),
+    );
   });
 });
 phase("operation-begin");
