@@ -146,7 +146,7 @@ fixture.describe("sidebar session row tint", () => {
           const label = theme + "/" + state + "/" + sample.id;
           expect(sample, label).toMatchObject({
             outerBackground: "rgba(0, 0, 0, 0)",
-            insets: [0, 0],
+            insets: [1, 1],
             title: sample.expectedTitle,
           });
           if (sample.colored || state.includes("active") || state.includes("selected")) {

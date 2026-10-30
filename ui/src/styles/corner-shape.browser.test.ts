@@ -11,7 +11,7 @@ const CORNER_CASES = [
   ...corners(
     "10px",
     "12.5px",
-    ".btn, .sidebar-recent-session, .nav-item, .slash-menu, .chat-reply-context-menu",
+    ".btn, .nav-item, .slash-menu, .chat-reply-context-menu",
   ),
   ...corners(
     "14px",

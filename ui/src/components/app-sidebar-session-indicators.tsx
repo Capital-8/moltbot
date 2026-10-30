@@ -155,7 +155,7 @@ export function renderSidebarSessionIndicators(
           aria-label={t("chat.sessionSharing.draft")}
           title={t("chat.sessionSharing.draft")}
         >
-          {sessionIcon("circleDashed", 14, 1.75)}
+          {sessionIcon("circleDashed", 14, 2)}
         </span>
       ) : undefined}
     </span>
@@ -187,17 +187,22 @@ export function renderSidebarSessionIndicators(
   const trail = createMemo(() => {
     const currentSession = readSession();
     return hasTrail() ? (
-      <span class="session-row-trail" id={metaId()}>
+      <span
+        class={["session-row-trail", { "session-row-trail--snooze": snoozed() }]}
+        id={metaId()}
+        title={
+          snoozed()
+            ? t("sessionsView.snoozeWakes", {
+                time: formatSessionSnoozeWakeTime(readSession().snoozedUntil!),
+              })
+            : undefined
+        }
+      >
         {snoozed() ? (
-          <span
-            class="session-row-trail__snooze"
-            title={t("sessionsView.snoozeWakes", {
-              time: formatSessionSnoozeWakeTime(readSession().snoozedUntil!),
-            })}
-          >
-            {sessionIcon("moon", 13, 1.75)}
+          <>
+            {sessionIcon("moon", 13, 2)}
             {formatSessionSnoozeWakeTime(readSession().snoozedUntil!, new Date(), true)}
-          </span>
+          </>
         ) : currentSession.runtimeMs != null ? (
           currentSession.hasActiveRun ? (
             <ElapsedTime startMs={currentSession.runtimeSampledAt! - currentSession.runtimeMs} />

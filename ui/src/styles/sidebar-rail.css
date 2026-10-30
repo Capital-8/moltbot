@@ -401,6 +401,7 @@
    surface across the pin slot so tags and multi-selection keep one owner. */
 .sidebar-pages__entry {
   --sidebar-pages-pin-width: 28px;
+  --sidebar-session-row-min-height: 30px;
 
   display: flex;
   align-items: center;
@@ -469,6 +470,7 @@
 }
 
 .sidebar-pages__entry .sidebar-recent-session::after {
+  inset-block: 0;
   inset-inline-end: calc(-1 * var(--sidebar-pages-pin-width));
 }
 
