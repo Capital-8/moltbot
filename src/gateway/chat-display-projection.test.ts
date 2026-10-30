@@ -13,6 +13,7 @@ import { augmentChatHistoryWithCanvasBlocks } from "./chat-display-projection.ca
 import {
   projectChatDisplayMessage,
   projectChatDisplayMessages,
+  projectChatDisplayMessagesWithState,
 } from "./chat-display-projection.js";
 import { sanitizeChatHistoryMessages } from "./chat-display-projection.sanitize.js";
 
@@ -571,9 +572,52 @@ it("drops invisible assistant attempts without pending recovery", () => {
       user,
       emptyAttempt("empty-primary", "length"),
       emptyAttempt("empty-fallback", "stop"),
+      assistant([text("model-only")], { stopReason: "stop", openclawDisplayContent: [] }),
     ]),
   ).toEqual([user]);
 });
+
+it.each([false, true])(
+  "retains completed material without settling pending recovery (earlier page=%s)",
+  (assistantErrorPending) => {
+    const reasoning = assistant([{ type: "thinking", thinking: "Compare the evidence." }], {
+      stopReason: "stop",
+      __openclaw: { id: "reasoning", runId: "run-a" },
+    });
+    const progress = "Checking the evidence.";
+    const commentary = assistant([phasedText(progress, "commentary")], {
+      stopReason: "length",
+      __openclaw: { id: "commentary", runId: "run-a" },
+    });
+    const input = [
+      ...(assistantErrorPending ? [] : [failed]),
+      reasoning,
+      commentary,
+      ...["stop", "length"].map((stopReason) =>
+        assistant([text(" "), { type: "thinking", thinking: "" }], { stopReason }),
+      ),
+    ];
+    const original = structuredClone(input);
+    const projected = projectChatDisplayMessagesWithState(input, {
+      assistantErrorPending,
+      includeCommentaryFallbacks: true,
+    });
+    expect(projected).toMatchObject({
+      messages: [
+        reasoning,
+        {
+          content: [text(progress)],
+          __openclaw: commentary["__openclaw"],
+          openclawStreamFallback: { source: "segment", itemId: "commentary" },
+        },
+      ],
+      assistantErrorPending: true,
+      assistantErrorRecoveryObserved: false,
+    });
+    expect(projectChatDisplayMessages(projected.messages)).toEqual(projected.messages);
+    expect(input).toEqual(original);
+  },
+);
 
 const legacyGuidance = "The provider stopped this request as a safety precaution (misalignment).";
 it.each([

@@ -423,8 +423,8 @@ describe("first chat startup snapshot ordering", () => {
         { sessionKey },
       );
       vi.spyOn(snapshotDatabase, "readStoredChatSnapshotRecord").mockResolvedValueOnce({
-        // Version 11 filtered out reasoning while retaining the current transcript cursor.
-        projectionVersion: 11,
+        // Version 12 filtered out reasoning while retaining the current transcript cursor.
+        projectionVersion: 12,
         savedAt: 0,
         sessionKey: cacheKey,
         sessionId: stored.sessionId,
