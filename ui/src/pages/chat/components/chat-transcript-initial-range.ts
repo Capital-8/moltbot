@@ -341,17 +341,17 @@ export class TranscriptInitialRange {
     }
   }
 
-  private queuePreparation(materialize = false): void {
+  private queuePreparation(materialize = false, afterFrame = false): void {
     if (
       this.cancelPreparation ||
       this.preparingEnd ||
-      this.preparingRowKey ||
       this.pending ||
       this.tailRows > 0 ||
       !this.canPrepare()
     ) {
       return;
     }
+    const materializeRow = materialize && !this.preparingRowKey;
     const idlePrewarmLimit = this.scrollSample.time
       ? IDLE_PREWARM_ROW_LIMIT
       : INITIAL_PREWARM_ROW_LIMIT;
@@ -374,11 +374,12 @@ export class TranscriptInitialRange {
         return;
       }
     }
+    const queueNext = (withDom = false) => this.queuePreparation(withDom, true);
     const prepare = (deadline: number, prewarmRequested = false, warmOnlyRequested = false) => {
       this.cancelPreparation = undefined;
       this.preparationIsIdle = false;
       if (performance.now() >= deadline) {
-        this.queuePreparation(!warmOnlyRequested);
+        queueNext(!warmOnlyRequested);
         return;
       }
       const virtualizer = this.virtualizer();
@@ -388,7 +389,7 @@ export class TranscriptInitialRange {
         !this.canPrepare() ||
         !range ||
         !virtualizer.scrollElement ||
-        this.prepareStarted
+        (this.prepareStarted && !warmOnlyRequested)
       ) {
         return;
       }
@@ -458,7 +459,7 @@ export class TranscriptInitialRange {
         // by the bounded cache, so even an oversized row eventually advances.
         while (this.idleStep <= warmLimit) {
           if (performance.now() >= deadline) {
-            this.queuePreparation();
+            queueNext();
             return;
           }
           const index = origin + this.idleStep * searchDirection;
@@ -470,7 +471,7 @@ export class TranscriptInitialRange {
           if (!rendered.has(row.key) && this.prewarmRow) {
             const warmed = this.prewarmRow(index, mode);
             if (warmed === undefined) {
-              this.queuePreparation();
+              queueNext();
               return;
             }
             if (warmed) {
@@ -517,7 +518,7 @@ export class TranscriptInitialRange {
           break;
         }
         if (performance.now() >= deadline) {
-          this.queuePreparation(warmOnly ? canMaterialize : true);
+          queueNext(warmOnly ? canMaterialize : true);
           return;
         }
         const index = origin + step * searchDirection;
@@ -548,7 +549,7 @@ export class TranscriptInitialRange {
         for (let warming = warm(); warming !== false; warming = warm()) {
           // An unloaded preparation module yields this slice without advancing the row.
           if (warming === undefined) {
-            this.queuePreparation();
+            queueNext();
             return;
           }
           // The shared cache owns readiness; no DOM or range invalidation is needed.
@@ -556,17 +557,17 @@ export class TranscriptInitialRange {
             warmed = true;
             // One admission prepares one message, not the whole atomic row.
             if (performance.now() >= deadline) {
-              this.queuePreparation();
+              queueNext();
               return;
             }
             continue;
           }
-          this.queuePreparation();
+          queueNext();
           return;
         }
         if (!warmOnly && candidates <= domLookahead && canPrepareRow) {
           if (performance.now() >= deadline) {
-            this.queuePreparation();
+            queueNext();
             return;
           }
           // Keep nearby DOM hot; farther idle rows live only until their
@@ -578,7 +579,7 @@ export class TranscriptInitialRange {
           admitted++;
         }
       }
-      if (warmOnly && preparedCandidate && performance.now() < deadline) {
+      if (warmOnly && preparedCandidate && !this.preparingRowKey && performance.now() < deadline) {
         // A fully warm viewport can use the rest of this slice to prepare one
         // DOM row, before the next scroll frame reaches it.
         this.preparedRowKeys.add(preparedCandidate);
@@ -587,7 +588,7 @@ export class TranscriptInitialRange {
       }
       if (!admitted) {
         if (warmOnly && (warmed || canMaterialize)) {
-          this.queuePreparation(canMaterialize);
+          queueNext(canMaterialize);
         } else if (
           prewarm &&
           !moving &&
@@ -595,7 +596,7 @@ export class TranscriptInitialRange {
           this.idleMeasureStep > PREPARED_ROW_LIMIT
         ) {
           // Ordinary rows need no DOM admission; resume their remaining HTML sweep.
-          this.queuePreparation();
+          queueNext();
         }
         return;
       }
@@ -605,20 +606,27 @@ export class TranscriptInitialRange {
         rangeExtractor: (next) => this.extract(next),
       });
       this.invalidate();
+      // Markdown can keep warming while the single admitted DOM row is measured.
+      queueNext();
     };
     if (this.isReaderMoving() && this.prewarmRow && typeof requestIdleCallback === "function") {
-      // Admit one slice per frame, after paint. Repeated zero-delay slices can
-      // otherwise spend several budgets before the next scrolling frame.
-      const frame = requestAnimationFrame(() => {
+      const queueTask = () => {
         // Rendering can delay this timer beyond six milliseconds. Budget its
         // own work so a busy frame cannot starve the next viewport's preparation.
         const task = setTimeout(
-          () => prepare(performance.now() + 6, !materialize, !materialize),
+          () => prepare(performance.now() + 6, !materializeRow, !materializeRow),
           0,
         );
         this.cancelPreparation = () => clearTimeout(task);
-      });
-      this.cancelPreparation = () => cancelAnimationFrame(frame);
+      };
+      // Start without waiting for another frame. Subsequent slices stay
+      // frame-paced so preparation cannot form a timer loop.
+      if (afterFrame) {
+        const frame = requestAnimationFrame(queueTask);
+        this.cancelPreparation = () => cancelAnimationFrame(frame);
+      } else {
+        queueTask();
+      }
     } else if (typeof requestIdleCallback === "function") {
       this.preparationIsIdle = true;
       const idleRequest = requestIdleCallback(

@@ -817,10 +817,6 @@ it("materializes one predicted row between scroll frames and uses the latest vie
   await view.scrollTo(3);
   const mounted = transcriptRows(view.container);
   await view.task();
-  expect(transcriptRows(view.container)).toEqual(mounted);
-  await view.frame(1, false);
-  expect(transcriptRows(view.container)).toEqual(mounted);
-  await view.task();
   const prepared = transcriptRows(view.container).find((row) => !mounted.includes(row));
   expect(prepared).toBeDefined();
   expect(prepared!.getAttribute("data-preparing-row")).toBe("true");
@@ -893,9 +889,24 @@ it("warms rows when earlier animation callbacks delay preparation delivery", asy
   const view = await transcriptFixture(0, true, false, "retained");
   await view.scrollTo(60);
   const rendered = view.renderRow.mock.calls.length;
-  await view.frame(1, false, 8);
+  // The next frame may already contain another scroll target.
   await view.task();
   expect(view.renderRow.mock.calls.length).toBeGreaterThan(rendered);
+});
+
+it("keeps Markdown warming ahead while one DOM row awaits measurement", async () => {
+  const view = await transcriptFixture(0, true, false, "retained");
+  await view.scrollTo(60);
+  await view.task();
+  const preparing = view.container.querySelector("[data-preparing-row]");
+  expect(preparing).not.toBeNull();
+  await view.scrollTo(120);
+  const prewarm = vi.spyOn(ChatTranscriptRenderer.prototype, "prewarmRow");
+  await view.frame(1, false);
+  await view.task();
+  expect(prewarm.mock.calls.some(([index]) => index > 130)).toBe(true);
+  expect(view.container.querySelector("[data-preparing-row]")).toBe(preparing);
+  expect(view.container.querySelectorAll("[data-preparing-row]")).toHaveLength(1);
 });
 
 it("warms arriving rows after a delayed timer without running twice in one frame", async () => {
