@@ -39,7 +39,10 @@ type WorkspaceSkillCommandParams = {
   agentId?: string;
   skillFilter?: string[];
   sessionEntry?: ExecSessionDefaults &
-    Pick<SessionEntry, "skillLibrarySelections" | "skillsSnapshot" | "spawnedCwd" | "worktree">;
+    Pick<
+      SessionEntry,
+      "skillLibrarySelections" | "skillsSnapshot" | "spawnedCwd" | "worktree" | "projectId"
+    >;
   sessionKey?: string;
   execOverrides?: ExecPolicyOverrides;
   includeAllowlistHidden?: boolean;
@@ -65,10 +68,7 @@ function resolveWorkspaceSkillCommandOptions(
           executionWorkspaceFileHost: params.executionWorkspaceFileHost,
         }
       : params.sessionEntry
-        ? resolveSessionSkillExecutionWorkspace(
-            params.sessionEntry.worktree?.canonicalWorkspaceDir,
-            params.sessionEntry.spawnedCwd,
-          )
+        ? resolveSessionSkillExecutionWorkspace(params.sessionEntry, params.sessionEntry.spawnedCwd)
         : {};
   return {
     config: params.cfg,
@@ -171,7 +171,10 @@ type AgentSkillCommandParams = {
   cfg: OpenClawConfig;
   agentIds?: string[];
   sessionEntry?: ExecSessionDefaults &
-    Pick<SessionEntry, "skillLibrarySelections" | "skillsSnapshot" | "spawnedCwd" | "worktree">;
+    Pick<
+      SessionEntry,
+      "skillLibrarySelections" | "skillsSnapshot" | "spawnedCwd" | "worktree" | "projectId"
+    >;
   sessionKey?: string;
   execOverrides?: ExecPolicyOverrides;
   /** Admitted project root for a single-agent catalog; callers own its authorization. */
