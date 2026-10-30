@@ -462,6 +462,8 @@ suite.define(() => {
       await page.keyboard.press("ContextMenu");
       const menu = page.getByRole("menu", { name: "Actions for Research notes" });
       await menu.waitFor({ state: "visible" });
+      await captureUiProof(suite, page, "session-context-menu.png", menu);
+      expect(await menu.getByText(/^Last active /).count()).toBe(0);
 
       await expect
         .poll(() =>
