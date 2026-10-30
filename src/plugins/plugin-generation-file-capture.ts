@@ -79,6 +79,25 @@ export function linkPluginGenerationHostModule(link: string, target: string): bo
   }
 }
 
+/**
+ * Native Workers do not inherit the parent resolver. Link a captured relative import
+ * to the canonical host module instead of capturing another SDK identity.
+ */
+export function linkBundledSharedModule(
+  link: string,
+  shared: string,
+  additions: Set<string>,
+  hostModuleLinks: Set<string>,
+): void {
+  if (linkPluginGenerationHostModule(link, shared)) {
+    additions.add(link);
+  }
+  // Recovery can already contain the link; denied links still allow asset capture.
+  if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    hostModuleLinks.add(link);
+  }
+}
+
 export function createPluginSourceLinkCapture() {
   const links = new Set<string>();
   return {

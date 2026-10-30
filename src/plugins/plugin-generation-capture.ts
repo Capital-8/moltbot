@@ -5,7 +5,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isPathInside } from "../infra/path-guards.js";
 import {
   bundledSharedModuleResolver,
-  linkBundledSharedModule,
   resolveBundledSharedModule,
   type BundledPluginReloadSource,
 } from "./plugin-bundled-reload.js";
@@ -14,6 +13,7 @@ import type { PluginGenerationArtifact } from "./plugin-generation-artifact.type
 import {
   createPluginGenerationFileCapture,
   createPluginSourceLinkCapture,
+  linkBundledSharedModule,
   linkPluginGenerationDependency,
 } from "./plugin-generation-file-capture.js";
 import { createPluginGenerationReceipt } from "./plugin-generation-receipt.js";

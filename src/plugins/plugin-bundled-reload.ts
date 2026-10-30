@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isPathInside } from "../infra/path-guards.js";
 import { readRuntimeDependencyOwnership } from "../infra/runtime-dependency-ownership.js";
-import { linkPluginGenerationHostModule } from "./plugin-generation-file-capture.js";
 
 /** Serializable ownership facts shared by capture workers and recovered generations. */
 export type BundledPluginReloadSource = {
@@ -118,25 +117,6 @@ export function resolveBundledSharedModule(
     return undefined;
   }
   return path.resolve(policy.hostRoot, relative);
-}
-
-/**
- * Native Workers do not inherit the parent resolver. Link a captured relative import
- * to the canonical host module instead of capturing another SDK identity.
- */
-export function linkBundledSharedModule(
-  link: string,
-  shared: string,
-  additions: Set<string>,
-  hostModuleLinks: Set<string>,
-): void {
-  if (linkPluginGenerationHostModule(link, shared)) {
-    additions.add(link);
-  }
-  // Recovery can already contain the link; denied links still allow asset capture.
-  if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) {
-    hostModuleLinks.add(link);
-  }
 }
 
 /** Artifact resolver for imports that must keep the host's canonical module identity. */
