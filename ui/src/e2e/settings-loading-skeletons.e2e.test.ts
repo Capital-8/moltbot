@@ -149,7 +149,6 @@ suite.define(() => {
         featureMethods: [...defaultControlUiFeatureMethods, "tools.catalog", "tools.effective"],
         heldMethods: ["tools.catalog", "tools.effective"],
         operatorScopes: ["operator.read"],
-        featureMethods: [...defaultControlUiFeatureMethods, "tools.catalog", "tools.effective"],
         methodResponses: {
           "agents.list": createAgentRoster({ main: "Main agent" }, "main", "agent"),
           "config.get": {
