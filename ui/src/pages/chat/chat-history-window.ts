@@ -1,7 +1,6 @@
 import {
   reduceSessionProjection,
   type SessionProjectionState,
-  type SessionProjectionEntry,
 } from "@openclaw/gateway-client/browser";
 import {
   nativeHistoryMessageSourceIdentity,
@@ -42,12 +41,12 @@ export function invalidateChatHistoryPacketSources(
 
 function admitResidentLiveSources(
   initialPagination: ChatHistoryPagination,
-  entries: readonly SessionProjectionEntry[],
+  projection: SessionProjectionState,
 ): ChatHistoryPagination {
   if (!initialPagination.segments?.length) {
     return initialPagination;
   }
-  const sourceEntries = entries.map((entry) => ({
+  const sourceEntries = projection.entries.map((entry) => ({
     entry,
     source: nativeHistoryMessageSourceIdentity(entry.message),
   }));
@@ -106,16 +105,7 @@ function admitResidentLiveSources(
   if (!changed) {
     return pagination;
   }
-  const groups = new Map<string, { count: number; weight: number }>();
-  for (const { entry, source } of sourceEntries) {
-    if (source) {
-      const group = groups.get(source);
-      groups.set(source, {
-        count: (group?.count ?? 0) + 1,
-        weight: (group?.weight ?? 0) + messageWeight(entry.message),
-      });
-    }
-  }
+  const groups = sourceGroups(projection.messages);
   return {
     ...pagination,
     segments: segments.flatMap((segment, index) => {
@@ -568,7 +558,7 @@ export function projectResidentChatHistory(
   readerSource: string | null | undefined,
   pinnedRunId?: string | null,
 ) {
-  const coverage = admitResidentLiveSources(pagination, projection.entries);
+  const coverage = admitResidentLiveSources(pagination, projection);
   const admitted = selectChatHistoryResidency(projection.messages, coverage, "tail", readerSource);
   return {
     projection: reduceSessionProjection(projection, {
