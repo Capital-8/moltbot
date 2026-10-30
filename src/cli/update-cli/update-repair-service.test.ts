@@ -94,7 +94,13 @@ afterEach(async () => {
   await state.cleanup();
 });
 
-function seed(stopped: boolean, verification = {}, nativeStop = false, restarted = false) {
+function seed(
+  stopped: boolean,
+  verification = {},
+  nativeStop = false,
+  restarted = false,
+  reason = "managed-service-handoff-failed",
+) {
   const run = createUpdateRun({
     trigger: "control-ui",
     ...(nativeStop ? { target: { installationMethod: "npm-global" } } : {}),
@@ -122,7 +128,7 @@ function seed(stopped: boolean, verification = {}, nativeStop = false, restarted
       endedAtMs: Date.now(),
     });
   }
-  finishUpdateRun(run.runId, { status: "failed", reason: "managed-service-handoff-failed" });
+  finishUpdateRun(run.runId, { status: "failed", reason });
   return run.runId;
 }
 function repair(json = true) {
@@ -250,6 +256,20 @@ it.each([
       }),
     }),
   );
+});
+
+// #188303: a refused recovery after migrated state leaves the managed service stopped
+// (launchd boots it out); without named data risk, repair restarts it on the installed package.
+it("restarts a Gateway left stopped by a refused post-migration recovery", async () => {
+  seed(
+    true,
+    { recovery: { serviceRestartSafe: false, reason: "runtime-verification-failed" } },
+    true,
+    false,
+    "state-migrated-no-rollback",
+  );
+  await repair();
+  expect(events).toEqual(["finalized", "start", "verified"]);
 });
 
 it("verifies a handoff that recorded manager liveness without settled readiness", async () => {
