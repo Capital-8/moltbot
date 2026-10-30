@@ -1649,6 +1649,7 @@ type ColdRouteControl = {
   keepsTriggerFocus?: boolean;
   revealOnFocus?: boolean;
   dashboard?: boolean;
+  syntheticMicrophone?: boolean;
 };
 
 function coldRouteControlScenario(control: ColdRouteControl): InteractionScenario {
@@ -1663,7 +1664,30 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
     fixtureOverrides: routeControlFixtureOverrides,
     setup: async (page) => {
       await page.addInitScript(
-        ({ triggerSelector: selector, content, keepsTriggerFocus }) => {
+        ({ triggerSelector: selector, content, keepsTriggerFocus, syntheticMicrophone }) => {
+          if (syntheticMicrophone) {
+            // First-open timing must not depend on host devices or a permission prompt.
+            const media = new EventTarget();
+            Object.assign(media, {
+              enumerateDevices: async () => [
+                {
+                  kind: "audioinput",
+                  deviceId: "synthetic-microphone",
+                  groupId: "synthetic-proof",
+                  label: "Synthetic microphone",
+                  toJSON: () => ({}),
+                },
+              ],
+              getUserMedia: async () => {
+                performance.mark("route-control:media-capture-attempt");
+                throw new DOMException(
+                  "Synthetic fixture forbids media capture",
+                  "NotAllowedError",
+                );
+              },
+            });
+            Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: media });
+          }
           const recordReady = () => {
             const composer = document.querySelector<HTMLElement>(
               ".chat-pane-cache__pane--active .agent-chat__input textarea",
@@ -1727,6 +1751,7 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
           triggerSelector,
           content: control.content,
           keepsTriggerFocus: control.keepsTriggerFocus ?? false,
+          syntheticMicrophone: control.syntheticMicrophone ?? false,
         },
       );
     },
@@ -1787,10 +1812,19 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
       await page.keyboard.press("Escape");
       await surface.waitFor({ state: "hidden" });
       await page.waitForFunction(
-        (id) =>
-          document.activeElement ===
-          document.querySelector(`[aria-controls=${JSON.stringify(id)}]`),
-        surfaceId,
+        ({ id, syntheticMicrophone }) => {
+          if (
+            syntheticMicrophone &&
+            performance.getEntriesByName("route-control:media-capture-attempt").length > 0
+          ) {
+            throw new Error("The labeled microphone fixture must not request media capture");
+          }
+          return (
+            document.activeElement ===
+            document.querySelector(`[aria-controls=${JSON.stringify(id)}]`)
+          );
+        },
+        { id: surfaceId, syntheticMicrophone: control.syntheticMicrophone ?? false },
       );
       return { ...evidence, dismissedControls: 1 };
     },
@@ -3089,6 +3123,7 @@ export const interactionScenarios: readonly InteractionScenario[] = [
     trigger: ".chat-talk-input-picker__trigger",
     content: ".chat-talk-input-picker__heading",
     revealOnFocus: true,
+    syntheticMicrophone: true,
   }),
   coldRouteControlScenario({
     id: "chat-dashboard-menu-first-ready-open",
