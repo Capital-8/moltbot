@@ -580,6 +580,7 @@ try {
           readiness: Reflect.get(window, "__richRiskReadiness"),
           capturedAtMs: performance.now(),
           longTasks: Reflect.get(window, "__richRiskLongTasks"),
+          layoutShifts: Reflect.get(window, "__richRiskLayoutShifts"),
           navigation: performance.getEntriesByType("navigation").map((entry) => entry.toJSON()),
           resources: performance.getEntriesByType("resource").map((entry) => ({
             name: entry.name,

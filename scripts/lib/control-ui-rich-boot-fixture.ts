@@ -126,6 +126,8 @@ export const installRichBootReadiness = ({
   timings.layoutShift = 0;
   const longTasks: Array<{ start: number; duration: number }> = [];
   Object.assign(window, { __richRiskLongTasks: longTasks });
+  const layoutShifts: unknown[] = [];
+  Object.assign(window, { __richRiskLayoutShifts: layoutShifts });
   new PerformanceObserver((entries) => {
     for (const entry of entries.getEntries())
       longTasks.push({ start: entry.startTime, duration: entry.duration });
@@ -134,6 +136,20 @@ export const installRichBootReadiness = ({
     for (const entry of entries.getEntries()) {
       if (!Reflect.get(entry, "hadRecentInput")) {
         timings.layoutShift += Reflect.get(entry, "value");
+        const sources = Reflect.get(entry, "sources") as Array<{
+          node?: Node;
+          previousRect: DOMRectReadOnly;
+          currentRect: DOMRectReadOnly;
+        }>;
+        layoutShifts.push({
+          startTime: entry.startTime,
+          value: Reflect.get(entry, "value"),
+          sources: sources.map(({ node, previousRect, currentRect }) => ({
+            node: node instanceof Element ? `${node.tagName}.${node.className}` : node?.nodeName,
+            previousRect: previousRect.toJSON(),
+            currentRect: currentRect.toJSON(),
+          })),
+        });
       }
     }
   }).observe({ type: "layout-shift", buffered: true });
