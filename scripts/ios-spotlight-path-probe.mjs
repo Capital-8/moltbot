@@ -26,7 +26,15 @@ const groups = [
   ["checkout-packages", [path.join(root, "packages")]],
   ["checkout-scripts", [path.join(root, "scripts")]],
   ["checkout-docs", [path.join(root, "docs")]],
-  ["checkout", [root.replace(/\/$/u, "")]],
+  ["checkout-src", [path.join(root, "src")]],
+  ["checkout-extensions", [path.join(root, "extensions")]],
+  ["checkout-test", [path.join(root, "test")]],
+  ["checkout-ui", [path.join(root, "ui")]],
+  ["checkout-config", [path.join(root, "config")]],
+  ["checkout-github", [path.join(root, ".github")]],
+  ["checkout-agents", [path.join(root, ".agents")]],
+  ["checkout-root", [root.replace(/\/$/u, "")]],
+  ["checkout-other", [root.replace(/\/$/u, "")]],
   [
     "simulator",
     [
@@ -45,14 +53,34 @@ const groups = [
   name,
   paths.map((prefix) => {
     const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-    return new RegExp(`(?:^|\\s)${escaped}(?:/|\\s|$)`, "u");
+    const boundary = name === "checkout-root" ? "/?(?:\\s|$)" : "(?:/|\\s|$)";
+    return new RegExp(`(?:^|\\s)${escaped}${boundary}`, "u");
   }),
 ]);
+// Fixed classes only: never retain native call names or pathname text.
+const operationGroups = [
+  ["enumeration", /^(?:getdirentries(?:64|attr)?|getattrlistbulk|searchfs)$/u],
+  [
+    "metadata",
+    /^(?:(?:f|l)?stat(?:64)?(?:_extended)?|fstatat(?:64)?|(?:f)?getattrlist(?:at)?|(?:f)?(?:get|list)xattr|access(?:_extended)?|(?:f)?pathconf|fsgetpath|readlink(?:at)?)$/u,
+  ],
+  ["open", /^(?:open(?:at|_extended|_dprotected)?(?:_nocancel)?|guarded_open.*)$/u],
+  ["read", /^(?:(?:p)?readv?(?:_nocancel)?|aio_read|RdData.*)$/u],
+  ["write", /^(?:(?:p)?writev?(?:_nocancel)?|guarded_(?:p)?writev?_np|aio_write|WrData.*)$/u],
+  ["close", /^(?:close(?:_nocancel)?|guarded_close_np)$/u],
+  ["paging", /^(?:PAGE_IN(?:_FILE|_ANON)?|PgIn.*|PgOut.*)$/u],
+];
 const counts = Object.fromEntries([
   ...groups.map(([name]) => [name, 0]),
   ["other-path", 0],
   ["no-path", 0],
 ]);
+const operationsByPath = Object.fromEntries(
+  Object.keys(counts).map((name) => [
+    name,
+    Object.fromEntries([...operationGroups.map(([operation]) => [operation, 0]), ["other", 0]]),
+  ]),
+);
 let lines = 0;
 let oversizedLines = 0;
 let droppedNotices = 0;
@@ -69,7 +97,12 @@ function observe(line) {
   lines++;
   const normalized = line.replace(/(^|\s)\/System\/Volumes\/Data(?=\/)/gu, "$1");
   const group = groups.find(([, paths]) => paths.some((pattern) => pattern.test(normalized)));
-  counts[group?.[0] ?? (/\s\//u.test(line) ? "other-path" : "no-path")]++;
+  const category = group?.[0] ?? (/\s\//u.test(line) ? "other-path" : "no-path");
+  counts[category]++;
+  // Apple's wide display puts the call immediately after the timestamp.
+  const call = /^\s*\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+(\S+)/u.exec(line)?.[1] ?? "";
+  const operation = operationGroups.find(([, pattern]) => pattern.test(call))?.[0] ?? "other";
+  operationsByPath[category][operation]++;
 }
 
 const child = spawn(
@@ -122,10 +155,12 @@ await writeFile(
       oversizedLines,
       droppedNotices,
       counts,
+      operationsByPath,
       limits: [
         "filesystem-events-from-four-named-host-spotlight-processes-only",
         "event-counts-are-not-cpu-time-or-indexed-document-counts",
         "paths-absent-or-truncated-by-fs-usage-cannot-be-attributed",
+        "checkout-root-is-the-displayed-path-not-proof-against-native-truncation",
         "no-raw-paths-or-native-stderr-retained",
       ],
     },

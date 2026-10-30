@@ -359,9 +359,12 @@ gh workflow run ios-store-release.yml --ref YOUR_BRANCH -f operation=screenshots
 The probe enables the resource timeline even if `resource_diagnostics` is false.
 Inside the 60-second host-idle window, it observes filesystem events from four
 named host Spotlight processes for 45 seconds. `ios-spotlight-path-probe.json`
-retains only aggregate path-category event counts, elapsed time, exit status, and
-collection limits. Raw paths and native error output are discarded. An unavailable
-observation or absent/truncated paths cannot establish that indexing was idle.
+retains only aggregate path-category and operation-class event counts, elapsed
+time, exit status, and collection limits. It separates the displayed checkout root
+from known subtrees and other descendants. A displayed root can still be a native
+truncation; it does not prove root-only activity. Raw paths, call names, and native
+error output are discarded. An unavailable observation or absent/truncated paths
+cannot establish that indexing was idle.
 Event counts do not measure CPU time or indexed documents. The trace runs only on
 disposable GitHub-hosted macOS; machine-wide indexing settings are unchanged.
 
