@@ -1,9 +1,9 @@
 // Real OpenAI voice sockets must use Proxyline's managed routing, including on Bun.
 import { once } from "node:events";
-import { createServer } from "node:http";
-import { connect, type AddressInfo, type Socket } from "node:net";
+import type { AddressInfo } from "node:net";
 import { afterEach, expect, it, vi } from "vitest";
 import { WebSocketServer } from "../../../../packages/gateway-client/src/websocket.js";
+import { createLoopbackConnectProxy } from "../../../../test/helpers/loopback-connect-proxy.js";
 import type { RealtimeVoiceProviderPlugin } from "../../../plugins/capability-provider.types.js";
 import { loadBundledPluginFacade } from "../../../test-utils/bundled-plugin-public-surface.js";
 import { rawDataToString } from "../../ws.js";
@@ -87,27 +87,7 @@ async function startNetwork(admit: boolean) {
   await once(target, "listening");
   closeAfterEach(target, () => target.clients.forEach((client) => client.terminate()));
   const port = (target.address() as AddressInfo).port;
-  const connects: string[] = [];
-  const sockets = new Set<Socket>();
-  const server = createServer((_request, response) => response.writeHead(405).end());
-  server.on("connection", (socket) => sockets.add(socket));
-  server.on("connect", (request, client: Socket, head: Buffer) => {
-    const authority = request.url ?? "";
-    connects.push(authority);
-    if (!admit) {
-      client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
-      return;
-    }
-    const upstream = connect(Number(authority.split(":").at(-1)), "127.0.0.1", () => {
-      client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      upstream.write(head);
-      upstream.pipe(client);
-      client.pipe(upstream);
-    });
-    sockets.add(upstream);
-    upstream.on("error", () => client.destroy());
-    client.on("error", () => upstream.destroy());
-  });
+  const { connects, sockets, server } = createLoopbackConnectProxy(admit);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   closeAfterEach(server, () => sockets.forEach((socket) => socket.destroy()));
