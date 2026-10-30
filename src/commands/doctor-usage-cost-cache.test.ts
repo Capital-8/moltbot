@@ -251,7 +251,13 @@ describe("legacy usage-cost cache cleanup", () => {
     if (operation === "readdir") {
       vi.spyOn(fs, "readdir").mockRejectedValueOnce(error);
     } else {
-      vi.spyOn(fs, "stat").mockRejectedValueOnce(error);
+      const stat = fs.stat;
+      vi.spyOn(fs, "stat").mockImplementation((...args) => {
+        if (args[0] === tempFile) {
+          return Promise.reject(error);
+        }
+        return stat(...args);
+      });
     }
     await maybeRepairLegacyRuntimeFiles(shouldRepair, { OPENCLAW_STATE_DIR: root });
     if (diagnostic) {
@@ -269,6 +275,9 @@ describe("legacy usage-cost cache cleanup", () => {
       expect(message).toContain(shouldRepair ? "openclaw doctor --fix" : "openclaw doctor");
       expect(message).not.toContain("Removed");
       await contents(cacheFile, "x");
+      if (scope === "entry") {
+        await contents(tempFile, "x");
+      }
       return;
     }
     noted("Removed 1 rebuildable legacy usage-cost cache file", "Usage cost cache");
