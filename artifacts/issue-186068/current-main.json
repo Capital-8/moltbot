@@ -1,0 +1,50 @@
+{
+  "remote_main": "5e27a6cf109fb3356e747901781ad6bb68de0622",
+  "files": [
+    {
+      "path": "docs/concepts/user-model.md",
+      "matches_local": true,
+      "sha256": "6c4af3a0e1dda920dc57226f6834c277bef1f85488788c4fcd4be0c2900298f0"
+    },
+    {
+      "path": "src/gateway/server-methods/users-personal-file.ts",
+      "matches_local": true,
+      "sha256": "7132d2150758d5b1070194b3f10cabf942a52076f698e42663ab093e2520fbf9"
+    },
+    {
+      "path": "src/config/sessions/session-entry-provenance.ts",
+      "matches_local": true,
+      "sha256": "c7b80d1935c5bedde83c7cafff9f48a10db8af7be7509fa9642ae93303cc3ce2"
+    },
+    {
+      "path": "src/sessions/session-participant-input.ts",
+      "matches_local": true,
+      "sha256": "ad9a66bef15ee3ba8a54e6f80e3ed8d1ba15ef6c1aa000adeb2c703f18cec5fc"
+    },
+    {
+      "path": "src/agents/bootstrap-files.ts",
+      "matches_local": true,
+      "sha256": "5e0bcd97e242bd9dfaa28fcdeb48ed63ec68969bfeed1fa71efd82f7fa0b4bcd"
+    },
+    {
+      "path": "src/agents/workspace-personal-bootstrap.ts",
+      "matches_local": true,
+      "sha256": "df3aee990d66096e81c8680038a889871fd5b0305669d3ae2322bcf17a442e62"
+    },
+    {
+      "path": "extensions/knowledge/src/access.ts",
+      "matches_local": true,
+      "sha256": "5fd913adbb9f50882e7a325959cbf88f6177a22270ad18f4673dc2014c7b7cdf"
+    },
+    {
+      "path": "extensions/knowledge/src/model.ts",
+      "matches_local": true,
+      "sha256": "46a9d3f7f8879c59bb151cc94143059319ff123aae9a545e62164866503df770"
+    },
+    {
+      "path": "extensions/codex/src/app-server/attempt-workspace-context.ts",
+      "matches_local": true,
+      "sha256": "82a7611fe46578527e4eaf012b373d76506579edaaa13908af3d8ef67a6f940d"
+    }
+  ]
+}
