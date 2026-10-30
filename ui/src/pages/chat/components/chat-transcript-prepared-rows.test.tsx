@@ -292,7 +292,8 @@ async function transcriptFixture(
 
 it("bounds initial HTML warming and keeps distant rows out of the DOM", async () => {
   const view = await transcriptFixture(0, true, false, "retained");
-  const elements = view.container.querySelectorAll(".chat-virtual-row").length;
+  const count = () => view.container.querySelectorAll(".chat-virtual-row").length;
+  const elements = count();
   await view.idle(0);
   for (let turn = 0; turn < 160; turn++) {
     await view.idle(10, 1);
@@ -302,11 +303,9 @@ it("bounds initial HTML warming and keeps distant rows out of the DOM", async ()
   // Cover the first gesture without preparing the whole untouched transcript.
   expect(prewarmGroupedMessage(view.groups[96]!.messages[0]!.message, {})).toBe(false);
   expect(prewarmGroupedMessage(view.groups[200]!.messages[0]!.message, {})).toBe(true);
-  expect(view.container.querySelector('[data-virtual-row-key="fragment:20"]')).not.toBeNull();
+  expect(view.container.querySelector('[data-virtual-row-key="fragment:9"]')).not.toBeNull();
   expect(view.container.querySelector('[data-virtual-row-key="fragment:200"]')).toBeNull();
-  expect(view.container.querySelectorAll(".chat-virtual-row").length).toBeLessThanOrEqual(
-    elements + 24,
-  );
+  expect(count()).toBeLessThanOrEqual(elements + 12);
   expect(view.container.querySelector("[data-preparing-row]")).toBeNull();
 
   view.elapse(150);
@@ -642,7 +641,7 @@ it("reuses a nearby completed row after scrolling away and back, with a bounded 
 it("keeps idle geometry nearby across intervening non-retainable rows", async () => {
   const view = await transcriptFixture(0, false, false, false, 600, false, 2);
   await view.frame(160);
-  const ahead = view.container.querySelector('[data-virtual-row-key="fragment:20"]');
+  const ahead = view.container.querySelector('[data-virtual-row-key="fragment:10"]');
   expect(ahead).not.toBeNull();
   expect(ahead!.getAttribute("data-prepared-row")).toBe("true");
   expect(view.container.querySelector('[data-virtual-row-key="fragment:40"]')).toBeNull();
@@ -756,23 +755,20 @@ it("retains nearby geometry while scrolling back into the prepared window", asyn
   await view.scrollTo(250);
   await view.frame(320);
   expect(transcriptRows(view.container).some((row) => Number(row.dataset.index) < 250)).toBe(true);
-  // The 24 retained rows share the DOM with the active viewport and its neighbours.
-  expect(view.container.querySelectorAll("[data-prepared-row]").length).toBeLessThanOrEqual(24);
-  expect(transcriptRows(view.container).length).toBeLessThanOrEqual(34);
-  const ahead = view.container.querySelector('[data-virtual-row-key="fragment:235"]');
+  // Retained rows share the DOM with the active viewport and its neighbours.
+  expect(view.container.querySelectorAll("[data-prepared-row]").length).toBeLessThanOrEqual(12);
+  expect(transcriptRows(view.container).length).toBeLessThanOrEqual(22);
+  const ahead = view.container.querySelector('[data-virtual-row-key="fragment:246"]');
   expect(ahead).not.toBeNull();
   const preparations = view.renderRow.mock.calls.length;
   expect(view.container.querySelector('[data-virtual-row-key="fragment:0"]')).toBeNull();
-  const aheadPreparations = view.renderRow.mock.calls.filter(
-    ([row]) => row.key === "fragment:235",
-  ).length;
+  const calls = () => view.renderRow.mock.calls.filter(([row]) => row.key === "fragment:246");
+  const aheadPreparations = calls().length;
   await view.frame(16);
   expect(view.renderRow.mock.calls).toHaveLength(preparations);
-  await view.scrollTo(235);
-  expect(view.container.querySelector('[data-virtual-row-key="fragment:235"]')).toBe(ahead);
-  expect(view.renderRow.mock.calls.filter(([row]) => row.key === "fragment:235")).toHaveLength(
-    aheadPreparations,
-  );
+  await view.scrollTo(246);
+  expect(view.container.querySelector('[data-virtual-row-key="fragment:246"]')).toBe(ahead);
+  expect(calls()).toHaveLength(aheadPreparations);
 });
 
 it("uses cached geometry on the first reader movement after tail placement", async () => {
@@ -808,8 +804,9 @@ it("keeps manual end-follow from measuring history before reader navigation", as
   expect(transcriptRows(view.container).some((row) => Number(row.dataset.index) < 240)).toBe(true);
 });
 
-it("measures nearby rows before spending idle budgets on distant Markdown", async () => {
-  const view = await transcriptFixture(0, true, false, "retained");
+it("continues idle warming when the viewport fills the retained DOM budget", async () => {
+  const view = await transcriptFixture(0, true, false, "retained", 1400);
+  await view.scrollTo(1);
   const warmed = new Set<number>();
   vi.spyOn(ChatTranscriptRenderer.prototype, "prewarmRow").mockImplementation((index) => {
     if (warmed.has(index)) {
@@ -820,13 +817,15 @@ it("measures nearby rows before spending idle budgets on distant Markdown", asyn
     return true;
   });
 
+  await view.task(150);
   for (let turn = 0; turn < 30; turn++) {
     await view.idle();
+    await view.frame(2, false);
   }
-
-  expect(view.container.querySelector("[data-prepared-row]")).not.toBeNull();
+  expect(transcriptRows(view.container).filter((row) => !row.inert).length).toBeGreaterThan(12);
+  expect(warmed.size).toBeGreaterThan(12);
   expect(warmed.size).toBeLessThan(32);
-  expect(view.container.querySelectorAll("[data-prepared-row]").length).toBeLessThanOrEqual(24);
+  expect(view.container.querySelectorAll("[data-prepared-row]").length).toBeLessThanOrEqual(12);
 });
 
 it("materializes one predicted row between scroll frames and uses the latest viewport", async () => {
@@ -888,7 +887,9 @@ it("prepares one arriving row between viewport-sized scroll steps", async () => 
   expect(preparing).not.toBeNull();
   expect(preparing!.hasAttribute("inert")).toBe(true);
   expect(Number(preparing!.dataset.index)).toBeGreaterThan(66);
-  expect(transcriptRows(view.container)).toHaveLength(mounted.length + 1);
+  expect(transcriptRows(view.container).filter((row) => !mounted.includes(row))).toEqual([
+    preparing,
+  ]);
   const prepared = transcriptRows(view.container);
   await view.frame(1, false);
   await view.task();
