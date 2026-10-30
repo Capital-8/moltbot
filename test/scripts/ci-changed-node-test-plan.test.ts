@@ -535,7 +535,10 @@ describe("CI changed Node test plan", () => {
       const watched = resolvePolicyTestTargets(changedPaths);
       const before = createChangedNodeTestShards(targets, { runnerBackend });
       // Use the real resolver-to-packer handoff; shell fixtures do not import their owner.
-      const selected = expectDefined(createChangedNodeTestShards(changedPaths, options));
+      const selected = expectDefined(
+        createChangedNodeTestShards(changedPaths, options),
+        "prior-CI owner shard plan",
+      );
       const envScratch = argvTempDirs.make("prior-ci-owner-env-");
       const files = selectedFiles(selected);
       expect(files).not.toContain("test/scripts/ci-workflow-planning.test.ts");
