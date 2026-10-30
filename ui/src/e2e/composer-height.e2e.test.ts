@@ -94,6 +94,84 @@ suite.define(() => {
       });
     },
   );
+  // The keyboard shrinks the app shell, not the device: start full height, focus,
+  // then shrink. 360 × 372 leaves a pane under the 320px short-pane step.
+  it.each([
+    { width: 360, height: 372 },
+    { width: 390, height: 400 },
+    { width: 390, height: 844 },
+  ])("grows a mobile web draft to three lines at $width × $height", async ({ width, height }) => {
+    await suite.withPage(
+      { viewport: { width, height: 844 }, hasTouch: true, isMobile: true },
+      async ({ page }) => {
+        await installMockGateway(page, {
+          historyMessages: Array.from({ length: 12 }, (_, index) => ({
+            role: index % 2 ? "assistant" : "user",
+            content: `Message ${index + 1}: keep the conversation visible while typing.`,
+          })),
+        });
+        await page.goto(`${suite.server.baseUrl}chat`);
+        const shell = page.locator(
+          '.chat-footer .agent-chat__composer-shell[data-mobile-composer="true"]',
+        );
+        const editor = shell.locator(".agent-chat__composer-combobox > textarea");
+        await editor.tap();
+        await expect.poll(() => shell.getAttribute("data-composer-editing")).toBe("true");
+        await page.setViewportSize({ width, height });
+        const measure = () =>
+          editor.evaluate((el) => {
+            const style = getComputedStyle(el);
+            const inset =
+              Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+            const line = Number.parseFloat(style.lineHeight);
+            return {
+              line,
+              inset,
+              lines: Math.round((el.scrollHeight - inset) / line),
+              height: el.clientHeight,
+              overflow: el.scrollHeight - el.clientHeight,
+              halfLeading: (line - Number.parseFloat(style.fontSize)) / 2,
+              // Typing at the end scrolls the caret, not the line's leading, into view.
+              lastLineHidden:
+                el.scrollHeight -
+                Number.parseFloat(style.paddingBottom) -
+                (el.scrollTop + el.clientHeight),
+            };
+          });
+        const artifacts = createControlUiE2eArtifactDir(
+          `composer-height-mobile-${width}-${height}`,
+        );
+        const seen = new Set<number>();
+        // Typed prose wraps on its own; each word is a real keystroke sequence.
+        for (const word of "Mobile drafts should keep growing while I type, up to three full lines, and then scroll inside the composer instead of covering the conversation above it".split(
+          " ",
+        )) {
+          await editor.pressSequentially(`${word} `);
+          const m = await measure();
+          seen.add(Math.min(m.lines, 4));
+          await expect
+            .poll(async () => (await measure()).height)
+            .toBe(Math.min(m.lines, 3) * m.line + m.inset);
+          if (m.lines === 3) {
+            await page.screenshot({ path: `${artifacts}/three-lines.png` });
+          }
+        }
+        // Typing only adds lines, so the set keeps them in order.
+        expect([...seen]).toEqual([1, 2, 3, 4]);
+        const capped = await measure();
+        await page.screenshot({ path: `${artifacts}/scrolling.png` });
+        expect(capped.overflow).toBeGreaterThan(0);
+        expect(capped.lastLineHidden).toBeLessThanOrEqual(capped.halfLeading);
+        const thread = await page.locator(".chat-thread").boundingBox();
+        const composer = await shell.locator(".agent-chat__input").boundingBox();
+        expect(thread!.height).toBeGreaterThan(0);
+        expect(composer!.y + composer!.height).toBeLessThanOrEqual(height);
+        await editor.fill("");
+        await expect.poll(async () => (await measure()).height).toBe(capped.line + capped.inset);
+      },
+    );
+  });
+
   it("restores a long draft at its final height from the first painted frame", async () => {
     await suite.withPage({ viewport: { width: 1440, height: 900 } }, async ({ page }) => {
       const sessionKey = "agent:main:composer-height-reload";
