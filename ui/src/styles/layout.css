@@ -3882,12 +3882,15 @@ html.openclaw-native-web-chrome
   white-space: nowrap;
   font-size: calc(12.5px * var(--control-ui-text-scale));
   line-height: 18px;
+  letter-spacing: 0;
   color: var(--session-row-muted, var(--muted));
 }
 
 .sidebar-recent-session__channel {
   max-width: 120px;
+  font-size: calc(12px * var(--control-ui-text-scale));
   line-height: 18px;
+  letter-spacing: 0;
 }
 
 .sidebar-recent-session__details-endcap {
@@ -3973,19 +3976,6 @@ html.openclaw-native-web-chrome
 .sidebar-recent-session:has(.session-unread-dot, .session-glyph__badge--unread)
   .sidebar-recent-session__name {
   color: var(--text-strong);
-}
-
-.sidebar-recent-session__subtitle,
-.sidebar-recent-session__channel {
-  letter-spacing: 0;
-}
-
-.sidebar-recent-session__subtitle {
-  line-height: 18px;
-}
-
-.sidebar-recent-session__channel {
-  font-size: calc(12px * var(--control-ui-text-scale));
 }
 
 .sidebar-session-tree__children .sidebar-session-error.callout.danger {
