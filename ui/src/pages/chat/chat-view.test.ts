@@ -697,7 +697,7 @@ describe("chat transcript rendering", () => {
 
   it.each(["ordinary"])(
     "announces named attachment failures within the cap in %s assistant rows",
-    (flow) => {
+    async (flow) => {
       const transcript = createTestTranscript();
       const container = createComposerContainer();
       const existing = {
@@ -725,8 +725,11 @@ describe("chat transcript rendering", () => {
         ],
       };
       renderMessages([existing, attachmentOnly]);
-      expect(container.querySelector(".chat-transcript-announcement")?.textContent).toBe(
-        "missing.pdf: Not sent. File not found. Check the path and try again.",
+      await vi.dynamicImportSettled();
+      await waitForSolid(() =>
+        expect(container.querySelector(".chat-transcript-announcement")?.textContent).toBe(
+          "missing.pdf: Not sent. File not found. Check the path and try again.",
+        ),
       );
 
       const mixed = {
@@ -840,141 +843,6 @@ describe("chat transcript rendering", () => {
       );
     },
   );
-
-  it("announces a run preamble and its later terminal answer separately", () => {
-    const transcript = createTestTranscript();
-    const container = createComposerContainer();
-    const user = {
-      kind: "group",
-      key: "group:user:announcement",
-      role: "user",
-      visibleContent: "text",
-      messages: [
-        {
-          key: "message:user:announcement",
-          message: {
-            role: "user",
-            content: "Start",
-            __openclaw: { id: "user:announcement", idempotencyKey: "run-announcement:user" },
-          },
-        },
-      ],
-      timestamp: 1,
-      isStreaming: false,
-    };
-    const renderItems = (items: ReturnType<typeof chatThread.buildCachedChatItems>) => {
-      vi.mocked(chatThread.buildCachedChatItems).mockReturnValue(items);
-      renderChatInto(container, { transcript, messages: items });
-    };
-
-    renderItems([user] as ReturnType<typeof chatThread.buildCachedChatItems>);
-    const stream = {
-      kind: "stream" as const,
-      key: "stream:announcement",
-      text: "Latest streamed narration",
-      startedAt: 2,
-      isStreaming: true,
-      runId: "run-announcement",
-      boundaryId: "send:run-announcement",
-    };
-    renderItems([
-      user,
-      stream,
-      {
-        kind: "reading-indicator",
-        key: "reading:announcement",
-        startedAt: 2,
-        runId: "run-announcement",
-        boundaryId: "send:run-announcement",
-      },
-    ] as ReturnType<typeof chatThread.buildCachedChatItems>);
-
-    expect(container.querySelector(".chat-transcript-announcement")?.textContent).toBe(
-      "Latest streamed narration",
-    );
-
-    renderItems([
-      user,
-      {
-        kind: "group",
-        key: "group:assistant:persisted-announcement",
-        role: "assistant",
-        visibleContent: "text",
-        messages: [
-          {
-            key: "assistant:persisted-announcement",
-            message: {
-              role: "assistant",
-              content: "Persisted narration while the run continues",
-              runId: "run-announcement",
-            },
-          },
-        ],
-        timestamp: 3,
-        isStreaming: false,
-        runId: "run-announcement",
-      },
-      {
-        kind: "reading-indicator",
-        key: "reading:persisted-announcement",
-        startedAt: 4,
-        runId: "run-announcement",
-        boundaryId: "send:run-announcement",
-      },
-    ] as ReturnType<typeof chatThread.buildCachedChatItems>);
-
-    expect(container.querySelector(".chat-transcript-announcement")?.textContent).toBe(
-      "Persisted narration while the run continues",
-    );
-
-    renderItems([
-      user,
-      { ...stream, isStreaming: false },
-      {
-        kind: "group",
-        key: "group:tool:announcement",
-        role: "tool",
-        visibleContent: "text",
-        messages: [
-          {
-            key: "tool:announcement",
-            message: {
-              role: "toolResult",
-              content: "Tool output",
-              runId: "run-announcement",
-            },
-          },
-        ],
-        timestamp: 3,
-        isStreaming: false,
-        runId: "run-announcement",
-      },
-      {
-        kind: "group",
-        key: "group:assistant:announcement",
-        role: "assistant",
-        visibleContent: "text",
-        messages: [
-          {
-            key: "assistant:announcement",
-            message: {
-              role: "assistant",
-              phase: "final_answer",
-              content: "Terminal answer",
-              runId: "run-announcement",
-            },
-          },
-        ],
-        timestamp: 4,
-        isStreaming: false,
-        runId: "run-announcement",
-      },
-    ] as ReturnType<typeof chatThread.buildCachedChatItems>);
-
-    expect(container.querySelector(".chat-transcript-announcement")?.textContent).toBe(
-      "Terminal answer",
-    );
-  });
 });
 
 describe("chat composer workbench", () => {
@@ -1273,8 +1141,8 @@ describe("chat loading skeleton", () => {
     ] as ReturnType<typeof chatThread.buildCachedChatItems>);
     renderChatInto(container, props);
 
+    await waitForSolid(() => expect(reply.querySelector(".chat-working-indicator")).toBeNull());
     expect(container.querySelector('[data-message-id="message:assistant:reply"]')).toBe(bubble);
-    expect(reply.querySelector(".chat-working-indicator")).toBeNull();
     expect(container.querySelectorAll(".chat-working-indicator")).toHaveLength(1);
   });
 

@@ -3,7 +3,7 @@
 import { createSignal, For } from "solid-js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { mountSolid } from "../../../test-helpers/mount-solid.ts";
-import { flush } from "../../../test-helpers/solid-settle.ts";
+import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { createAsyncQuestionPresentation } from "./chat-async-question.ts";
 import { GroupedMessage } from "./chat-message-bubble-view.tsx";
 import { prepareChatMessageRender } from "./chat-message-markdown-view.tsx";
@@ -21,7 +21,7 @@ it("keeps ordinary transcript text synchronous", () => {
   expect(view.container.querySelector(".chat-text")?.textContent?.trim()).toBe("Ready immediately");
 });
 
-it("renders rich history immediately and retires a superseded message", () => {
+it("keeps plain siblings synchronous while rich history loads and retires a superseded message", async () => {
   const question = {
     role: "assistant",
     content: "Choose an audience.",
@@ -58,10 +58,12 @@ it("renders rich history immediately and retires a superseded message", () => {
   ));
   onTestFinished(view.unmount);
   expect(view.container.textContent).toContain("Visible immediately");
-  expect(view.container.querySelector(".chat-tool-msg-collapse")).not.toBeNull();
-  expect(view.container.querySelector(".chat-question-summary")?.textContent).toContain(
-    "Which audience?",
-  );
+  await waitForSolid(() => {
+    expect(view.container.querySelector(".chat-tool-msg-collapse")).not.toBeNull();
+    expect(view.container.querySelector(".chat-question-summary")?.textContent).toContain(
+      "Which audience?",
+    );
+  });
 
   const currentTool = createToolResultMessage("current-call", "exec", "Permission required", {
     details: {
@@ -76,7 +78,9 @@ it("renders rich history immediately and retires a superseded message", () => {
   });
   setMessages((entries) => [...entries.slice(0, 2), { key: "current", message: currentTool }]);
   flush();
-  expect(view.container.querySelector(".chat-permission-card")).not.toBeNull();
+  await waitForSolid(() =>
+    expect(view.container.querySelector(".chat-permission-card")).not.toBeNull(),
+  );
   expect(view.container.querySelector(".chat-question-summary")?.textContent).toContain(
     "Which audience?",
   );

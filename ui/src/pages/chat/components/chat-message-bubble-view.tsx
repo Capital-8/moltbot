@@ -109,110 +109,112 @@ export function GroupedMessage(props: {
         props.options.displayFacts?.forRow(persistedMessageEntryId(props.preparation.message))
       }
     >
-      <Show
-        when={state().workspaceConflict}
-        fallback={
-          <Show when={!state().empty}>
-            {(_visible) => {
-              const entryRef = messageElements?.forKey(initialMessageKey);
-              const bindEntry = elementRef((element) => {
-                entryRef?.(element);
-                return () => entryRef?.(undefined);
-              });
-              return (
-                <>
-                  <div
-                    class={state().bubbleClasses}
-                    ref={[bindEntry]}
-                    data-message-id={props.messageKey}
-                    data-file-session-key={props.options.fileLinkSessionKey}
-                    data-entry-id={props.options.entryId || undefined}
-                    data-message-text={state().actionText || undefined}
-                    prop:messageActions={props.options.messageActions}
-                  >
-                    <Show when={props.options.replyLine}>
-                      <ReplyLineView
-                        line={props.options.replyLine!}
-                        actions={props.options}
-                        inline
-                      />
-                    </Show>
-                    <Switch>
-                      <Match when={state().voiceTranscript}>
-                        <ChatBubbleActivity
-                          label={t("chat.messages.voiceTranscript")}
-                          open={props.options.searchResult}
-                        >
+      <ChatLazyBoundary>
+        <Show
+          when={state().workspaceConflict}
+          fallback={
+            <Show when={!state().empty}>
+              {(_visible) => {
+                const entryRef = messageElements?.forKey(initialMessageKey);
+                const bindEntry = elementRef((element) => {
+                  entryRef?.(element);
+                  return () => entryRef?.(undefined);
+                });
+                return (
+                  <>
+                    <div
+                      class={state().bubbleClasses}
+                      ref={[bindEntry]}
+                      data-message-id={props.messageKey}
+                      data-file-session-key={props.options.fileLinkSessionKey}
+                      data-entry-id={props.options.entryId || undefined}
+                      data-message-text={state().actionText || undefined}
+                      prop:messageActions={props.options.messageActions}
+                    >
+                      <Show when={props.options.replyLine}>
+                        <ReplyLineView
+                          line={props.options.replyLine!}
+                          actions={props.options}
+                          inline
+                        />
+                      </Show>
+                      <Switch>
+                        <Match when={state().voiceTranscript}>
+                          <ChatBubbleActivity
+                            label={t("chat.messages.voiceTranscript")}
+                            open={props.options.searchResult}
+                          >
+                            <BubbleContents
+                              state={state}
+                              messageKey={props.messageKey}
+                              options={props.options}
+                              onOpenSidebar={props.onOpenSidebar}
+                            />
+                          </ChatBubbleActivity>
+                        </Match>
+                        <Match when={state().onlyToolCards}>
+                          <InlineToolCards
+                            cards={state().toolCards}
+                            options={state().toolRenderOptions}
+                          />
+                        </Match>
+                        <Match when={state().isStandaloneToolMessage}>
+                          <ToolMessage
+                            {...props}
+                            state={state}
+                            renderContents={() => <BubbleContents {...props} state={state} />}
+                          />
+                        </Match>
+                        <Match when={true}>
+                          {/* Keep preparation out of this boundary so refreshes retain embedded media. */}
                           <BubbleContents
                             state={state}
                             messageKey={props.messageKey}
                             options={props.options}
                             onOpenSidebar={props.onOpenSidebar}
                           />
-                        </ChatBubbleActivity>
-                      </Match>
-                      <Match when={state().onlyToolCards}>
-                        <InlineToolCards
-                          cards={state().toolCards}
-                          options={state().toolRenderOptions}
-                        />
-                      </Match>
-                      <Match when={state().isStandaloneToolMessage}>
-                        <ToolMessage
-                          {...props}
-                          state={state}
-                          renderContents={() => <BubbleContents {...props} state={state} />}
-                        />
-                      </Match>
-                      <Match when={true}>
-                        {/* Keep preparation out of this boundary so refreshes retain embedded media. */}
-                        <BubbleContents
-                          state={state}
-                          messageKey={props.messageKey}
-                          options={props.options}
-                          onOpenSidebar={props.onOpenSidebar}
-                        />
-                      </Match>
-                    </Switch>
-                    <Show
-                      when={
-                        state().sourceRole === "assistant" &&
-                        assistantMessageIsInterrupted(state().message)
-                      }
-                    >
-                      <div
-                        class="chat-tasks-status chat-turn-recap chat-turn-recap--continuation"
-                        role="status"
+                        </Match>
+                      </Switch>
+                      <Show
+                        when={
+                          state().sourceRole === "assistant" &&
+                          assistantMessageIsInterrupted(state().message)
+                        }
                       >
-                        {t("chat.composer.runInterrupted")}
-                      </div>
+                        <div
+                          class="chat-tasks-status chat-turn-recap chat-turn-recap--continuation"
+                          role="status"
+                        >
+                          {t("chat.composer.runInterrupted")}
+                        </div>
+                      </Show>
+                    </div>
+                    <Show when={readMessageWorkContext(state().message)}>
+                      <MessageWorkContext message={state().message} />
                     </Show>
-                  </div>
-                  <Show when={readMessageWorkContext(state().message)}>
-                    <MessageWorkContext message={state().message} />
-                  </Show>
-                </>
-              );
-            }}
-          </Show>
-        }
-      >
-        {(conflict) => {
-          const entryRef = messageElements?.forKey(initialMessageKey);
-          const bindEntry = elementRef((element) => {
-            entryRef?.(element);
-            return () => entryRef?.(undefined);
-          });
-          return (
-            <WorkspaceConflictTranscriptMessage
-              conflict={conflict()}
-              messageKey={props.messageKey}
-              entryId={props.options.entryId}
-              ref={bindEntry}
-            />
-          );
-        }}
-      </Show>
+                  </>
+                );
+              }}
+            </Show>
+          }
+        >
+          {(conflict) => {
+            const entryRef = messageElements?.forKey(initialMessageKey);
+            const bindEntry = elementRef((element) => {
+              entryRef?.(element);
+              return () => entryRef?.(undefined);
+            });
+            return (
+              <WorkspaceConflictTranscriptMessage
+                conflict={conflict()}
+                messageKey={props.messageKey}
+                entryId={props.options.entryId}
+                ref={bindEntry}
+              />
+            );
+          }}
+        </Show>
+      </ChatLazyBoundary>
     </ChatRowDisplayContext>
   );
 }

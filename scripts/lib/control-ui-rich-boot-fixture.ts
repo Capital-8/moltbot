@@ -29,7 +29,9 @@ export async function inspectRichBootBundles(
       const embedded = /globalThis\.OPENCLAW_CONTROL_UI_BUILD_INFO=(\{.*?\});<\/script>/su.exec(
         html,
       )?.[1];
-      if (!embedded) throw new Error(`Missing embedded build identity: ${directory}`);
+      if (!embedded) {
+        throw new Error(`Missing embedded build identity: ${directory}`);
+      }
       return {
         directory,
         indexSha256: sha(html),
@@ -39,7 +41,9 @@ export async function inspectRichBootBundles(
     }),
   );
   // Legacy timing callers need bundle identity, not the newer deferred-family layout.
-  if (!requireRichFamily) return { bundles, richFamily: undefined };
+  if (!requireRichFamily) {
+    return { bundles, richFamily: undefined };
+  }
   // Source maps identify the candidate family; imports come from parsed emitted JS, not filenames.
   const owners = ["chat-rich-presentation.runtime.ts", "chat-message-bubble-tools.tsx"];
   let richSource: string | undefined;
@@ -47,26 +51,33 @@ export async function inspectRichBootBundles(
   for (const owner of owners) {
     const matches: string[] = [];
     for (const name of await readdir(path.join(head, "assets"))) {
-      if (!name.endsWith(".js.map")) continue;
+      if (!name.endsWith(".js.map")) {
+        continue;
+      }
       const map = JSON.parse(await readFile(path.join(head, "assets", name), "utf8"));
-      if (map.sources.some((source: string) => source.endsWith(`/components/${owner}`)))
+      if (map.sources.some((source: string) => source.endsWith(`/components/${owner}`))) {
         matches.push(`assets/${name.slice(0, -4)}`);
+      }
     }
-    if (matches.length > 1)
+    if (matches.length > 1) {
       throw new Error(`Ambiguous rich source owner ${owner}: ${matches.join(", ")}`);
+    }
     if (matches.length === 1) {
       richAsset = matches[0];
       richSource = owner;
       break;
     }
   }
-  if (!richAsset)
+  if (!richAsset) {
     throw new Error(
       "This proof mode requires a candidate rich implementation in emitted source maps",
     );
+  }
   const richClosure = new Map<string, { sha256: string; imports: string[] }>();
   async function inspectStaticClosure(file: string): Promise<void> {
-    if (richClosure.has(file)) return;
+    if (richClosure.has(file)) {
+      return;
+    }
     const code = await readFile(path.join(head, file), "utf8");
     const imports = parse(code, { ecmaVersion: "latest", sourceType: "module" }).body.flatMap(
       (node) =>
@@ -79,7 +90,9 @@ export async function inspectRichBootBundles(
           : [],
     );
     richClosure.set(file, { sha256: sha(code), imports });
-    for (const dependency of imports) await inspectStaticClosure(dependency);
+    for (const dependency of imports) {
+      await inspectStaticClosure(dependency);
+    }
   }
   await inspectStaticClosure(richAsset);
   return {
@@ -129,8 +142,9 @@ export const installRichBootReadiness = ({
   const layoutShifts: unknown[] = [];
   Object.assign(window, { __richRiskLayoutShifts: layoutShifts });
   new PerformanceObserver((entries) => {
-    for (const entry of entries.getEntries())
+    for (const entry of entries.getEntries()) {
       longTasks.push({ start: entry.startTime, duration: entry.duration });
+    }
   }).observe({ type: "longtask", buffered: true });
   new PerformanceObserver((entries) => {
     for (const entry of entries.getEntries()) {
@@ -193,15 +207,20 @@ export const installRichBootReadiness = ({
     ].find((node) => visible(node) && node.complete && node.naturalWidth > 0);
     const rich =
       fixtureKind === "initial-rich" || fixtureKind === "first-rich-arrival" ? image : summary;
-    if (!timings.richMs && rich) timings.richMs = performance.now();
+    if (!timings.richMs && rich) {
+      timings.richMs = performance.now();
+    }
     const ready =
       timings.composerMs &&
       timings.finalMs &&
       ((fixtureKind !== "rich-history" && fixtureKind !== "initial-rich") ||
         (timings.activeMs && timings.richMs));
-    if (!timings.readyMs && ready) timings.readyMs = performance.now();
-    if (timings.arrivalStartedMs && !timings.arrivalMs && rich && summary)
+    if (!timings.readyMs && ready) {
+      timings.readyMs = performance.now();
+    }
+    if (timings.arrivalStartedMs && !timings.arrivalMs && rich && summary) {
       timings.arrivalMs = performance.now();
+    }
     if (!timings.readyMs || (fixtureKind === "first-rich-arrival" && !timings.arrivalMs)) {
       requestAnimationFrame(check);
     }
@@ -254,7 +273,7 @@ export function createRichBootHistory(
         }).historyMessages.map((message, index) => ({
           role: message.role,
           timestamp: message.timestamp,
-          __openclaw: message.__openclaw,
+          __openclaw: message["__openclaw"],
           content:
             index === (fixture === "mixed-history" ? 239 : 59)
               ? finalText
@@ -378,7 +397,9 @@ export async function readRichBootRunnerIdentity(runnerPath: string, providedMan
         }).trim(),
       }
     : undefined;
-  if (sourceIdentity?.status) throw new Error("Commit harness sources before benchmarking");
+  if (sourceIdentity?.status) {
+    throw new Error("Commit harness sources before benchmarking");
+  }
   if (
     fingerprint &&
     (sourceIdentity?.head !== fingerprint.source.head ||
@@ -443,7 +464,9 @@ export async function summarizeRichBootResources(
   const bundleResources = [];
   for (const resource of resources) {
     const asset = new URL(resource.name).pathname.slice(1);
-    if (!asset.startsWith("assets/") || !/\.(?:js|css)$/u.test(asset)) continue;
+    if (!asset.startsWith("assets/") || !/\.(?:js|css)$/u.test(asset)) {
+      continue;
+    }
     const bytes = await readFile(path.join(bundleInfo.directory, asset));
     bundleResources.push({
       asset,

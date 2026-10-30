@@ -302,7 +302,9 @@ try {
         });
         cdp.on("Network.loadingFailed", (event) => {
           const request = pendingRequests.get(event.requestId);
-          if (request) request.failed = event.errorText;
+          if (request) {
+            request.failed = event.errorText;
+          }
         });
         const responses: Array<{
           url: string;
@@ -313,8 +315,9 @@ try {
           headers: Record<string, string>;
         }> = [];
         cdp.on("Network.responseReceived", ({ response }) => {
-          if (richAsset && new URL(response.url).pathname === `/${richAsset}`)
+          if (richAsset && new URL(response.url).pathname === `/${richAsset}`) {
             richResponseSeen = true;
+          }
           responses.push({
             url: response.url,
             protocol: response.protocol,
@@ -432,7 +435,9 @@ try {
             "idempotencyKey" in request.params
               ? request.params.idempotencyKey
               : undefined;
-          if (typeof runId !== "string") throw new Error("Synthetic send has no run ID");
+          if (typeof runId !== "string") {
+            throw new Error("Synthetic send has no run ID");
+          }
           if (captureCoverage) {
             preArrivalCoverage = (await cdp.send("Profiler.getBestEffortCoverage")).result;
             if (
@@ -477,8 +482,9 @@ try {
             await page.waitForFunction(() =>
               Boolean(document.querySelector(".chat-transcript-preparation")),
             );
-            if (richRequestAt === undefined)
+            if (richRequestAt === undefined) {
               throw new Error("Admission never requested the rich asset");
+            }
             recoveryMessage = await emitRichBootToolResult(gateway, {
               sessionKey,
               runId,
@@ -537,8 +543,9 @@ try {
                   document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
                 );
               }))
-            )
+            ) {
               throw new Error("Rich import recovery is not hit-testable");
+            }
             await page.screenshot({ path: path.join(output, "head-failed-rich-import.png") });
           } else {
             await page.waitForFunction(
@@ -546,11 +553,12 @@ try {
               undefined,
               { timeout: 30000 },
             );
-            if (values.admission)
+            if (values.admission) {
               await page
                 .locator("section.chat .chat-text")
                 .filter({ hasText: latestText })
                 .waitFor();
+            }
           }
         }
         const after =
@@ -574,11 +582,12 @@ try {
         ) {
           throw new Error("Visible rich image did not evaluate the candidate rich family");
         }
-        if (coverage)
+        if (coverage) {
           await writeFile(
             path.join(output, `${pair}-${variant}.coverage.json`),
             JSON.stringify({ coverage, bootCoverage, preArrivalCoverage }, null, 2),
           );
+        }
         workerNetwork?.assertHealthy();
         const data = await page.evaluate(() => ({
           readiness: Reflect.get(window, "__richRiskReadiness"),
@@ -617,7 +626,9 @@ try {
           navigationStart,
           data.resources.map((resource) => ({ ...resource, url: resource.name })),
         );
-        if (!networkClock.passed) throw new Error("Rich boot network clocks do not match");
+        if (!networkClock.passed) {
+          throw new Error("Rich boot network clocks do not match");
+        }
         const resources = await summarizeRichBootResources(
           bundleInfo,
           data.resources,
@@ -628,7 +639,7 @@ try {
         );
         const coverageSummary = coverage
           ?.filter((entry) => new URL(entry.url, baseUrl).pathname.startsWith("/assets/"))
-          .map((entry) => ({ url: entry.url, ...summarizeScriptCoverage(entry) }));
+          .map((entry) => Object.assign({ url: entry.url }, summarizeScriptCoverage(entry)));
         const documentPath = new URL(controlUiSessionUrl(baseUrl, sessionKey)).pathname;
         const documentRequests = server.requests.filter((request) => request.url === documentPath);
         if (documentRequests.length !== 1) {

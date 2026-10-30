@@ -429,6 +429,7 @@ it.each(["history", "stream"] as const)(
     controller.start();
     try {
       renderAttachment();
+      await vi.dynamicImportSettled();
       const open = await vi.waitFor(() =>
         element(transcript, ".chat-assistant-attachment-card__expand"),
       );

@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../../test/helpers/promise.js";
 import { en } from "../../../i18n/locales/en.ts";
+import { waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { prepareChatMessageRender } from "./chat-message-markdown-view.tsx";
 import { managedSource } from "./chat-message-media.test-helpers.ts";
 import { createGroupedMessageHarness } from "./chat-message-native.test-support.tsx";
@@ -210,7 +211,7 @@ it.each([
   { width: 280, direction: "rtl", scale: 1.5, long: true },
 ])(
   "keeps readable insets at $width px, $direction, scale $scale",
-  ({ width, direction, scale, long }) => {
+  async ({ width, direction, scale, long }) => {
     if (long) {
       en.chat.pairingQrExpired = {
         title: "A deliberately long pairing invitation title that wraps across several lines",
@@ -223,8 +224,11 @@ it.each([
     container.dir = direction;
     container.style.setProperty("--control-ui-text-scale", String(scale));
     draw(Array.from({ length: 2 }, () => ({ type: "openclaw_pairing_qr", expiresAtMs: 1 })));
-    const cards = all(container, ".chat-pairing-qr-expired");
-    expect(cards).toHaveLength(2);
+    const cards = await waitForSolid(() => {
+      const rendered = all(container, ".chat-pairing-qr-expired");
+      expect(rendered).toHaveLength(2);
+      return rendered;
+    });
     for (const card of cards) {
       const box = rect(card);
       const reason = card.querySelector<HTMLElement>(".chat-assistant-attachment-card__reason")!;

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { retryStaleChunkReloadWhenReachable } from "../../../app/stale-chunk-reload.ts";
+import { registerControlUiReloadGuard } from "../../../app/document-reload-guard.ts";
 import type { MessageGroup as MessageGroupData } from "../../../lib/chat/chat-types.ts";
 import { ContentPresentation } from "../../../lib/solid/presentation.ts";
 import { mountSolid as mountView } from "../../../test-helpers/mount-solid.ts";
@@ -17,12 +17,6 @@ import { settleToolBridges } from "./chat-tool-render.test-support.ts";
 import { createChatTranscript } from "./chat-transcript-controller.ts";
 import { threadProps } from "./chat-transcript.test-support.ts";
 import { WorkGroupSummary } from "./chat-work-group-summary.tsx";
-
-// Keep the real recovery button handler without navigating the browser test page.
-vi.mock("../../../app/stale-chunk-reload.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../app/stale-chunk-reload.ts")>()),
-  retryStaleChunkReloadWhenReachable: vi.fn(async () => false),
-}));
 
 const browserMode = "__vitest_browser__" in globalThis;
 let userEvent: (typeof import("vitest/browser"))["userEvent"];
@@ -57,10 +51,11 @@ function group(
 
 describe.runIf(browserMode)("chat disclosure activation", () => {
   it("keeps failed rich-content recovery reachable at the end of retained plain history", async () => {
-    const pending = Promise.withResolvers<Awaited<ReturnType<typeof chatRichPresentation.load>>>();
+    const pending = Promise.withResolvers<never>();
     const ready = vi.spyOn(chatRichPresentation, "ready").mockReturnValue(false);
     const load = vi.spyOn(chatRichPresentation, "load").mockReturnValue(pending.promise);
-    vi.mocked(retryStaleChunkReloadWhenReachable).mockClear();
+    const reloadBlocked = vi.fn();
+    const releaseReloadGuard = registerControlUiReloadGuard(() => false, reloadBlocked);
     container = document.body.appendChild(document.createElement("div"));
     container.className = "rich-preparation-browser";
     container.style.width = "min(800px, 100%)";
@@ -83,7 +78,9 @@ describe.runIf(browserMode)("chat disclosure activation", () => {
     );
     const settleLayout = async () => {
       for (let frame = 0; frame < 4; frame++) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
         flush();
       }
     };
@@ -157,12 +154,13 @@ describe.runIf(browserMode)("chat disclosure activation", () => {
         ),
       ).toBe(true);
       await userEvent.click(reload);
-      expect(retryStaleChunkReloadWhenReachable).toHaveBeenCalledOnce();
+      expect(reloadBlocked).toHaveBeenCalledOnce();
     } finally {
       view.dispose();
       transcript.dispose();
       ready.mockRestore();
       load.mockRestore();
+      releaseReloadGuard();
     }
   });
 

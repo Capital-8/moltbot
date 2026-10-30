@@ -37,9 +37,11 @@ it("keeps conflict roots registered across updates and retires replaced roots", 
   );
 
   try {
-    const conflictRoot = expectDefined(
-      view.container.querySelector(".chat-bubble--workspace-conflict"),
-      "workspace conflict root",
+    const conflictRoot = await waitForSolid(() =>
+      expectDefined(
+        view.container.querySelector(".chat-bubble--workspace-conflict"),
+        "workspace conflict root",
+      ),
     );
     await waitForSolid(() => expect(registry.elements.get("custom-message")).toBe(conflictRoot));
 

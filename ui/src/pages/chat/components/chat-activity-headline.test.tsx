@@ -296,16 +296,16 @@ const liveOptions = {
   activityRunId: "active-run",
 };
 
-it("keeps the headline and its dwell across disclosure toggles with accessible controls", () => {
+it("keeps the headline and its dwell across disclosure toggles with accessible controls", async () => {
   let expanded = false;
   const onToggle = vi.fn();
-  const draw = (activity: AgentActivityItem[]) =>
-    activityRoot.render([group("current", activity)], {
+  const draw = async (activity: AgentActivityItem[]) =>
+    await renderActivityFixture([group("current", activity)], {
       ...liveOptions,
       isToolMessageExpanded: () => expanded,
       onToggleToolMessageExpanded: onToggle,
     });
-  draw([prepared("first")]);
+  await draw([prepared("first")]);
   const summary = query("summary")!;
   const body = query("body")!;
   expect(summary.getAttribute("aria-expanded")).toBe("false");
@@ -315,9 +315,9 @@ it("keeps the headline and its dwell across disclosure toggles with accessible c
   expect(onToggle).toHaveBeenCalledWith("activity:current", false);
 
   advanceTimersByTime(1_000);
-  draw([prepared("first", "completed")]);
+  await draw([prepared("first", "completed")]);
   expanded = true;
-  draw([prepared("first", "completed"), prepared("next")]);
+  await draw([prepared("first", "completed"), prepared("next")]);
   expect(label()).toBe("Read first");
   expect(summary.getAttribute("aria-expanded")).toBe("true");
   expect(body.hidden).toBe(false);
@@ -325,7 +325,7 @@ it("keeps the headline and its dwell across disclosure toggles with accessible c
   expectAfter(1_999, "Read first");
   expectAfter(1, "Read next…");
   expanded = false;
-  draw([prepared("first", "completed"), prepared("next", "completed")]);
+  await draw([prepared("first", "completed"), prepared("next", "completed")]);
   expect(label()).toBe("Read next");
   expect(summary.getAttribute("aria-expanded")).toBe("false");
 });

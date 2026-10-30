@@ -39,7 +39,7 @@ beforeEach(() => {
 });
 const visibleTools = { showToolCalls: true, showReasoning: true };
 
-it("commits a cached activity summary with its transcript row", () => {
+it("commits a cached activity summary with its transcript row", async () => {
   const group = createToolGroup("cached", [
     createMessageEntry(
       "cached-tool",
@@ -47,6 +47,7 @@ it("commits a cached activity summary with its transcript row", () => {
     ),
   ]);
   activityRoot.render([group], visibleTools);
+  await settleToolBridges(summaryContainer);
   const row = summaryContainer.querySelector('[data-chat-row-key="cached"]');
   expect(row).not.toBeNull();
   expect(row?.querySelector(".chat-activity-group__summary")?.textContent).toContain("1 read");

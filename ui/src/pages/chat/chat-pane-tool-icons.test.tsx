@@ -111,6 +111,7 @@ it("renders plugin artwork for accepted history absent from the capped session l
     { container },
   );
   onTestFinished(view.unmount);
+  await vi.dynamicImportSettled();
   await waitForSolid(() => {
     expect(request).toHaveBeenCalledWith(
       "tools.effective",

@@ -65,6 +65,7 @@ it("keeps another pane's QR expiry alive when one message retires", async () => 
     />
   ));
   try {
+    await vi.dynamicImportSettled();
     flush();
     const resource = media.readChatMediaResource("pairing-qr", messageKey);
     expect(resource?.subscribers.size).toBe(2);

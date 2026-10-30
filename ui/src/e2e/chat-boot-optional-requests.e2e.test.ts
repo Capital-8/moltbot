@@ -56,7 +56,7 @@ suite.define(() => {
         expect(iconRequests()).toEqual([]);
         expect(loginRequests()).toEqual([]);
         expect(mediaRequests()).toEqual([]);
-        expect(requested.some((path) => imageModule.test(path))).toBe(true);
+        expect(requested.some((path) => imageModule.test(path))).toBe(false);
         expect(requested.filter((path) => subagentActivityModule.test(path))).toEqual([]);
 
         const imageMessage = {
@@ -83,6 +83,7 @@ suite.define(() => {
           hasActiveRun: false,
         });
         await page.locator('.chat-message-images img[alt="Inline transcript image"]').waitFor();
+        expect(requested.some((path) => imageModule.test(path))).toBe(true);
         expect(await page.locator("[data-message-id] .lazy-view-state--loading").count()).toBe(0);
         expect(mediaRequests()).toEqual([]);
         expect(await composer.inputValue()).toBe("Keep this draft while the image loads");

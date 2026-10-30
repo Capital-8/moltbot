@@ -315,18 +315,17 @@ suite.define(() => {
       await waitForChatScrollIdle(page);
       await captureProof(page, "worked-for-geometry-collapsed");
 
-      const geometry = await workedFor.evaluate(async (element) => {
-        const owner = element.closest("openclaw-chat-pane") as
-          | (HTMLElement & { updateComplete: Promise<unknown> })
-          | null;
-        const thread = element.closest<HTMLElement>(".chat-thread");
-        if (!owner || !thread) {
-          throw new Error("Worked-for disclosure is missing its chat pane or thread");
-        }
-
+      await workedFor.evaluate((element) => {
         window.pauseTranscriptResizeObservers();
         (element as HTMLButtonElement).click();
-        await owner.updateComplete;
+      });
+      // Rich row admission can outlive the current pane commit; resize delivery stays paused.
+      await expect.poll(() => workedFor.getAttribute("aria-expanded")).toBe("true");
+      const geometry = await workedFor.evaluate((element) => {
+        const thread = element.closest<HTMLElement>(".chat-thread");
+        if (!thread) {
+          throw new Error("Worked-for disclosure is missing its thread");
+        }
 
         const viewport = thread.getBoundingClientRect();
         const rows = Array.from(thread.querySelectorAll<HTMLElement>(".chat-virtual-row"))

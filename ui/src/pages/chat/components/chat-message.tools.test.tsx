@@ -160,7 +160,7 @@ describe("grouped chat rendering", () => {
     expectAbsent(".chat-tool-row--running");
   });
 
-  it("keeps aggregate expansion and accessibility ids stable when groups append", () => {
+  it("keeps aggregate expansion and accessibility ids stable when groups append", async () => {
     const groups = ["first", "second", "third"].map((key, index) =>
       createToolGroup(`stable-${key}`, [
         toolResultEntry(`stable-${index}`, `call-${index}`, "read_file", key),
@@ -173,6 +173,7 @@ describe("grouped chat rendering", () => {
     };
 
     renderActivityGroup(groups.slice(0, 2), opts);
+    await settleToolBridges(harness.view);
     const initialSummary = requireElement(".chat-activity-group__summary", HTMLButtonElement);
     const initialBodyId = initialSummary.getAttribute("aria-controls");
     expect(initialSummary.getAttribute("aria-expanded")).toBe("true");

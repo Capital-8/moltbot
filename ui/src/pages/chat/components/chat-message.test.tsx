@@ -42,7 +42,7 @@ it.each([
     7,
   ],
   ["escaped terminal-control filenames", ["src/line\nbreak.ts"], "claim-control", undefined],
-] as const)("renders %s in durable history", (_label, paths, ref, totalCount) => {
+] as const)("renders %s in durable history", async (_label, paths, ref, totalCount) => {
   const stagedResultRef = `refs/openclaw/worker-results/${ref}`;
   renderGroupedMessage(
     {
@@ -54,7 +54,7 @@ it.each([
     },
     "custom",
   );
-  expect(harness.view.textContent).toContain(stagedResultRef);
+  await waitForSolid(() => expect(harness.view.textContent).toContain(stagedResultRef));
   if (totalCount === undefined) {
     expect(elementText(".chat-workspace-conflict-paths code")).toBe("src/line\\u{000a}break.ts");
   } else {

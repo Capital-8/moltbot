@@ -227,8 +227,8 @@ it.each([
           readRows: () => {
             const layout = expectDefined(pane?.session, "mounted transcript session").layout;
             return Object.fromEntries(
-              layout.rows.flatMap((_, index) => {
-                const key = layout["rowLayoutKey"](index);
+              layout.rows.flatMap((row) => {
+                const key = layout["rowLayoutKey"](row);
                 return key && cachedHeight(key) ? [[key, rowHeight]] : [];
               }),
             );

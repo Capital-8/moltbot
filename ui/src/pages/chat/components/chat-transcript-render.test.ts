@@ -153,9 +153,11 @@ describe("chat transcript rendering", () => {
       );
       props.showToolCalls = showTools;
       const { container } = await mountThread(props);
-      for (const text of interruptedChatCommentary) {
-        expect(container.textContent).toContain(text);
-      }
+      await waitForSolid(() => {
+        for (const text of interruptedChatCommentary) {
+          expect(container.textContent).toContain(text);
+        }
+      });
       await waitForSolid(() =>
         expect(Boolean(container.querySelector(".chat-activity-group__summary"))).toBe(showTools),
       );

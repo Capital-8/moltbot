@@ -2,7 +2,6 @@ import { defaultRangeExtractor, type Range, Virtualizer } from "@tanstack/virtua
 import { findMcpAppUnmountTargets } from "../../../components/mcp-app-unmount.ts";
 import type { TranscriptInitialRange } from "./chat-transcript-initial-range.ts";
 import type { TranscriptLayoutOwner } from "./chat-transcript-layout-owner.ts";
-import type { TranscriptPrependAnchor } from "./chat-transcript-prepend-anchor.ts";
 import type { TranscriptRenderSnapshot } from "./chat-transcript-session.ts";
 
 export type TranscriptRangeOwner = {
@@ -11,7 +10,14 @@ export type TranscriptRangeOwner = {
   appliedHeaderHeight: () => number;
   focusedRowKey: () => string | null;
   initialRange: TranscriptInitialRange;
-  prependAnchor: TranscriptPrependAnchor;
+  prependAnchor: {
+    extractRange(
+      range: Range,
+      indexes: ReadonlyMap<string, number>,
+      focusedRowKey: string | null,
+      messageRows?: ReadonlyMap<string, string>,
+    ): number[];
+  };
   layout: TranscriptLayoutOwner;
 };
 

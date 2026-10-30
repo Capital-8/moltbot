@@ -199,7 +199,8 @@ export function ChatThread(input: {
     return current().projection.renderRows(sentinel(), historyHeader());
   });
   const announcement = createMemo(() => {
-    // The row owner records the accepted announcement while rendering its rows.
+    // Admission can update the announcement while retaining the same row root.
+    geometry().read();
     contents();
     return current().session.liveAnnouncementText;
   });

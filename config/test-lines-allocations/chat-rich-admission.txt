@@ -1,0 +1,2 @@
+# Rich-row admission, retained geometry/media/focus, stale-chunk recovery, and lazy-boundary regressions.
+592

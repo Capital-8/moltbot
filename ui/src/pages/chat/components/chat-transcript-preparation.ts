@@ -48,6 +48,7 @@ export function projectTranscriptPreparation(
       if (
         !options.richRowKeys.has(rowKey) &&
         expansion?.status === "loaded" &&
+        expansion.message !== undefined &&
         messageNeedsRichPresentation(expansion.message)
       ) {
         (additionalRichRowKeys ??= new Set(options.richRowKeys)).add(rowKey);
