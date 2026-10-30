@@ -11,6 +11,11 @@ import {
 import { hasNodeErrorCode } from "../../infra/path-guards.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { assertLocalWorkspaceDirectory } from "./local-workspace-checkout.js";
+import type { LocalWorkspaceManifestScan } from "./local-workspace-store.types.js";
+import {
+  MAX_WORKSPACE_INVENTORY_ENTRIES,
+  MAX_WORKSPACE_INVENTORY_PATH_BYTES,
+} from "./workspace-inventory-limits.js";
 
 type Direction = "canonical" | "projection";
 // Btrfs identifiers do not constrain the RFC UUID version or variant bits.
@@ -23,8 +28,23 @@ const identity = z.object({
 });
 const reservation = z.object({ token: z.string().uuid(), source: identity });
 const retained = reservation.extend({ snapshot: identity });
+const baselineRoots = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .regex(/^[^/\\\0]+$/u),
+  )
+  .max(MAX_WORKSPACE_INVENTORY_ENTRIES)
+  .refine(
+    (roots) =>
+      roots.reduce((bytes, root) => bytes + Buffer.byteLength(root), 0) <=
+      MAX_WORKSPACE_INVENTORY_PATH_BYTES,
+  );
 const accepted = retained.extend({
   baselineRef: z.string(),
+  // Content changed by the other direction since this source snapshot was taken.
+  baselineChangedRoots: baselineRoots.optional(),
   admissionRef: z.string(),
   runtimeId: z.string().uuid(),
 });
@@ -154,7 +174,7 @@ export function localWorkspaceFilesystemCheckpoints(params: {
       const pending = { target, token: randomUUID(), source };
       await write({ ...state, pending });
       const root = location(pending);
-      const snapshot = await createBtrfsCheckpoint(sourceRoot, root, options);
+      const snapshot = await createBtrfsCheckpoint(sourceRoot, root, options, source);
       if (!snapshot || snapshot.parentUuid !== source.uuid) {
         // Retain cleanup custody if snapshot creation had an uncertain outcome.
         return undefined;
@@ -178,14 +198,26 @@ export function localWorkspaceFilesystemCheckpoints(params: {
         ...(matching
           ? { previousRoot: previous.baselineRef, admissionRef: previous.admissionRef }
           : {}),
-        ...(changed ? { changedRoots: [...changed] } : {}),
+        ...(changed
+          ? { changedRoots: [...new Set([...changed, ...(previous!.baselineChangedRoots ?? [])])] }
+          : {}),
       } satisfies PreparedLocalWorkspaceFilesystemCheckpoint;
     },
     async accept(
       prepared: PreparedLocalWorkspaceFilesystemCheckpoint,
-      baselineRef: string,
-      admissionRef: string,
+      snapshot: Pick<
+        LocalWorkspaceManifestScan,
+        "previousRoot" | "resultingRoot" | "filesystemAdmissionRef" | "filesystemChangedRoots"
+      >,
     ) {
+      const {
+        resultingRoot: baselineRef,
+        filesystemAdmissionRef: admissionRef,
+        filesystemChangedRoots: changedRoots,
+      } = snapshot;
+      if (!admissionRef || !changedRoots) {
+        return;
+      }
       const state = read();
       if (
         !state ||
@@ -197,6 +229,17 @@ export function localWorkspaceFilesystemCheckpoints(params: {
       const previous = state.accepted[prepared.target];
       if (previous) {
         state.garbage.push(previous);
+      }
+      const other = state.accepted[prepared.target === "canonical" ? "projection" : "canonical"];
+      if (other?.baselineRef === snapshot.previousRoot) {
+        const roots = baselineRoots.safeParse([
+          ...new Set([...(other.baselineChangedRoots ?? []), ...changedRoots]),
+        ]);
+        // Preserve a complete transition or keep the old binding and require a full scan.
+        if (roots.success) {
+          other.baselineRef = baselineRef;
+          other.baselineChangedRoots = roots.data;
+        }
       }
       state.accepted[prepared.target] = {
         token: prepared.token,

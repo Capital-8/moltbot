@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { expect, it } from "vitest";
-import { runCommandBuffersWithTimeout } from "../../process/exec-runner.js";
+import { expect, it, vi } from "vitest";
+import * as execRunner from "../../process/exec-runner.js";
 import {
   createBtrfsCheckpoint,
   deleteBtrfsCheckpoint,
@@ -67,9 +67,10 @@ it("requires complete, checksummed v1 deltas for the exact parent and snapshot",
   ]) {
     expect(parseBtrfsCheckpointChanges(input, identity)).toBeNull();
   }
-  expect(
-    parseBtrfsCheckpointChanges(stream, { ...identity, parentUuid: identity.snapshotUuid }),
-  ).toBeNull();
+  for (const key of ["parentUuid", "snapshotUuid"] as const) {
+    const otherUuid = key === "parentUuid" ? identity.snapshotUuid : identity.parentUuid;
+    expect(parseBtrfsCheckpointChanges(stream, { ...identity, [key]: otherUuid })).toBeNull();
+  }
 });
 
 it("never probes or mutates a filesystem after checkpoint authority is revoked", async () => {
@@ -80,7 +81,14 @@ it("never probes or mutates a filesystem after checkpoint authority is revoked",
     },
   };
   await expect(readBtrfsCheckpointIdentity("/unused", options)).rejects.toBe(refused);
-  await expect(createBtrfsCheckpoint("/unused", "/unused-new", options)).rejects.toBe(refused);
+  await expect(
+    createBtrfsCheckpoint("/unused", "/unused-new", options, {
+      uuid: identity.snapshotUuid,
+      parentUuid: null,
+      device: "0",
+      inode: "256",
+    }),
+  ).rejects.toBe(refused);
 });
 
 it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
@@ -90,8 +98,11 @@ it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
     const source = path.join(root, "source");
     const options = { signal, commitGuard: () => signal.throwIfAborted() };
     const snapshots: BtrfsCheckpoint[] = [];
+    const commands = vi.spyOn(execRunner, "runCommandBuffersWithTimeout");
     const btrfs = async (...args: string[]) => {
-      const result = await runCommandBuffersWithTimeout(["btrfs", ...args], { timeoutMs: 30_000 });
+      const result = await execRunner.runCommandBuffersWithTimeout(["btrfs", ...args], {
+        timeoutMs: 30_000,
+      });
       expect(result.code, result.stderr.toString()).toBe(0);
     };
     try {
@@ -99,9 +110,14 @@ it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
       await fs.mkdir(path.join(source, "nested"));
       const filename = path.join(source, "nested", "source.txt");
       await fs.writeFile(filename, "original\n");
+      const sourceIdentity = await readBtrfsCheckpointIdentity(source, options);
+      if (!sourceIdentity) {
+        throw new Error("Btrfs source identity is required by this native fixture");
+      }
+      commands.mockClear();
       const checkpoint = async (name: string) => {
         const pathname = path.join(root, name);
-        const created = await createBtrfsCheckpoint(source, pathname, options);
+        const created = await createBtrfsCheckpoint(source, pathname, options, sourceIdentity);
         expect(created).not.toBeNull();
         if (!created) {
           throw new Error("Btrfs checkpoint support is required by this native fixture");
@@ -113,6 +129,8 @@ it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
       const before = await checkpoint("before");
       const unchanged = await checkpoint("unchanged");
       expect(await diffBtrfsCheckpoints(before, unchanged, options)).toEqual(new Set());
+      // Two captures (four commands each) and one diff (send plus two final shows).
+      expect(commands).toHaveBeenCalledTimes(11);
       const originalStat = await fs.stat(filename);
       await fs.writeFile(filename, "modified\n");
       await fs.utimes(filename, originalStat.atime, originalStat.mtime);
@@ -126,6 +144,17 @@ it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
       );
       expect(await deleteBtrfsCheckpoint(changed.path, before.identity, options)).toBe(false);
       expect(await fs.stat(changed.path)).toBeDefined();
+      expect(
+        await diffBtrfsCheckpoints(
+          before,
+          { ...changed, identity: { ...changed.identity, uuid: before.identity.uuid } },
+          options,
+        ),
+      ).toBeNull();
+      const alias = path.join(root, "alias");
+      await fs.symlink(changed.path, alias);
+      expect(await diffBtrfsCheckpoints(before, { ...changed, path: alias }, options)).toBeNull();
+      await fs.unlink(alias);
       const priorMount = {
         ...unchanged,
         identity: { ...unchanged.identity, device: String(BigInt(unchanged.identity.device) + 1n) },
@@ -145,10 +174,16 @@ it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
       );
       await btrfs("subvolume", "create", path.join(source, "nested-subvolume"));
       expect(
-        await createBtrfsCheckpoint(source, path.join(root, "unsupported"), options),
+        await createBtrfsCheckpoint(
+          source,
+          path.join(root, "unsupported"),
+          options,
+          sourceIdentity,
+        ),
       ).toBeNull();
       await btrfs("subvolume", "delete", path.join(source, "nested-subvolume"));
     } finally {
+      commands.mockRestore();
       for (const snapshot of snapshots.toReversed()) {
         expect(
           await deleteBtrfsCheckpoint(snapshot.path, snapshot.identity, { commitGuard() {} }),

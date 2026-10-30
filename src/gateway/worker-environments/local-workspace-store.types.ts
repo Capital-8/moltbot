@@ -50,6 +50,7 @@ export type LocalWorkspaceManifestScan = {
   currentManifestRef: string;
   buildCacheInputs: string[];
   filesystemAdmissionRef?: string;
+  filesystemChangedRoots?: string[];
 };
 
 export type LocalWorkspaceManifestValue =

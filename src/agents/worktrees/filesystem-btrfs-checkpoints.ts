@@ -73,6 +73,30 @@ function sameIdentity(left: BtrfsCheckpointIdentity, right: BtrfsCheckpointIdent
   return sameStableIdentity(left, right) && left.device === right.device;
 }
 
+async function matchesCheckpointPath(
+  root: string,
+  expected: BtrfsCheckpointIdentity,
+  options: WorktreeFilesystemOptions,
+): Promise<boolean> {
+  assertCurrent(options);
+  if (process.platform !== "linux" || !path.isAbsolute(root)) {
+    return false;
+  }
+  try {
+    const stats = await fs.lstat(root, { bigint: true });
+    const matches =
+      stats.isDirectory() &&
+      String(stats.ino) === expected.inode &&
+      String(stats.dev) === expected.device &&
+      (await fs.realpath(root)) === root;
+    assertCurrent(options);
+    return matches;
+  } catch {
+    assertCurrent(options);
+    return false;
+  }
+}
+
 /** UUID identifies a subvolume; transaction generations do not identify its contents. */
 export async function readBtrfsCheckpointIdentity(
   root: string,
@@ -130,14 +154,14 @@ export async function readBtrfsCheckpointIdentity(
   }
 }
 
-/** The caller durably reserves this host-only destination before snapshot creation. */
+/** The caller supplies the source identity recorded by its durable destination reservation. */
 export async function createBtrfsCheckpoint(
   source: string,
   destination: string,
   options: WorktreeFilesystemOptions,
+  sourceIdentity: BtrfsCheckpointIdentity,
 ): Promise<BtrfsCheckpointIdentity | null> {
-  const sourceIdentity = await readBtrfsCheckpointIdentity(source, options);
-  if (!sourceIdentity) {
+  if (!(await matchesCheckpointPath(source, sourceIdentity, options))) {
     return null;
   }
   const mountInfo = await fs.readFile("/proc/self/mountinfo", "utf8").catch(() => null);
@@ -177,11 +201,12 @@ export async function diffBtrfsCheckpoints(
   options: WorktreeFilesystemOptions,
 ): Promise<ReadonlySet<string> | null> {
   for (const snapshot of [parent, current]) {
-    const identity = await readBtrfsCheckpointIdentity(snapshot.path, options, true);
-    if (!identity || !sameIdentity(identity, snapshot.identity)) {
+    if (!(await matchesCheckpointPath(snapshot.path, snapshot.identity, options))) {
       return null;
     }
   }
+  // Send requires readonly roots; the stream and post-send inspection verify
+  // UUIDs and retained readonly custody before any manifest reads.
   const stream = await command(
     ["send", "--no-data", "--proto", "1", "-p", parent.path, current.path],
     options,

@@ -150,8 +150,7 @@ export function projectionOperations(
     }
     return document;
   };
-  // Full documents cross this boundary only for initial creation and old receipts,
-  // or when an archive/publication explicitly needs the complete inventory.
+  // Only creation, legacy receipts, archives, and publication consume full inventories.
   const replaceBaseline = async (
     raw: string,
     ref: string,
@@ -490,8 +489,8 @@ export function projectionOperations(
       });
       await settle(false, snapshot);
     }
-    if (prepared && snapshot.filesystemAdmissionRef) {
-      await filesystem.accept(prepared, snapshot.resultingRoot, snapshot.filesystemAdmissionRef);
+    if (prepared) {
+      await filesystem.accept(prepared, snapshot);
     }
   };
   const prepare = async (dependencies?: {
@@ -718,8 +717,8 @@ export function projectionOperations(
         });
         await cleanupAccepted();
       }
-      current();
       await filesystem.remove();
+      current();
       await fs.rm(parent, { recursive: true, force: true });
       await store.delete(current(), owner.workerAuthority);
     },

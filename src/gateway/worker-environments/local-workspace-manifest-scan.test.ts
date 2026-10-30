@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,6 +7,7 @@ import { inflateRawSync } from "node:zlib";
 import { afterEach, expect, it, vi } from "vitest";
 import { trackSqliteStatementExecutions } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import * as btrfs from "../../agents/worktrees/filesystem-btrfs-checkpoints.js";
 import { requireGit } from "../../agents/worktrees/git.js";
 import { extractSqliteTableSchema } from "../../infra/sqlite-schema-sql.js";
 import { OPENCLAW_STATE_SCHEMA_SQL } from "../../state/openclaw-state-schema.js";
@@ -22,6 +23,7 @@ import {
   readLocalWorkspaceSweepCandidates,
   readLocalWorkspaceTree,
 } from "./local-workspace-cas.kernel.js";
+import { localWorkspaceFilesystemCheckpoints } from "./local-workspace-filesystem-checkpoints.js";
 import {
   executeLocalWorkspaceManifestRead,
   readLocalWorkspaceManifestRows,
@@ -266,6 +268,7 @@ it("uses checkpoint deltas only for the accepted content and current host admiss
   const lstat = vi.spyOn(fs, "lstat");
   const unchanged = await capture(checkpoint);
   expect(unchanged.kind === "scan" && unchanged.resultingRoot).toBe(snapshot.row.baseline_ref);
+  expect(unchanged.kind === "scan" && unchanged.filesystemChangedRoots).toEqual([]);
   expect(lstat.mock.calls.filter(([file]) => String(file).endsWith("nested/file.txt"))).toEqual([]);
 
   const file = path.join(canonical, "nested/file.txt");
@@ -274,6 +277,7 @@ it("uses checkpoint deltas only for the accepted content and current host admiss
   await fs.utimes(file, before.atime, before.mtime);
   const edited = await capture({ ...checkpoint, changedRoots: ["nested"] });
   expect(edited.kind === "scan" && edited.currentManifestRaw).toContain(hash("modified"));
+  expect(edited.kind === "scan" && edited.filesystemChangedRoots).toEqual(["nested"]);
   const stale = await capture({ ...checkpoint, previousRoot: "stale" });
   expect(stale.kind === "scan" && stale.currentManifestRaw).toContain(hash("modified"));
 
@@ -283,6 +287,88 @@ it("uses checkpoint deltas only for the accepted content and current host admiss
   const admitted = await capture(checkpoint);
   expect(admitted.kind === "scan" && admitted.currentManifestRaw).toContain(hash("host admission"));
   expect(await fs.readFile(path.join(projection, "nested/file.txt"), "utf8")).toBe("baseline");
+});
+
+it("retains baseline changes across direction switches even when the native delta is empty", async () => {
+  const { canonical, projection } = await repairFixture();
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { value: "linux" });
+  try {
+    const sources = new Map(
+      [canonical, projection].map((root) => [
+        root,
+        { uuid: randomUUID(), parentUuid: null, device: "1", inode: "256" },
+      ]),
+    );
+    vi.spyOn(btrfs, "readBtrfsCheckpointIdentity").mockImplementation(
+      async (root) => sources.get(root) ?? null,
+    );
+    vi.spyOn(btrfs, "createBtrfsCheckpoint").mockImplementation(async (root) => ({
+      uuid: randomUUID(),
+      parentUuid: sources.get(root)!.uuid,
+      device: "2",
+      inode: "256",
+    }));
+    const diff = vi.spyOn(btrfs, "diffBtrfsCheckpoints").mockResolvedValue(new Set());
+    vi.spyOn(btrfs, "deleteBtrfsCheckpoint").mockResolvedValue(true);
+    const row = { baseline_ref: "A", filesystem_checkpoints_json: null as string | null };
+    const checkpoints = localWorkspaceFilesystemCheckpoints({
+      projectionPath: projection,
+      current: () => row,
+      update: async (patch) => void Object.assign(row, patch),
+      assertCurrent() {},
+      signal: new AbortController().signal,
+    });
+    for (const target of ["canonical", "projection"] as const) {
+      const prepared = await checkpoints.prepare(
+        target,
+        target === "canonical" ? projection : canonical,
+      );
+      expect(prepared).toBeDefined();
+      await checkpoints.accept(prepared!, {
+        previousRoot: "A",
+        resultingRoot: "A",
+        filesystemAdmissionRef: "admission",
+        filesystemChangedRoots: [],
+      });
+    }
+    // Guest A→B advances the shared baseline; the older host snapshot remains A.
+    diff.mockResolvedValue(new Set(["nested"]));
+    const guest = await checkpoints.prepare("canonical", projection);
+    row.baseline_ref = "B";
+    await checkpoints.accept(guest!, {
+      previousRoot: "A",
+      resultingRoot: "B",
+      filesystemAdmissionRef: "admission",
+      filesystemChangedRoots: ["nested"],
+    });
+    // After an external host revert B→A, A→A contributes no native changes.
+    // The manifest still holds B, so the retained baseline delta must be scanned.
+    diff.mockResolvedValue(new Set());
+    const reverted = await checkpoints.prepare("projection", canonical);
+    expect(reverted?.previousRoot).toBe("B");
+    expect(reverted?.changedRoots).toEqual(["nested"]);
+    row.baseline_ref = "A";
+    await checkpoints.accept(reverted!, {
+      previousRoot: "B",
+      resultingRoot: "A",
+      filesystemAdmissionRef: "admission",
+      filesystemChangedRoots: ["nested"],
+    });
+    const unchanged = await checkpoints.prepare("projection", canonical);
+    expect(unchanged?.changedRoots).toEqual([]);
+    await checkpoints.accept(unchanged!, {
+      previousRoot: "A",
+      resultingRoot: "A",
+      filesystemAdmissionRef: "admission",
+      filesystemChangedRoots: [],
+    });
+    // Refresh/recovery without a known transition must still use a full scan.
+    row.baseline_ref = "unrecorded-transition";
+    expect((await checkpoints.prepare("projection", canonical))?.changedRoots).toBeUndefined();
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+  }
 });
 
 it.each([

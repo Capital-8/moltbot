@@ -569,6 +569,7 @@ export async function executeLocalWorkspaceManifestRead(
       currentManifestRef: document.manifestRef,
       buildCacheInputs: retained,
       filesystemAdmissionRef,
+      filesystemChangedRoots: [],
     };
   }
   const affected = (entryPath: string) =>
@@ -720,6 +721,11 @@ export async function executeLocalWorkspaceManifestRead(
     currentManifestRaw: current.rawManifest,
     currentManifestRef: current.manifestRef,
     buildCacheInputs: retained,
-    ...(filesystemAdmissionRef ? { filesystemAdmissionRef } : {}),
+    ...(filesystemAdmissionRef
+      ? {
+          filesystemAdmissionRef,
+          filesystemChangedRoots: [...new Set(changes.map(({ path }) => path.split("/", 1)[0]!))],
+        }
+      : {}),
   };
 }

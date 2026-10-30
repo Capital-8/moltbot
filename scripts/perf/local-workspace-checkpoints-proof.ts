@@ -223,9 +223,31 @@ async function child() {
       const guestEdit = editWithinGeneration(projection, "guest001\n");
       await synchronize("canonical");
       assert.equal(read(canonical), "guest001\n");
+      await observe("projection", async (action) => {
+        if (action.kind === "scan") {
+          assert(
+            action.filesystem?.changedRoots?.includes("source.txt"),
+            "Accepted guest edits must carry their changed root into the older host checkpoint",
+          );
+          assert(
+            action.filesystem.changedRoots.every(
+              (root) => root === ".git" || root === "source.txt",
+            ),
+            "Direction changes must retain incremental scanning",
+          );
+        }
+      });
       const hostEdit = editWithinGeneration(canonical, "host0001\n");
       await synchronize("projection");
       assert.equal(read(projection), "host0001\n");
+      await observe("canonical", async (action) => {
+        if (action.kind === "scan") {
+          assert(
+            action.filesystem?.changedRoots?.includes("source.txt"),
+            "Accepted host edits must carry their changed root into the older guest checkpoint",
+          );
+        }
+      });
       assert(
         !fs.existsSync(path.join(projection, ".env.local")),
         "Ignored host secret must not reach the guest",
