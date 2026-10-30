@@ -116,8 +116,15 @@ it("passes the manually pinned compatibility specimen into the published-driver 
   });
   expect(ciWorkflow.jobs["published-driver-update"].with).toMatchObject({
     driver_version: "${{ inputs.published_driver_version }}",
-    moved_cron: "${{ inputs.published_driver_moved_cron }}",
   });
+  for (const movedCron of [undefined, false, true]) {
+    expect(
+      evaluateWorkflowExpression(ciWorkflow.jobs["published-driver-update"].with.moved_cron, {
+        ...baseContext,
+        inputs: movedCron === undefined ? {} : { published_driver_moved_cron: movedCron },
+      }),
+    ).toBe(movedCron ?? false);
+  }
   expect(updateWorkflow.on.workflow_call.inputs).toMatchObject({
     driver_version: { default: "", type: "string" },
     moved_cron: { default: false, type: "boolean" },

@@ -250,7 +250,7 @@ async function waitForCronRun(gateway, name, jobId, runId) {
     const entry = history.entries?.find((row) => row.runId === runId);
     if (entry) {
       assert.equal(entry.status, "ok", `Cron fixture run ${runId} failed`);
-      return entry;
+      return;
     }
     await new Promise((resolve) => {
       setTimeout(resolve, 100);
@@ -454,15 +454,20 @@ process.exitCode = await runCancelableCommand(async (signal) => {
       );
       sessions.push({ kind, marker, params, sessionId: created.sessionId });
     }
+    const beforePid = fs.readFileSync(
+      env.OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_PID_FILE,
+      "utf8",
+    );
     let movedCronFixture;
     if (movedCron) {
       const created = await gateway("moved-cron-create", "cron.add", {
         name: "published driver moved cron fixture",
         enabled: false,
         schedule: { kind: "every", everyMs: 86_400_000 },
-        sessionTarget: "main",
+        sessionTarget: "isolated",
         wakeMode: "now",
-        payload: { kind: "systemEvent", text: "published driver moved cron fixture" },
+        // Exercise cron execution and history without requiring a model provider.
+        payload: { kind: "command", argv: ["/bin/echo", "published driver moved cron fixture"] },
         delivery: { mode: "none" },
       });
       assert.equal(typeof created.id, "string");
@@ -492,17 +497,10 @@ process.exitCode = await runCancelableCommand(async (signal) => {
         ...relocatePublishedDriverCronPartition(state, created.id, movedStoreKey),
       };
       writeJson("moved-cron-before-update", movedCronFixture);
-      await run("start-after-cron-move", path.join(bin, "systemctl"), [
-        "--user",
-        "start",
-        "openclaw-gateway.service",
-      ]);
-      await ready("moved-cron-before-ready", port);
+      // Leave the installed service stopped: the old Gateway would recreate heartbeat
+      // jobs at its default path, turning this sole-partition specimen into two stores.
+      // The published updater owns the next start, after the candidate migrates state.
     }
-    const beforePid = fs.readFileSync(
-      env.OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_PID_FILE,
-      "utf8",
-    );
     const inspectIncognito = (name) => {
       const backups = fs
         .readdirSync(path.dirname(packageRoot))
@@ -608,7 +606,7 @@ process.exitCode = await runCancelableCommand(async (signal) => {
     }
     inspectIncognito("incognito-artifacts-after");
     if (movedCronFixture) {
-      const assertMovedCron = async (suffix) => {
+      const assertMovedCron = async (suffix, runIds) => {
         const jobs = await gateway(`moved-cron-list-${suffix}`, "cron.list", {
           includeDisabled: true,
         });
@@ -619,34 +617,35 @@ process.exitCode = await runCancelableCommand(async (signal) => {
           movedCronFixture.jobDefinition,
           "Candidate runtime changed the moved cron job definition",
         );
-        await waitForCronRun(
-          gateway,
-          `moved-cron-history-${suffix}`,
-          movedCronFixture.jobId,
-          movedCronFixture.baselineRunId,
-        );
         const stored = inspectPublishedDriverMovedCron(state);
         assert.equal(stored.binding, movedCronFixture.movedStoreKey);
         assert(stored.jobs.some((row) => row.job_id === movedCronFixture.jobId));
-        assert(
-          stored.history.some(
-            (row) =>
-              row.job_id === movedCronFixture.jobId &&
-              row.run_id === movedCronFixture.baselineRunId &&
-              row.store_key === movedCronFixture.movedStoreKey,
-          ),
-          "Candidate runtime omitted the moved cron task history",
-        );
-        assert(
-          stored.receipts.some(
-            (row) =>
-              row.job_id === movedCronFixture.jobId &&
-              row.request_run_id === movedCronFixture.baselineRunId,
-          ),
-        );
+        for (const [index, runId] of runIds.entries()) {
+          await waitForCronRun(
+            gateway,
+            `moved-cron-history-${suffix}-${index}`,
+            movedCronFixture.jobId,
+            runId,
+          );
+          assert(
+            stored.history.some(
+              (row) =>
+                row.job_id === movedCronFixture.jobId &&
+                row.run_id === runId &&
+                row.store_key === movedCronFixture.movedStoreKey,
+            ),
+            "Candidate runtime omitted the moved cron task history",
+          );
+          assert(
+            stored.receipts.some(
+              (row) => row.job_id === movedCronFixture.jobId && row.request_run_id === runId,
+            ),
+            "Candidate runtime omitted the moved cron run receipt",
+          );
+        }
         return stored;
       };
-      await assertMovedCron("after-update");
+      await assertMovedCron("after-update", [movedCronFixture.baselineRunId]);
       const candidateRun = await gateway("moved-cron-run-after", "cron.run", {
         id: movedCronFixture.jobId,
         mode: "force",
@@ -666,7 +665,10 @@ process.exitCode = await runCancelableCommand(async (signal) => {
         "openclaw-gateway.service",
       ]);
       await ready("moved-cron-after-restart-ready", port);
-      const afterRestart = await assertMovedCron("after-restart");
+      const afterRestart = await assertMovedCron("after-restart", [
+        movedCronFixture.baselineRunId,
+        candidateRun.runId,
+      ]);
       const settingsAfterRestart = assertSettingsRetained();
       writeJson("moved-cron-proof", {
         driverVersion,

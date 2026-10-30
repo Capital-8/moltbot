@@ -69,16 +69,19 @@ function cronRows(database) {
     .map((row) => Object.assign({}, row));
   const history = database
     .prepare(
-      "SELECT task_id, source_id AS job_id, run_id, status, detail_json FROM task_runs WHERE runtime = 'cron' ORDER BY created_at, task_id",
+      "SELECT task_id, source_id AS job_id, status, detail_json FROM task_runs WHERE runtime = 'cron' ORDER BY created_at, task_id",
     )
     .all()
-    .map((row) => ({
-      task_id: row.task_id,
-      job_id: row.job_id,
-      run_id: row.run_id,
-      status: row.status,
-      store_key: JSON.parse(row.detail_json).storeKey,
-    }));
+    .map((row) => {
+      const detail = JSON.parse(row.detail_json);
+      return {
+        task_id: row.task_id,
+        job_id: row.job_id,
+        run_id: detail.runId,
+        status: row.status,
+        store_key: detail.storeKey,
+      };
+    });
   const binding = database
     .prepare("SELECT value_json FROM config_machine_state WHERE state_key = 'cron.defaultStoreKey'")
     .get();

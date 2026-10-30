@@ -6834,7 +6834,7 @@ jobs:
       candidate_artifact_id: ${{ needs.build-artifacts.outputs.published_driver_artifact_id }}
       candidate_sha256: ${{ needs.build-artifacts.outputs.published_driver_sha256 }}
       driver_version: ${{ inputs.published_driver_version }}
-      moved_cron: ${{ inputs.published_driver_moved_cron }}
+      moved_cron: ${{ inputs.published_driver_moved_cron || false }}
 
   docker-seed-e2e:
     permissions:
