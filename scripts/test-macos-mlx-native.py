@@ -25,6 +25,10 @@ import uuid
 
 STABLE = "8b18b5578f66eab1501cba4cef2310d88bfb9a41"  # v2026.10.9, not a moving release.
 BAD = "6d3c68afc27ba52972a76deb2cee0e483d6e1b4f"
+BAD_MANIFEST_SHA256 = "2164677fc1096873f7130346d5b595945261cf688104deaa608c02a1d2c762cf"
+BAD_LOCK_SHA256 = "0be43dc0d1edf2f7ab547c5c5ed7f99ce4f9976e5b2e87a83494c6f6383af0a0"
+BAD_RESOLUTION = "test/fixtures/macos-mlx-native/bad.Package.resolved"
+BAD_RESOLUTION_SHA256 = "ed4fbe6da8823c6f5739d495df9912b40dca9670a96ae1089c62b29d8a85ca03"
 MODEL = "mlx-community/Soprano-80M-bf16"
 REVISION = "b7da048eff3dfd556409a44b78b9c61a9dd4ccfa"
 FILES = {
@@ -858,7 +862,7 @@ class Proof:
 
     def verify_source(self, source, revision):
         require(self.command(["git", "rev-parse", "HEAD"], 30, source) == revision, "selected checkout HEAD mismatch")
-        blobs = {p: self.command(["git", "rev-parse", f"{revision}:{p}"], 30, source) for p in INPUTS}
+        blobs = {p: self.command(["git", "rev-parse", f"{revision}:{p}"], 30, source) for p in [*INPUTS, BAD_RESOLUTION]}
         for p, expected in blobs.items():
             actual = self.command(["git", "hash-object", p], 30, source)
             require(actual == expected, f"selected helper input differs: {p}")
@@ -890,7 +894,30 @@ class Proof:
             blobs[relative] = blob
         require(all(p in blobs for p in INPUTS), "incomplete helper snapshot")
         self.result["variants"][name] = {"sha": revision, "tree": self.git("rev-parse", revision + "^{tree}"), "blobs": blobs}
+        if name == "bad":
+            self.prepare_bad_resolution(target, revision)
         return target
+
+    def prepare_bad_resolution(self, source, revision):
+        # The historical proposal retained an unused pin and stale origin hash.
+        # Freeze the observed native resolution at export, so resolver drift still fails build().
+        require(revision == BAD, "unexpected bad reference revision")
+        manifest, lock = source / PACKAGE / "Package.swift", source / PACKAGE / "Package.resolved"
+        require(digest(manifest) == BAD_MANIFEST_SHA256 and digest(lock) == BAD_LOCK_SHA256,
+                "bad reference historical inputs differ")
+        fixture = self.checkout / BAD_RESOLUTION
+        require(fixture.is_file() and not fixture.is_symlink() and fixture.stat().st_size == 3119,
+                "bad reference resolution fixture unavailable")
+        data = fixture.read_bytes()
+        blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+        selected = self.result["source"]
+        require(blob == selected["blobs"].get(BAD_RESOLUTION) and hashlib.sha256(data).hexdigest() == BAD_RESOLUTION_SHA256,
+                "bad reference resolution fixture differs from committed native resolution")
+        lock.write_bytes(data)
+        self.result["variants"]["bad"]["referenceResolution"] = {
+            "historicalLockSHA256": BAD_LOCK_SHA256, "buildLockSHA256": BAD_RESOLUTION_SHA256,
+            "fixture": BAD_RESOLUTION, "fixtureSourceSHA": selected["sha"], "fixtureBlob": blob,
+        }
 
     def build(self, name, source):
         self.begin(f"{name}: resolve and build")

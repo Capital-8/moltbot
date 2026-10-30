@@ -531,27 +531,81 @@ class DriverTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "exactly one"):
             self.proof.sandbox(["fixture-helper"], online=True)
 
-    def fake_build(self, stale=False, mutate=False):
+    def bad_reference(self):
+        package = self.root / "bad" / m.PACKAGE
+        package.mkdir(parents=True)
+        (package / "Package.swift").write_bytes(b"fixture manifest")
+        (package / "Package.resolved").write_bytes(b"fixture lock")
+        fixture = self.root / m.BAD_RESOLUTION
+        fixture.parent.mkdir(parents=True)
+        fixture.write_bytes((Path(sys.argv[1]).parents[1] / m.BAD_RESOLUTION).read_bytes())
+        self.proof.result["source"] = {"sha": "a" * 40, "blobs": {m.BAD_RESOLUTION: "9923235468d35fe0e7b78382e5f1f1625dabd33a"}}
+        self.proof.result["variants"]["bad"] = {"sha": m.BAD, "blobs": {"original": "preserve"}}
+        for name, value in [
+            ("BAD_MANIFEST_SHA256", "72fe0d961c89cdc8cf6a0c8663484fa8d2259521a0ecbdf00ad49be1a3a07b78"),
+            ("BAD_LOCK_SHA256", "105fb84489dda864b45fe1607202cec9202b519fe5ce7a089767bd8272d3ff90"),
+        ]:
+            override = patch.object(m, name, value)
+            override.start()
+            self.addCleanup(override.stop)
+        return package, fixture
+
+    def test_bad_reference_uses_exact_committed_resolution_and_preserves_provenance(self):
+        package, fixture = self.bad_reference()
+        self.proof.prepare_bad_resolution(self.root / "bad", m.BAD)
+        self.assertEqual((package / "Package.swift").read_bytes(), b"fixture manifest")
+        self.assertEqual((package / "Package.resolved").read_bytes(), fixture.read_bytes())
+        info = self.proof.result["variants"]["bad"]
+        self.assertEqual(info["blobs"], {"original": "preserve"})
+        receipt = info["referenceResolution"]
+        self.assertEqual(receipt["historicalLockSHA256"], m.BAD_LOCK_SHA256)
+        self.assertEqual(receipt["buildLockSHA256"], "ed4fbe6da8823c6f5739d495df9912b40dca9670a96ae1089c62b29d8a85ca03")
+        self.assertEqual(receipt["fixtureSourceSHA"], "a" * 40)
+
+    def test_bad_reference_rejects_changed_history_or_fixture_before_replacement(self):
+        package, fixture = self.bad_reference()
+        original = fixture.read_bytes()
+        for fault in ["revision", "manifest", "lock", "missing", "uncommitted", "canonical", "symlink"]:
+            with self.subTest(fault=fault):
+                (package / "Package.swift").write_bytes(b"changed" if fault == "manifest" else b"fixture manifest")
+                lock = package / "Package.resolved"
+                lock.write_bytes(b"changed" if fault == "lock" else b"fixture lock")
+                data = original.replace(b"eventsource", b"eventSource", 1) if fault == "canonical" else original
+                fixture.write_bytes(data)
+                self.proof.result["source"]["blobs"][m.BAD_RESOLUTION] = hashlib.sha1(f"blob {len(data)}\0".encode()+data).hexdigest() if fault == "canonical" else "9923235468d35fe0e7b78382e5f1f1625dabd33a"
+                if fault == "uncommitted": self.proof.result["source"]["blobs"] = {}
+                if fault in ["missing", "symlink"]:
+                    fixture.unlink()
+                    if fault == "symlink": fixture.symlink_to(package / "Package.swift")
+                with self.assertRaises(RuntimeError):
+                    self.proof.prepare_bad_resolution(self.root / "bad", m.STABLE if fault == "revision" else m.BAD)
+                self.assertEqual(lock.read_bytes(), b"changed" if fault == "lock" else b"fixture lock")
+                self.assertNotIn("referenceResolution", self.proof.result["variants"]["bad"])
+                if fixture.is_symlink(): fixture.unlink()
+                fixture.write_bytes(original)
+
+    def fake_build(self, stale=False, mutate=False, name="fixed"):
         package = self.root / m.PACKAGE
         package.mkdir(parents=True)
         (package / "Package.swift").write_text("fixture manifest")
-        (package / "Package.resolved").write_text('{"pins": []}')
-        self.proof.result["variants"]["fixed"] = {}
+        pins = [] if name == "fixed" else [{"identity": "mlx-audio-swift", "state": {"revision": "6fd938669e45412f5c35e011e7086ecd20397dbd"}}]
+        (package / "Package.resolved").write_text(json.dumps({"pins": pins}))
+        self.proof.result["variants"][name] = {}
         calls = []
         def command(argv, seconds, cwd=None, env=None):
             args = [str(x) for x in argv]
             calls.append(args)
             if args[:2] == ["swift", "package"] and stale:
-                (package / "Package.resolved").write_text('{"pins": [], "changed": true}')
+                (package / "Package.resolved").write_text(json.dumps({"pins": pins, "changed": True}))
             if "--show-bin-path" in args:
-                binary = self.scratch / "fixed-build/bin"
+                binary = self.scratch / (name + "-build/bin")
                 library = binary / "mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
                 library.parent.mkdir(parents=True)
                 library.write_text("fixture Metal library")
                 (binary / "openclaw-mlx-tts").write_text("fixture executable")
                 return str(binary)
-            if args[:2] == ["swift", "test"] and mutate:
-                (package / "Package.resolved").write_text('{"pins": [], "mutated": true}')
+            if args[:2] == ["swift", "test" if name == "fixed" else "build"] and "--show-bin-path" not in args and mutate:
+                (package / "Package.resolved").write_text(json.dumps({"pins": pins, "mutated": True}))
             return "fixture output"
         self.proof.command = command
         return calls
@@ -568,6 +622,17 @@ class DriverTests(unittest.TestCase):
         self.fake_build(mutate=True)
         with self.assertRaisesRegex(RuntimeError, "inputs changed"):
             self.proof.build("fixed", self.root)
+
+    def test_bad_reference_resolver_drift_still_refuses_before_build(self):
+        calls = self.fake_build(stale=True, name="bad")
+        with self.assertRaisesRegex(RuntimeError, "committed resolution changed"):
+            self.proof.build("bad", self.root)
+        self.assertFalse(any(c[:2] == ["swift", "build"] for c in calls))
+
+    def test_bad_reference_build_drift_still_refuses_completion(self):
+        self.fake_build(mutate=True, name="bad")
+        with self.assertRaisesRegex(RuntimeError, "inputs changed"):
+            self.proof.build("bad", self.root)
 
     def test_pcm_contract_rejects_wrong_ids_format_and_silence(self):
         class Helper:

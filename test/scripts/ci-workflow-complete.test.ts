@@ -562,6 +562,7 @@ ${check.run}
 
   it.each([
     ["workflow_dispatch", true, "scripts/test-macos-mlx-native.py", true],
+    ["workflow_dispatch", true, "test/fixtures/macos-mlx-native/bad.Package.resolved", true],
     ["workflow_dispatch", true, ".github/workflows/ci.yml", true],
     ["workflow_dispatch", true, "scripts/ci-changed-scope.mjs", true],
     ["workflow_dispatch", true, "apps/macos-mlx-tts/Package.swift", true],
