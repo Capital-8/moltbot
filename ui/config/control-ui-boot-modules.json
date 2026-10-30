@@ -1623,6 +1623,7 @@
   "ui/src/pages/chat/components/chat-composer-textarea.tsx",
   "ui/src/pages/chat/components/chat-composer-view.tsx",
   "ui/src/pages/chat/components/chat-composer.tsx",
+  "ui/src/pages/chat/components/chat-context-compact.tsx",
   "ui/src/pages/chat/components/chat-context-copy.ts",
   "ui/src/pages/chat/components/chat-conversation-history-error.tsx",
   "ui/src/pages/chat/components/chat-conversation-loading.tsx",
