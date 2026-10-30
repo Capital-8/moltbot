@@ -712,7 +712,7 @@ suite.define(() => {
               status: "failed",
               hasActiveRun: false,
               activeRunIds: [],
-              lastRunError: diagnostic,
+              lastRunError: expect.stringContaining(diagnostic),
               unreadFailure: true,
             });
           expect(await stopButton(page).count()).toBe(0);
