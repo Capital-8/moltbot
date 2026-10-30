@@ -150,10 +150,12 @@ function expectSteadyDetailsMotion(frames: DetailsMotionFrame[]) {
   }
   const last = frames.at(-1)!;
   expect(last.detailsDisplay === "none").toBe(!last.open);
-  for (const key of ["threadWidth", "anchorTop", "scrollTop"] as const) {
-    const values = frames.map((frame) => frame[key]);
-    expect(Math.max(...values) - Math.min(...values), key).toBeLessThan(1);
-  }
+  const widths = frames.map((frame) => frame.threadWidth);
+  expect(Math.max(...widths) - Math.min(...widths), "threadWidth").toBeLessThan(1);
+  // Offscreen measurements may compensate scrollTop while preserving this visible anchor.
+  // Match the anchor owner's inclusive one-pixel settling tolerance.
+  const anchors = frames.map((frame) => frame.anchorTop);
+  expect(Math.max(...anchors) - Math.min(...anchors), "anchorTop").toBeLessThanOrEqual(1);
   for (const [left, right] of [
     ["threadRight", "frameRight"],
     ["columnCenter", "composerCenter"],

@@ -746,6 +746,8 @@ it("keeps smooth latest through settlement and idle until the target", async () 
   transcript.update();
   transcript.scrollToEnd({ behavior: "smooth" });
   await Promise.resolve();
+  flush();
+  await Promise.resolve();
   expect(scrollTo).toHaveBeenLastCalledWith({ top: 4200, behavior: "smooth" });
   scroll(container, 1500);
   geometry(container, { scrollHeight: 4900 });

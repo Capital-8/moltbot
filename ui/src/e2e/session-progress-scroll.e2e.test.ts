@@ -126,6 +126,7 @@ suite.define(() => {
         await card.locator("summary").click();
         await card.locator("summary").click();
         expect(await isOpen()).toBe(true);
+        await waitForHomeScrollIdle(thread);
         if (target === "canceled wheel") {
           await outputScroller.evaluate((element) => {
             element.addEventListener("wheel", (event) => event.preventDefault(), {
@@ -135,7 +136,11 @@ suite.define(() => {
         }
         const wheelPoint = await outputScroller.evaluate((element) => {
           const rect = element.getBoundingClientRect();
-          return { x: rect.left + 100, y: rect.top + 100 };
+          const point = { x: rect.left + 100, y: rect.top + 100 };
+          if (!element.contains(document.elementFromPoint(point.x, point.y))) {
+            throw new Error("Nested output wheel target is not visible");
+          }
+          return point;
         });
         await page.mouse.move(wheelPoint.x, wheelPoint.y);
         const before = {
