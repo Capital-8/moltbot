@@ -478,10 +478,15 @@ it("parks retained rows without layout and restores their resized geometry and n
   expect(code.scrollLeft).toBe(37);
 
   const deliveredHeights: number[] = [];
+  let parkedReceipt: ResizeObserverEntry | undefined;
   const observer = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (entry.target === row) {
-        deliveredHeights.push(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height);
+        const size = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
+        deliveredHeights.push(size);
+        if (size === 0) {
+          parkedReceipt = entry;
+        }
       }
     }
   });
@@ -518,6 +523,18 @@ it("parks retained rows without layout and restores their resized geometry and n
     expect(Math.abs(viewport.scrollHeight - extent - (resizedHeight - height))).toBeLessThanOrEqual(
       1,
     );
+    // Frame-deferred delivery can outlive the parked state that produced zero.
+    virtualizer.resizeItem(
+      1,
+      virtualizer.options.measureElement(
+        row,
+        expectDefined(parkedReceipt, "parked zero-size receipt"),
+        virtualizer,
+      ),
+    );
+    expect(virtualizer.itemSizeCache.get(key)).toBeCloseTo(resizedHeight, 1);
+    row.style.height = "0px";
+    expect(virtualizer.options.measureElement(row, parkedReceipt, virtualizer)).toBe(0);
   } finally {
     observer.disconnect();
   }
@@ -562,7 +579,8 @@ it("reconciles the streaming end only when native row geometry changes", async (
 });
 
 it("commits uncompensated extents while coalescing reader row updates", async () => {
-  const { host, session, viewport, virtualizer } = await mountPane();
+  // Observe the initial row heights before injecting the two resize receipts.
+  const { host, session, viewport, virtualizer } = await mountPane(false, 120, undefined, 480);
   scrollReader(viewport, 480);
   expect(virtualizer.isScrolling).toBe(true);
   expect(session.isPositionSettled).toBe(true);
@@ -597,7 +615,7 @@ it("commits uncompensated extents while coalescing reader row updates", async ()
 });
 
 it("defers uncompensated measurement read-back until the next frame", async () => {
-  const { host, session, viewport, virtualizer } = await mountPane();
+  const { host, session, viewport, virtualizer } = await mountPane(false, 120, undefined, 480);
   scrollReader(viewport, 480);
   const inner = requireElement(host, ".chat-thread-inner");
   const height = Number.parseFloat(inner.style.height);

@@ -190,7 +190,12 @@ export function measureTranscriptRow(
     // Rounded row heights accumulate when skipped overscan uses those measurements.
     const size =
       entry?.borderBoxSize?.[0]?.blockSize ?? measureElement(element, entry, virtualizer);
-    if (size !== 0 || virtualizer.scrollElement?.clientHeight !== 0) {
+    // A frame-deferred zero can describe an earlier parked state. Keep its
+    // cached geometry if the row has already returned to layout.
+    if (
+      size !== 0 ||
+      (virtualizer.scrollElement?.clientHeight !== 0 && (!entry || element.offsetHeight === 0))
+    ) {
       return size;
     }
   }
