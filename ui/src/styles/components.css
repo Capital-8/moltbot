@@ -3299,3 +3299,7 @@ td.data-table-key-col {
 .sidebar-child-session-toggle:focus-visible {
   color: var(--text);
 }
+
+.sidebar-recent-session .hover-marquee {
+  --hover-marquee-fade-width: 24px;
+}

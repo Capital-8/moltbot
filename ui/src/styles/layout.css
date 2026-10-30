@@ -2054,8 +2054,6 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 .sidebar-recent-session__name {
-  --hover-marquee-fade-width: 24px;
-
   display: block;
   width: 100%;
   line-height: var(--sidebar-title-line-height);
@@ -3915,8 +3913,9 @@ html.openclaw-native-web-chrome
 }
 
 .sidebar-session-tool > svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
+  stroke-width: 2px;
 }
 
 .sidebar-recent-session__title-row {
@@ -3958,7 +3957,6 @@ html.openclaw-native-web-chrome
 }
 
 .sidebar-recent-session--single-line > .sidebar-recent-session__aside {
-  top: 0;
   display: flex;
   align-items: center;
 }
