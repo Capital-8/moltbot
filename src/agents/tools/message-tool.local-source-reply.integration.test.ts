@@ -1,5 +1,6 @@
-// Only the channel adapter and capture consumer are synthetic. Tool execution,
-// source matching, transcript writes, accepted-turn publication and history reads are real.
+// Prepared sends use the shipped Discord adapters with only network I/O substituted.
+// Plugin-action fallbacks and the capture consumer are synthetic; source matching,
+// transcript writes, accepted-turn publication and history reconciliation are real.
 import path from "node:path";
 import { afterEach, expect, it, vi, type Mock } from "vitest";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
@@ -27,8 +28,10 @@ import {
 } from "../../gateway/message-action-turn-capability.js";
 import { resetPluginRuntimeStateForTest } from "../../plugins/runtime.js";
 import { persistUserTurnTranscript } from "../../sessions/user-turn-transcript.persistence.js";
+import { loadBundledPluginFacade } from "../../test-utils/bundled-plugin-public-surface.js";
 import { createChannelTestPluginBase } from "../../test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { buildEmbeddedAttemptToolRunContext } from "../embedded-agent-runner/run/attempt-tool-run-context.js";
 import {
   drainPendingContextEngineTurnsBeforeRun,
   finalizeAcceptedContextEngineTurn,
@@ -50,6 +53,15 @@ const sessionId = "local-source-session";
 const runId = "local-source-run";
 const sourceTurnId = "local-source-turn";
 const request = { sender: "User", messageId: "request-60", body: 'reply only "60"' };
+const { discordPlugin } = await loadBundledPluginFacade<{ discordPlugin: ChannelPlugin }>({
+  pluginId: "discord",
+  artifactBasename: "api.ts",
+});
+const createDiscordSender = () =>
+  vi.fn(async (_target: string, _text: string, _options?: unknown) => ({
+    messageId: "answer-60",
+    channelId: "12345",
+  }));
 
 function historyContext(): FinalizedMsgContext {
   return {
@@ -72,8 +84,10 @@ async function withLocalSource(
     tool: ReturnType<typeof createMessageTool>;
     scope: { agentId: string; sessionKey: string; sessionId: string; storePath: string };
     handleAction: Mock<() => Promise<ReturnType<typeof jsonResult>>>;
+    sendDiscord: ReturnType<typeof createDiscordSender>;
     capture: () => Promise<ReturnType<typeof createCommitTurn>>;
   }) => Promise<void>,
+  options: { prepared?: boolean; finalByDefault?: boolean; preparedText?: string } = {},
 ) {
   await withOpenClawTestState(
     { layout: "state-only", prefix: "local-source-reply-" },
@@ -91,6 +105,13 @@ async function withLocalSource(
       const handleAction = vi.fn(async () =>
         jsonResult({ ok: true, messageId: "answer-60", channelId: "12345" }),
       );
+      const sendDiscord = createDiscordSender();
+      const sendPayload = discordPlugin.outbound?.sendPayload;
+      const sendText = discordPlugin.outbound?.sendText;
+      const prepareSendPayload = discordPlugin.actions?.prepareSendPayload;
+      if (!sendPayload || !sendText || !prepareSendPayload) {
+        throw new Error("Missing shipped Discord preparation or outbound adapter");
+      }
       registerMessageChannel({
         ...createChannelTestPluginBase({
           id: "discord",
@@ -102,6 +123,17 @@ async function withLocalSource(
           supportsAction: ({ action }) => action === "send",
           resolveExecutionMode: () => "local",
           handleAction,
+          ...(options.prepared
+            ? {
+                prepareSendPayload:
+                  options.preparedText === undefined
+                    ? prepareSendPayload
+                    : async (ctx) => ({
+                        ...(await prepareSendPayload(ctx)),
+                        text: options.preparedText,
+                      }),
+              }
+            : {}),
         },
         messaging: {
           normalizeTarget: (target) => target.replace(/^channel:/, ""),
@@ -110,12 +142,19 @@ async function withLocalSource(
             hint: "<channel id>",
           },
         },
-        outbound: {
-          deliveryMode: "direct",
-          sendText: async () => {
-            throw new Error("unexpected core send");
-          },
-        },
+        outbound: options.prepared
+          ? {
+              ...discordPlugin.outbound,
+              deliveryMode: "direct",
+              sendPayload: (ctx) => sendPayload({ ...ctx, deps: { sendDiscord } }),
+              sendText: (ctx) => sendText({ ...ctx, deps: { sendDiscord } }),
+            }
+          : {
+              deliveryMode: "direct",
+              sendText: async () => {
+                throw new Error("unexpected core send");
+              },
+            },
       } satisfies ChannelPlugin);
       await replaceSessionEntry(scope, sessionEntry);
       const input = await persistUserTurnTranscript({
@@ -154,8 +193,12 @@ async function withLocalSource(
         await run({
           scope,
           handleAction,
+          sendDiscord,
           tool: createMessageTool({
             config,
+            ...buildEmbeddedAttemptToolRunContext({
+              messageToolFinalByDefault: options.finalByDefault,
+            }),
             ...source,
             agentId: "main",
             agentSessionKey: sessionKey,
@@ -255,6 +298,106 @@ it.each(["automatic", "message_tool_only"] as const)(
     });
   },
 );
+
+it.each([
+  { final: undefined, finalByDefault: undefined, preparedText: undefined },
+  { final: true, finalByDefault: undefined, preparedText: undefined },
+  { final: true, finalByDefault: false, preparedText: "prepared 60" },
+])(
+  "records a shipped Discord core send ($final/$finalByDefault)",
+  async ({ final, finalByDefault, preparedText }) => {
+    await withLocalSource(
+      "automatic",
+      async ({ tool, scope, handleAction, sendDiscord, capture }) => {
+        const deliveredText = preparedText ?? "60";
+        const result = await tool.execute("send-60", {
+          action: "send",
+          message: "60",
+          ...(final === undefined ? {} : { final }),
+        });
+        expect(result.details).toMatchObject({ via: "direct", deliveryStatus: "sent" });
+        expect(sendDiscord).toHaveBeenCalledOnce();
+        expect(sendDiscord.mock.calls[0]?.slice(0, 2)).toEqual(["channel:12345", deliveredText]);
+        expect(handleAction).not.toHaveBeenCalled();
+        const answers = (await loadTranscriptEvents(scope))
+          .map(readTranscriptEventMessage)
+          .filter((message) => message?.role === "assistant");
+        expect(answers).toHaveLength(1);
+        expect(answers[0]).toMatchObject({
+          content: [{ type: "text", text: deliveredText }],
+          openclawDeliveryMirror: { final: true, sourceTurnId, toolCallId: "send-60" },
+        });
+        const committed = await capture();
+        expect(committed.mock.calls[0]?.[0].messages).toContainEqual(
+          expect.objectContaining({
+            role: "assistant",
+            content: [{ type: "text", text: deliveredText }],
+          }),
+        );
+        const ctx = historyContext();
+        await mergeSessionTranscriptContext({ ...scope, ctx });
+        expect(ctx.InboundHistory).toEqual([]);
+      },
+      { prepared: true, finalByDefault, preparedText },
+    );
+  },
+);
+
+it.each([
+  { final: false, finalByDefault: undefined },
+  { final: undefined, finalByDefault: false },
+])(
+  "does not complete a prepared progress send ($final/$finalByDefault)",
+  async ({ final, finalByDefault }) => {
+    await withLocalSource(
+      "automatic",
+      async ({ tool, scope, sendDiscord }) => {
+        const result = await tool.execute("progress", {
+          action: "send",
+          message: "60",
+          ...(final === undefined ? {} : { final }),
+        });
+        expect(sendDiscord).toHaveBeenCalledOnce();
+        expect(result.details).not.toMatchObject({
+          messageDelivery: { sourceReplyDelivered: true },
+        });
+        const answers = (await loadTranscriptEvents(scope))
+          .map(readTranscriptEventMessage)
+          .filter((message) => message?.role === "assistant");
+        expect(answers).toHaveLength(1);
+        expect(answers[0]).toMatchObject({
+          openclawDeliveryMirror: { final: false, sourceTurnId },
+        });
+        const ctx = historyContext();
+        await mergeSessionTranscriptContext({ ...scope, ctx });
+        expect(ctx.InboundHistory).toEqual([request]);
+      },
+      { prepared: true, finalByDefault },
+    );
+  },
+);
+
+it("does not persist a failed prepared send or complete its source", async () => {
+  await withLocalSource(
+    "automatic",
+    async ({ tool, scope, sendDiscord }) => {
+      sendDiscord.mockRejectedValue(new Error("transport unavailable"));
+      await expect(tool.execute("failed", { action: "send", message: "60" })).rejects.toThrow(
+        "transport unavailable",
+      );
+      expect(sendDiscord).toHaveBeenCalledOnce();
+      expect(
+        (await loadTranscriptEvents(scope))
+          .map(readTranscriptEventMessage)
+          .filter((message) => message?.role === "assistant"),
+      ).toEqual([]);
+      const ctx = historyContext();
+      await mergeSessionTranscriptContext({ ...scope, ctx });
+      expect(ctx.InboundHistory).toEqual([request]);
+    },
+    { prepared: true },
+  );
+});
 
 it.each([
   {

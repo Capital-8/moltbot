@@ -148,7 +148,7 @@ Once a turn is durably accepted, an unexpected failure before its answer produce
 
 A final source reply completes only the input it answers. When another input steers the same running agent, its answer or failure remains visible even if an earlier input already received a final reply through the message tool.
 
-Successful local channel-plugin sends through `message(action="send", final=true)` retain the delivered answer in the source session transcript. When the send belongs to an admitted source turn, its terminal marker makes the answer available to accepted-turn context capture and prevents unchanged answered requests from being injected again as recent channel history. Progress replies (`final=false`), failed or partial sends, dry runs, and deliveries to other conversations do not mark that source turn answered.
+Successful local message-tool sends retain the delivered answer in the source session transcript, including sends prepared by channel plugins for core delivery. When the send belongs to an admitted source turn, `final=true` (or omitted `final` under the normal default) makes the answer available to accepted-turn context capture and prevents unchanged answered requests from being injected again as recent channel history. Progress replies (`final=false`, or omitted `final` when the run disables final-by-default), failed or partial sends, dry runs, and deliveries to other conversations do not mark that source turn answered.
 
 When delivery of the current input's reply is pending, OpenClaw waits for its outcome before sending a replacement answer or failure message.
 
