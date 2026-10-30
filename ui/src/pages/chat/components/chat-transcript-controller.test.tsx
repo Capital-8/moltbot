@@ -227,6 +227,7 @@ it("reads only mounted row keys when rendering an unchanged 2,000-row transcript
 });
 
 it("keeps retained MCP rows and the virtual row model atomic through teardown", async () => {
+  const flushFrames = stubAnimationFrames();
   const teardownPending = createDeferred();
   transcriptDomState.measuredRowHeight = 180;
   const initialRows = [
@@ -241,6 +242,7 @@ it("keeps retained MCP rows and the virtual row model atomic through teardown", 
   ];
   const { container, renderRows } = await mountTestTranscript("pane-mcp-rows", initialRows);
   emitRowSizes(transcriptRows(container), 180);
+  flushFrames();
   renderRows(initialRows);
   expect(transcriptSize(container)).toBe(540);
   stubMcpAppLifecycle(container, () => teardownPending.promise);
@@ -275,6 +277,8 @@ it("keeps retained MCP rows and the virtual row model atomic through teardown", 
     committedRows.filter((row) => row.dataset.virtualRowKey !== "group:reply"),
     180,
   );
+  // Deliver the old tool's queued receipt after replacement, alongside the new rows.
+  flushFrames();
   renderRows(regroupedRows);
   // The old tool's 40px delivery must not resize the retained reply key.
   expect(transcriptSize(container)).toBe(540);

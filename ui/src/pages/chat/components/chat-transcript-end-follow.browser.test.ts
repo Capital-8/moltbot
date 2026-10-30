@@ -715,7 +715,7 @@ it("holds the canceled viewport after a smooth journey's automatic final approac
   });
   host.transcript.scrollToEnd({ behavior: "smooth" });
   const offset = await canceled;
+  await expect.poll(() => extent.offsetHeight).toBe(1390);
   await settleFrames();
-  expect(extent.offsetHeight).toBe(1390);
   expect(thread.scrollTop).toBe(offset);
 });

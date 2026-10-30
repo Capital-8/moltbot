@@ -182,6 +182,10 @@ it.each(["idle measurement", "end-command measurement", "native end clamp"] as c
       for (const observer of resizeObservers) {
         observer.emitTarget(measured, 800, 80);
       }
+      // Native observer receipts commit compensation on the next frame.
+      expect(container.scrollTop).toBe(800);
+      vi.advanceTimersToNextFrame();
+      flush();
     }
     expect(container.scrollTop).toBe(760);
     container.dispatchEvent(new Event("scroll"));
