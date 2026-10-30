@@ -14,7 +14,7 @@ if (!output || process.platform !== "darwin" || process.arch !== "arm64") {
 const runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.iOS-27-0";
 const deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
 const proof = {
-  kind: "stock-boot-diagnostic-not-qualification",
+  kind: "blank-seed-clone-diagnostic-not-qualification",
   targetSha: process.env.GITHUB_SHA,
   imageVersion: process.env.ImageVersion,
   nodeVersion: process.version,
@@ -43,19 +43,22 @@ const handlers = new Map(
 );
 let stage = "preflight";
 let udid;
-let createAttempted = false;
+let cloneUdid;
+let creationAttempts = 0;
+const ownedDevices = [];
 const started = performance.now();
 const save = () => writeFileSync(output, `${JSON.stringify(proof, null, 2)}\n`);
-async function command(bin, args, timeoutMs = 120_000, cleanup = false) {
+async function command(bin, args, timeoutMs = 120_000, cleanup = false, input = "") {
   let stdout = "";
   const code = await runManagedCommand({
     bin,
     args,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
     timeoutMs,
     requireProcessTreeExit: true,
     signal: cleanup ? undefined : controller.signal,
     onReady(child) {
+      child.stdin.end(input);
       child.stdout.on("data", (chunk) => {
         stdout = (stdout + chunk.toString()).slice(-256 * 1024);
       });
@@ -135,7 +138,7 @@ try {
   proof.hostLogging = await loggingStatus("sudo", ["-n", "/usr/bin/log", "config", "--status"]);
   await phase("baseline", () => sleep(20_000, undefined, { signal: controller.signal }));
   await phase("create", async () => {
-    createAttempted = true;
+    creationAttempts++;
     const created = await command("xcrun", [
       "simctl",
       "create",
@@ -147,6 +150,7 @@ try {
       throw new Error("invalid-created-device-identity");
     }
     udid = created;
+    ownedDevices.push(created);
   });
   await phase("boot", () => command("xcrun", ["simctl", "boot", udid]));
   await phase("ready", () => command("xcrun", ["simctl", "bootstatus", udid, "-b"], 600_000));
@@ -166,24 +170,83 @@ try {
     "config",
     "--status",
   ]);
+  await phase("seed-blank", () => assertOpenClawAbsent(udid));
+  await phase("seed-shutdown", () => command("xcrun", ["simctl", "shutdown", udid]));
+  await phase("clone", async () => {
+    creationAttempts++;
+    const created = await command("xcrun", [
+      "simctl",
+      "clone",
+      udid,
+      `openclaw-blank-clone-${randomUUID()}`,
+    ]);
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(created)) {
+      throw new Error("invalid-cloned-device-identity");
+    }
+    cloneUdid = created;
+    ownedDevices.push(created);
+  });
+  await phase("clone-boot", () => command("xcrun", ["simctl", "boot", cloneUdid]));
+  await phase("clone-ready", () =>
+    command("xcrun", ["simctl", "bootstatus", cloneUdid, "-b"], 600_000),
+  );
+  await phase("clone-headroom", async () => {
+    proof.cloneHeadroom = await waitForIOSSimulatorHeadroom(controller.signal);
+    if (proof.cloneHeadroom.status !== "ready") {
+      throw new Error("clone-headroom-timeout");
+    }
+  });
+  await phase("clone-blank", () => assertOpenClawAbsent(cloneUdid));
+  const sumPhases = (names) =>
+    proof.phases
+      .filter((entry) => names.includes(entry.phase))
+      .reduce((sum, entry) => sum + entry.ms, 0);
+  proof.seedPreparationMs = sumPhases(["create", "boot", "ready", "headroom", "seed-blank"]);
+  proof.cloneStartupMs = sumPhases([
+    "seed-shutdown",
+    "clone",
+    "clone-boot",
+    "clone-ready",
+    "clone-headroom",
+    "clone-blank",
+  ]);
+  proof.totalStartupMs = proof.seedPreparationMs + proof.cloneStartupMs;
   proof.status = "passed";
 } catch {
   proof.failedStage = stage;
   process.exitCode = 1;
 } finally {
-  try {
-    if (udid) {
-      await phase("cleanup", () => command("xcrun", ["simctl", "delete", udid], 120_000, true));
+  let deletedDevices = 0;
+  for (const device of ownedDevices.toReversed()) {
+    try {
+      await phase("cleanup", () => command("xcrun", ["simctl", "delete", device], 120_000, true));
+      deletedDevices++;
+    } catch {
+      proof.status = "failed";
+      process.exitCode = 1;
     }
-    proof.cleanupConfirmed = Boolean(udid) || !createAttempted;
-  } catch {
+  }
+  proof.cleanupConfirmed = deletedDevices === creationAttempts;
+  proof.ownedDeviceCount = ownedDevices.length;
+  proof.deletedDeviceCount = deletedDevices;
+  if (!proof.cleanupConfirmed) {
     proof.status = "failed";
-    proof.cleanupConfirmed = false;
     process.exitCode = 1;
   }
   proof.elapsedMs = Math.round(performance.now() - started);
   save();
   for (const [signal, handler] of handlers) {
     process.off(signal, handler);
+  }
+}
+
+async function assertOpenClawAbsent(device) {
+  const listing = await command("xcrun", ["simctl", "listapps", device]);
+  const apps = JSON.parse(
+    await command("/usr/bin/plutil", ["-convert", "json", "-o", "-", "-"], 5_000, false, listing),
+  );
+  // A seed must never carry app containers or pairing state into the clone.
+  if (Object.keys(apps).some((id) => id.startsWith("ai.openclawfoundation."))) {
+    throw new Error("seed-contains-openclaw");
   }
 }
