@@ -54,6 +54,10 @@ import {
   type CapturedReplyToolAuthoritySession,
 } from "./reply-tool-authority-cohort.js";
 import {
+  applyReplyToolAuthorityOverlay,
+  resolveAuthorizedCrossSurfaceContinuation,
+} from "./reply-tool-authority-inbound.js";
+import {
   captureMemoryReplyToolAuthoritySession,
   prepareMemoryReplyToolAuthorityCaller,
 } from "./reply-tool-authority-memory.js";
@@ -106,11 +110,6 @@ export type ReplyToolAuthorityInput = {
   > &
     Pick<FollowupRun["run"], "sessionId" | "sessionFile" | "workspaceDir" | "provider" | "model">;
 };
-
-import {
-  applyReplyToolAuthorityOverlay,
-  resolveAuthorizedCrossSurfaceContinuation,
-} from "./reply-tool-authority-inbound.js";
 
 export { resolveInboundReplyToolAuthorityOverlay } from "./reply-tool-authority-inbound.js";
 
