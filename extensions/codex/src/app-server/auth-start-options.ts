@@ -74,6 +74,14 @@ export function withManagedCodexThreadUnloading(
   return args === startOptions.args ? startOptions : { ...startOptions, args };
 }
 
+export function withManagedCodexAuthStore(params: {
+  startOptions: CodexAppServerStartOptions;
+  preparedAuth?: unknown;
+  authProfileId?: string | null;
+}): CodexAppServerStartOptions {
+  return withManagedCodexThreadUnloading(withEphemeralCodexAuthStore(params));
+}
+
 export function withClearedEnvironmentVariables(
   startOptions: CodexAppServerStartOptions,
   envVars: readonly string[],

@@ -80,6 +80,7 @@ import { itemNotification, rawItemCompleted, turnCompleted } from "./protocol.te
 import { readCodexRateLimitsRevision, rememberCodexRateLimitsRead } from "./rate-limit-cache.js";
 import { registerCodexFastModeTests } from "./run-attempt-fast-mode.test-support.js";
 import {
+  expectResumeRequest,
   expectRetainedSuccessfulThread,
   observeAttemptProjectionReady,
   startClockControlledAttempt,
@@ -151,20 +152,6 @@ import { buildThreadStartParams } from "./thread-requests.js";
 import { buildTurnStartParams } from "./turn-params.js";
 import { readMirrorIdentity } from "./upstream-prompt-provenance.js";
 import * as userInputBridge from "./user-input-bridge.js";
-
-function expectResumeRequest(
-  requests: Array<{ method: string; params: unknown }>,
-  params: Record<string, unknown>,
-) {
-  const request = requests.find((entry) => entry.method === "thread/resume");
-  if (!request) {
-    throw new Error("Expected thread/resume request");
-  }
-  const requestParams = request.params as Record<string, unknown> | undefined;
-  for (const [key, value] of Object.entries(params)) {
-    expect(requestParams?.[key]).toEqual(value);
-  }
-}
 
 const DISABLED_CODEX_WEB_SEARCH_THREAD_CONFIG_FINGERPRINT = JSON.stringify({
   "features.standalone_web_search": false,

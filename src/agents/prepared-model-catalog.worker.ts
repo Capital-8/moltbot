@@ -101,7 +101,10 @@ async function refreshAuthStore(params: {
   env: NodeJS.ProcessEnv;
   profileIds?: readonly string[];
   providerIds?: readonly string[];
-  pluginGeneration: PreparedModelRuntimePluginGeneration;
+  pluginGeneration: Pick<
+    PreparedModelRuntimePluginGeneration,
+    "pluginMetadataSnapshot" | "pluginRegistry"
+  >;
 }) {
   const durable = preserveResolvedSecretBackedCredentials({
     next: await loadAuthProfileStoreWithoutExternalProfilesAsync(params.agentDir, {

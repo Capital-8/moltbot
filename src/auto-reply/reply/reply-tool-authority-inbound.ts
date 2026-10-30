@@ -32,6 +32,47 @@ const authorizedCrossSurfaceContinuations = new WeakMap<
   AuthorizedCrossSurfaceContinuation
 >();
 
+export function applyReplyToolAuthorityOverlay(
+  snapshot: ReplyToolAuthorityInput,
+  overlay: ReplyToolAuthorityOverlay,
+): ReplyToolAuthorityInput {
+  return {
+    ...snapshot,
+    originatingChannel: overlay.originatingChannel,
+    operatorAuthority: overlay.operatorAuthority,
+    toolsAllow: overlay.toolsAllow,
+    disableTools: overlay.disableTools,
+    run: {
+      ...snapshot.run,
+      permissionMode: overlay.permissionMode,
+      toolOverrides: overlay.toolOverrides,
+      messageProvider: overlay.messageProvider,
+      chatType: overlay.chatType,
+      agentAccountId: overlay.agentAccountId,
+      conversationToolPolicy: overlay.conversationToolPolicy,
+      groupId: overlay.groupId,
+      groupChannel: overlay.groupChannel,
+      groupSpace: overlay.groupSpace,
+      memberRoleIds: overlay.memberRoleIds,
+      spawnedBy: overlay.spawnedBy,
+      senderId: overlay.senderId,
+      senderName: overlay.senderName,
+      senderUsername: overlay.senderUsername,
+      senderE164: overlay.senderE164,
+      senderIsOwner: overlay.senderIsOwner,
+      inputProvenance: overlay.inputProvenance,
+      trustedInternalHandoff: overlay.trustedInternalHandoff,
+      scheduledToolPolicy: overlay.scheduledToolPolicy,
+      runtimePluginToolGrant: overlay.runtimePluginToolGrant,
+      traceAuthorized: overlay.traceAuthorized,
+      approvalReviewerDeviceId: overlay.approvalReviewerDeviceId,
+      clientCaps: overlay.clientCaps,
+      gatewayUiCommandTarget: overlay.gatewayUiCommandTarget,
+      toolBindings: overlay.toolBindings,
+    },
+  };
+}
+
 export function readAuthorizedCrossSurfaceContinuation(
   caller: object,
 ): AuthorizedCrossSurfaceContinuation | undefined {

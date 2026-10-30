@@ -72,8 +72,6 @@ export async function buildMattermostEventPlan(
     teamId,
     channelName,
     channelDisplay,
-    channelName,
-    teamId,
     roomLabel,
     route,
     thread,
