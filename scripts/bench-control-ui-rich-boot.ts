@@ -527,7 +527,11 @@ try {
               undefined,
               { timeout: 30000 },
             );
-            if (values.admission) await page.getByText(latestText, { exact: true }).waitFor();
+            if (values.admission)
+              await page
+                .locator("section.chat .chat-text")
+                .filter({ hasText: latestText })
+                .waitFor();
           }
         }
         const after =
