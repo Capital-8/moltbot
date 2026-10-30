@@ -130,6 +130,11 @@ export type ReleaseOptions = {
   from?: ReleasePhase;
   dryRun: boolean;
   status: boolean;
+  watch: boolean;
+  watchOnce: boolean;
+  watchJson: boolean;
+  watchPollSeconds: number;
+  watchTimeoutSeconds: number;
   approvePublication: boolean;
   cutSha?: string;
   confirmCutSha?: string;
