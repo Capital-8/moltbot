@@ -636,6 +636,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/subagents/registry/subagent-announcement.worker.test.ts",
   "src/agents/subagents/registry/subagent-announcement-delivery.worker.test.ts",
   "src/agents/tools/agents-wait-tool.native.test.ts",
+  "src/agents/tools/agents-wait-tool.persistence.native.test.ts",
   "src/gateway/session-row-failure-handoff.test.ts",
   "src/agents/subagents/registry/subagent-registry.persistence.test.ts",
   "src/agents/subagents/registry/subagent-registry-lifecycle.test.ts",

@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { stableStringify } from "@openclaw/normalization-core";
-import { expect, it, onTestFinished } from "vitest";
-import { createDeferred } from "../../test/helpers/promise.js";
+import { expect, it } from "vitest";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import {
   loadTranscriptEvents,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
+import { createContext } from "../gateway/server-plugin-in-process-dispatch.test-support.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { prepareSystemAgentRunAdmission } from "./admitted-run-context.js";
 import { codeModeReplayIdForToolCall } from "./code-mode-bridge.js";
@@ -16,8 +16,6 @@ import { applyCodeModeCatalog } from "./code-mode.js";
 import { resetCodeModeTestState, resultDetails } from "./code-mode.test-support.js";
 import { SessionManager } from "./sessions/session-manager.js";
 import { loadRequesterSessionEntry } from "./subagents/announce/subagent-announce-delivery.runtime.js";
-import { subagentRuns } from "./subagents/registry/subagent-registry-memory.js";
-import { subscribeSubagentRunChanges } from "./subagents/registry/subagent-registry-publication.js";
 import {
   loadSubagentRegistryFromSqlite,
   persistRegistryFixture,
@@ -31,13 +29,18 @@ import {
 } from "./tools/gateway-caller-context.js";
 import { createSessionsSpawnTool } from "./tools/sessions-spawn-tool.js";
 
-it.each(["intrinsic", "catalog"] as const)(
-  "durably consumes a failed %s collector through its subscribed nested owner",
-  async (mode) => {
+it.each([
+  { mode: "intrinsic", omitted: false },
+  { mode: "catalog", omitted: false },
+  { mode: "intrinsic", omitted: true },
+  { mode: "catalog", omitted: true },
+] as const)(
+  "consumes only retained $mode collector evidence through its subscribed nested owner (omitted=$omitted)",
+  async ({ mode, omitted }) => {
     await withOpenClawTestState(
       { scenario: "minimal", env: { OPENCLAW_TEST_READ_SUBAGENT_RUNS_FROM_SQLITE: "1" } },
       async (state) => {
-        const name = mode + "-custody";
+        const name = mode + (omitted ? "-omitted-custody" : "-custody");
         const storePath = resolveSessionStorePathCore(undefined, { agentId: "main" });
         const target = {
           agentId: "main",
@@ -87,11 +90,11 @@ it.each(["intrinsic", "catalog"] as const)(
         const code =
           mode === "intrinsic"
             ? 'try { return await agents.run("Recover saved collector"); } catch (error) { return { message: error.message, runId: error.runId, status: error.status }; }'
-            : 'const [wait] = await catalog.search("agents_wait"); const result = await wait({ids:["catalog-failed"], awaitResults:true}); return result.completed[0];';
+            : `const [wait] = await catalog.search("agents_wait"); const result = await wait({ids:[${JSON.stringify(name + "-failed")}], awaitResults:true}); return result.completed[0];`;
         const requester = await loadRequesterSessionEntry(target.sessionKey, "main");
         const failed = {
-          ...collectorRun(mode + "-failed", target.sessionKey),
-          swarmRunId: mode + "-failed",
+          ...collectorRun(name + "-failed", target.sessionKey),
+          swarmRunId: name + "-failed",
           requesterStorePath: requester.physicalStorePath,
           completionRequesterSessionId: target.sessionId,
           completionRequesterLifecycleRevision: "consumer-1",
@@ -115,7 +118,10 @@ it.each(["intrinsic", "catalog"] as const)(
             outcome: { status: "error" as const, error: "Intrinsic provider failure" },
           },
           collectorCompletion: { status: "failed" as const },
-          completion: { required: false, resultText: "Intrinsic saved progress" },
+          completion: {
+            required: false,
+            resultText: "Intrinsic saved progress" + (omitted ? "P".repeat(40_000) : ""),
+          },
         };
         persistRegistryFixture(new Map([[failed.runId, failed]]));
         const admission = prepareSystemAgentRunAdmission(
@@ -134,6 +140,14 @@ it.each(["intrinsic", "catalog"] as const)(
           if (!caller) {
             throw new Error("Missing admitted caller");
           }
+          const context = createContext();
+          const pending: Promise<unknown>[] = [];
+          context.trackExecution = (work) => {
+            const task = Promise.resolve().then(work);
+            pending.push(task);
+            return task;
+          };
+          caller.gatewayContextResolver = () => context;
           caller.assertToolAllowed = (toolName) => {
             if (toolName !== allowedTool) {
               throw new Error("raw collector unavailable");
@@ -149,14 +163,6 @@ it.each(["intrinsic", "catalog"] as const)(
                   arguments: { code, awaitResults: true },
                 },
               ],
-            }),
-          );
-          const committed = createDeferred();
-          onTestFinished(
-            subscribeSubagentRunChanges("persistence", () => {
-              if (subagentRuns.get(failed.runId)?.delivery?.failureHandoff) {
-                committed.resolve();
-              }
             }),
           );
           const result = await withGatewayToolCallerIdentity(caller, () =>
@@ -190,42 +196,63 @@ it.each(["intrinsic", "catalog"] as const)(
           expect(JSON.stringify(await loadTranscriptEvents(target))).toContain(
             "Intrinsic provider failure",
           );
-          await committed.promise;
-          expect(
-            loadSubagentRegistryFromSqlite().get(failed.runId)?.delivery?.failureHandoff,
-          ).toMatchObject({
-            requesterSessionKey: target.sessionKey,
-            requesterSessionId: target.sessionId,
-            requesterLifecycleRevision: "consumer-1",
-          });
+          await Promise.all(pending);
+          if (!omitted) {
+            expect(
+              loadSubagentRegistryFromSqlite().get(failed.runId)?.delivery?.failureHandoff,
+            ).toMatchObject({
+              requesterSessionKey: target.sessionKey,
+              requesterSessionId: target.sessionId,
+              requesterLifecycleRevision: "consumer-1",
+            });
+          }
           const transcript = JSON.stringify(await loadTranscriptEvents(target));
-          expect(transcript).toContain("Intrinsic saved progress");
-          expect(await harness.readNestedActivities()).toMatchObject([
-            {
-              details: {
-                toolName: mode === "intrinsic" ? "agents.run" : "agents_wait",
-                result: {
-                  details:
-                    mode === "intrinsic"
-                      ? {
-                          runId: failed.runId,
-                          error: "Intrinsic provider failure",
-                          result: expect.stringContaining("Intrinsic saved progress"),
-                        }
-                      : {
-                          completed: [
-                            {
-                              runId: failed.runId,
-                              error: "Intrinsic provider failure",
-                              result: expect.stringContaining("Intrinsic saved progress"),
-                            },
-                          ],
-                          pending: [],
-                        },
+          if (omitted) {
+            expect(pending).toHaveLength(0);
+            expect(
+              loadSubagentRegistryFromSqlite().get(failed.runId)?.delivery?.failureHandoff,
+            ).toBeUndefined();
+            expect(await harness.readNestedActivities()).toMatchObject([
+              {
+                details: {
+                  result: {
+                    content: [
+                      { type: "text", text: "[Nested tool output omitted: exceeds display limit]" },
+                    ],
+                  },
                 },
               },
-            },
-          ]);
+            ]);
+          } else {
+            expect(pending).toHaveLength(1);
+            expect(transcript).toContain("Intrinsic saved progress");
+            expect(await harness.readNestedActivities()).toMatchObject([
+              {
+                details: {
+                  toolName: mode === "intrinsic" ? "agents.run" : "agents_wait",
+                  result: {
+                    details:
+                      mode === "intrinsic"
+                        ? {
+                            runId: failed.runId,
+                            error: "Intrinsic provider failure",
+                            result: expect.stringContaining("Intrinsic saved progress"),
+                          }
+                        : {
+                            completed: [
+                              {
+                                runId: failed.runId,
+                                error: "Intrinsic provider failure",
+                                result: expect.stringContaining("Intrinsic saved progress"),
+                              },
+                            ],
+                            pending: [],
+                          },
+                  },
+                },
+              },
+            ]);
+          }
           expect(loadSubagentRegistryFromSqlite().get(failed.runId)?.delivery?.status).toBe(
             "not_required",
           );

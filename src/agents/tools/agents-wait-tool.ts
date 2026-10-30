@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import { expectDefined } from "@openclaw/normalization-core/expect";
+import { safeParseJson } from "@openclaw/normalization-core/json-coercion";
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { Type, type Static } from "typebox";
@@ -15,8 +17,10 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createAbortError } from "../../infra/abort-signal.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
+import { readNestedToolActivity } from "../../sessions/nested-tool-activity.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import type { AgentMessage } from "../runtime/index.js";
 import {
   captureRequesterSessionEntryCurrent,
   loadRequesterSessionEntry,
@@ -32,6 +36,7 @@ import { isFailedTerminalSubagentRun } from "../subagents/subagent-failure.js";
 import { markCollectorReaderTool } from "../subagents/swarm/swarm-collector-capability.js";
 import { resolveSwarmConfig } from "../subagents/swarm/swarm-config.js";
 import { describeAgentsWaitTool } from "../tool-description-presets.js";
+import { toToolSearchJsonSafe } from "../tool-search-json.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, ToolInputError } from "./common.js";
 import {
@@ -375,6 +380,30 @@ type CollectorWaitParams = CollectorOwnerScope & {
   assertCurrent?: () => void;
 };
 
+/** Only whole structured results prove retention; child-authored nested text is never identity. */
+function readCommittedCollectorResults(message?: AgentMessage): CollectorCompletionResult[] {
+  if (!message) {
+    return [];
+  }
+  const content =
+    message.role === "toolResult"
+      ? message.content
+      : (readNestedToolActivity(message)?.details.result.content ?? []);
+  return content.flatMap((block) => {
+    const part = asOptionalRecord(block);
+    if (part?.type !== "text" || typeof part.text !== "string") {
+      return [];
+    }
+    // Truncated JSON cannot establish which source's diagnostics survived.
+    const value = safeParseJson(part.text);
+    return Value.Check(AgentsWaitOutputSchema, value)
+      ? value.completed
+      : Value.Check(CollectorCompletionSchema, value)
+        ? [value]
+        : [];
+  });
+}
+
 async function waitForCollector(params: CollectorWaitParams) {
   const state = await waitForCollectorState(params);
   const completed = await Promise.all(
@@ -389,7 +418,12 @@ async function waitForCollector(params: CollectorWaitParams) {
   }
   const { readCurrent: _readCurrent, ...result } = state;
   const output = { ...result, completed };
-  const failed = state.completed.map(({ entry }) => entry).filter(isFailedTerminalSubagentRun);
+  // Capture the JSON form before result hooks can mutate the exposed collection.
+  const failed = state.completed.flatMap(({ entry }, index) =>
+    isFailedTerminalSubagentRun(entry)
+      ? [{ entry, expected: toToolSearchJsonSafe(completed[index]) }]
+      : [],
+  );
   const caller = getGatewayToolCallerIdentity();
   const callerAssertion = captureGatewayToolCallerAssertion();
   const consumerSessionKey = caller?.sessionKey ?? params.consumerSessionKey;
@@ -413,7 +447,7 @@ async function waitForCollector(params: CollectorWaitParams) {
     return output;
   }
   const consumer = { ...params, currentSessionKeys: new Set([requester.canonicalKey]) };
-  if (failed.some((entry) => !ownsRun(entry, consumer))) {
+  if (failed.some(({ entry }) => !ownsRun(entry, consumer))) {
     return output;
   }
   const gateway = caller?.gatewayContextResolver?.();
@@ -423,7 +457,16 @@ async function waitForCollector(params: CollectorWaitParams) {
     storePath: requester.physicalStorePath,
   };
   const lifecycleRevision = requester.entry.lifecycleRevision;
-  return attachInternalToolResultAcknowledgement(output, () => {
+  return attachInternalToolResultAcknowledgement(output, (committedMessage) => {
+    const represented = readCommittedCollectorResults(committedMessage);
+    const retained = failed
+      .filter(({ expected }) =>
+        represented.some((candidate) => isDeepStrictEqual(candidate, expected)),
+      )
+      .map(({ entry }) => entry);
+    if (!retained.length) {
+      return;
+    }
     const commit = async () => {
       assertCurrent();
       const recipient = await captureRequesterSessionEntryCurrent(
@@ -432,7 +475,7 @@ async function waitForCollector(params: CollectorWaitParams) {
       );
       try {
         await recordSubagentFailureHandoff({
-          entries: failed,
+          entries: retained,
           requester: capturedRequester,
           collector: { lifecycleRevision, ownsRun: (entry) => ownsRun(entry, consumer) },
           assertCurrent: () => {
@@ -444,7 +487,7 @@ async function waitForCollector(params: CollectorWaitParams) {
             ) {
               throw new ToolInputError("Collector consumer changed before consumption.");
             }
-            for (const entry of failed) {
+            for (const entry of retained) {
               const source = state.readCurrent(entry.runId);
               if (!source || !ownsRun(source, consumer)) {
                 throw new ToolInputError("Collector result source changed before consumption.");

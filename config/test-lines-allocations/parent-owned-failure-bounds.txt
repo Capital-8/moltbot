@@ -1,3 +1,3 @@
-# Actual typed-event shared budget and producer/native-input/collector overflow custody.
-# Three native boundary cases; existing budget cases strengthened without duplication.
-225
+# Typed-event and collector persistence bounds: actual producer, guard, native append and cold attention.
+# Includes native hook/omission controls; replaces the earlier standalone custody positive.
+502
