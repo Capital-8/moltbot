@@ -259,25 +259,21 @@ function ConfigPage(props: ConfigPageProps) {
         />
       </Show>
       <SettingsWorkspace>
-        <Show when={props.pageId} keyed>
-          {(pageId) => (
-            <Errored
-              fallback={(error, retry) => (
-                <ConfigReadError message={formatUiError(error())} onRetry={retry} />
-              )}
-            >
-              <Loading fallback={<ConfigReadLoading message={t("common.loading")} />}>
-                <ConfigBody
-                  state={state}
-                  pageId={pageId}
-                  routeData={props.routeData}
-                  config={state.configProps()}
-                  configObject={state.configObject()}
-                />
-              </Loading>
-            </Errored>
+        <Errored
+          fallback={(error, retry) => (
+            <ConfigReadError message={formatUiError(error())} onRetry={retry} />
           )}
-        </Show>
+        >
+          <Loading on={props.pageId} fallback={<ConfigReadLoading message={t("common.loading")} />}>
+            <ConfigBody
+              state={state}
+              pageId={props.pageId}
+              routeData={props.routeData}
+              config={state.configProps()}
+              configObject={state.configObject()}
+            />
+          </Loading>
+        </Errored>
       </SettingsWorkspace>
     </openclaw-config-page>
   );

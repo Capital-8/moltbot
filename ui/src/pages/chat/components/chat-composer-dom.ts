@@ -12,6 +12,7 @@ type ComposerTextareaResizeObserverState = {
   adjustmentFrame: number | null;
   overflowFrame: number | null;
   height: number;
+  heightCapped: boolean;
   nativeInputPending: boolean;
   hasScrollbarGutter: boolean;
   // Width a forced scrollbar takes from this textarea; null until first overflow.
@@ -154,7 +155,7 @@ function scheduleNativeTextareaOverflow(el: HTMLTextAreaElement) {
   el.removeAttribute("data-scroll-fade-top");
   el.removeAttribute("data-scroll-fade-bottom");
   const state = composerTextareaResizeObservers.get(el);
-  if (!state || state.overflowFrame !== null) {
+  if (!state || !state.heightCapped || state.overflowFrame !== null) {
     return;
   }
   state.overflowFrame = requestAnimationFrame(() => {
@@ -281,10 +282,24 @@ function updateTextareaOverflow(
   el.toggleAttribute("data-scroll-fade-bottom", fadeBottom);
   if (state) {
     state.hasScrollbarGutter = false;
-    if (scrollable && hasNativeTextareaContentSizing(el)) {
+    // Below the cap, native sizing reports every height change through ResizeObserver.
+    // At the cap, wrapping and gutter changes can alter overflow without resizing.
+    if (hasNativeTextareaContentSizing(el)) {
       const style = getComputedStyle(el);
+      const maxHeight = Number.parseFloat(style.maxHeight);
+      const height =
+        style.boxSizing === "border-box"
+          ? clientHeight +
+            Number.parseFloat(style.borderTopWidth) +
+            Number.parseFloat(style.borderBottomWidth)
+          : clientHeight -
+            Number.parseFloat(style.paddingTop) -
+            Number.parseFloat(style.paddingBottom);
+      state.heightCapped =
+        !Number.isFinite(maxHeight) || !Number.isFinite(height) || height >= maxHeight - 1;
       // Hiding a reserved gutter cannot free width for intrinsic sizing.
       state.hasScrollbarGutter =
+        scrollable &&
         !style.getPropertyValue("scrollbar-gutter").includes("stable") &&
         el.offsetWidth - el.clientWidth >
           Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.borderRightWidth);
@@ -446,6 +461,8 @@ function observeComposerPane(el: HTMLTextAreaElement, state: ComposerTextareaRes
         input.style.getPropertyValue(EDITOR_HEIGHT_LIMIT) !== limit
         ? () => {
             input.style.setProperty(EDITOR_HEIGHT_LIMIT, limit);
+            // A changed cap can leave the current box unchanged, without a resize receipt.
+            state.heightCapped = true;
             scheduleTextareaHeightAdjustment(el);
           }
         : undefined;
@@ -480,6 +497,7 @@ export function observeTextareaOverflow(
     adjustmentFrame: null,
     overflowFrame: null,
     height: el.clientHeight,
+    heightCapped: true,
     nativeInputPending: false,
     hasScrollbarGutter: false,
     scrollbarWidth: null,

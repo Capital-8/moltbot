@@ -285,8 +285,20 @@ export function ChatModelPickerPanel(panel: {
         .map(({ row }) => row.key) ?? [],
   );
   const renderRow = window.renderRow;
-  const mounted = (entries: readonly ModelPickerOption[]) =>
-    entries.filter((entry) => window.has(modelPickerOptionKey(entry)));
+  const mounted = (entries: ReadonlyMap<string, ModelPickerOption>) => {
+    const indexes = state().optionIndex;
+    // Keep catalog DOM order while looking up only the window's mounted keys.
+    return window
+      .keys()
+      .flatMap((key) => {
+        const entry = entries.get(key);
+        return entry ? [entry] : [];
+      })
+      .toSorted(
+        (left, right) =>
+          indexes.get(modelPickerOptionKey(left))! - indexes.get(modelPickerOptionKey(right))!,
+      );
+  };
   const selectModel = (entry: ModelPickerOption, event: MouseEvent) => {
     event.stopPropagation();
     // Resetting a pin does not require the inherited model to be available.
@@ -400,6 +412,12 @@ export function ChatModelPickerPanel(panel: {
     more: ModelPickerOption[];
   }) {
     const provider = createMemo(() => props.provider);
+    const leadOptions = createMemo(
+      () => new Map(props.lead.map((entry) => [modelPickerOptionKey(entry), entry])),
+    );
+    const moreOptions = createMemo(
+      () => new Map(props.more.map((entry) => [modelPickerOptionKey(entry), entry])),
+    );
     const providerLabel = () => providerDisplayLabel(props.provider);
     const groupLabel = () => t("chat.modelControls.providerModels", { provider: providerLabel() });
     const options = () => [...props.lead, ...props.more];
@@ -494,7 +512,7 @@ export function ChatModelPickerPanel(panel: {
           </div>
         ))}
         <ModelList label={groupLabel()} id={props.provider}>
-          <For each={mounted(props.lead)} keyed={modelPickerOptionKey}>
+          <For each={mounted(leadOptions())} keyed={modelPickerOptionKey}>
             {(entry) => <ModelOption entry={entry()} />}
           </For>
         </ModelList>
@@ -525,7 +543,7 @@ export function ChatModelPickerPanel(panel: {
               </button>
             ))}
             <ModelList label={groupLabel()} id={`${props.provider}:more`} more>
-              <For each={mounted(props.more)} keyed={modelPickerOptionKey}>
+              <For each={mounted(moreOptions())} keyed={modelPickerOptionKey}>
                 {(entry) => <ModelOption entry={entry()} />}
               </For>
             </ModelList>

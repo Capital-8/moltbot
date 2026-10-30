@@ -426,29 +426,42 @@ describe("config appearance preferences", () => {
     expect(props.onAppearanceChange).toHaveBeenLastCalledWith({ lobsterPetSounds: false });
   });
 
-  it("defers offscreen Lobsterdex artwork and keeps it after the first reveal", async () => {
+  it("defers offscreen Lobsterdex artwork and tooltips without changing cell geometry", async () => {
     const { container } = renderAppearance();
     container.style.cssText = "position:fixed;top:0;left:0;width:390px;height:200px;overflow:auto";
     document.body.append(container);
     onTestFinished(() => container.remove());
     const gallery = required(container, ".lobsterdex", HTMLElement);
-    const thumbnails = gallery.querySelectorAll(".lobsterdex__mini");
+    const thumbnails = gallery.querySelectorAll<HTMLElement>(".lobsterdex__mini");
     expect(thumbnails.length).toBeGreaterThan(0);
+    const first = thumbnails[0]!;
+    const before = first.getBoundingClientRect();
+    const beforeGallery = gallery.getBoundingClientRect();
     expect(gallery.querySelectorAll(".lobster-pet__svg")).toHaveLength(0);
+    expect(gallery.querySelectorAll("openclaw-tooltip")).toHaveLength(0);
 
     gallery.scrollIntoView({ block: "center" });
     await waitForSolid(() => {
       expect(gallery.querySelectorAll(".lobster-pet__svg")).toHaveLength(thumbnails.length);
+      expect(gallery.querySelectorAll("openclaw-tooltip")).toHaveLength(thumbnails.length);
     });
+    const after = first.getBoundingClientRect();
+    expect(after.width).toBe(before.width);
+    expect(after.height).toBe(before.height);
+    expect(gallery.getBoundingClientRect().height).toBe(beforeGallery.height);
+    expect(gallery.getBoundingClientRect().width).toBe(beforeGallery.width);
+    expect(gallery.querySelector(".lobsterdex__mini")).toBe(first);
     const artwork = gallery.querySelector(".lobster-pet__svg");
+    const tooltip = gallery.querySelector("openclaw-tooltip");
     container.style.top = "2000px";
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => resolve());
     });
     expect(gallery.querySelector(".lobster-pet__svg")).toBe(artwork);
+    expect(gallery.querySelector("openclaw-tooltip")).toBe(tooltip);
   });
 
-  it("uses rich Lobsterdex lore tooltips and opens the full collection", () => {
+  it("reveals rich Lobsterdex lore on programmatic focus and opens the full collection", async () => {
     const firstSeenAt = new Date("2026-07-10T12:00:00.000Z").getTime();
     vi.stubGlobal("localStorage", window.localStorage);
     localStorage.setItem(
@@ -466,10 +479,24 @@ describe("config appearance preferences", () => {
         onOpenLobsterdex,
       });
 
-      const seen = container.querySelector(".lobster-pet--palette-crimson");
-      const seenTooltip = seen?.closest("openclaw-tooltip");
-      expect(seen?.hasAttribute("title")).toBe(false);
-      expect(seen?.getAttribute("aria-label")).toContain("Ruby ✦");
+      container.style.cssText =
+        "position:fixed;top:0;left:0;width:390px;height:200px;overflow:auto";
+      document.body.append(container);
+      onTestFinished(() => container.remove());
+      const gallery = required(container, ".lobsterdex", HTMLElement);
+      const seen = required(gallery, ".lobster-pet--palette-crimson", HTMLSpanElement);
+      expect(gallery.querySelectorAll("openclaw-tooltip")).toHaveLength(0);
+      expect(seen.hasAttribute("title")).toBe(false);
+      expect(seen.getAttribute("aria-label")).toContain("Ruby ✦");
+      seen.focus({ preventScroll: true });
+      const seenTooltip = await waitForSolid(() => {
+        const tooltip = [...gallery.querySelectorAll("openclaw-tooltip")].find(
+          (candidate) => candidate.anchor === seen,
+        );
+        expect(tooltip?.hasAttribute("open")).toBe(true);
+        expect(document.activeElement).toBe(seen);
+        return tooltip!;
+      });
       expect(seenTooltip?.querySelector('[slot="content"]')?.textContent).toContain(
         "The classic red, first in every tide pool.",
       );
@@ -479,9 +506,12 @@ describe("config appearance preferences", () => {
 
       const unseen = container.querySelector(".lobster-pet--palette-watermelon");
       expect(unseen?.getAttribute("aria-label")).toContain("Ripe when thumped.");
-      expect(
-        unseen?.closest("openclaw-tooltip")?.querySelector('[slot="content"]')?.textContent,
-      ).toContain("Ripe when thumped.");
+      const unseenTooltip = [...gallery.querySelectorAll("openclaw-tooltip")].find(
+        (candidate) => candidate.anchor === unseen,
+      );
+      expect(unseenTooltip?.querySelector('[slot="content"]')?.textContent).toContain(
+        "Ripe when thumped.",
+      );
 
       const openLink = container.querySelector<HTMLAnchorElement>(".lobsterdex__open");
       openLink?.addEventListener("click", (event) => event.preventDefault(), {

@@ -16,6 +16,10 @@ vi.mock("../../components/config-form.render.tsx", async (importOriginal) => {
   return importOriginal<typeof import("../../components/config-form.render.tsx")>();
 });
 
+vi.mock("./security.tsx", async () => {
+  throw new Error("Synthetic Security module read failed");
+});
+
 afterEach(() => {
   formModule.ready.resolve();
   cleanupSolid();
@@ -57,4 +61,19 @@ it("keeps Appearance usable without loading the schema editor and loads it on se
     expect(view.page.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe("18789"),
   );
   expect(formModule.requested).toHaveBeenCalledOnce();
+});
+
+it("leaves a failed Settings module when navigating to another page", async () => {
+  const view = mountConfigPage(createConfigRouteContext(), { pageId: "security" });
+  await waitForSolid(() =>
+    expect(view.page.querySelector(".config-content-callout")?.textContent).toContain(
+      "Synthetic Security module read failed",
+    ),
+  );
+
+  view.update({ pageId: "appearance" });
+  await waitForSolid(() => {
+    expect(view.page.querySelector('[data-theme-id="claw"]')).not.toBeNull();
+    expect(view.page.querySelector(".config-content-callout")).toBeNull();
+  });
 });

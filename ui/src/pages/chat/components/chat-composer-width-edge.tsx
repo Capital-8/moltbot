@@ -1,4 +1,4 @@
-import { onSettled } from "solid-js";
+import { createMemo, onSettled } from "solid-js";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { createLayoutMeasurement } from "../../../lib/reactive/layout-measurement.ts";
 import { createPointerDrag } from "../../../lib/reactive/pointer-drag.ts";
@@ -10,6 +10,8 @@ import { transcriptColumnWidth, type ComposerWidthOptions } from "./chat-compose
  */
 export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
   const options = () => props.options();
+  const savedWidth = createMemo(() => options().chatMessageMaxWidth);
+  const transcriptElement = createMemo(() => options().getTranscriptElement?.() ?? null);
   const drag = createPointerDrag();
   let edge: HTMLDivElement | undefined;
   const shell = () => edge?.parentElement;
@@ -80,9 +82,8 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
   };
   const schedule = createLayoutMeasurement(
     () => {
-      // Read each reactive prop here; callers may return a stable props object.
-      const { chatMessageMaxWidth, onComposerWidthChange, getTranscriptElement } = options();
-      return { chatMessageMaxWidth, onComposerWidthChange, getTranscriptElement };
+      // Callback identity does not change geometry; commits still read the current callback.
+      return { chatMessageMaxWidth: savedWidth(), transcriptElement: transcriptElement() };
     },
     (next) => {
       if (!next) {
@@ -94,11 +95,11 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
         refreshMinimum = true;
       }
       lastWidth = width;
-      measure(next);
+      measure(options());
     },
     {
-      targets: (next) =>
-        [shell(), input(), shell() && region(), next?.getTranscriptElement?.()].filter(
+      targets: () =>
+        [shell(), input(), shell() && region(), options().getTranscriptElement?.()].filter(
           (node): node is Element => Boolean(node),
         ),
       changeTiming: "sync",
