@@ -34,51 +34,6 @@ export function renderSessionSection(params: {
     host,
     () => !(section().renderHeader && host().collapsedSessionSections.has(section().id)),
   );
-  const totalRowCount = createMemo(() => section().totalRowCount);
-  const group = createMemo(() => section().category);
-  // Created rows lead their section, so a create for this group takes that slot now.
-  const pendingCreate = createMemo(() => {
-    const pending = host().sessionCreateDisplay();
-    return pending?.category && pending.category === group() ? pending : undefined;
-  });
-  const personOwner = createMemo(() => section().personOwner);
-  const personIdentity = createMemo(() => personOwner()?.identity);
-  const presence = createMemo(() => {
-    const personIdentityValue = personIdentity();
-    const personHeadersValue = personHeaders();
-    return personIdentityValue?.type === "profile"
-      ? personHeadersValue?.presence.get(personIdentityValue.id)
-      : undefined;
-  });
-  const personCard = createMemo(() => {
-    const owner = personOwner();
-    const identity = owner?.identity;
-    return owner && identity?.type === "profile" && identity.id !== personHeaders()?.selfProfileId
-      ? { id: owner.id, identity }
-      : undefined;
-  });
-  const personCardKey = createMemo(() => {
-    const personCardValue = personCard();
-    return personCardValue ? presenceUserKey(personCardValue) : undefined;
-  });
-  const presenceLabel = createMemo(() => {
-    const presenceValue = presence();
-    return presenceValue ? presenceActivityLabel(presenceValue) : undefined;
-  });
-  // The person button's explicit aria-label hides descendant text, so the live
-  // state is exposed as its accessible description via this indicator id.
-  const presenceId = createMemo(() => {
-    const presenceValue = presence();
-    const personIdentityValue = personIdentity();
-    return presenceValue && personIdentityValue
-      ? `sidebar-person-presence-${personIdentityValue.id}`
-      : undefined;
-  });
-  // renderHeader records whether this list section owns collapse UI or sits
-  // directly below the global toolbar.
-  const collapsed = createMemo(
-    () => section().renderHeader && host().collapsedSessionSections.has(section().id),
-  );
   const label = createMemo(() => {
     const personOwnerValue = personOwner();
     const personIdentityValue = personIdentity();
@@ -191,13 +146,9 @@ export function renderSessionSection(params: {
   const labelText = createMemo(() =>
     renderHoverMarquee(label(), "sidebar-recent-sessions__label-text"),
   );
-  const showCount = createMemo(() => collapsed() && totalRowCount() > 0);
   const headerStatus = createMemo(() =>
-    showCount() || collapsedRunningDot() || collapsedAttentionDot() ? (
+    collapsedRunningDot() || collapsedAttentionDot() ? (
       <>
-        {showCount() ? (
-          <span class="sidebar-session-group-count">{totalRowCount()}</span>
-        ) : undefined}
         {collapsedRunningDot() ? (
           <span
             class="session-run-spinner sidebar-session-group-running"
