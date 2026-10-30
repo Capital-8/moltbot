@@ -181,9 +181,8 @@ export function connectShellIdle(
         }
         seen.add(href);
         const link = document.createElement("link");
-        // Closed controls need warm bytes, but evaluating them belongs to opening.
-        const downloadOnly = key === "chat-next" || key === "new-session-next";
-        link.rel = file.endsWith(".css") || downloadOnly ? "preload" : "modulepreload";
+        // Prepare the module graph without evaluating closed controls.
+        link.rel = file.endsWith(".css") ? "preload" : "modulepreload";
         if (link.rel === "preload") {
           link.as = file.endsWith(".css") ? "style" : "script";
         }

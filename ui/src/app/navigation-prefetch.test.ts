@@ -297,7 +297,7 @@ it.each(["chat", "dashboard", "new-session"] as const)(
     fixture.transcript.ready = true;
     await idle();
     expect(hints().map((link) => [link.rel, link.as, link.href])).toEqual([
-      ["preload", "script", new URL(`/control/${controls[0]}`, location.origin).href],
+      ["modulepreload", undefined, new URL(`/control/${controls[0]}`, location.origin).href],
       ["preload", "style", new URL(`/control/${controls[1]}`, location.origin).href],
     ]);
     expect(fixture.preloadRoute).not.toHaveBeenCalled();
