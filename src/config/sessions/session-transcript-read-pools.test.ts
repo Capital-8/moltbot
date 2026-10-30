@@ -150,7 +150,7 @@ it("captures renewed physical validation after queued read admission", async () 
     const read = () =>
       withSessionHistoryWorkerDatabase(
         { agentId: database.agentId, path: database.path, env: state.env },
-        (owner) => owner.readEntryPresence(scope),
+        (owner) => owner.readEntryPresence({ ...scope, databaseAgentId: database.agentId }),
       );
     await expect(read()).resolves.toBe(true);
     const entered = createDeferred();
