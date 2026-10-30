@@ -561,15 +561,16 @@ function* createOpenClawToolsSteps(
         }),
     createDecisionTool(sessionAgentId, options),
     createTtsTool({ ...options, agentId: sessionAgentId }),
-    ...(options?.githubPublicationAvailable !== undefined
-      ? [
-          createGitHubIdentityStatusTool(options),
-          createGitHubPublishTool({
-            ...options,
-            publicationAvailable: options.githubPublicationAvailable,
-          }),
-        ]
-      : []),
+    options?.githubPublicationAvailable !== undefined
+      ? createGitHubIdentityStatusTool(options)
+      : null,
+    options?.githubPublicationAvailable !== undefined
+      ? createGitHubPublishTool({
+          ...options,
+          publicationAvailable: options.githubPublicationAvailable,
+          preview: options.githubPublicationPreview,
+        })
+      : null,
     transcriptsTool,
     imageGenerateTool,
     musicGenerateTool,
