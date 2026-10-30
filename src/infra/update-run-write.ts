@@ -22,8 +22,8 @@ import {
   type UpdateRunStep,
 } from "./update-run-record.js";
 import { updateRunStepKey } from "./update-run-step-key.js";
-import { updateRunStepsFromResultStep } from "./update-run-step.js";
 import { upsertStep } from "./update-run-step-upsert.js";
+import { updateRunStepsFromResultStep } from "./update-run-step.js";
 import { recordUpdateRunVerificationRecord } from "./update-run-verification.js";
 
 export const updateRunLedgerSchema = getOpenClawStateFeatureSchemaSql("update_runs", {
