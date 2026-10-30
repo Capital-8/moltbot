@@ -129,6 +129,7 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
   let accepted: ControlUiSessionPullRequestCheckDetails | undefined;
   let target = "";
   let sessionKey = "";
+  let agentId: string | undefined;
   let stopGateway: (() => void) | undefined;
   let requestController: AbortController | undefined;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -166,6 +167,7 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
   function syncTarget() {
     const next = JSON.stringify([
       host.sessionKey,
+      host.agentId,
       host.pullRequest?.owner,
       host.pullRequest?.repo,
       host.pullRequest?.number,
@@ -175,11 +177,12 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
       return false;
     }
     // Head changes refresh the same open monitor; session changes dismiss it.
-    if (sessionKey && sessionKey !== host.sessionKey) {
+    if (sessionKey && (sessionKey !== host.sessionKey || agentId !== host.agentId)) {
       disclosure.close();
     }
     target = next;
     sessionKey = host.sessionKey;
+    agentId = host.agentId;
     reset();
     return true;
   }
@@ -245,6 +248,7 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
     const client = scope.client;
     const params = {
       sessionKey: host.sessionKey,
+      ...(host.agentId !== undefined ? { agentId: host.agentId } : {}),
       owner: pr.owner,
       repo: pr.repo,
       number: pr.number,
@@ -559,6 +563,7 @@ export const ChatCiDetails = defineSolidBridge<ChatCiDetailsProps>(
       gateway: { default: undefined, attribute: false },
       pullRequest: { default: undefined, attribute: false },
       sessionKey: { default: "", attribute: false },
+      agentId: { default: undefined, attribute: false },
       presented: { default: true, type: Boolean },
       inline: { default: false, attribute: false },
       menuControls: { default: false, attribute: false },

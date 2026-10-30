@@ -309,6 +309,7 @@ export type ChatPullRequestMobileCiProps = ChatPullRequestMobileRecoveryProps & 
   pullRequest?: ControlUiSessionPullRequest;
   gateway?: ApplicationGateway;
   sessionKey: string;
+  agentId?: string;
   sessionId?: string;
   presented: boolean;
 };
@@ -326,6 +327,7 @@ export function ChatPullRequestMobileChecks(props: ChatPullRequestMobileCiProps)
               pullRequest={pullRequest()}
               gateway={props.gateway}
               sessionKey={props.sessionKey}
+              agentId={props.agentId}
               presented={props.presented}
               inline
             />
@@ -360,6 +362,7 @@ export function ChatPullRequestMobileMonitoring(props: ChatPullRequestMobileCiPr
             pullRequest={pullRequest()}
             gateway={props.gateway}
             sessionKey={props.sessionKey}
+            agentId={props.agentId}
             sessionId={props.sessionId ?? ""}
             presented={props.presented}
             inline

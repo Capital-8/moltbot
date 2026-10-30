@@ -245,35 +245,74 @@ describe("CI automation popup scope", () => {
     },
   );
 
-  it("ignores a delayed inventory after session replacement", async () => {
-    const oldRead = createDeferred<ReturnType<typeof inventory>>();
-    h.jobs = [job("first")];
-    h.read = oldRead.promise;
-    await h.open(false);
-    const signal = h.calls("cron.list")[0]?.[2]?.signal;
-    h.element.sessionId = "replacement";
-    expect(signal?.aborted).toBe(true);
-    expect(h.root.open).toBe(false);
-    await h.element.updateComplete;
-    h.jobs = [];
-    h.read = undefined;
-    await h.open();
-    oldRead.resolve(inventory([job("first")]));
-    await h.settle();
-    expect(h.checkbox().checked).toBe(false);
-    expect(h.checkbox().closest("fieldset")?.disabled).toBe(false);
-    expect(h.root.textContent).not.toContain("fix-first");
-  });
+  it.each(["session", "agent"] as const)(
+    "ignores a delayed inventory after %s replacement",
+    async (change) => {
+      if (change === "agent") {
+        h.element.sessionKey = "global";
+        h.element.agentId = "main";
+      }
+      const oldRead = createDeferred<ReturnType<typeof inventory>>();
+      const saved =
+        change === "agent"
+          ? {
+              ...job("first"),
+              ...ciAutomationJobSpec(
+                { ...pr, sessionKey: "global", agentId: "main", sessionId: "first" },
+                "autoFix",
+              ),
+            }
+          : job("first");
+      h.jobs = [saved];
+      h.read = oldRead.promise;
+      await h.open(false);
+      const signal = h.calls("cron.list")[0]?.[2]?.signal;
+      if (change === "session") {
+        h.element.sessionId = "replacement";
+      } else {
+        h.element.agentId = "work";
+      }
+      expect(signal?.aborted).toBe(true);
+      expect(h.root.open).toBe(false);
+      await h.element.updateComplete;
+      h.jobs = [];
+      h.read = undefined;
+      await h.open();
+      oldRead.resolve(inventory([saved]));
+      await h.settle();
+      expect(h.checkbox().checked).toBe(false);
+      expect(h.checkbox().closest("fieldset")?.disabled).toBe(false);
+      expect(h.root.textContent).not.toContain("fix-first");
+      if (change === "agent") {
+        expect(h.calls("cron.list").at(-1)?.[1]).toMatchObject({
+          sessionKey: "global",
+          sessionAgentId: "work",
+        });
+      }
+    },
+  );
 
-  it("retires old inventory before another toggle can target a replacement session", async () => {
-    await h.open();
-    h.element.sessionId = "replacement";
-    // The old DOM is still present until Solid commits the new presentation.
-    h.checkbox("autoMerge").click();
-    expect(h.calls("cron.add")).toHaveLength(0);
-    await h.settle();
-    expect(h.root.open).toBe(false);
-  });
+  it.each(["session", "agent"] as const)(
+    "retires old inventory before another toggle can target a replacement %s",
+    async (change) => {
+      if (change === "agent") {
+        h.element.sessionKey = "global";
+        h.element.agentId = "main";
+      }
+      await h.open();
+      expect(h.checkbox("autoMerge").closest("fieldset")?.disabled).toBe(false);
+      if (change === "session") {
+        h.element.sessionId = "replacement";
+      } else {
+        h.element.agentId = "work";
+      }
+      // The old DOM is still present until Solid commits the new presentation.
+      h.checkbox("autoMerge").click();
+      expect(h.calls("cron.add")).toHaveLength(0);
+      await h.settle();
+      expect(h.root.open).toBe(false);
+    },
+  );
 
   it("settles an admitted write while hidden and refreshes when presented again", async () => {
     const pending = createDeferred<{ job: CronJob }>();
@@ -302,9 +341,13 @@ describe("CI automation popup scope", () => {
     expect(h.calls("cron.add")).toHaveLength(1);
   });
 
-  it.each(["session", "auth", "gateway"])(
+  it.each(["session", "agent", "auth", "gateway"])(
     "ignores a rejected write after %s replacement",
     async (change) => {
+      if (change === "agent") {
+        h.element.sessionKey = "global";
+        h.element.agentId = "main";
+      }
       const pending = createDeferred<{ job: CronJob }>();
       h.writes["cron.add"] = pending.promise;
       await h.open();
@@ -313,6 +356,8 @@ describe("CI automation popup scope", () => {
       if (change === "session") {
         await h.paint("replacement");
         await h.open(false);
+      } else if (change === "agent") {
+        h.element.agentId = "work";
       } else if (change === "auth") {
         h.snapshot({ hello: hello(["operator.read"]) });
       } else {

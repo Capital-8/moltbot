@@ -47,7 +47,6 @@ import {
   isUiGlobalScopeConfigured,
   parseAgentSessionKey,
   resolveUiConfiguredMainKey,
-  scopedSessionArtifactKey,
 } from "../../lib/sessions/session-key.ts";
 import { activityRunInspectorHref } from "./run-inspector-model.ts";
 import { ActivitySessionGit } from "./session-activity-git.tsx";
@@ -294,7 +293,7 @@ function SessionLinkView(props: {
       <ActivitySessionGit context={context} sessionKey={props.row.key} agentId={agentId()} />
       <ActivitySessionMedia
         context={context}
-        sessionKey={scopedSessionArtifactKey(props.row.key, agentId())}
+        sessionKey={props.row.key}
         agentId={agentId()}
         revision={props.row.updatedAt ?? 0}
         session={props.row}

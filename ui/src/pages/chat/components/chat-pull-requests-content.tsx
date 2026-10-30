@@ -42,6 +42,7 @@ function Checks(props: {
   pullRequest: ControlUiSessionPullRequest;
   gateway?: ApplicationGateway;
   sessionKey?: string;
+  agentId?: string;
   sessionId?: string;
   presented?: PresentationValue;
   dismissed?: boolean;
@@ -79,6 +80,7 @@ function Checks(props: {
         pullRequest={props.pullRequest}
         gateway={props.gateway}
         sessionKey={props.sessionKey ?? ""}
+        agentId={props.agentId}
         sessionId={props.sessionId ?? ""}
         presented={presented()}
       />
@@ -87,6 +89,7 @@ function Checks(props: {
           pullRequest={props.pullRequest}
           gateway={props.gateway}
           sessionKey={props.sessionKey ?? ""}
+          agentId={props.agentId}
           presented={presented()}
         />
       </Show>
@@ -333,6 +336,7 @@ function PullRequestRow(props: {
                   pullRequest={pullRequest()}
                   gateway={props.owner.gateway}
                   sessionKey={props.owner.sessionKey}
+                  agentId={props.owner.agentId}
                   sessionId={props.owner.sessionId}
                   presented={props.owner.presented}
                   dismissed={props.owner.dismissed}

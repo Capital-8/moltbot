@@ -8,7 +8,6 @@ import { useOptionalApplication } from "../../lib/reactive/context.ts";
 import { elementRef } from "../../lib/reactive/element-ref.ts";
 import { registerEnglishCatalog, t } from "../../lib/reactive/i18n.ts";
 import { createScrollPosition } from "../../lib/reactive/scroll-state.ts";
-import { scopedSessionArtifactKey } from "../../lib/sessions/session-key.ts";
 import { defineSolidBridge, type SolidBridgeElement } from "../../lib/solid-bridge.ts";
 import { ContentPresentation } from "../../lib/solid/presentation.ts";
 import type { ChatMobileHost, MobileDetailsRoute } from "./chat-mobile-host.ts";
@@ -178,10 +177,10 @@ function MobileHostContent(
         return context?.gateway;
       },
       get sessionKey() {
-        return scopedSessionArtifactKey(
-          props.details.sessionKey,
-          props.details.currentAgentId ?? undefined,
-        );
+        return props.details.sessionKey;
+      },
+      get agentId() {
+        return props.details.currentAgentId ?? undefined;
       },
       get presented() {
         return props.presented;
@@ -519,10 +518,8 @@ function MobileHostContent(
           ...recovery(),
           pullRequest,
           gateway: details.pullRequestsGateway,
-          sessionKey: scopedSessionArtifactKey(
-            details.sessionKey,
-            details.currentAgentId ?? undefined,
-          ),
+          sessionKey: details.sessionKey,
+          agentId: details.currentAgentId ?? undefined,
           sessionId: details.pullRequestsSessionId,
         };
         // Page navigation changes presentation, not the lifetime of either CI owner.

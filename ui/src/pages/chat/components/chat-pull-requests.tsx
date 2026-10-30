@@ -36,6 +36,7 @@ export function ChatPullRequests(props: ChatPullRequestsProps) {
               return;
             }
             const sessionKey = props.sessionKey;
+            const agentId = props.agentId;
             const sessionId = props.sessionId;
             const gateway = props.gateway;
             void retryStaleChunkReloadWhenReachable({
@@ -45,6 +46,7 @@ export function ChatPullRequests(props: ChatPullRequestsProps) {
                   active &&
                   error() === failure &&
                   props.sessionKey === sessionKey &&
+                  props.agentId === agentId &&
                   props.sessionId === sessionId &&
                   props.gateway === gateway &&
                   hasChatPullRequests(props) &&

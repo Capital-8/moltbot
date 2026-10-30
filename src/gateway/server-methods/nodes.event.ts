@@ -93,7 +93,7 @@ export const nodeEventHandlers: GatewayRequestHandlers = {
         nodeSession.permissions?.accessibility === true;
       const bindSubscription =
         (method: "nodeSubscribe" | "nodeUnsubscribe"): NodeEventContext["nodeSubscribe"] =>
-        async (subscriptionNodeId, sessionKey, subscriptionConnId) => {
+        async (subscriptionNodeId, sessionKey, subscriptionConnId, requestKey) => {
           if (
             subscriptionNodeId !== nodeId ||
             !subscriptionConnId ||
@@ -102,7 +102,7 @@ export const nodeEventHandlers: GatewayRequestHandlers = {
           ) {
             return;
           }
-          context[method](subscriptionNodeId, sessionKey, subscriptionConnId);
+          context[method](subscriptionNodeId, sessionKey, subscriptionConnId, requestKey);
         };
       const nodeContext: NodeEventContext = {
         deps: context.deps,

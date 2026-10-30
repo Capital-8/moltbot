@@ -378,7 +378,7 @@ describe("sessions.abort agent scope", () => {
       {
         agentId: "work",
         dropIfSlow: true,
-        sessionEventSubscriptionKeys: ["agent:work:global"],
+        sessionEventSubscriptionKeys: ['["work","global"]'],
       },
     );
   });
@@ -609,7 +609,7 @@ describe("sessions.abort agent scope", () => {
     });
 
     expect(loadSessionEntryMock).not.toHaveBeenCalled();
-    expect(subscribeSessionMessageEvents).toHaveBeenCalledWith("conn-sub", "agent:work:global", {
+    expect(subscribeSessionMessageEvents).toHaveBeenCalledWith("conn-sub", '["work","global"]', {
       provisional: true,
     });
     expect(respond).toHaveBeenCalledWith(

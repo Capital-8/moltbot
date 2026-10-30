@@ -1,8 +1,11 @@
 import { expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { setRuntimeConfigSnapshot } from "../config/config.js";
+import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import type { AgentEventRuntimePayload } from "../infra/agent-events.js";
 import { NODE_WORKER_SUPERVISOR_PROTOCOL_FEATURE } from "../infra/node-runner-inventory.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { GATEWAY_EVENT_NODE_RUNNER_INVENTORY_CHANGED } from "./events.js";
 import { updateNodeRunnerInventory } from "./node-registry-private.js";
 import type { GatewayBroadcastOpts } from "./server-broadcast-types.js";
@@ -13,6 +16,8 @@ import {
 } from "./server-chat-state.js";
 import { createAgentEventHandler } from "./server-chat.js";
 import { broadcastChatTerminal } from "./server-methods/chat-broadcast.js";
+import type { NodeEventContext } from "./server-node-events-types.js";
+import { handleNodeEvent } from "./server-node-events.js";
 import { createGatewayNodeSessionRuntime } from "./server-node-session-runtime.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
@@ -216,6 +221,148 @@ test("routes fanout and removes both session indexes through connected nodes", a
   expect(a.frames).toHaveLength(1);
   expect(b.frames).toHaveLength(2);
 });
+
+test.each([
+  { agentId: "main", scenario: "raw only" },
+  { agentId: "ops", scenario: "raw only" },
+  { agentId: "main", scenario: "pair" },
+  { agentId: "ops", scenario: "pair" },
+  { agentId: "main", scenario: "literal appears" },
+  { agentId: "ops", scenario: "literal appears" },
+])(
+  "keeps the admitted $agentId node subscription through $scenario",
+  async ({ agentId, scenario }) => {
+    await withOpenClawTestState(
+      { label: "node-global-subscription", layout: "state-only" },
+      async (state) => {
+        const cfg = {
+          agents: {
+            ownership: "explicit" as const,
+            defaults: { systemAgent: { agentId: "main" } },
+            entries: { main: {}, ops: {} },
+          },
+          session: {
+            scope: "global" as const,
+            store: state.statePath("agents", "{agentId}", "sessions", "sessions.json"),
+          },
+        };
+        setRuntimeConfigSnapshot(cfg, cfg);
+        await replaceSessionEntry(
+          { agentId, sessionKey: "global" },
+          { sessionId: `${agentId}-raw-global`, updatedAt: 1 },
+        );
+        const qualifiedKey = `agent:${agentId}:global`;
+        const addLiteral = () =>
+          replaceSessionEntry(
+            { agentId, sessionKey: qualifiedKey },
+            { sessionId: `${agentId}-literal-global`, updatedAt: 1 },
+          );
+        if (scenario === "pair") {
+          await addLiteral();
+        }
+        const { runtime, context, frames, sends, chatRunState } = pairedSubscriber(
+          "chat",
+          "global",
+          false,
+        );
+        const nodeContext: NodeEventContext = {
+          ...context,
+          deps: {},
+          addChatRun: () => {},
+          removeChatRun: () => undefined,
+          dedupe: new Map(),
+          getHealthCache: () => null,
+          refreshHealthSnapshot: async () => {
+            throw new Error("Unexpected health refresh");
+          },
+          loadGatewayModelCatalog: async () => [],
+          authorizeNodeSystemRunEvent: () => false,
+          logGateway: { warn: vi.fn() },
+        };
+        const subscribe = (
+          event: "chat.subscribe" | "chat.unsubscribe",
+          sessionKey = qualifiedKey,
+        ) =>
+          handleNodeEvent(
+            nodeContext,
+            "node-a",
+            { event, payloadJSON: JSON.stringify({ sessionKey }) },
+            {
+              connId: "conn-original",
+              isConnectionCurrent: () =>
+                runtime.nodeRegistry.isConnectionCurrentPairingState("conn-original"),
+            },
+          );
+        const publish = async (runId: string, sessionKey: string, owner = agentId) => {
+          broadcastChatTerminal({
+            terminalEntry: undefined,
+            context: { ...context, getRuntimeConfig: () => cfg },
+            runId,
+            sessionKey,
+            agentId: owner,
+            state: "final",
+          });
+          await Promise.all(sends);
+        };
+        const admittedRequest =
+          scenario === "pair"
+            ? agentId === "main"
+              ? "global"
+              : `agent:${agentId}:main`
+            : qualifiedKey;
+        const runIds = () => frames.map((frame) => JSON.parse(frame).payload.runId);
+        try {
+          await subscribe("chat.subscribe", admittedRequest);
+          await publish("selected-raw", "global");
+          expect(frames.map((frame) => JSON.parse(frame).payload)).toEqual([
+            { runId: "selected-raw", sessionKey: "global", agentId, seq: 1, state: "final" },
+          ]);
+          if (scenario === "pair") {
+            await subscribe("chat.subscribe");
+          }
+          if (scenario === "literal appears") {
+            await addLiteral();
+            await subscribe("chat.subscribe");
+          }
+          await publish("literal-sibling", qualifiedKey);
+          await publish("other-owner", "global", agentId === "main" ? "ops" : "main");
+          expect(runIds()).toEqual(
+            scenario === "pair" ? ["selected-raw", "literal-sibling"] : ["selected-raw"],
+          );
+          await publish("still-raw", "global");
+          expect(runIds()).toEqual(
+            scenario === "pair"
+              ? ["selected-raw", "literal-sibling", "still-raw"]
+              : ["selected-raw", "still-raw"],
+          );
+
+          await subscribe("chat.unsubscribe", admittedRequest);
+          await publish("after-unsubscribe", "global");
+          expect(frames).toHaveLength(scenario === "pair" ? 3 : 2);
+          if (scenario !== "raw only") {
+            if (scenario === "literal appears") {
+              await subscribe("chat.subscribe");
+            }
+            await publish("remaining-literal", qualifiedKey);
+            expect(runIds()).toEqual(
+              scenario === "pair"
+                ? ["selected-raw", "literal-sibling", "still-raw", "remaining-literal"]
+                : ["selected-raw", "still-raw", "remaining-literal"],
+            );
+            await subscribe("chat.unsubscribe");
+            await publish("literal-after-unsubscribe", qualifiedKey);
+            expect(frames).toHaveLength(scenario === "pair" ? 4 : 3);
+          }
+        } finally {
+          runtime.nodeUnsubscribeAll("node-a");
+          runtime.nodeRegistry.unregister("conn-original");
+          await runtime.closeHostStats();
+          chatRunState.clear();
+        }
+      },
+    );
+  },
+);
 
 test("settles a failed node transport while delivering to its subscribed sibling", async () => {
   const runtime = createRuntime();

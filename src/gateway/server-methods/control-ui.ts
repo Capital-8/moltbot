@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { normalizeAgentIdStrict } from "@openclaw/normalization-core/agent-id";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import { GitHubIdentityError } from "../../agents/github-tool-identity.js";
@@ -284,10 +285,21 @@ function parseCheckDetailsParams(
 ): ControlUiSessionPullRequestChecksParams | null {
   if (
     Object.keys(params).some(
-      (key) => !["sessionKey", "owner", "repo", "number", "headSha"].includes(key),
+      (key) => !["sessionKey", "agentId", "owner", "repo", "number", "headSha"].includes(key),
     )
   ) {
     return null;
+  }
+  let agentId: string | undefined;
+  if (params.agentId !== undefined) {
+    if (typeof params.agentId !== "string") {
+      return null;
+    }
+    const normalized = normalizeAgentIdStrict(params.agentId);
+    if (!normalized.ok) {
+      return null;
+    }
+    agentId = normalized.value;
   }
   const sessionKey = typeof params.sessionKey === "string" ? params.sessionKey.trim() : "";
   const headSha = typeof params.headSha === "string" ? params.headSha : "";
@@ -298,6 +310,7 @@ function parseCheckDetailsParams(
     /^[0-9a-f]{40}$/i.test(headSha)
     ? {
         sessionKey,
+        ...(agentId !== undefined ? { agentId } : {}),
         owner: target.owner,
         repo: target.repo,
         number: target.number,
@@ -310,9 +323,10 @@ async function prepareCheckDetailsSession(
   sessionKey: string,
   context: GatewayRequestContext,
   assertRequestCurrent: () => void,
+  agentId?: string,
 ): Promise<(ControlUiSessionPrTarget & { release: () => void }) | null> {
   const sourceCfg = context.getRuntimeConfig();
-  const sourceRequest = resolveRequestedGlobalAgentId(sourceCfg, sessionKey);
+  const sourceRequest = resolveRequestedGlobalAgentId(sourceCfg, sessionKey, agentId);
   if (!sourceRequest.ok) {
     return null;
   }
@@ -485,6 +499,7 @@ export const controlUiHandlers: GatewayRequestHandlers = {
             allowOwnImportedPullRequest: true,
             client,
             sessionKey: parsed.sessionKey,
+            agentId: parsed.agentId,
             getRuntimeConfig: context.getRuntimeConfig,
             getSessionRowProjection: () => getSessionRowProjection(context),
             isCurrentClient: () =>
@@ -495,8 +510,11 @@ export const controlUiHandlers: GatewayRequestHandlers = {
         : undefined;
       const binding = client
         ? ((await reader?.()) ?? null)
-        : (preparedSession = await prepareCheckDetailsSession(parsed.sessionKey, context, () =>
-            signal?.throwIfAborted(),
+        : (preparedSession = await prepareCheckDetailsSession(
+            parsed.sessionKey,
+            context,
+            () => signal?.throwIfAborted(),
+            parsed.agentId,
           ));
       if (!binding) {
         throw new gitHubPublicApi.ControlUiGitHubError(404, "Session CI details unavailable");

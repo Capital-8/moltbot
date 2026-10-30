@@ -11,7 +11,6 @@ import { projectGateway } from "../../../lib/reactive/application.ts";
 import { useOptionalApplication } from "../../../lib/reactive/context.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import { createScrollPosition } from "../../../lib/reactive/scroll-state.ts";
-import { scopedSessionArtifactKey } from "../../../lib/sessions/session-key.ts";
 import { defineSolidBridge, type SolidBridgeElement } from "../../../lib/solid-bridge.ts";
 import { ProcessesPanelData } from "../processes-panel-data.ts";
 import { ChatAuthorAvatar } from "./chat-author-avatar.ts";
@@ -91,14 +90,8 @@ function DetailsAutomations(props: Props) {
       presentationIdentity={identity()}
       desktop={desktop()}
       gateway={props.props?.pullRequestsGateway}
-      sessionKey={
-        props.props
-          ? scopedSessionArtifactKey(
-              props.props.sessionKey,
-              props.props.currentAgentId ?? undefined,
-            )
-          : ""
-      }
+      sessionKey={props.props?.sessionKey ?? ""}
+      agentId={props.props?.currentAgentId ?? undefined}
       presented={props.presented}
       cached={props.desktop ? props.props?.cachedDetails?.automations : undefined}
       onDetailsSnapshot={props.desktop ? props.props?.onDetailsSnapshot : undefined}
@@ -286,10 +279,8 @@ export const ChatDetailsSession = defineSolidBridge<Props>(
               pullRequests: snapshot.pullRequests ?? [],
               gateway: snapshot.pullRequestsGateway,
               sessionId: snapshot.pullRequestsSessionId,
-              sessionKey: scopedSessionArtifactKey(
-                snapshot.sessionKey,
-                snapshot.currentAgentId ?? undefined,
-              ),
+              sessionKey: snapshot.sessionKey,
+              agentId: snapshot.currentAgentId ?? undefined,
               presented: active() && requestsExpanded(),
               dismissed: props.dismissed,
               branch: snapshot.pullRequestsBranch,

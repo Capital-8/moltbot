@@ -347,8 +347,13 @@ type GatewayTransportContext = {
     opts?: GatewayBroadcastOpts,
   ) => void;
   nodeSendToAllSubscribed: (event: string, payload: unknown) => void;
-  nodeSubscribe: (nodeId: string, sessionKey: string, connId?: string) => void;
-  nodeUnsubscribe: (nodeId: string, sessionKey: string, connId?: string) => void;
+  nodeSubscribe: (nodeId: string, sessionKey: string, connId?: string, requestKey?: string) => void;
+  nodeUnsubscribe: (
+    nodeId: string,
+    sessionKey: string,
+    connId?: string,
+    requestKey?: string,
+  ) => void;
   nodeUnsubscribeAll: (nodeId: string) => void;
   hasConnectedTalkNode: () => Promise<boolean>;
   isConnectionActive?: (connId: string) => boolean;
