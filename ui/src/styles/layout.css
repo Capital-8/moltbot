@@ -3967,15 +3967,9 @@ html.openclaw-native-web-chrome
   color: var(--danger);
 }
 
-/* Attention color lives on the leading icon; the title only gains contrast. */
-.sidebar-recent-session:is(
-    .sidebar-recent-session--attention-amber,
-    .sidebar-recent-session--attention-danger
-  )
-  .sidebar-recent-session__name,
-.sidebar-recent-session:has(.session-unread-dot, .session-glyph__badge--unread)
-  .sidebar-recent-session__name {
-  color: var(--text-strong);
+/* A failure inherited from a subagent stays neutral: red marks this session's own block. */
+.sidebar-session-attention__icon--error.sidebar-session-attention__icon--inherited {
+  color: var(--muted);
 }
 
 .sidebar-session-tree__children .sidebar-session-error.callout.danger {
