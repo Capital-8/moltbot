@@ -315,11 +315,11 @@ export class ChatTranscriptRenderer {
     return element;
   }
 
-  render(snapshot: TranscriptLayoutProps): HTMLDivElement {
+  render(nextSnapshot: TranscriptLayoutProps): HTMLDivElement {
     // A held import retains the accepted range even while the native viewport moves.
     const next = {
-      ...snapshot,
-      virtualRows: snapshot.virtualRows ?? snapshot.virtualizer.getVirtualItems(),
+      ...nextSnapshot,
+      virtualRows: nextSnapshot.virtualRows ?? nextSnapshot.virtualizer.getVirtualItems(),
     };
     this.accepted = next;
     const binding = typeof next.presented === "boolean" ? undefined : next.presented;
