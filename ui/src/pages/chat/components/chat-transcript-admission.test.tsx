@@ -156,3 +156,44 @@ it("retires presentation while an import holds accepted rows", async () => {
     held.resolve();
   }
 });
+
+it("retains model-change labels and provider icons through the lazy notice row", async () => {
+  const item = {
+    kind: "notice" as const,
+    key: "model-change",
+    text: "",
+    timestamp: 1,
+    label: "Model changed from openai/model-a to anthropic/model-b.",
+    modelChange: { from: "openai/model-a", to: "anthropic/model-b" },
+  };
+  const catalog = [
+    { id: "model-a", provider: "openai", name: "First model" },
+    { id: "model-b", provider: "anthropic", name: "Second model" },
+  ];
+  const noticeRows = (modelCatalog = catalog) => [
+    {
+      kind: "content" as const,
+      key: item.key,
+      content: new GuardedTranscriptItem([item, modelCatalog], {
+        kind: "notice",
+        item,
+        modelCatalog,
+      }),
+    },
+  ];
+  const view = await mountTestTranscript("admission-model-change", noticeRows());
+  await waitForSolid(() =>
+    expect(view.container.querySelector(".chat-notice--model-change")?.textContent).toContain(
+      "First model",
+    ),
+  );
+  const notice = view.container.querySelector(".chat-notice--model-change")!;
+  expect([...notice.querySelectorAll("bdi")].map((name) => name.textContent)).toEqual([
+    "First model",
+    "Second model",
+  ]);
+  expect(notice.querySelectorAll("[data-provider-icon]")).toHaveLength(2);
+  view.renderRows(noticeRows([{ ...catalog[0]!, name: "Renamed model" }, catalog[1]!]));
+  await waitForSolid(() => expect(notice.textContent).toContain("Renamed model"));
+  expect(view.container.querySelector(".chat-notice--model-change")).toBe(notice);
+});

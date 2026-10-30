@@ -1,3 +1,4 @@
+import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 import { Icon } from "../../../components/solid/icon.tsx";
 import type { ChatItem } from "../../../lib/chat/chat-types.ts";
@@ -5,6 +6,7 @@ import type { ChatItem } from "../../../lib/chat/chat-types.ts";
 export function SystemLine(props: {
   icon?: Extract<ChatItem, { kind: "divider" }>["icon"];
   label: string;
+  children?: JSX.Element;
   metric?: string;
   compaction?: "active" | "complete";
 }) {
@@ -38,7 +40,7 @@ export function SystemLine(props: {
             <Icon name="check" />
           </span>
         </Show>
-        <span class="chat-divider__title">{props.label}</span>
+        <span class="chat-divider__title">{props.children ?? props.label}</span>
         <Show when={props.metric}>
           <span class="chat-divider__separator" aria-hidden="true">
             ·

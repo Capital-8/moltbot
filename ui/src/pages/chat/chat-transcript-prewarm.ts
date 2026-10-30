@@ -18,7 +18,9 @@ export function prepareCachedTranscript(
   const items = buildChatItems({
     paneId: "snapshot-prewarm",
     sessionKey,
-    archiveNotice: buildChatArchiveNotice(snapshot.historyState?.sessionInfo),
+    archiveNotice: buildChatArchiveNotice(
+      snapshot.transcriptMetadata ?? snapshot.historyState?.sessionInfo,
+    ),
     messages: snapshot.messages,
     pendingInputs: snapshot.historyState?.pendingInputs?.items,
     toolMessages: [],
