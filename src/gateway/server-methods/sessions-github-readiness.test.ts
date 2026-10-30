@@ -3,8 +3,6 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { getEnvironmentData, setEnvironmentData } from "node:worker_threads";
 import { Value } from "typebox/value";
 import { afterEach, assert, expect, it, vi } from "vitest";
 import { SessionGitHubReadinessResultSchema } from "../../../packages/gateway-protocol/src/schema/session-github-publication.js";
@@ -33,7 +31,6 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { OpenClawSchema } from "../../config/zod-schema.js";
 import { inspectDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
-import * as workerCpu from "../../infra/worker-cpu.js";
 import { withPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
 import { holdStateRead } from "../../state/github-publication-fixtures.test-support.js";
 import { repositoryRow } from "../../state/github-publication.worker.test-support.js";
@@ -80,6 +77,7 @@ import {
   withReadFixture,
   type ReadFixture,
 } from "./sessions-github-read.test-support.js";
+import { observeReadinessNativeReads } from "./sessions-github-readiness.test-support.js";
 import type { GatewayRequestHandlerOptions } from "./types.js";
 
 const temporary = useAutoCleanupTempDirTracker(afterEach);
@@ -760,30 +758,7 @@ it.each([
         expect(before[databasePath + "-wal"]).toBeUndefined();
         expect(before[databasePath + "-shm"]).toBeUndefined();
         const counts = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 4));
-        const create = workerCpu.createCpuTrackedWorker;
-        const observer = vi
-          .spyOn(workerCpu, "createCpuTrackedWorker")
-          .mockImplementation((filename, options) => {
-            if (options?.eval) {
-              return create(filename, options);
-            }
-            const entry = typeof filename === "string" ? pathToFileURL(filename) : filename;
-            const key = "openclaw.test.readinessNativeReads";
-            const previous = getEnvironmentData(key);
-            setEnvironmentData(key, {
-              entry: entry.href,
-              source: databasePath,
-              counts: counts.buffer,
-            });
-            try {
-              return create(
-                new URL("./sessions-github-readiness.native.test-support.mjs", import.meta.url),
-                options,
-              );
-            } finally {
-              setEnvironmentData(key, previous);
-            }
-          });
+        const observer = observeReadinessNativeReads(() => databasePath, counts);
         const hostReads: Record<string, string[]> = { cold: [], warm: [] };
         let observation: "cold" | "warm" = "cold";
         const stat = fsSync.statSync;
@@ -973,3 +948,41 @@ it.each(["requested", "publishing", "published", "failed"] as const)(
     });
   },
 );
+
+it("warm readiness reads the prepared source without whole database copies", async () => {
+  const counts = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 7));
+  const observer = observeReadinessNativeReads(
+    () => resolveOpenClawAgentSqlitePath({ agentId: "main" }),
+    counts,
+  );
+  try {
+    await fixture(async (f) => {
+      const source = resolveOpenClawAgentSqlitePath({ agentId: "main" });
+      expect(await observe(f)).toMatchObject(unbound);
+      for (const padding of [1, 4096]) {
+        // Real committed changes keep this proof off any exact-row response cache.
+        await upsertSessionEntryCore(
+          { agentId: "main", sessionKey },
+          { label: "fixture-padding-".repeat(padding) },
+        );
+        const before = await databaseArtifacts([source]);
+        counts.fill(0);
+        expect(await observe(f)).toMatchObject(unbound);
+        const measured = Array.from(counts);
+        const after = await databaseArtifacts([source]);
+        expect(Object.keys(after)).toEqual(Object.keys(before));
+        expect(after[source]).toBe(before[source]);
+        expect(after[source + "-wal"]).toBe(before[source + "-wal"]);
+        expect(measured[4], "readiness must not allocate a whole private image").toBe(0);
+        expect(measured[5], "readiness must not copy the growing database/WAL").toBe(0);
+        expect(measured[0], "readiness must not open another native connection").toBe(0);
+        expect(
+          measured[6],
+          "readiness must really query the prepared source, not a response cache",
+        ).toBeGreaterThan(0);
+      }
+    });
+  } finally {
+    observer.mockRestore();
+  }
+});

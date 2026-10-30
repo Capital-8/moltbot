@@ -1,0 +1,2 @@
+# Registered readiness regression: real prepared source reads without database/WAL copies.
+56
