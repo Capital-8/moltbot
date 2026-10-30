@@ -84,9 +84,11 @@ describe("commitBackgroundResultToSession", () => {
     ];
 
     try {
-      await vi.waitFor(() => expect(commitSettled).toBe(true));
-      expect(admission.isActive()).toBe(true);
+      // The admission stays held until `finally`, so settling here proves the commit
+      // did not wait for source work. A fixed poll window flaked on cold CI workers.
       const first = await commit;
+      expect(commitSettled).toBe(true);
+      expect(admission.isActive()).toBe(true);
       expect(first).toMatchObject({ ok: true });
       const retry = await commitBackgroundResultToSession({
         agentId: "main",
