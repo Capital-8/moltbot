@@ -353,7 +353,11 @@ successful run, the last meaningful result is saved with the job and included as
 bounded context in its next prompt, even when the final reply is silent. Quiet
 checks and execution failures do not overwrite that result or append result
 boilerplate to the conversation. This is not a delivery retry queue. `no_change`
-keeps runner delivery silent without hiding execution failures. Adaptive scheduling still uses `next_check` on a paced
+keeps runner delivery silent without hiding execution failures. A `progress`,
+`done`, `blocked`, or `needs_attention` summary is the run's authored outcome:
+an earlier tool failure the run moved past no longer adds a generic
+`⚠️ <tool> failed` notice to an otherwise silent run. The failure stays visible
+in the transcript and progress lane. Adaptive scheduling still uses `next_check` on a paced
 job. Scratch is context, not another scheduler:
 runtime does not parse `tasks:` blocks or read `HEARTBEAT.md`.
 
@@ -489,6 +493,8 @@ With `announce`, agent, command, and script results belong to the chat or topic 
 
     To come back to this conversation later (for example, to recheck CI), add a one-shot `at` job with `payload: { kind: "agentTurn", message: "Instructions for your next turn" }` and `sessionTarget: "session:<your session key from Runtime>"`. It runs inside the existing conversation with the same history and saved workspace/worktree.
 
+    With `session.scope: "global"`, `session:global` targets the selected agent's existing global conversation, just like its main-session alias. Keep the literal `global` key; an explicitly agent-qualified named key remains a separate target.
+
     Custom-session agent turns use the existing session’s saved workspace and working directory, including its managed worktree. Requester-scoped jobs may use a saved workspace only for their owning conversation; trusted operator-scheduled jobs can target another conversation’s saved workspace. A missing, retired, or mismatched worktree stops the run instead of falling back to the agent’s default workspace. Filesystem containment and the job’s tool restrictions still apply; a path in the job prompt does not grant access. Persistent-session rollover keeps the saved workspace binding, permission mode, containment root, and inherited tool restrictions; other detached runs inherit it only from a current creating conversation, as described for `current` jobs above. A new `session:custom-id` without an existing session starts in the configured agent workspace. Use `delivery: { mode: "none" }` without an external target for quiet named-session work that needs no runner fallback announcement.
 
     Main-session automation events are self-contained reminders. They include their own job scratch and notices assigned to that occurrence, not another monitor’s checklist or unrelated queued events. Put required instructions in the job payload or scratch.
@@ -511,6 +517,11 @@ With `announce`, agent, command, and script results belong to the chat or topic 
     Child completion does not resume an isolated automation turn. If the orchestrator must act on child results (for example, integrate or verify their work), it must spawn with `collect: true` and collect the results with `agents_wait` before ending its turn; fire-and-forget delegation is valid when the child output itself is the deliverable.
 
     When isolated automation runs orchestrate subagents, delivery prefers the final descendant output over stale parent interim text. If descendant tasks are still running or settling, OpenClaw suppresses that partial parent update instead of announcing it. This includes a yielded orchestrator waiting for its successor to start and completed descendants whose result delivery is still pending. The wait shares the existing run deadline and stops on cancellation. A `delivery.mode: "none"` run whose turn only handed work to a child waits for the child under the same deadline and records the child's final reply as the run output without sending it. Subagents must return a meaningful result or a concrete blocker, even when delivery is `none`. A child that returns only `NO_REPLY` enters [missing-answer recovery](/tools/subagents/announce#announce); if it still produces no result or times out, the automation fails.
+
+    For successful children, spawn-only handoffs use the complete final answer
+    while it is still retained, not the 4,096-character lifecycle preview. If the
+    complete answer is no longer available, delivery keeps the existing preview,
+    including its trailing `…`.
 
     For text-only Discord announce targets, OpenClaw sends the final assistant text once instead of replaying both streamed/intermediate text and the final answer. Media and structured Discord payloads are still delivered separately so attachments and components are not dropped.
 

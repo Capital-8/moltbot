@@ -152,6 +152,11 @@ One `PluginCache` starts on the first plugin metadata access, including CLI pref
 
 Plugin-aware config validation, startup auto-enable, and Gateway plugin bootstrap consume that snapshot instead of rebuilding manifest/index metadata independently. `PluginLookUpTable` is derived from the same snapshot and adds the startup plugin plan for the current runtime config.
 
+Startup auto-enable also retains the snapshot's scoped managed-install facts when
+reusing its manifest registry and discovery. Managed native binaries keep their
+existing reference admission; unmanaged captures and metadata isolation keep their
+existing policies.
+
 On POSIX, successful checked entry opens also publish their canonical paths to the metadata cache. For ordinary metadata paths, discovery resolves each parent directory once and reuses it for non-symlink children. These path facts last until the owner invalidates metadata; symlinks retain filesystem resolution, and actual file opens retain their descriptor-bound security checks. Windows keeps separate path resolution because admission can return a trusted root alias rather than the native spelling.
 
 Async config validation requests metadata when a rule or default needs it. Core-only settings do not load the plugin inventory; successful `config get` uses core redaction hints outside plugin, channel, and agent configuration, building the JSON schema only for missing-path diagnostics. Agent configuration keeps provider model-parameter schemas from plugins. Native-catalog privacy preferences still receive their plugin schema checks.
@@ -215,6 +220,8 @@ Reply model preparation uses the configured agent’s inventory workspace across
 A delivery-enabled requester continuation refused at its initial runtime acquisition finishes as failed and uses ordinary final delivery for a failure notice. Check the conversation and logs before retrying after the reload. Cancelled or revoked work cannot send this notice; a refusal after earlier execution keeps its existing error path.
 
 While admitted work drains, ordinary model catalog, auth-status, and chat metadata reads continue using the active publication. Catalog refresh work, downloaded catalog adoption, and new execution still wait. Published facts retire when resource replacement begins; an admitted-work timeout keeps those facts available without rebuilding them. An unfinished startup publication still follows its existing cancellation and recovery path.
+
+Session lists wait for replacement provider policy when the previous runtime has retired. Disconnecting a reader cancels only that reader’s wait; other readers and the reload continue. Lists resume with the published replacement catalog and never invoke retired provider callbacks.
 
 Retained work and in-flight calls share a 60-second pre-stop budget. Retained runs finish before ordinary call admission closes. Existing calls then settle while published metadata remains readable. Sidecars release their capability consumers before the remaining finite consumers drain; memory teardown retains cleanup authority for its exact retiring provider instances until the raw cleanup settles. Replacement stops services and channels only after that handoff. Idle service and channel custody stops later with its owners. If work does not finish, the reload fails once, resumes admission, and clears the reload status; the previous plugin generation keeps serving. The deadline does not cancel agent runs or permit disposal of unfinished writes. Retry `openclaw plugins reload <id>` after that work finishes, or explicitly select `--wait` for a shared ten-minute pre-stop drain budget, matching the plugin lifecycle wait budget. Both modes hold new agent runs behind the replacement gate until completion or rollback; `status` exposes the pending reload and its drain deadline in JSON. The extended wait also expires with the previous generation serving. The explicit wait belongs to its requesting connection: Ctrl+C or disconnect cancels the pre-publication wait and runs the same rollback. Cancellation never disposes admitted work, bypasses cleanup, or reverses a committed publication. Service shutdown and recovery retain their bounded deadlines. Successful publication logs the applied replacement and emits `plugins.changed`.
 
@@ -613,7 +620,7 @@ worker fails, the Gateway logs a warning with the reason and counts the failure 
 `status` as `workerPools.modelCatalog.workerFailures`. Other than stalled native
 admission, failures republish the affected agent catalogs on a new worker.
 
-Catalog and authentication refresh tasks carry the host's prepared Claw consent
+Catalog and authentication refresh tasks carry the host's prepared Template consent
 provenance. Worker config reconstruction and provider imports consume these facts
 without opening or copying the shared state database. Host config publication and
 Doctor retain their existing provenance refresh and artifact-preserving inspection

@@ -3,7 +3,9 @@ import type { RetainedOperation } from "@openclaw/worker-runtime/lifecycle";
 import { requireNativeDatabaseFile } from "../infra/database-engine/physical-facts.js";
 import { getStateDatabaseSchemaLease } from "../infra/gateway-state-owner.js";
 import { resolveImmutableSqliteFileUri } from "../infra/node-sqlite.js";
+import { statIfExists } from "../infra/path-existence.js";
 import { isPostgresSqlConnection } from "../infra/sql-connection.js";
+import { readSqliteDatabaseCleanClose } from "../infra/sqlite-database-admission.js";
 import { throwSqliteLifecycleErrors } from "../infra/sqlite-lifecycle-errors.js";
 import { hasVerifiedLiveSqliteOwner } from "../infra/sqlite-live-owner.js";
 import { retainSnapshotTempDirectory } from "../infra/sqlite-readonly-location-cleanup.js";
@@ -24,7 +26,6 @@ import {
   registerOpenClawStateDatabaseAsyncResource,
 } from "./openclaw-state-db-cache.js";
 import { canReadWarmNativeSourceIndependently } from "./openclaw-state-db-readonly-reuse.js";
-import { existingPathOrUndefined } from "./openclaw-state-db.paths.js";
 import { captureOpenClawStateReadSource } from "./openclaw-state-read-worker.js";
 import type {
   OpenClawStateReadAuthority,
@@ -37,6 +38,10 @@ import type {
   RetainedReadScope,
 } from "./openclaw-state-read.types.js";
 import type { captureOpenClawStateReadWorkerContext } from "./openclaw-state-worker-context.js";
+import {
+  hydrateOpenClawStateWorkerError,
+  retainOpenClawStateWorkerErrorPayload,
+} from "./openclaw-state-worker-error.js";
 
 export type OpenClawStateReadCompletion = Promise<OpenClawStateReadReply | undefined>;
 
@@ -256,7 +261,8 @@ export function startOpenClawStateReadOperation(
         pathname,
         context.admission.identity.key,
       );
-    if (!snapshot && !borrowed && !existingPathOrUndefined(pathname)) {
+    if (!snapshot && !borrowed && !(await statIfExists(pathname))) {
+      authority.assertCurrent();
       return undefined;
     }
     if (native && !independentWarmSource) {
@@ -278,14 +284,15 @@ export function startOpenClawStateReadOperation(
         !context.existingSchemaPath &&
         !context.maintenanceScope &&
         !getStateDatabaseSchemaLease(pathname) &&
-        hasVerifiedLiveSqliteOwner(pathname)
+        (hasVerifiedLiveSqliteOwner(pathname) || readSqliteDatabaseCleanClose(pathname))
       ) {
         // Read startup metadata in the child's pinned transaction instead of
-        // copying unrelated state. Offline and retained snapshots keep their owner.
+        // copying unrelated state. Sealed files retain custody in that child;
+        // unclean and retained snapshots keep their private recovery owner.
         authority.assertCurrent();
         const inspected = await runSqliteReadOnlyOperation(
           pathname,
-          { type: "startupMetadata.readLive", input: command },
+          { type: "startupMetadata.readCurrent", input: command },
           {
             source: "canonical",
             expectedIdentity: context.admission.identity.key,
@@ -297,9 +304,7 @@ export function startOpenClawStateReadOperation(
         if (inspected) {
           const result = inspected.value;
           if (!result.ok) {
-            const { retainOpenClawStateWorkerErrorPayload, hydrateOpenClawStateWorkerError } =
-              await import("./openclaw-state-worker-error.js");
-            const error = new Error("Live startup metadata inspection failed");
+            const error = new Error("Startup metadata inspection failed");
             retainOpenClawStateWorkerErrorPayload(error, result.error);
             return consume({
               error: hydrateOpenClawStateWorkerError(error, { includeOrdinary: true }),

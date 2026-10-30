@@ -14,7 +14,7 @@ import {
   type ResolveModulePreloadDependenciesFn,
   type UserConfig,
 } from "vite";
-import { mermaidClassicBundlePlugin } from "../packages/mermaid-renderer/vite-plugin.ts";
+import { peleClassicBundlePlugin } from "../packages/mermaid-renderer/vite-plugin.ts";
 import { isControlUiOptionalAsset } from "../scripts/lib/control-ui-optional-assets.ts";
 import {
   CONTROL_UI_BUILD_ID_ATTRIBUTE,
@@ -354,6 +354,8 @@ export function resolveSourcePackageAliasesForVite(): ControlUiViteAlias[] {
   return [
     sourcePackageAlias("normalization-core", "agent-id"),
     sourcePackageAlias("normalization-core", "code-points"),
+    sourcePackageAlias("normalization-core", "error-coercion"),
+    sourcePackageAlias("normalization-core", "expect"),
     sourcePackageAlias("normalization-core", "grapheme"),
     sourcePackageAlias("normalization-core", "json-coercion"),
     sourcePackageAlias("normalization-core", "json-schema"),
@@ -799,7 +801,7 @@ export default function controlUiViteConfig(
     base,
     worker: {
       format: "iife",
-      plugins: () => [mermaidClassicBundlePlugin()],
+      plugins: () => [peleClassicBundlePlugin()],
       rolldownOptions: {
         output: { codeSplitting: false },
       },
@@ -828,7 +830,9 @@ export default function controlUiViteConfig(
       ],
     },
     build: {
-      target: ["chrome147", "firefox150", "safari26.2"],
+      // iOS Safari is listed separately: desktop Safari alone lets the CSS minifier drop
+      // WebKit prefixes that only iOS reads, such as -webkit-text-size-adjust.
+      target: ["chrome147", "firefox150", "safari26.2", "ios26.2"],
       outDir: options.outDir ?? outDir,
       emptyOutDir: true,
       // The canonical sidecar performance report already measures shipped compressed bytes.
@@ -863,7 +867,7 @@ export default function controlUiViteConfig(
     },
     plugins: [
       controlUiSolidPlugin(),
-      mermaidClassicBundlePlugin(),
+      peleClassicBundlePlugin(),
       controlUiIsolatedDesktopRuntimePlugin(),
       {
         name: "control-ui-static-import-preloads",
