@@ -18,6 +18,14 @@ const started = performance.now();
 const root = fileURLToPath(new URL("../", import.meta.url));
 const groups = [
   ["snapshot-derived-data", [path.join(root, "apps/ios/build/SnapshotDerivedData")]],
+  ["checkout-git", [path.join(root, ".git")]],
+  ["checkout-dependencies", [path.join(root, "node_modules")]],
+  ["checkout-artifacts", [path.join(root, ".artifacts")]],
+  ["checkout-ios-build", [path.join(root, "apps/ios/build")]],
+  ["checkout-apps", [path.join(root, "apps")]],
+  ["checkout-packages", [path.join(root, "packages")]],
+  ["checkout-scripts", [path.join(root, "scripts")]],
+  ["checkout-docs", [path.join(root, "docs")]],
   ["checkout", [root.replace(/\/$/u, "")]],
   [
     "simulator",
