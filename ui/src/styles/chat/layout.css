@@ -1514,10 +1514,10 @@ openclaw-chat-video-player {
   position: fixed;
   z-index: 9999;
   padding: var(--menu-padding);
-  border: 1px solid var(--overlay-border);
   border-radius: var(--menu-radius);
-  background: var(--bg-elevated);
-  box-shadow: var(--overlay-shadow);
+  background: var(--menu-surface);
+  box-shadow: var(--menu-shadow);
+  backdrop-filter: var(--menu-backdrop);
 }
 
 .chat-reply-context-menu {
@@ -1537,9 +1537,9 @@ openclaw-chat-video-player {
 }
 
 .chat-reply-context-menu button {
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 5px 8px;
   text-align: left;
 }
 
