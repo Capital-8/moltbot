@@ -324,7 +324,7 @@ export class TranscriptInitialRange {
   private retainViewportRows(): void {
     const virtualizer = this.virtualizer();
     const range = virtualizer.range;
-    if (!range || this.pending) {
+    if (!range || this.pending || this.viewportOnly) {
       return;
     }
     for (let index = range.startIndex; index <= range.endIndex; index++) {

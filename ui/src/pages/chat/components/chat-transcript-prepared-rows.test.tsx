@@ -725,6 +725,21 @@ it("prepares ahead during scrolling and waits for measurement before admitting a
   expect(view.container.querySelectorAll("[data-preparing-row]")).toHaveLength(1);
 });
 
+it("releases initial viewport rows when the tail grows before reader navigation", async () => {
+  const view = await transcriptFixture(null);
+  await view.frame(32);
+  const tail = view.container.querySelector<HTMLElement>('[data-virtual-row-key="fragment:255"]');
+  expect(tail).not.toBeNull();
+  expect(transcriptRows(view.container).length).toBeGreaterThan(1);
+
+  emitTranscriptResize(tail!, 800, 900);
+  await settle();
+  await view.frame(32);
+
+  expect(view.container.querySelector("[data-prepared-row]")).toBeNull();
+  expect(transcriptRows(view.container)).toEqual([tail]);
+});
+
 it("retains nearby geometry while scrolling back into the prepared window", async () => {
   const view = await transcriptFixture(null);
   await view.frame(32);
