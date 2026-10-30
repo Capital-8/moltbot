@@ -30,6 +30,7 @@ import { persistedMessageEntryId } from "../chat-thread-items.ts";
 import { AssistantViews } from "./chat-assistant-views.tsx";
 import { ChatBubbleActivity } from "./chat-bubble-activity-view.tsx";
 import { ChatLazyBoundary } from "./chat-lazy-boundary.tsx";
+import { OmittedMedia, PairingQrNotices } from "./chat-message-attachment-status-solid.tsx";
 import type { GroupedMessageOptions } from "./chat-message-bubble-options.ts";
 import {
   prepareGroupedMessage,
@@ -40,6 +41,7 @@ import {
   ChatClawHubCard,
   MessageAttachment,
 } from "./chat-message-deferred.tsx";
+import { MessageImages } from "./chat-message-images-solid.tsx";
 import type { ChatMessageRenderPreparation } from "./chat-message-markdown-view.tsx";
 import type { MarkdownMedia, PositionedMedia } from "./chat-message-media-markdown.ts";
 import { prepareMarkdownMedia } from "./chat-message-media-markdown.ts";
@@ -56,10 +58,7 @@ import {
   InlineToolCards,
   ToolMessage,
   AsyncQuestionSummary,
-  OmittedMedia,
-  PairingQrNotices,
   MessageWorkContext,
-  MessageImages,
   WorkspaceConflictTranscriptMessage,
 } from "./chat-rich-presentation.ts";
 import { ChatRowDisplayContext } from "./chat-row-display-context.ts";

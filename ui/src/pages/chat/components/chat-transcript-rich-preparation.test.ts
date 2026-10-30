@@ -34,10 +34,15 @@ function delayedRichPresentation() {
 function mixedHistory() {
   return Array.from({ length: 80 }, (_, index) => ({
     role: index % 2 ? "user" : "assistant",
-    content:
-      index === 0
-        ? "Earlier rich answer\nMEDIA:https://example.com/proof.png"
-        : `Plain history ${index}`,
+    content: index === 0 ? "Earlier rich answer" : `Plain history ${index}`,
+    ...(index === 0
+      ? {
+          openclawAsyncDelivery: {
+            itemId: "earlier-question",
+            questions: [{ title: "Earlier rich answer" }],
+          },
+        }
+      : {}),
     timestamp: 1_000 + index,
     __openclaw: { id: `mixed-${index}`, seq: index + 1 },
   }));
@@ -121,7 +126,11 @@ it("keeps initial rows hidden while preparing rich content and reveals failed re
     threadProps("measured-rich-history", undefined, [
       {
         role: "assistant",
-        content: "Earlier measured image\nMEDIA:https://example.com/proof.png",
+        content: "Earlier measured question",
+        openclawAsyncDelivery: {
+          itemId: "measured-question",
+          questions: [{ title: "Earlier measured question" }],
+        },
         timestamp: 1_000,
       },
       { role: "user", content: "Visible plain tail", timestamp: 2_000 },
@@ -136,7 +145,7 @@ it("keeps initial rows hidden while preparing rich content and reveals failed re
     await waitForSolid(() =>
       expect(view.container.querySelector(".chat-transcript-preparation")).not.toBeNull(),
     );
-    expect(view.container.textContent).not.toContain("Earlier measured image");
+    expect(view.container.textContent).not.toContain("Earlier measured question");
     expect(view.container.querySelector(".chat-group.user")).toBe(tail);
     const inner = view.container.querySelector<HTMLDivElement>(".chat-thread-inner")!;
     expect(inner.style.visibility).toBe("hidden");
@@ -156,6 +165,7 @@ it("keeps initial rows hidden while preparing rich content and reveals failed re
 
 it.each([
   ["plain text", "Immediate cached answer"],
+  ["an image", "Immediate cached answer\nMEDIA:https://example.com/proof.png"],
   [
     "a canvas preview",
     'Immediate cached answer\n\n[embed ref="team-scale-chart-12" title="Team metric 12" height="220" /]',
@@ -209,7 +219,11 @@ it.each(["loaded", "failed"] as const)(
         user,
         {
           role: "assistant",
-          content: "Replacement answer\nMEDIA:https://example.com/proof.png",
+          content: "Replacement answer",
+          openclawAsyncDelivery: {
+            itemId: "replacement-question",
+            questions: [{ title: "Replacement answer" }],
+          },
           timestamp: 2_000,
         },
       ];
@@ -251,7 +265,7 @@ it.each(["loaded", "failed"] as const)(
   },
 );
 
-it("prepares completed keyed preamble media before replacing accepted plain rows", () => {
+it("shows completed keyed preamble media without requesting the optional family", () => {
   delayedRichPresentation();
   const props = threadProps("preamble-rich-admission", "agent:main:preamble", [
     { role: "user", content: "Keep this question", timestamp: 1_000 },
@@ -260,8 +274,6 @@ it("prepares completed keyed preamble media before replacing accepted plain rows
   const view = threadFixture(props);
   try {
     view.rerender();
-    const acceptedRows = [...view.container.querySelectorAll("[data-virtual-row-key]")];
-    expect(acceptedRows.length).toBeGreaterThan(0);
     expect(view.container.textContent).toContain("Accepted plain answer");
     expect(chatRichPresentation.load).not.toHaveBeenCalled();
 
@@ -278,21 +290,18 @@ it("prepares completed keyed preamble media before replacing accepted plain rows
     view.transcript.update();
     flush();
 
-    expect(chatRichPresentation.load).toHaveBeenCalledOnce();
-    expect(view.container.querySelector(".chat-transcript-preparation")).not.toBeNull();
-    expect(view.container.textContent).toContain("Accepted plain answer");
-    expect(view.container.textContent).not.toContain("Here is the chart.");
-    const currentRows = view.container.querySelectorAll("[data-virtual-row-key]");
-    expect(currentRows.length).toBe(acceptedRows.length);
-    acceptedRows.forEach((row, index) => expect(currentRows[index]).toBe(row));
+    expect(chatRichPresentation.load).not.toHaveBeenCalled();
+    expect(view.container.querySelector(".chat-transcript-preparation")).toBeNull();
+    expect(view.container.textContent).toContain("Here is the chart.");
+    expect(view.container.querySelector(".chat-image-frame")).not.toBeNull();
   } finally {
     render(null, view.container);
     view.transcript.dispose();
   }
 });
 
-it("holds the mounted stream at its admitted text until its first rich block is ready", async () => {
-  const pending = delayedRichPresentation();
+it("keeps streamed text visible when an image arrives without the optional family", () => {
+  delayedRichPresentation();
   const props = threadProps("stream-rich-admission", "agent:main:stream", [], {
     stream: "Current streamed answer",
     streamStartedAt: 1_000,
@@ -308,14 +317,14 @@ it("holds the mounted stream at its admitted text until its first rich block is 
     view.transcript.update();
     flush();
     expect(view.container.querySelector(".chat-bubble.streaming")).toBe(bubble);
-    expect(bubble?.textContent).toContain("Current streamed answer");
-    expect(bubble?.textContent).not.toContain("Rich streamed answer");
+    expect(bubble?.textContent).toContain("Rich streamed answer");
+    expect(chatRichPresentation.load).not.toHaveBeenCalled();
     props.stream = "Latest streamed answer\nMEDIA:https://example.com/stream.png";
     view.rerender();
     view.transcript.update();
     flush();
-    pending.resolve();
-    await waitForSolid(() => expect(bubble?.textContent).toContain("Latest streamed answer"));
+    expect(bubble?.textContent).toContain("Latest streamed answer");
+    expect(chatRichPresentation.load).not.toHaveBeenCalled();
     expect(view.container.querySelector(".chat-bubble.streaming")).toBe(bubble);
     expect(bubble?.textContent).not.toContain("Rich streamed answer");
   } finally {

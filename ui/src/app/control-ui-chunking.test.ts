@@ -231,7 +231,7 @@ describe("Control UI build chunking", () => {
       ],
       [
         chat,
-        `import ${JSON.stringify(sharedStyle)}; import ${JSON.stringify(transcriptStyle)}; import { label } from ${JSON.stringify(sharedUi)}; import { action } from ${JSON.stringify(pluginActions)}; import { patch } from ${JSON.stringify(mutations)}; export { version } from ${JSON.stringify(inlineView)}; export { skeleton } from ${JSON.stringify(skeleton)}; export { available } from ${JSON.stringify(mediaAvailability)}; export { canvas } from ${JSON.stringify(assistantViews)}; export { row as process } from ${JSON.stringify(processRow)}; export { renderRun, renderPreview } from ${JSON.stringify(runFrame)}; export class Chat { label = patch(action(label)); } export const openPanel = () => import(${JSON.stringify(optional)}); export const loadRich = () => import(${JSON.stringify(richPresentation)});`,
+        `import ${JSON.stringify(sharedStyle)}; import ${JSON.stringify(transcriptStyle)}; import { label } from ${JSON.stringify(sharedUi)}; import { action } from ${JSON.stringify(pluginActions)}; import { patch } from ${JSON.stringify(mutations)}; export { version } from ${JSON.stringify(inlineView)}; export { skeleton } from ${JSON.stringify(skeleton)}; export { available } from ${JSON.stringify(mediaAvailability)}; export { canvas } from ${JSON.stringify(assistantViews)}; export { images } from ${JSON.stringify(messageImages)}; export { row as process } from ${JSON.stringify(processRow)}; export { renderRun, renderPreview } from ${JSON.stringify(runFrame)}; export class Chat { label = patch(action(label)); } export const openPanel = () => import(${JSON.stringify(optional)}); export const loadRich = () => import(${JSON.stringify(richPresentation)});`,
       ],
       [
         newSession,
@@ -245,10 +245,7 @@ describe("Control UI build chunking", () => {
       [sourcePreviews, 'export const preview = "preview";'],
       [sourcePreviewView, 'export const view = "source-preview";'],
       [assistantViews, 'export const canvas = "canvas";'],
-      [
-        richPresentation,
-        `export { tools } from ${JSON.stringify(bubbleTools)}; export { images } from ${JSON.stringify(messageImages)};`,
-      ],
+      [richPresentation, `export { tools } from ${JSON.stringify(bubbleTools)};`],
       [
         bubbleTools,
         `import { cards } from ${JSON.stringify(toolCards)}; import { content } from ${JSON.stringify(toolContent)}; import { activity } from ${JSON.stringify(activityOperation)}; export const tools = () => cards() + content + activity;`,
@@ -409,7 +406,16 @@ describe("Control UI build chunking", () => {
     expect(staticImports(chatChunk.fileName)).toContain(visibleChunk.fileName);
     expect(staticImports(visibleChunk.fileName)).not.toContain(runChunk.fileName);
     const chatImports = staticImports(chatChunk.fileName);
-    for (const id of [assistantViews, mediaAvailability]) {
+    for (const id of [
+      assistantViews,
+      mediaAvailability,
+      messageImages,
+      imageActions,
+      imagePreviewSize,
+      imageRendition,
+      imageOpen,
+      imageLoading,
+    ]) {
       expect(chatImports).toContain(chunks.find((chunk) => id in chunk.modules)!.fileName);
     }
     const richChunk = chunks.find((chunk) => richPresentation in chunk.modules)!;
@@ -427,12 +433,6 @@ describe("Control UI build chunking", () => {
       activityOperation,
       permissionCard,
       permissionLabels,
-      messageImages,
-      imageActions,
-      imagePreviewSize,
-      imageRendition,
-      imageOpen,
-      imageLoading,
     ]) {
       const file = chunks.find((chunk) => id in chunk.modules)!.fileName;
       expect(richImports, id).toContain(file);

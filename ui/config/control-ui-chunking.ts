@@ -216,14 +216,6 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/pages/chat/components/chat-message-activity-operation.tsx":
     case "ui/src/pages/chat/components/chat-diff-stat.solid.tsx":
     case "ui/src/pages/chat/components/chat-tool-row-presentation.ts":
-    case "ui/src/pages/chat/components/chat-message-images-solid.tsx":
-    case "ui/src/pages/chat/components/chat-image-actions.tsx":
-    case "ui/src/pages/chat/components/chat-image-preview-size.ts":
-    case "ui/src/pages/chat/components/chat-image-rendition.ts":
-    case "ui/src/pages/chat/components/chat-message-image-open.ts":
-    case "ui/src/pages/chat/components/chat-message-image-loading.ts":
-    case "ui/src/pages/chat/components/chat-image-frame.tsx":
-    case "ui/src/pages/chat/components/chat-message-attachment-status-solid.tsx":
     case "ui/src/pages/chat/components/chat-message-activity-view.tsx":
     case "ui/src/pages/chat/components/chat-workspace-conflict.tsx":
     case "ui/src/pages/chat/components/chat-async-question-summary.tsx":

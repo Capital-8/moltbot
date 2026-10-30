@@ -4,13 +4,9 @@ import { CHAT_PENDING_INPUT_MESSAGE_PREFIX } from "../../../../../packages/gatew
 import { readMessageWorkContext } from "../../../../../src/chat/work-context.js";
 import { parseMarkdownJson } from "../../../components/markdown-json.ts";
 import type { MarkdownRenderOptions } from "../../../components/markdown-render-options.ts";
-import {
-  extractThinkingCached,
-  readTranscriptMediaEntries,
-} from "../../../lib/chat/message-extract.ts";
+import { extractThinkingCached } from "../../../lib/chat/message-extract.ts";
 import {
   isStandaloneToolMessageForDisplay,
-  normalizeMessage,
   normalizeRoleForGrouping,
 } from "../../../lib/chat/message-normalizer.ts";
 import { extractToolCardsCached, isToolCardError } from "../../../lib/chat/tool-cards.ts";
@@ -29,14 +25,10 @@ import { isSentPastedTextAttachment } from "./chat-pasted-text.ts";
 import { isSentCommentAttachment } from "./chat-sent-comments.ts";
 import type { SidebarContent } from "./chat-sidebar-content-types.ts";
 
-/** Uses the same normalized facts as the bubble, including media outside content blocks. */
+/** Match only the bubble consumers behind the optional presentation boundary. */
 export function messageNeedsRichPresentation(message: unknown): boolean {
   return (
     isStandaloneToolMessageForDisplay(message) ||
-    normalizeMessage(message).content.some(
-      (item) => item.type !== "text" && item.type !== "thinking" && item.type !== "canvas",
-    ) ||
-    readTranscriptMediaEntries(message).length > 0 ||
     extractToolCardsCached(message).length > 0 ||
     readAsyncQuestions(message) !== null ||
     workspaceResultConflictFromTranscript(message) !== undefined ||
