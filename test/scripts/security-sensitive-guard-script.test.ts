@@ -385,7 +385,7 @@ describe("security-sensitive guard entry point", () => {
   );
 
   it("refuses incomplete changed-file lists", () => {
-    const result = expectGuard({ changedFiles: 3001 }, ["pending"], 1);
+    const result = expectGuard({ changedFiles: 3001 }, ["pending", "failure"], 1);
     expect(result.stderr).toContain("complete changed-file list");
   });
 

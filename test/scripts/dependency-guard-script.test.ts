@@ -226,8 +226,7 @@ describe("dependency guard script", () => {
       "GET /repos/openclaw/openclaw/pulls/8": { ...pullRequest, number: 8 },
     });
     expect(result.status).toBe(1);
-    expect(result.statuses.map((call) => call.body?.state)).not.toContain("success");
-    expect(result.statuses.at(-1)?.body?.state).toBe("failure");
+    expect(result.statuses.map((call) => call.body?.state)).toEqual(["pending", "failure"]);
   });
 
   it("requires current maintainer authority for dependency approval", () => {
@@ -359,7 +358,7 @@ describe("dependency guard script", () => {
         [`GET ${pullPath}/files`]: [{ filename: "package.json" }],
         [`GET ${comparisonPath}`]: invalidComparison,
       });
-      expectGuard(result, ["pending"], 1);
+      expectGuard(result, ["pending", "failure"], 1);
       expect(result.stderr).toContain("merge base");
       expect(result.writes).toEqual([]);
     }
@@ -391,7 +390,7 @@ describe("dependency guard script", () => {
         },
         "autoscrub",
       );
-      expectGuard(result, ["pending"], writeError ? 1 : 0);
+      expectGuard(result, writeError ? ["pending", "failure"] : ["pending"], writeError ? 1 : 0);
       if (writeError) {
         expect(result.stderr).toContain("Fixture API failure");
         expect(result.stdout).toContain(

@@ -678,7 +678,7 @@ describe("combined security review entry point", () => {
     "preserves publication recovery when reporting an inconsistent diff: $failure.httpError",
     ({ failure, minimumDelay }) => {
       const result = evaluate({
-        [statusPath]: { responses: [{}, {}, failure, {}] },
+        [statusPath]: { responses: [{}, {}, {}, failure, {}] },
         [`GET ${pullPath}/files`]: { responses: [files.slice(0, 1), files] },
       });
       expectReview(result, "success");
@@ -818,6 +818,39 @@ describe("combined security review entry point", () => {
     expect(result.stderr).toContain("recovery budget exhausted");
   });
 
+  it("settles pending statuses after read recovery is exhausted", () => {
+    const result = evaluate(
+      { [rolePath]: { requestTimeout: "fetch" } },
+      "enforce",
+      Date.parse("2026-01-02T00:00:30Z"),
+    );
+    expectReview(result, "failure", 1, []);
+    expect(
+      result.reviews.findLast((entry) => entry.body?.context === "openclaw/dependency-review")?.body
+        ?.state,
+    ).toBe("failure");
+    expect(result.stderr).toContain("recovery budget exhausted");
+  });
+
+  it("preserves a second guard read timeout after an earlier guard error", () => {
+    const result = evaluate(
+      {
+        [rolePath]: {
+          responses: [{ httpError: 403 }, { requestTimeout: "fetch" }],
+        },
+      },
+      "enforce",
+      Date.parse("2026-01-02T00:00:30Z"),
+    );
+    expectReview(result, "failure", 1, []);
+    for (const context of ["openclaw/dependency-review", "openclaw/security-sensitive-review"]) {
+      expect(result.reviews.findLast((entry) => entry.body?.context === context)?.body?.state).toBe(
+        "failure",
+      );
+    }
+    expect(result.stderr).toContain("exceeded timeout");
+  });
+
   it.each([rolePath, statusPath, historyPath])(
     "does not retry an ordinary permission rejection: %s",
     (route) => {
@@ -891,8 +924,10 @@ describe("combined security review entry point", () => {
       expectReview(result, false, 1);
       expect(result.stderr).toContain("capacity is nearly exhausted");
       expect(
-        result.requests.findLast((entry) => entry.body?.context === context)?.body?.state,
-      ).toBe("failure");
+        result.requests.filter(
+          (entry) => entry.body?.context === context && entry.body?.state === "failure",
+        ),
+      ).toHaveLength(1);
     },
   );
 
@@ -1425,6 +1460,10 @@ describe("combined security review entry point", () => {
     });
     expectReview(result, false, 1);
     expect(result.stderr).toContain("Fixture API failure");
+    expect(
+      result.reviews.findLast((entry) => entry.body?.context === "openclaw/dependency-review")?.body
+        ?.state,
+    ).toBe("failure");
     expect(
       result.requests.some((entry) =>
         entry.body?.body?.includes("/allow-security-sensitive-change"),
