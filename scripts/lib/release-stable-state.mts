@@ -519,10 +519,12 @@ export function createReleaseRunner(
         if (deadline !== undefined) {
           backoff = Math.min(backoff, Math.max(0, deadline - Date.now()));
         }
-        if (backoff <= 0) {
+        if (deadline !== undefined && deadline <= Date.now()) {
           break;
         }
-        await delay(backoff);
+        if (backoff > 0) {
+          await delay(backoff);
+        }
       }
     }
     if (!options.allowFailure) {

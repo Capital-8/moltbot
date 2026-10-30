@@ -353,7 +353,7 @@ process.exit(expected.exit ?? 0);
     readState(): ReleaseState {
       return JSON.parse(readFileSync(join(stateDir, "state.json"), "utf8"));
     },
-    run(script: FakeStep[], args: string[] = []) {
+    run(script: FakeStep[], args: string[] = [], env: Record<string, string> = {}) {
       writeFileSync(join(root, "script.json"), JSON.stringify(script));
       const result = spawnSync(
         node,
@@ -379,6 +379,7 @@ process.exit(expected.exit ?? 0);
             TSX_DISABLE_CACHE: "1",
             OPENCLAW_RELEASE_STABLE_POLL_MS: "1",
             OPENCLAW_RELEASE_STABLE_BACKOFF_MS: "1",
+            ...env,
           },
         },
       );

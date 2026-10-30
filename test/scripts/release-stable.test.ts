@@ -758,4 +758,26 @@ describe("release:stable CLI", () => {
     expect(release.readState().publish.approvedGates).toEqual([]);
     expect(release.readState().publish.npmVisibleAt).toBeUndefined();
   });
+
+  it("retries GET requests immediately when retry backoff is zero", () => {
+    const state = publishState(true);
+    state.publish.publishRunId = "301";
+    const release = publishing(state);
+    const result = release.run(
+      [
+        ...publishPreparation(),
+        { ...pendingGates(301), exit: 1, stderr: "temporary API failure" },
+        pendingGates(301),
+        npmVisibility(),
+      ],
+      [],
+      { OPENCLAW_RELEASE_STABLE_BACKOFF_MS: "0" },
+    );
+    expect(result.status, result.output).toBe(0);
+    expect(
+      result.calls.filter(
+        (call) => call.bin === "gh" && call.args[1]?.endsWith("pending_deployments"),
+      ),
+    ).toHaveLength(2);
+  });
 });
