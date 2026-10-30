@@ -7,18 +7,19 @@ import {
   Show,
   type Element as SolidElement,
 } from "solid-js";
+import { resolveModelRuntimeRoute } from "../../../../../src/shared/model-runtime-route.js";
 import { findOverlayParent } from "../../../components/overlay-lifecycle.ts";
 import { hasProviderBrandIcon } from "../../../components/provider-icon-data.ts";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { ProviderBrandIcon } from "../../../components/solid/provider-icon.tsx";
 import "../../../components/tooltip.ts";
 import { registerModelControlsEnglish } from "../../../i18n/locales/en-model-controls.ts";
-import { warmWhenIdle } from "../../../lib/idle-warmup.ts";
 import type { ChatModelCatalogState as ModelCatalogState } from "../../../lib/model-catalog-store.ts";
 import type { ModelProviderAuthLabel } from "../../../lib/model-provider-auth-label.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import type { ChatContextWindowControlParams } from "./chat-context-window-control.tsx";
 import type { ChatModelAccountSection } from "./chat-model-account-control.ts";
+import { ChatModelCatalogRefresh, ChatModelCatalogState } from "./chat-model-catalog-state.tsx";
 import {
   isModelPickerOptionSelected,
   type ChatModelPickerOption as ModelPickerOption,
@@ -28,7 +29,9 @@ import {
   ChatModelSearchContext,
   createChatModelSearch,
   handleModelPickerKeydown,
+  handleModelSearchKeydown,
   resetModelSearch,
+  updateModelSearch,
 } from "./chat-model-picker-search.ts";
 import { createChatPickerOverlay } from "./chat-picker-overlay.ts";
 
@@ -37,8 +40,6 @@ registerEnglishCatalog(registerModelControlsEnglish);
 const ChatModelPickerPanel = lazy(() => import("./chat-model-picker-panel.tsx"), {
   export: "ChatModelPickerPanel",
 });
-// Keep first-open focus out of the lazy component's pending render path.
-warmWhenIdle(ChatModelPickerPanel.preload);
 
 export type ChatModelPickerParams = {
   providerAuth?: ReadonlyMap<string, ModelProviderAuthLabel>;
@@ -101,9 +102,6 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
   const [choicesMounted, mountChoices] = createSignal(false);
   const pickerOverlay = createChatPickerOverlay((target) => {
     search.setOpen(target.open);
-    if (target.open) {
-      mountChoices(true);
-    }
     params.onOpenChange?.(target.open);
     if (!target.open) {
       pendingSearchFocus = undefined;
@@ -111,10 +109,20 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
       resetModelSearch(target);
       return;
     }
-    void params.onOpen?.();
     pendingSearchFocus = target.ownerDocument.activeElement;
+    // The native surface is open; focus its retained input before result evaluation.
+    focusSearch();
+    mountChoices(true);
+    void params.onOpen?.();
     requestAnimationFrame(focusSearch);
   });
+  const hasChoices = () =>
+    params.modelOptions.length > 0 ||
+    (params.targetGroups?.length ?? 0) > 0 ||
+    params.accountSection !== undefined;
+  // Retain the route's catalog boundary without involving lazy result readiness.
+  const renderDirect = (render: () => SolidElement) => render();
+  const renderCatalogStatus = createMemo(() => params.renderModelCatalogStatus ?? renderDirect);
   const state = createMemo(() => {
     const activeModelOption = params.modelOptions.find((option) =>
       isModelPickerOptionSelected(option, params.selectedModelValue, params.selectedAgentRuntime),
@@ -233,35 +241,112 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
           data-anchored-overlay
           popover="manual"
         >
-          <Show when={choicesMounted()}>
-            <Errored
-              fallback={(_error, reset) => (
-                <div class="chat-controls__model-catalog-state" role="alert">
-                  {t("chat.modelControls.modelsUnavailable")}
-                  <button class="btn btn--sm" type="button" onClick={reset}>
-                    {t("common.retry")}
-                  </button>
-                </div>
-              )}
-            >
-              <Loading
-                fallback={
-                  <div class="chat-controls__model-catalog-state" role="status">
-                    {t("chat.modelControls.loadingModels")}
-                  </div>
-                }
+          <div
+            class="chat-controls__inline-select-menu chat-controls__model-menu"
+            aria-label={t("chat.selectors.model")}
+            data-chat-model-filtering={search.query().trim() ? "" : undefined}
+          >
+            {params.modelSelectionLocked ? (
+              <div
+                class="chat-controls__locked-model"
+                aria-label={t("chat.selectors.modelLockedLabel")}
               >
-                <ChatModelPickerPanel
-                  params={params}
-                  onSelectionClose={closeModelPickerAfterSelection}
-                  searchRef={(element) => {
-                    searchInput = element;
-                    queueMicrotask(focusSearch);
-                  }}
-                />
-              </Loading>
-            </Errored>
-          </Show>
+                <span class="chat-controls__inline-select-section-label">
+                  {t("chat.selectors.modelSection")}
+                </span>
+                <span class="chat-controls__locked-model-value">{params.triggerModelLabel}</span>
+                <span class="chat-controls__locked-model-badge">
+                  {t("chat.selectors.modelLocked")}
+                </span>
+              </div>
+            ) : (
+              <>
+                {hasChoices() ? (
+                  <div class="chat-controls__model-search-wrap">
+                    <Icon name="search" />
+                    <input
+                      ref={[
+                        search.inputRef(),
+                        (element) => {
+                          searchInput = element;
+                          queueMicrotask(focusSearch);
+                        },
+                      ]}
+                      class="chat-controls__model-search"
+                      data-chat-model-search="true"
+                      type="search"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-controls={search.controls()}
+                      aria-expanded={search.open() ? "true" : "false"}
+                      aria-activedescendant={
+                        search.highlighted() ? search.optionId(search.highlighted()!) : undefined
+                      }
+                      value={search.query()}
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder={t("chat.modelControls.searchModels")}
+                      aria-label={t("chat.modelControls.searchModels")}
+                      disabled={params.disabled}
+                      onInput={(event) => updateModelSearch(event.currentTarget)}
+                      onKeyDown={handleModelSearchKeydown}
+                    />
+                    {params.modelOptions.length > 0 ? (
+                      <ChatModelCatalogRefresh state={params.modelCatalogState} />
+                    ) : undefined}
+                  </div>
+                ) : undefined}
+                {renderCatalogStatus()(() => (
+                  <ChatModelCatalogState
+                    state={params.modelCatalogState}
+                    hasOptions={params.modelOptions.length > 0}
+                    hasSelectableOptions={params.modelOptions.some((option) => !option.disabled)}
+                    onModelSetup={params.onModelSetup}
+                    emptyLabel={
+                      params.modelOptions.some(
+                        (option) =>
+                          option.unavailableReason === "missing-auth" &&
+                          resolveModelRuntimeRoute(option.provider, option.agentRuntimeId) ===
+                            "claudeCli",
+                      )
+                        ? t("chat.modelControls.claudeCliNotReady")
+                        : undefined
+                    }
+                  />
+                ))}
+              </>
+            )}
+            <Show when={choicesMounted()}>
+              <Errored
+                fallback={(_error, reset) => (
+                  <div class="chat-controls__model-catalog-state" role="alert">
+                    {t("chat.modelControls.modelsUnavailable")}
+                    <button class="btn btn--sm" type="button" onClick={reset}>
+                      {t("common.retry")}
+                    </button>
+                  </div>
+                )}
+              >
+                <Loading
+                  fallback={
+                    <div class="chat-controls__model-catalog-state" role="status">
+                      {t("chat.modelControls.loadingModels")}
+                    </div>
+                  }
+                >
+                  <ChatModelPickerPanel
+                    params={params}
+                    onSelectionClose={closeModelPickerAfterSelection}
+                  />
+                </Loading>
+              </Errored>
+            </Show>
+            {params.modelCatalogState?.modelSelectionPolicy?.restricted ? (
+              <div class="chat-controls__model-catalog-state" data-chat-model-policy>
+                {t("chat.modelControls.restrictedModelsHelp")}
+              </div>
+            ) : undefined}
+          </div>
         </div>
       </details>
     </ChatModelSearchContext>

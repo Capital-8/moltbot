@@ -56,7 +56,7 @@ type ModelSearchState = {
   rows: Map<string, HTMLButtonElement>;
   query(): string;
   setQuery(value: string): void;
-  view?: ChatModelSearchView;
+  view(): ChatModelSearchView | undefined;
 };
 const pickers = new WeakMap<HTMLDetailsElement, ModelSearchState>();
 
@@ -65,13 +65,17 @@ export function createChatModelSearch() {
   const prefix = `chat-model-picker-${createUniqueId()}`;
   const [query, setQuery] = createSignal("");
   const [open, setOpen] = createSignal(false);
-  const state: ModelSearchState = { rows: new Map(), query, setQuery };
+  // The eager input observes the view when the lazy result body binds it.
+  const [view, setView] = createSignal<ChatModelSearchView | undefined>(undefined, {
+    ownedWrite: true,
+  });
+  const state: ModelSearchState = { rows: new Map(), query, setQuery, view };
   const optionId = (key: string) => `${prefix}-option-${encodeURIComponent(key)}`;
   const listId = (key: string) => `${prefix}-list-${encodeURIComponent(key)}`;
   onSettled(() =>
     state.details
       ? registerMenuShortcuts(state.details, () =>
-          (state.view?.selectable() ?? []).slice(0, 9).flatMap(({ row }, index) => {
+          (state.view()?.selectable() ?? []).slice(0, 9).flatMap(({ row }, index) => {
             const element = state.rows.get(row.key);
             return row.hasShortcut && element ? [{ element, key: String(index + 1) }] : [];
           }),
@@ -123,18 +127,14 @@ export function createChatModelSearch() {
       return (node: HTMLButtonElement) => (element = node);
     },
     row(key: string) {
-      return state.view?.row(key);
+      return state.view()?.row(key);
     },
-    highlighted: () => state.view?.highlighted(),
-    isHighlighted: (key: string) => state.view?.isHighlighted(key) ?? false,
+    controls: () => state.view()?.controls(),
+    highlighted: () => state.view()?.highlighted(),
+    isHighlighted: (key: string) => state.view()?.isHighlighted(key) ?? false,
     bindView(view: ChatModelSearchView) {
-      // Rows read this synchronous bridge while mounting; cleanup belongs to this primitive.
-      state.view = view;
-      onCleanup(() => {
-        if (state.view === view) {
-          state.view = undefined;
-        }
-      });
+      setView(view);
+      onCleanup(() => setView((current) => (current === view ? undefined : current)));
     },
   };
 }
@@ -157,10 +157,10 @@ export function resetModelSearch(details: HTMLDetailsElement): void {
   if (state) {
     state.focusRow = undefined;
   }
-  const rows = state?.view?.selectable() ?? [];
+  const rows = state?.view()?.selectable() ?? [];
   // An unchanged empty query cannot invalidate the writable highlight derivation.
   const fallback = rows.find(({ row }) => row.selected) ?? rows[0];
-  state?.view?.highlight(state.query().trim() ? undefined : fallback?.row.key);
+  state?.view()?.highlight(state.query().trim() ? undefined : fallback?.row.key);
   state?.setQuery("");
 }
 
@@ -207,8 +207,74 @@ export function handleModelPickerKeydown(event: KeyboardEvent): void {
     return;
   }
   event.preventDefault();
-  const row = state.view?.selectable()[Number(event.key) - 1]?.row;
+  const row = state.view()?.selectable()[Number(event.key) - 1]?.row;
   if (row) {
     state.rows.get(row.key)?.click();
   }
+}
+
+export function updateModelSearch(input: HTMLInputElement): void {
+  const state = chatModelSearchState(input);
+  if (state) {
+    state.setQuery(input.value);
+    state.view()?.highlight(undefined);
+  }
+}
+
+export function handleModelSearchKeydown(event: KeyboardEvent): void {
+  if (
+    event.isComposing ||
+    event.keyCode === 229 ||
+    !["Enter", "ArrowDown", "ArrowUp"].includes(event.key)
+  ) {
+    return;
+  }
+  const state = chatModelSearchState(event.currentTarget);
+  const view = state?.view();
+  const rows = view?.selectable() ?? [];
+  if (!state || !view || !rows.length) {
+    return;
+  }
+  event.preventDefault();
+  if (event.key === "Enter") {
+    const key = view.highlighted();
+    if (key) {
+      state.rows.get(key)?.click();
+    }
+    return;
+  }
+  const index = rows.findIndex(({ row }) => row.key === view.highlighted());
+  const offset = event.key === "ArrowDown" ? 1 : rows.length - 1;
+  const next = rows[index < 0 ? 0 : (index + offset) % rows.length];
+  if (next) {
+    view.highlight(next.row.key);
+    view.reveal(next.row.key);
+    onSettled(() => {
+      // Chromium returns a promise; settlement callbacks must not return it as cleanup.
+      state.rows.get(next.row.key)?.scrollIntoView?.({ block: "nearest" });
+    });
+  }
+}
+
+/** A disappearing refresh control can return focus; catalog presentation is already derived. */
+export function restoreChatModelRefreshFocus(details: Element | undefined): void {
+  if (!(details instanceof HTMLDetailsElement) || !details.open) {
+    return;
+  }
+  const state = chatModelSearchState(details);
+  const active = details.ownerDocument.activeElement;
+  if (!state || !active?.closest("[data-chat-model-refresh]") || !details.contains(active)) {
+    return;
+  }
+  queueMicrotask(() => {
+    if (
+      !active.isConnected &&
+      details.isConnected &&
+      details.open &&
+      details.ownerDocument.activeElement === details.ownerDocument.body
+    ) {
+      const target = state.input && !state.input.disabled ? state.input : state.summary;
+      target?.focus({ preventScroll: true });
+    }
+  });
 }

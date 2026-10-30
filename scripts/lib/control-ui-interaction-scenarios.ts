@@ -1597,7 +1597,7 @@ async function prepareModelPicker(page: Page) {
   await prepareFirstModelPicker(page);
   const trigger = page.locator(`${activePane} [data-chat-model-select]`);
   await trigger.click();
-  await page.locator("[data-chat-model-search]").waitFor();
+  await page.locator("[data-chat-model-window]").waitFor();
   await trigger.click();
 }
 
@@ -1607,7 +1607,8 @@ async function prepareFirstModelPicker(page: Page) {
   await page
     .locator(`${activePane} [data-chat-model-select][aria-disabled="false"][aria-busy="false"]`)
     .waitFor();
-  if (await page.locator(".chat-controls__model-menu, [data-chat-model-search]").count()) {
+  // The input shell is retained while closed; result rows still require first open.
+  if (await page.locator(".chat-controls__model-picker[open], [data-chat-model-window]").count()) {
     throw new Error("First-open measurement requires an unopened picker");
   }
 }
@@ -1627,10 +1628,28 @@ async function setupColdFirstModelPicker(page: Page) {
     };
     requestAnimationFrame(recordReady);
     const recordClick = (event: MouseEvent) => {
-      if (event.target instanceof Element && event.target.closest(triggerSelector)) {
+      const trigger = event.target instanceof Element && event.target.closest(triggerSelector);
+      if (trigger) {
         performance.mark("model-picker:native-click", { startTime: event.timeStamp });
         performance.mark("model-picker:observed-click");
         document.removeEventListener("click", recordClick, true);
+        const picker = trigger.closest(".chat-controls__model-picker");
+        if (!picker) {
+          throw new Error("Model picker trigger has no owning details");
+        }
+        // Native popovers enter the top layer without leaving their owning details.
+        const recordFirstVisibleOption = () => {
+          if (
+            [...picker.querySelectorAll<HTMLElement>("[data-chat-model-option]")].some((option) =>
+              option.checkVisibility(),
+            )
+          ) {
+            performance.mark("model-picker:raf-observed-first-visible-option");
+          } else {
+            requestAnimationFrame(recordFirstVisibleOption);
+          }
+        };
+        requestAnimationFrame(recordFirstVisibleOption);
       }
     };
     document.addEventListener("click", recordClick, true);
@@ -1649,7 +1668,7 @@ async function prepareColdFirstModelPicker(page: Page) {
     if (!performance.getEntriesByName("model-picker:first-ready").length) {
       return false;
     }
-    if (document.querySelector(".chat-controls__model-menu, [data-chat-model-search]")) {
+    if (document.querySelector(".chat-controls__model-picker[open], [data-chat-model-window]")) {
       throw new Error("First-open measurement requires an unopened picker");
     }
     return true;
@@ -1658,19 +1677,26 @@ async function prepareColdFirstModelPicker(page: Page) {
 
 async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence> {
   const result = await runFirstModelPicker(page);
+  await page.waitForFunction(
+    () => performance.getEntriesByName("model-picker:raf-observed-first-visible-option").length > 0,
+  );
   const phase = await page.evaluate(() => {
     const readyAt = performance.getEntriesByName("model-picker:first-ready")[0]?.startTime;
     const clickedAt = performance.getEntriesByName("model-picker:native-click")[0]?.startTime;
     const observedAt = performance.getEntriesByName("model-picker:observed-click")[0]?.startTime;
     const focusedAt = performance.getEntriesByName("model-picker:native-search-focus")[0]
       ?.startTime;
+    const firstOptionAt = performance.getEntriesByName(
+      "model-picker:raf-observed-first-visible-option",
+    )[0]?.startTime;
     if (
       readyAt === undefined ||
       clickedAt === undefined ||
       observedAt === undefined ||
-      focusedAt === undefined
+      focusedAt === undefined ||
+      firstOptionAt === undefined
     ) {
-      throw new Error("Cold first-open readiness/native click/search focus was not recorded");
+      throw new Error("Cold first-open readiness/click/focus/observed option was not recorded");
     }
     return {
       firstReadyAtMs: readyAt,
@@ -1678,6 +1704,8 @@ async function runColdFirstModelPicker(page: Page): Promise<InteractionEvidence>
       nativeClickObservedAtMs: observedAt,
       nativeSearchFocusAtMs: focusedAt,
       nativeClickToSearchFocusMs: focusedAt - clickedAt,
+      rafObservedFirstVisibleOptionAtMs: firstOptionAt,
+      nativeClickToRafObservedFirstVisibleOptionMs: firstOptionAt - clickedAt,
       firstReadyToActionMs: clickedAt - readyAt,
     };
   });

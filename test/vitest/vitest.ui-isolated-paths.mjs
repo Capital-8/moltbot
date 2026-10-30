@@ -64,6 +64,8 @@ export const uiIsolatedTestFiles = [
   "ui/src/pages/chat/chat-pane-tool-icons.test.tsx",
   // Holds the editor import before first use; other comment suites load it eagerly.
   "ui/src/pages/chat/components/chat-annotation-lazy.test.ts",
+  // Holds result code while the eager model-search input accepts typing.
+  "ui/src/pages/chat/components/chat-model-picker-loading.test.tsx",
   // The cold widget placeholder proof holds the renderer import.
   "ui/src/pages/chat/components/chat-message-deferred.test.tsx",
   // Holds the rich-message import before first use by any other transcript suite.

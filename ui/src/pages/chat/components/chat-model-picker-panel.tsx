@@ -7,7 +7,7 @@ import { canonicalModelAuthProviderId } from "../../../lib/model-auth.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { ChatContextWindowControl } from "./chat-context-window-control.tsx";
 import { ChatModelAccountSectionView } from "./chat-model-account-control.tsx";
-import { ChatModelCatalogRefresh, ChatModelCatalogState } from "./chat-model-catalog-state.tsx";
+import { ChatModelCatalogState } from "./chat-model-catalog-state.tsx";
 import {
   isModelPickerOptionSelected,
   modelPickerOptionKey,
@@ -20,11 +20,7 @@ import {
   ChatModelProviderIcon,
   modelOptionSearchRow,
 } from "./chat-model-picker-options.tsx";
-import {
-  createChatModelSearchView,
-  handleModelSearchKeydown,
-  updateModelSearch,
-} from "./chat-model-picker-search-view.ts";
+import { createChatModelSearchView } from "./chat-model-picker-search-view.ts";
 import { ChatModelSearchContext, type ChatModelSearchCatalog } from "./chat-model-picker-search.ts";
 import { createModelPickerWindow } from "./chat-model-picker-window.tsx";
 import type { ChatModelPickerParams } from "./chat-model-picker.tsx";
@@ -91,7 +87,6 @@ function prepareChatModelPickerPanel(
   const targetGroups = params.targetGroups ?? [];
   const targetOptionCount = targetGroups.reduce((count, group) => count + group.options.length, 0);
   const hasOptions = params.modelOptions.length > 0 || targetGroups.length > 0;
-  const hasSelectableModelOptions = params.modelOptions.some((option) => !option.disabled);
   return {
     orderedProviderGroups,
     activeProvider,
@@ -100,7 +95,6 @@ function prepareChatModelPickerPanel(
     targetGroups,
     targetOptionCount,
     hasOptions,
-    hasSelectableModelOptions,
   };
 }
 
@@ -123,7 +117,6 @@ function ModelList(props: { label: string; id: string; more?: boolean; children:
 export function ChatModelPickerPanel(panel: {
   params: ChatModelPickerParams;
   onSelectionClose: (event: MouseEvent) => void;
-  searchRef: (element: HTMLInputElement) => void;
 }) {
   const search = useContext(ChatModelSearchContext);
   // Parent controls also publish effort and copy changes; retain unchanged model facts.
@@ -312,11 +305,6 @@ export function ChatModelPickerPanel(panel: {
     panel.params.onTargetSelect?.(groupId, value);
     panel.onSelectionClose(event);
   };
-  // Retain the route boundary across unrelated owner publications.
-  const renderDirect = (render: () => JSX.Element) => render();
-  const renderCatalogStatus = createMemo(
-    () => panel.params.renderModelCatalogStatus ?? renderDirect,
-  );
   function TargetOptions(props: { group: ChatModelPickerTargetGroup }) {
     const options = createMemo(() => props.group.completion.promise);
     return (
@@ -535,150 +523,79 @@ export function ChatModelPickerPanel(panel: {
     );
   }
   return (
-    <div
-      class="chat-controls__inline-select-menu chat-controls__model-menu"
-      aria-label={t("chat.selectors.model")}
-      data-chat-model-filtering={searchView?.filtering() ? "" : undefined}
-    >
-      {modelSelectionLocked() ? (
-        <div class="chat-controls__locked-model" aria-label={t("chat.selectors.modelLockedLabel")}>
-          <span class="chat-controls__inline-select-section-label">
-            {t("chat.selectors.modelSection")}
-          </span>
-          <span class="chat-controls__locked-model-value">{panel.params.triggerModelLabel}</span>
-          <span class="chat-controls__locked-model-badge">{t("chat.selectors.modelLocked")}</span>
-        </div>
-      ) : (
+    <>
+      {!modelSelectionLocked() && (state().hasOptions || panel.params.accountSection) ? (
         <>
-          {state().hasOptions || panel.params.accountSection ? (
-            <div class="chat-controls__model-search-wrap">
-              <Icon name="search" />
-              <input
-                ref={[search?.inputRef(), panel.searchRef]}
-                class="chat-controls__model-search"
-                data-chat-model-search="true"
-                type="search"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-controls={searchView?.controls()}
-                aria-expanded={search?.open() ? "true" : "false"}
-                aria-activedescendant={
-                  search?.highlighted() ? search.optionId(search.highlighted()!) : undefined
-                }
-                value={search?.query() ?? ""}
-                autocomplete="off"
-                spellcheck="false"
-                placeholder={t("chat.modelControls.searchModels")}
-                aria-label={t("chat.modelControls.searchModels")}
-                disabled={disabled()}
-                onInput={(event: InputEvent) =>
-                  // SAFETY: This input handler belongs to the model search input.
-                  updateModelSearch(event.currentTarget as HTMLInputElement)
-                }
-                onKeyDown={handleModelSearchKeydown}
-              />
-              {modelOptions().length > 0 ? (
-                <ChatModelCatalogRefresh state={panel.params.modelCatalogState} />
+          <div ref={window.bind} class="chat-controls__model-options" data-chat-model-window>
+            <div
+              class="chat-controls__model-virtual-content"
+              style={{ height: `${window.height()}px` }}
+            >
+              <For each={state().orderedProviderGroups} keyed={(group) => group[0]}>
+                {(group) => (
+                  <ProviderGroup
+                    provider={group()[0]}
+                    lead={group()[1].lead}
+                    more={group()[1].more}
+                  />
+                )}
+              </For>
+              <For each={state().targetGroups} keyed={(group) => group.id}>
+                {(group) => {
+                  const id = createMemo(() => group().id);
+                  return (
+                    <section
+                      class="chat-controls__provider-model-group"
+                      data-chat-model-target-group={group().id}
+                      aria-label={group().label}
+                    >
+                      {renderRow(`heading:target:${id()}`, () => (
+                        <div class="chat-controls__provider-heading">
+                          <span
+                            class="chat-controls__provider-icon chat-controls__target-icon"
+                            aria-hidden="true"
+                          >
+                            <Icon name="terminal" />
+                          </span>
+                          <span>{group().label}</span>
+                        </div>
+                      ))}
+                      <Show when={group().completion} keyed>
+                        <Errored fallback={() => <TargetState group={group()} error />}>
+                          <Loading fallback={<TargetState group={group()} />}>
+                            <TargetOptions group={group()} />
+                          </Loading>
+                        </Errored>
+                      </Show>
+                    </section>
+                  );
+                }}
+              </For>
+              {panel.params.accountSection ? (
+                <ChatModelAccountSectionView {...accounts()!} renderRow={renderRow} />
               ) : undefined}
             </div>
-          ) : undefined}
-          {renderCatalogStatus()(() => (
-            <ChatModelCatalogState
-              state={panel.params.modelCatalogState}
-              hasOptions={modelOptions().length > 0}
-              hasSelectableOptions={state().hasSelectableModelOptions}
-              onModelSetup={onModelSetup()}
-              emptyLabel={
-                modelOptions().some(
-                  (option) =>
-                    option.unavailableReason === "missing-auth" &&
-                    resolveModelRuntimeRoute(option.provider, option.agentRuntimeId) ===
-                      "claudeCli",
-                )
-                  ? t("chat.modelControls.claudeCliNotReady")
-                  : undefined
-              }
+          </div>
+          <div
+            class="chat-controls__model-search-empty"
+            data-chat-model-search-empty
+            hidden={!searchView?.empty()}
+          >
+            {t("chat.modelControls.noMatchingModels")}
+          </div>
+          {panel.params.contextWindow ? (
+            <ChatContextWindowControl
+              contextWindow={panel.params.contextWindow}
+              sessionKey={panel.params.sessionKey}
             />
-          ))}
-          {state().hasOptions || panel.params.accountSection ? (
-            <>
-              <div ref={window.bind} class="chat-controls__model-options" data-chat-model-window>
-                <div
-                  class="chat-controls__model-virtual-content"
-                  style={{ height: `${window.height()}px` }}
-                >
-                  <For each={state().orderedProviderGroups} keyed={(group) => group[0]}>
-                    {(group) => (
-                      <ProviderGroup
-                        provider={group()[0]}
-                        lead={group()[1].lead}
-                        more={group()[1].more}
-                      />
-                    )}
-                  </For>
-                  <For each={state().targetGroups} keyed={(group) => group.id}>
-                    {(group) => {
-                      const id = createMemo(() => group().id);
-                      return (
-                        <section
-                          class="chat-controls__provider-model-group"
-                          data-chat-model-target-group={group().id}
-                          aria-label={group().label}
-                        >
-                          {renderRow(`heading:target:${id()}`, () => (
-                            <div class="chat-controls__provider-heading">
-                              <span
-                                class="chat-controls__provider-icon chat-controls__target-icon"
-                                aria-hidden="true"
-                              >
-                                <Icon name="terminal" />
-                              </span>
-                              <span>{group().label}</span>
-                            </div>
-                          ))}
-                          <Show when={group().completion} keyed>
-                            <Errored fallback={() => <TargetState group={group()} error />}>
-                              <Loading fallback={<TargetState group={group()} />}>
-                                <TargetOptions group={group()} />
-                              </Loading>
-                            </Errored>
-                          </Show>
-                        </section>
-                      );
-                    }}
-                  </For>
-                  {panel.params.accountSection ? (
-                    <ChatModelAccountSectionView {...accounts()!} renderRow={renderRow} />
-                  ) : undefined}
-                </div>
-              </div>
-              <div
-                class="chat-controls__model-search-empty"
-                data-chat-model-search-empty
-                hidden={!searchView?.empty()}
-              >
-                {t("chat.modelControls.noMatchingModels")}
-              </div>
-              {panel.params.contextWindow ? (
-                <ChatContextWindowControl
-                  contextWindow={panel.params.contextWindow}
-                  sessionKey={panel.params.sessionKey}
-                />
-              ) : undefined}
-            </>
           ) : undefined}
         </>
-      )}
+      ) : undefined}
       {modelSelectionLocked() && panel.params.accountSection ? (
         <div class="chat-controls__model-options">
           <ChatModelAccountSectionView {...accounts()!} startIndex={0} />
         </div>
       ) : undefined}
-      {panel.params.modelCatalogState?.modelSelectionPolicy?.restricted ? (
-        <div class="chat-controls__model-catalog-state" data-chat-model-policy>
-          {t("chat.modelControls.restrictedModelsHelp")}
-        </div>
-      ) : undefined}
-    </div>
+    </>
   );
 }

@@ -60,8 +60,12 @@ function seedCatalog(
   return scope;
 }
 
-const menuReady = (container: HTMLElement) =>
-  waitForSolid(() => expect(container.querySelector(".chat-controls__model-menu")).not.toBeNull());
+const menuReady = async (container: HTMLElement) => {
+  await vi.dynamicImportSettled();
+  await waitForSolid(() =>
+    expect(container.querySelector(".chat-controls__model-menu")).not.toBeNull(),
+  );
+};
 
 function composerControls(state: ChatPageHost) {
   return renderControls(state, {
