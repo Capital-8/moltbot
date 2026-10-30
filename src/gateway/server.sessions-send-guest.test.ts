@@ -10,11 +10,13 @@ import { prepareAgentRunTerminalReply } from "../agents/agent-run-terminal-reply
 import type { AgentCommandGatewayIngressOpts as IngressCommand } from "../agents/command/types.js";
 import * as preparedRuntime from "../agents/prepared-model-runtime.js";
 import { createAgentRunDirectAbortError } from "../agents/run-termination.js";
+import * as replyDelivery from "../agents/tools/sessions-send-tool.a2a.js";
 import { createSessionsSendTool } from "../agents/tools/sessions-send-tool.js";
 import { withPersonalToolTurn } from "../auto-reply/reply/personal-tool-turn.test-support.js";
 import { writeConfigFile } from "../config/io.js";
 import {
   loadTranscriptEvents,
+  replaceSessionEntry,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
 import * as pendingInputs from "../config/sessions/session-accessor.pending-inputs.js";
@@ -44,6 +46,11 @@ installGatewayTestHooks({
     const role = expectDefined(cfg.gateway?.roles?.definitions?.view, "guest role");
     role.scopes = ["operator.sessions.read", "operator.sessions.write"];
     role.sandbox = "required";
+    expectDefined(cfg.gateway?.roles?.definitions, "role definitions").blocked = {
+      agents: [],
+      scopes: [],
+      sessions: { others: "none" },
+    };
     cfg.tools = { sessions: { visibility: "all" } };
     await writeConfigFile(cfg);
     kernel = await captureGatewayKernel(async () => {
@@ -65,6 +72,7 @@ async function withFollowup(
     readInput: (sessionKey?: string) => Promise<{ pending: unknown; transcript: unknown }>;
     waitForCompletion: (signal: AbortSignal) => Promise<void>;
     observe: () => Promise<{ status: string; error?: string; stopReason?: string }>;
+    invalidateAccepted: (boundary: "access revoked" | "session replaced") => Promise<void>;
   }) => Promise<void | (() => Promise<void>)>,
   sameSession = false,
 ) {
@@ -181,6 +189,30 @@ async function withFollowup(
                   runId,
                   timeoutMs: 1,
                 }),
+              invalidateAccepted: async (boundary) => {
+                if (boundary === "access revoked") {
+                  await dispatchGatewayMethodInProcess(
+                    "users.setRole",
+                    { profileId, role: "blocked" },
+                    {
+                      resolveGatewayContext: () => context,
+                      forceSyntheticClient: true,
+                      operatorRoleActor: { kind: "system" },
+                      syntheticScopes: ["operator.admin"],
+                    },
+                  );
+                } else {
+                  const current = await loadSessionEntryAsync(parent, { agentId: "main" });
+                  await replaceSessionEntry(
+                    { agentId: "main", sessionKey: parent },
+                    {
+                      ...expectDefined(current.entry, "current accepted session"),
+                      sessionId: randomUUID(),
+                      lifecycleRevision: randomUUID(),
+                    },
+                  );
+                }
+              },
             });
           },
         ),
@@ -298,6 +330,55 @@ it.for(["success", "failure", "cancelled"] as const)(
     } finally {
       resetLogger();
       setLoggerOverride({ level: "silent", consoleLevel: "silent" });
+    }
+  },
+);
+
+it.for(["access revoked", "session replaced"] as const)(
+  "rejects late self-followup delivery after accepted %s",
+  async (boundary, { signal }) => {
+    const entered = createDeferred();
+    const finish = createDeferred();
+    const delivery = vi.spyOn(replyDelivery, "runSessionsSendA2AFlow");
+    try {
+      await withFollowup(async ({ send, runId, waitForCompletion, invalidateAccepted }) => {
+        agentCommandMock.mockImplementation(async (input) => {
+          const command = input as IngressCommand;
+          await expectDefined(
+            command.userTurnTranscriptRecorder,
+            "real input recorder",
+          ).persistApproved();
+          entered.resolve();
+          await finish.promise;
+          throw new Error("The accepted review failed after its requester changed.");
+        });
+        await expect(send()).resolves.toMatchObject({
+          details: {
+            status: "accepted",
+            runId,
+            targetDisposition: "queued",
+            delivery: { status: "pending" },
+          },
+        });
+        return async () => {
+          try {
+            await withinTest(entered.promise, signal);
+            await invalidateAccepted(boundary);
+            finish.resolve();
+            await waitForCompletion(signal);
+            expect((await waitForGatewayActiveWork(10_000)).drained).toBe(true);
+            expect(agentCommandMock).toHaveBeenCalledOnce();
+            // This real consumer owns both the returned notice and source-channel send.
+            // Revoked results must not reach it, even after the accepted producer ends.
+            expect(delivery).not.toHaveBeenCalled();
+          } finally {
+            finish.resolve();
+          }
+        };
+      }, true);
+    } finally {
+      finish.resolve();
+      delivery.mockRestore();
     }
   },
 );
