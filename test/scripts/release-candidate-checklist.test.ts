@@ -284,7 +284,8 @@ describe("release candidate checklist", () => {
       ["--run-parallels", "--skip-parallels"],
       "--run-parallels and --skip-parallels cannot be combined",
     ],
-    [["--skip-dispatch"], "--skip-dispatch requires --full-release-run"],
+    [["--skip-dispatch"], "--skip-dispatch requires --full-release-validation-run-id"],
+    [["--full-release-validation-run-id", "111", "--full-release-run", "222"], "do not combine"],
     [["--workflow-ref", "release/2026.5.14"], "--workflow-ref must be main"],
     [["--tag", "v2026.7.1-alpha.3"], "Alpha releases are retired;"],
     [
@@ -1990,7 +1991,7 @@ describe("release candidate checklist", () => {
         "latest",
         "--publish-workflow-ref",
         preparedWorkflowRef,
-        "--full-release-run",
+        "--full-release-validation-run-id",
         "111",
         "--npm-preflight-run",
         "222",
