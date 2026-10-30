@@ -49,7 +49,9 @@ async function expectRetired(observation: Record<string, unknown>) {
   expect(observation.processesRetired).toBe(true);
   expect(typeof observation.leaderPid).toBe("number");
   expect(
-    await waitForManagedProcessGroupExit({ pid: observation.leaderPid as number }, 1_000),
+    await waitForManagedProcessGroupExit({ pid: observation.leaderPid as number }, 1_000, {
+      errorPolicy: "indeterminate",
+    }),
   ).toBe(true);
 }
 
@@ -88,14 +90,20 @@ describe.skipIf(process.platform === "win32")("MLX settings producer deadline ow
 
   it("does not admit a READY sent during bootstrap cancellation", async () => {
     const workFile = path.join(tempDirs.make("mlx-producer-late-ready-"), "work");
+    const readyFile = `${workFile}.ready`;
     const f = run(
       `process.on('message', () => import('node:fs').then(fs => fs.writeFileSync(${JSON.stringify(workFile)}, 'work')));
-process.on('SIGTERM', async () => { await notify('ready'); await delay(100); process.exit(0); });
+process.on('SIGTERM', async () => {
+  await notify('ready');
+  (await import('node:fs')).writeFileSync(${JSON.stringify(readyFile)}, 'sent');
+  await delay(100); process.exit(0);
+});
 await delay(10_000);`,
       { bootstrapTimeoutMs: 500 },
     );
     await expect(f.result).rejects.toThrow("bootstrap timed out");
     expect(f.observation.bootstrapReady).toBe(false);
+    expect(fs.readFileSync(readyFile, "utf8")).toBe("sent");
     expect(fs.existsSync(workFile)).toBe(false);
     await expectRetired(f.observation);
   });

@@ -406,6 +406,7 @@ process.disconnect();`;
         effectiveDumpSHA256: hash(JSON.stringify(focusedDump)),
       };
       for (const source of [stable, f.workspace]) {
+        fs.writeFileSync(path.join(source, "package.json"), '{"type":"module"}\n');
         for (const [relative, content] of [
           [fixturePath, "synthetic Swift fixture"],
           [producerPath, producer],
