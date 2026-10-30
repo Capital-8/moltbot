@@ -1,6 +1,6 @@
 import { hasUpdateGatewayStopIntent } from "./update-run-gateway-stop.js";
 import type { UpdateRunRecord } from "./update-run-record.js";
-import { upsertStep } from "./update-run-step.js";
+import { upsertStep } from "./update-run-step-upsert.js";
 
 export function isUpdateRunVerificationConfirmed(
   verification: UpdateRunRecord["verification"],

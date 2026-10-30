@@ -60,7 +60,7 @@ async function recordUpdateHistoryWarning(detail: string): Promise<void> {
     import("../infra/update-run-read.kernel.js"),
     import("../infra/update-run-codec.js"),
     import("../infra/update-run-write.js"),
-    import("../infra/update-run-step.js"),
+    import("../infra/update-run-step-upsert.js"),
   ]);
   runExistingOpenClawStateWriteTransaction(
     ({ db }) => {

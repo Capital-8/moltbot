@@ -48,7 +48,7 @@ import {
 } from "./update-run-record.js";
 import { isUpdateRecoveryPending } from "./update-run-recovery-schema.js";
 import { inspectRecoveryRows } from "./update-run-recovery-store.js";
-import { upsertStep } from "./update-run-step.js";
+import { upsertStep } from "./update-run-step-upsert.js";
 import { recordUpdateRunVerificationRecord } from "./update-run-verification.js";
 import {
   applyUpdateRunPhase,

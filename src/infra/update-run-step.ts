@@ -1,6 +1,5 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { formatUpdateDoctorConfigChange } from "./update-doctor-config.js";
-import { isRetainedStep } from "./update-run-codec.js";
 import { UPDATE_RUN_DIAGNOSTIC_LIMIT, UPDATE_RUN_TEXT_LIMIT } from "./update-run-limits.js";
 import {
   summarizeUpdateStepFailure,
@@ -8,27 +7,9 @@ import {
   type UpdateRunStep,
 } from "./update-run-record.js";
 import type { UpdateRunResult } from "./update-run-result.js";
-import { updateRunStepKey } from "./update-run-step-key.js";
 import type { UpdateStepResult } from "./update-step-result.js";
 
 type ResultStep = Omit<UpdateStepResult, "command" | "cwd" | "durationMs" | "recoverySteps">;
-
-export function upsertStep(record: UpdateRunRecord, input: UpdateRunStep): void {
-  const step = { ...input, step: updateRunStepKey(input.step) };
-  const index = record.steps.findIndex((existing) => existing.step === step.step);
-  if (index >= 0) {
-    record.steps[index] = { ...record.steps[index], ...step };
-  } else {
-    record.steps.push(step);
-  }
-  while (record.steps.length > 128) {
-    const disposable = record.steps.findIndex((entry) => !isRetainedStep(entry));
-    if (disposable < 0) {
-      throw new Error("Update run retained steps exceed the step limit");
-    }
-    record.steps.splice(disposable, 1);
-  }
-}
 
 /** Preserve the failed outcome without attaching command or working-directory metadata. */
 export function createUpdateStepFailureError(step: ResultStep): Error {
