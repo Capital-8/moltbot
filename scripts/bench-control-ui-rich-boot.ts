@@ -183,22 +183,36 @@ try {
           },
           serverBuildId: buildId,
           sessionKey,
-          historyMessages: historyMessages.map((message) =>
-            message === historyMessages[1] && fixture === "mixed-history"
+          historyMessages: historyMessages.map((message, index) =>
+            index === 3 && fixture === "initial-rich"
               ? {
-                  ...oldMedia,
-                  content: `Old synthetic image.\nMEDIA:${baseUrl}/__rich-proof.png`,
+                  role: "assistant",
+                  content: [
+                    { type: "text", text: finalText },
+                    {
+                      type: "image",
+                      url: `${baseUrl}/__rich-proof.png`,
+                      alt: "Synthetic initial rich image",
+                      width: 32,
+                      height: 32,
+                    },
+                  ],
+                  phase: "final_answer",
+                  runId: "completed-risk",
+                  timestamp: now - 2000,
                 }
-              : message,
+              : message === historyMessages[1] && fixture === "mixed-history"
+                ? {
+                    ...oldMedia,
+                    content: `Old synthetic image.\nMEDIA:${baseUrl}/__rich-proof.png`,
+                  }
+                : message,
           ),
           ...(fixture === "rich-history" || fixture === "initial-rich"
             ? {
                 inFlightRun: {
                   runId: "active-risk",
-                  text:
-                    fixture === "initial-rich"
-                      ? `${activeText}\nMEDIA:${baseUrl}/__rich-proof.png`
-                      : activeText,
+                  text: activeText,
                   startedAt: now,
                 },
               }

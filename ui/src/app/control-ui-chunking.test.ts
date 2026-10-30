@@ -164,8 +164,31 @@ describe("Control UI build chunking", () => {
     const runStream = modulePath("../pages/chat/components/chat-message-stream-view.tsx");
     const sourcePreviews = modulePath("../lib/chat/source-previews.ts");
     const sourcePreviewView = modulePath("../pages/chat/components/chat-source-previews.tsx");
+    const richPresentation = modulePath(
+      "../pages/chat/components/chat-rich-presentation.runtime.ts",
+    );
+    const assistantViews = modulePath("../pages/chat/components/chat-assistant-views.tsx");
+    const bubbleTools = modulePath("../pages/chat/components/chat-message-bubble-tools.tsx");
+    const toolCards = modulePath("../pages/chat/components/chat-tool-cards.solid.tsx");
+    const toolContent = modulePath("../pages/chat/components/chat-tool-content.solid.tsx");
+    const toolOutcome = modulePath("../pages/chat/components/chat-tool-outcome-summary.solid.tsx");
+    const toolModel = modulePath("../pages/chat/components/chat-tool-render-model.ts");
+    const toolRow = modulePath("../pages/chat/components/chat-tool-row-presentation.ts");
+    const diffStat = modulePath("../pages/chat/components/chat-diff-stat.solid.tsx");
+    const activityOperation = modulePath(
+      "../pages/chat/components/chat-message-activity-operation.tsx",
+    );
     const permissionCard = modulePath("../pages/chat/components/chat-permission-card.tsx");
     const permissionLabels = modulePath("../i18n/locales/en-chat-permissions.ts");
+    const mediaAvailability = modulePath(
+      "../pages/chat/components/chat-message-attachment-availability.ts",
+    );
+    const messageImages = modulePath("../pages/chat/components/chat-message-images-solid.tsx");
+    const imageActions = modulePath("../pages/chat/components/chat-image-actions.tsx");
+    const imagePreviewSize = modulePath("../pages/chat/components/chat-image-preview-size.ts");
+    const imageRendition = modulePath("../pages/chat/components/chat-image-rendition.ts");
+    const imageOpen = modulePath("../pages/chat/components/chat-message-image-open.ts");
+    const imageLoading = modulePath("../pages/chat/components/chat-message-image-loading.ts");
     const processRow = modulePath("../pages/chat/components/chat-details-process-row.tsx");
     const optional = modulePath("../components/assistant-panel-content-solid.tsx");
     const devices = modulePath("../pages/devices/devices-page.tsx");
@@ -208,7 +231,7 @@ describe("Control UI build chunking", () => {
       ],
       [
         chat,
-        `import ${JSON.stringify(sharedStyle)}; import ${JSON.stringify(transcriptStyle)}; import { label } from ${JSON.stringify(sharedUi)}; import { action } from ${JSON.stringify(pluginActions)}; import { patch } from ${JSON.stringify(mutations)}; export { version } from ${JSON.stringify(inlineView)}; export { skeleton } from ${JSON.stringify(skeleton)}; export { card } from ${JSON.stringify(permissionCard)}; export { row as process } from ${JSON.stringify(processRow)}; export { renderRun, renderPreview } from ${JSON.stringify(runFrame)}; export class Chat { label = patch(action(label)); } export const openPanel = () => import(${JSON.stringify(optional)});`,
+        `import ${JSON.stringify(sharedStyle)}; import ${JSON.stringify(transcriptStyle)}; import { label } from ${JSON.stringify(sharedUi)}; import { action } from ${JSON.stringify(pluginActions)}; import { patch } from ${JSON.stringify(mutations)}; export { version } from ${JSON.stringify(inlineView)}; export { skeleton } from ${JSON.stringify(skeleton)}; export { available } from ${JSON.stringify(mediaAvailability)}; export { canvas } from ${JSON.stringify(assistantViews)}; export { row as process } from ${JSON.stringify(processRow)}; export { renderRun, renderPreview } from ${JSON.stringify(runFrame)}; export class Chat { label = patch(action(label)); } export const openPanel = () => import(${JSON.stringify(optional)}); export const loadRich = () => import(${JSON.stringify(richPresentation)});`,
       ],
       [
         newSession,
@@ -221,11 +244,43 @@ describe("Control UI build chunking", () => {
       [runStream, 'export const stream = "stream";'],
       [sourcePreviews, 'export const preview = "preview";'],
       [sourcePreviewView, 'export const view = "source-preview";'],
+      [assistantViews, 'export const canvas = "canvas";'],
+      [
+        richPresentation,
+        `export { tools } from ${JSON.stringify(bubbleTools)}; export { images } from ${JSON.stringify(messageImages)};`,
+      ],
+      [
+        bubbleTools,
+        `import { cards } from ${JSON.stringify(toolCards)}; import { content } from ${JSON.stringify(toolContent)}; import { activity } from ${JSON.stringify(activityOperation)}; export const tools = () => cards() + content + activity;`,
+      ],
+      [
+        toolCards,
+        `import { card } from ${JSON.stringify(permissionCard)}; import { outcome } from ${JSON.stringify(toolOutcome)}; import { model } from ${JSON.stringify(toolModel)}; import { verb } from ${JSON.stringify(toolRow)}; import { diff } from ${JSON.stringify(diffStat)}; export const cards = () => card() + outcome + model + verb + diff;`,
+      ],
+      [toolContent, 'export const content = "content";'],
+      [toolOutcome, 'export const outcome = "outcome";'],
+      [toolModel, 'export const model = "model";'],
+      [toolRow, 'export const verb = "verb";'],
+      [diffStat, 'export const diff = "diff";'],
+      [activityOperation, 'export const activity = "activity";'],
       [
         permissionCard,
         `import { permission } from ${JSON.stringify(permissionLabels)}; export const card = () => permission;`,
       ],
       [permissionLabels, 'export const permission = "permission";'],
+      [mediaAvailability, 'export const available = () => "available";'],
+      [
+        messageImages,
+        `import { openImage } from ${JSON.stringify(imageOpen)}; import { actions } from ${JSON.stringify(imageActions)}; import { previewSize } from ${JSON.stringify(imagePreviewSize)}; export const images = () => openImage() + actions + previewSize;`,
+      ],
+      [
+        imageOpen,
+        `import { loadImage } from ${JSON.stringify(imageLoading)}; import { rendition } from ${JSON.stringify(imageRendition)}; import { available } from ${JSON.stringify(mediaAvailability)}; export const openImage = () => loadImage() + rendition + available();`,
+      ],
+      [imageActions, 'export const actions = "actions";'],
+      [imagePreviewSize, 'export const previewSize = "size";'],
+      [imageRendition, 'export const rendition = "rendition";'],
+      [imageLoading, 'export const loadImage = () => "image";'],
       [processRow, 'export const row = "process";'],
       [
         optional,
@@ -350,10 +405,39 @@ describe("Control UI build chunking", () => {
     const previewChunk = chunks.find((chunk) => sourcePreviewView in chunk.modules)!;
     expect(staticImports(chatChunk.fileName)).not.toContain(previewChunk.fileName);
     expect(runChunk.dynamicImports).toContain(previewChunk.fileName);
-    const visibleChunk = chunks.find((chunk) => permissionCard in chunk.modules)!;
-    expect([permissionLabels, processRow].every((id) => id in visibleChunk.modules)).toBe(true);
+    const visibleChunk = chunks.find((chunk) => processRow in chunk.modules)!;
     expect(staticImports(chatChunk.fileName)).toContain(visibleChunk.fileName);
     expect(staticImports(visibleChunk.fileName)).not.toContain(runChunk.fileName);
+    const chatImports = staticImports(chatChunk.fileName);
+    for (const id of [assistantViews, mediaAvailability]) {
+      expect(chatImports).toContain(chunks.find((chunk) => id in chunk.modules)!.fileName);
+    }
+    const richChunk = chunks.find((chunk) => richPresentation in chunk.modules)!;
+    expect(chatChunk.dynamicImports).toContain(richChunk.fileName);
+    const richImports = staticImports(richChunk.fileName);
+    for (const id of [
+      richPresentation,
+      bubbleTools,
+      toolCards,
+      toolContent,
+      toolOutcome,
+      toolModel,
+      toolRow,
+      diffStat,
+      activityOperation,
+      permissionCard,
+      permissionLabels,
+      messageImages,
+      imageActions,
+      imagePreviewSize,
+      imageRendition,
+      imageOpen,
+      imageLoading,
+    ]) {
+      const file = chunks.find((chunk) => id in chunk.modules)!.fileName;
+      expect(richImports, id).toContain(file);
+      expect(chatImports, id).not.toContain(file);
+    }
     const pluginChunk = chunks.find((chunk) => pluginLoader in chunk.modules)!;
     const actionChunk = chunks.find((chunk) => pluginActions in chunk.modules)!;
     const sharedChunk = chunks.find((chunk) => sharedUi in chunk.modules)!;

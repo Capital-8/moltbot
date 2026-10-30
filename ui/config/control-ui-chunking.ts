@@ -20,20 +20,10 @@ const controlUiBootModules = JSON.parse(
 
 const chatVisibleModules = new Set([
   "ui/src/pages/chat/components/chat-tool-card-chrome.tsx",
-  "ui/src/pages/chat/components/chat-tool-outcome-summary.solid.tsx",
-  "ui/src/pages/chat/components/chat-tool-render-model.ts",
-  "ui/src/pages/chat/components/chat-message-bubble-tools.tsx",
-  "ui/src/pages/chat/components/chat-permission-card.tsx",
-  "ui/src/pages/chat/components/chat-tool-content.solid.tsx",
-  "ui/src/pages/chat/components/chat-tool-cards.solid.tsx",
-  "ui/src/pages/chat/components/chat-message-activity-operation.tsx",
-  "ui/src/pages/chat/components/chat-diff-stat.solid.tsx",
-  "ui/src/pages/chat/components/chat-tool-row-presentation.ts",
   "ui/src/lib/chat/tool-display-identity.ts",
   "ui/src/lib/chat/tool-call-input.ts",
   "src/agents/tool-display-name.ts",
   "ui/src/i18n/locales/en-chat-details.ts",
-  "ui/src/i18n/locales/en-chat-permissions.ts",
   "ui/src/pages/chat/components/chat-details-process-row.tsx",
   "ui/src/pages/chat/components/chat-environment-content.tsx",
 ]);
@@ -216,15 +206,10 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "packages/markdown-core/src/ir-metadata.ts":
       // Text annotations also serve plain-text consumers without loading the parser.
       return "deferred-ui-support";
-    case "ui/src/pages/chat/components/chat-image-preview-size.ts":
-    case "ui/src/pages/chat/components/chat-image-rendition.ts":
-    case "ui/src/pages/chat/components/chat-message-image-open.ts":
-    case "ui/src/pages/chat/components/chat-message-images-solid.tsx":
-    case "ui/src/pages/chat/components/chat-image-actions.tsx":
     case "ui/src/pages/chat/components/chat-message-local-media.ts":
     case "ui/src/pages/chat/components/chat-message-attachment-availability.ts":
     case "ui/src/pages/chat/components/chat-media-playback.ts":
-    case "ui/src/pages/chat/components/chat-message-image-loading.ts":
+      // Eager workspace admission needs availability, not image renderers.
       return "chat-message-media-runtime";
     case "ui/src/pages/chat/chat-provider-review-controller.tsx":
       return "chat-provider-review";
