@@ -67,6 +67,7 @@ describe("broadcast dispatch", () => {
     mockGetChatInfo,
     mockResolveStorePath,
     resolvedTurnCalls,
+    runtimeStub,
   } = setupFeishuBroadcastTestHarness();
 
   function mockActiveDispatcher(ensureNoVisibleReplyFallback = vi.fn()) {
@@ -95,6 +96,32 @@ describe("broadcast dispatch", () => {
       ...options,
     });
   }
+
+  it("keeps broadcast commands authorized only for the active agent", async () => {
+    vi.spyOn(runtimeStub.channel.commands, "shouldComputeCommandAuthorized").mockReturnValue(true);
+    const cfg = createBroadcastConfig();
+    cfg.channels = {
+      ...cfg.channels,
+      feishu: { ...cfg.channels?.feishu, allowFrom: ["ou_sender"] },
+    };
+    const event = createBroadcastEvent({
+      messageId: "broadcast-command",
+      text: "/followup next task",
+      botMentioned: true,
+    });
+    event.sender.sender_id.open_id = "ou_sender";
+    await dispatchBroadcast("broadcast-command", { cfg, event });
+    const active = resolvedTurnCalls.find((turn) => turn.admission?.kind !== "observeOnly");
+    const observer = resolvedTurnCalls.find((turn) => turn.admission?.kind === "observeOnly");
+    expect(active?.ctxPayload?.CommandTurn).toMatchObject({
+      kind: "text-slash",
+      authorized: true,
+    });
+    expect(observer).toBeDefined();
+    expect(observer?.ctxPayload?.CommandAuthorized).toBeUndefined();
+    expect(observer?.ctxPayload?.CommandTurn).toBeUndefined();
+    expect(observer?.ctxPayload?.CommandSource).toBeUndefined();
+  });
 
   it("sends no-visible-reply fallback for active broadcast failed final delivery", async () => {
     mockAgentReply("main", {

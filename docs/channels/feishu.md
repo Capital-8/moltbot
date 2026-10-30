@@ -83,17 +83,20 @@ Every section heading from the previous single-page version keeps its anchor her
 
 ## Common commands
 
-| Command   | Description                 |
-| --------- | --------------------------- |
-| `/status` | Show bot status             |
-| `/reset`  | Reset the current session   |
-| `/model`  | Show or switch the AI model |
+| Command               | Description                               |
+| --------------------- | ----------------------------------------- |
+| `/status`             | Show bot status                           |
+| `/reset`              | Reset the current session                 |
+| `/model`              | Show or switch the AI model               |
+| `/followup <message>` | Request a separate turn after active work |
 
 <Note>
 Feishu/Lark does not support native slash-command menus, so send these as plain text messages.
 </Note>
 
 Control commands bypass Feishu's message batching and ordinary chat queue, so you can check status or interrupt a running reply. Ordinary chat messages are handled in order.
+
+When work is active, `/followup <message>` reports queue acceptance without waiting for that work to finish. It keeps the submitting sender's identity and leaves the conversation's queue mode unchanged.
 
 ## Related
 
