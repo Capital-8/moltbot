@@ -406,7 +406,6 @@ process.disconnect();`;
         effectiveDumpSHA256: hash(JSON.stringify(focusedDump)),
       };
       for (const source of [stable, f.workspace]) {
-        fs.writeFileSync(path.join(source, "package.json"), '{"type":"module"}\n');
         for (const [relative, content] of [
           [fixturePath, "synthetic Swift fixture"],
           [producerPath, producer],
@@ -416,6 +415,7 @@ process.disconnect();`;
           fs.writeFileSync(file, content!);
           overlays[relative!] = createHash("sha256").update(content!).digest("hex");
         }
+        fs.writeFileSync(path.join(source, "package.json"), '{"type":"module"}\n');
         fs.writeFileSync(path.join(source, "apps/macos/Package.swift"), focusedManifest);
         const scripts = path.join(source, "scripts");
         if (source === stable) {
