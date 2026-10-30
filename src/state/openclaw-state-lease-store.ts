@@ -6,6 +6,7 @@ import {
   getNodeSqliteKysely,
 } from "../infra/kysely-sync.js";
 import type { EngineConnection } from "../infra/sql-connection.js";
+import { withSqliteDatabaseWriteScope } from "../infra/sqlite-database-admission.js";
 import {
   parseStateLeaseProcessOwner,
   readStateLeaseProcessOwnerStatus,
@@ -48,22 +49,30 @@ function heldLease(
   };
 }
 
+export function stateLeaseWriteScope(
+  identity: Pick<OpenClawStateLeaseIdentity, "scope" | "key">,
+): string {
+  return JSON.stringify(["state-lease", identity.scope, identity.key]);
+}
+
 /** Publish owner facts in the caller's transaction without renewing or replacing its lease. */
 export function updateOpenClawStateLeasePayloadInTransaction(
   db: EngineConnection,
   identity: OpenClawStateLeaseIdentity,
   payloadJson: string,
 ): boolean {
-  const result = executeSqliteQuerySync(
-    db,
-    getNodeSqliteKysely<LeaseDatabase>(db)
-      .updateTable("state_leases")
-      .set({ payload_json: payloadJson })
-      .where("scope", "=", identity.scope)
-      .where("lease_key", "=", identity.key)
-      .where("owner", "=", identity.owner),
-  );
-  return result.numAffectedRows === 1n;
+  return withSqliteDatabaseWriteScope(db, [stateLeaseWriteScope(identity)], () => {
+    const result = executeSqliteQuerySync(
+      db,
+      getNodeSqliteKysely<LeaseDatabase>(db)
+        .updateTable("state_leases")
+        .set({ payload_json: payloadJson })
+        .where("scope", "=", identity.scope)
+        .where("lease_key", "=", identity.key)
+        .where("owner", "=", identity.owner),
+    );
+    return result.numAffectedRows === 1n;
+  });
 }
 
 /** The caller owns the write transaction; only absent or expired leases can be acquired. */
@@ -75,114 +84,120 @@ export function acquireOpenClawStateLeaseInTransaction(
   nowMs?: number,
   wait = false,
 ): OpenClawStateLeaseAcquisition {
-  // Unless the caller owns a captured clock, sample after transaction admission:
-  // BEGIN IMMEDIATE may wait long enough to exhaust a lease sampled beforehand.
-  const now = nowMs ?? Date.now();
-  const kysely = getNodeSqliteKysely<LeaseDatabase>(db);
-  const scope = waiterScope(identity);
-  executeSqliteQuerySync(
+  return withSqliteDatabaseWriteScope(
     db,
-    kysely.deleteFrom("state_leases").where("scope", "=", scope).where("expires_at", "<=", now),
+    [stateLeaseWriteScope(identity)],
+    (): OpenClawStateLeaseAcquisition => {
+      // Unless the caller owns a captured clock, sample after transaction admission:
+      // BEGIN IMMEDIATE may wait long enough to exhaust a lease sampled beforehand.
+      const now = nowMs ?? Date.now();
+      const kysely = getNodeSqliteKysely<LeaseDatabase>(db);
+      const scope = waiterScope(identity);
+      executeSqliteQuerySync(
+        db,
+        kysely.deleteFrom("state_leases").where("scope", "=", scope).where("expires_at", "<=", now),
+      );
+      const oldest = () =>
+        executeSqliteQueryTakeFirstSync(
+          db,
+          kysely
+            .selectFrom("state_leases")
+            .select([
+              "owner",
+              "created_at as createdAt",
+              "expires_at as expiresAt",
+              "heartbeat_at as heartbeatAt",
+              "payload_json as payloadJson",
+            ])
+            .where("scope", "=", scope)
+            .orderBy("created_at")
+            .orderBy("lease_key")
+            .limit(1),
+        );
+      const first = oldest();
+      const held = readOpenClawStateLease(db, identity);
+      // Contention alone creates intent. Polls refresh expiry without changing FIFO order.
+      // A crashed/stalled waiter loses its position after 30s; active grants are never revoked.
+      if (wait && (first || (held && (held.expiresAt === null || held.expiresAt > now)))) {
+        const last = executeSqliteQueryTakeFirstSync(
+          db,
+          kysely
+            .selectFrom("state_leases")
+            .select("created_at")
+            .where("scope", "=", scope)
+            .orderBy("created_at", "desc")
+            .limit(1),
+        );
+        executeSqliteQuerySync(
+          db,
+          kysely
+            .insertInto("state_leases")
+            .values({
+              scope,
+              lease_key: identity.owner,
+              owner: identity.owner,
+              expires_at: now + 30_000,
+              heartbeat_at: now,
+              payload_json: payloadJson,
+              created_at: Math.max(now, (last?.created_at ?? now - 1) + 1),
+              updated_at: now,
+            })
+            .onConflict((conflict) =>
+              conflict
+                .columns(["scope", "lease_key"])
+                .doUpdateSet({ expires_at: now + 30_000, heartbeat_at: now, updated_at: now }),
+            ),
+        );
+      }
+      const next = first ?? oldest();
+      if (next && next.owner !== identity.owner) {
+        return held && (held.expiresAt === null || held.expiresAt > now)
+          ? heldLease(held)
+          : heldLease(next, true);
+      }
+      executeSqliteQuerySync(
+        db,
+        kysely
+          .deleteFrom("state_leases")
+          .where("scope", "=", identity.scope)
+          .where("lease_key", "=", identity.key)
+          .where("expires_at", "<=", now),
+      );
+      const expiresAt = now + leaseMs;
+      const inserted = executeSqliteQuerySync(
+        db,
+        kysely
+          .insertInto("state_leases")
+          .values({
+            scope: identity.scope,
+            lease_key: identity.key,
+            owner: identity.owner,
+            expires_at: expiresAt,
+            heartbeat_at: now,
+            payload_json: payloadJson,
+            created_at: now,
+            updated_at: now,
+          })
+          .onConflict((conflict) => conflict.columns(["scope", "lease_key"]).doNothing()),
+      );
+      if (inserted.numAffectedRows === 1n) {
+        executeSqliteQuerySync(
+          db,
+          kysely
+            .deleteFrom("state_leases")
+            .where("scope", "=", scope)
+            .where("lease_key", "=", identity.owner),
+        );
+        return { kind: "acquired", expiresAt };
+      }
+      const current = readOpenClawStateLease(db, identity);
+      if (!current) {
+        throw new Error("Conflicting state lease disappeared inside its acquisition transaction");
+      }
+      // The owner token and recorded creation time identify this lease's grant, not liveness.
+      return heldLease(current);
+    },
   );
-  const oldest = () =>
-    executeSqliteQueryTakeFirstSync(
-      db,
-      kysely
-        .selectFrom("state_leases")
-        .select([
-          "owner",
-          "created_at as createdAt",
-          "expires_at as expiresAt",
-          "heartbeat_at as heartbeatAt",
-          "payload_json as payloadJson",
-        ])
-        .where("scope", "=", scope)
-        .orderBy("created_at")
-        .orderBy("lease_key")
-        .limit(1),
-    );
-  const first = oldest();
-  const held = readOpenClawStateLease(db, identity);
-  // Contention alone creates intent. Polls refresh expiry without changing FIFO order.
-  // A crashed/stalled waiter loses its position after 30s; active grants are never revoked.
-  if (wait && (first || (held && (held.expiresAt === null || held.expiresAt > now)))) {
-    const last = executeSqliteQueryTakeFirstSync(
-      db,
-      kysely
-        .selectFrom("state_leases")
-        .select("created_at")
-        .where("scope", "=", scope)
-        .orderBy("created_at", "desc")
-        .limit(1),
-    );
-    executeSqliteQuerySync(
-      db,
-      kysely
-        .insertInto("state_leases")
-        .values({
-          scope,
-          lease_key: identity.owner,
-          owner: identity.owner,
-          expires_at: now + 30_000,
-          heartbeat_at: now,
-          payload_json: payloadJson,
-          created_at: Math.max(now, (last?.created_at ?? now - 1) + 1),
-          updated_at: now,
-        })
-        .onConflict((conflict) =>
-          conflict
-            .columns(["scope", "lease_key"])
-            .doUpdateSet({ expires_at: now + 30_000, heartbeat_at: now, updated_at: now }),
-        ),
-    );
-  }
-  const next = first ?? oldest();
-  if (next && next.owner !== identity.owner) {
-    return held && (held.expiresAt === null || held.expiresAt > now)
-      ? heldLease(held)
-      : heldLease(next, true);
-  }
-  executeSqliteQuerySync(
-    db,
-    kysely
-      .deleteFrom("state_leases")
-      .where("scope", "=", identity.scope)
-      .where("lease_key", "=", identity.key)
-      .where("expires_at", "<=", now),
-  );
-  const expiresAt = now + leaseMs;
-  const inserted = executeSqliteQuerySync(
-    db,
-    kysely
-      .insertInto("state_leases")
-      .values({
-        scope: identity.scope,
-        lease_key: identity.key,
-        owner: identity.owner,
-        expires_at: expiresAt,
-        heartbeat_at: now,
-        payload_json: payloadJson,
-        created_at: now,
-        updated_at: now,
-      })
-      .onConflict((conflict) => conflict.columns(["scope", "lease_key"]).doNothing()),
-  );
-  if (inserted.numAffectedRows === 1n) {
-    executeSqliteQuerySync(
-      db,
-      kysely
-        .deleteFrom("state_leases")
-        .where("scope", "=", scope)
-        .where("lease_key", "=", identity.owner),
-    );
-    return { kind: "acquired", expiresAt };
-  }
-  const current = readOpenClawStateLease(db, identity);
-  if (!current) {
-    throw new Error("Conflicting state lease disappeared inside its acquisition transaction");
-  }
-  // The owner token and recorded creation time identify this lease's grant, not liveness.
-  return heldLease(current);
 }
 
 export function readOpenClawStateLease(
@@ -302,25 +317,27 @@ export function renewOpenClawStateLeaseInTransaction(
   processOwner?: StateLeaseProcessOwner,
   nowMs?: number,
 ): number | undefined {
-  const now = nowMs ?? Date.now();
-  const expiresAt = now + leaseMs;
-  const payloadJson = repairMissingProcessStartTime(db, identity, processOwner);
-  const result = executeSqliteQuerySync(
-    db,
-    getNodeSqliteKysely<LeaseDatabase>(db)
-      .updateTable("state_leases")
-      .set({
-        expires_at: expiresAt,
-        heartbeat_at: now,
-        updated_at: now,
-        ...(payloadJson === undefined ? {} : { payload_json: payloadJson }),
-      })
-      .where("scope", "=", identity.scope)
-      .where("lease_key", "=", identity.key)
-      .where("owner", "=", identity.owner)
-      .where("expires_at", ">", now),
-  );
-  return result.numAffectedRows === 1n ? expiresAt : undefined;
+  return withSqliteDatabaseWriteScope(db, [stateLeaseWriteScope(identity)], () => {
+    const now = nowMs ?? Date.now();
+    const expiresAt = now + leaseMs;
+    const payloadJson = repairMissingProcessStartTime(db, identity, processOwner);
+    const result = executeSqliteQuerySync(
+      db,
+      getNodeSqliteKysely<LeaseDatabase>(db)
+        .updateTable("state_leases")
+        .set({
+          expires_at: expiresAt,
+          heartbeat_at: now,
+          updated_at: now,
+          ...(payloadJson === undefined ? {} : { payload_json: payloadJson }),
+        })
+        .where("scope", "=", identity.scope)
+        .where("lease_key", "=", identity.key)
+        .where("owner", "=", identity.owner)
+        .where("expires_at", ">", now),
+    );
+    return result.numAffectedRows === 1n ? expiresAt : undefined;
+  });
 }
 
 /** Renew an unchanged grant while its owner excludes takeover with SQLite's writer lock. */
@@ -330,21 +347,23 @@ export function renewOpenClawStateLeaseUnderWriteFence(
   acquiredAt: number,
   leaseMs: number,
 ): number | undefined {
-  const now = Date.now();
-  const expiresAt = now + leaseMs;
-  // Only the owner retaining SQLite's writer across a native COMMIT may renew
-  // past expiry. Both the owner token and the original grant must still match.
-  const result = executeSqliteQuerySync(
-    db,
-    getNodeSqliteKysely<LeaseDatabase>(db)
-      .updateTable("state_leases")
-      .set({ expires_at: expiresAt, heartbeat_at: now, updated_at: now })
-      .where("scope", "=", identity.scope)
-      .where("lease_key", "=", identity.key)
-      .where("owner", "=", identity.owner)
-      .where("created_at", "=", acquiredAt),
-  );
-  return result.numAffectedRows === 1n ? expiresAt : undefined;
+  return withSqliteDatabaseWriteScope(db, [stateLeaseWriteScope(identity)], () => {
+    const now = Date.now();
+    const expiresAt = now + leaseMs;
+    // Only the owner retaining SQLite's writer across a native COMMIT may renew
+    // past expiry. Both the owner token and the original grant must still match.
+    const result = executeSqliteQuerySync(
+      db,
+      getNodeSqliteKysely<LeaseDatabase>(db)
+        .updateTable("state_leases")
+        .set({ expires_at: expiresAt, heartbeat_at: now, updated_at: now })
+        .where("scope", "=", identity.scope)
+        .where("lease_key", "=", identity.key)
+        .where("owner", "=", identity.owner)
+        .where("created_at", "=", acquiredAt),
+    );
+    return result.numAffectedRows === 1n ? expiresAt : undefined;
+  });
 }
 
 /** The caller owns write admission; a replaced owner cannot release its successor. */
@@ -352,16 +371,18 @@ export function releaseOpenClawStateLeaseInTransaction(
   db: EngineConnection,
   identity: OpenClawStateLeaseIdentity,
 ): void {
-  executeSqliteQuerySync(
-    db,
-    getNodeSqliteKysely<LeaseDatabase>(db)
-      .deleteFrom("state_leases")
-      .where((eb) =>
-        eb.or([
-          eb.and([eb("scope", "=", identity.scope), eb("lease_key", "=", identity.key)]),
-          eb.and([eb("scope", "=", waiterScope(identity)), eb("lease_key", "=", identity.owner)]),
-        ]),
-      )
-      .where("owner", "=", identity.owner),
-  );
+  withSqliteDatabaseWriteScope(db, [stateLeaseWriteScope(identity)], () => {
+    executeSqliteQuerySync(
+      db,
+      getNodeSqliteKysely<LeaseDatabase>(db)
+        .deleteFrom("state_leases")
+        .where((eb) =>
+          eb.or([
+            eb.and([eb("scope", "=", identity.scope), eb("lease_key", "=", identity.key)]),
+            eb.and([eb("scope", "=", waiterScope(identity)), eb("lease_key", "=", identity.owner)]),
+          ]),
+        )
+        .where("owner", "=", identity.owner),
+    );
+  });
 }

@@ -7,7 +7,6 @@ import { isPostgresSqlConnection, type EngineConnection } from "../infra/sql-con
 import { isSqliteLockError } from "../infra/sqlite-error-diagnostics.js";
 import { createSqliteLifecycleAggregateError } from "../infra/sqlite-lifecycle-errors.js";
 import { stageSqliteTransactionState } from "../infra/sqlite-post-commit.js";
-import type { DatabasePathIdentity } from "../infra/sqlite-worker-identity.js";
 import { scheduleAbsoluteDeadline } from "../utils/absolute-deadline.js";
 import {
   getOpenClawDatabaseMaintenanceScope,
@@ -42,12 +41,15 @@ import { registerProcessExitLeaseCleanup } from "./openclaw-state-lease-process-
 import {
   createOpenClawStateLeaseLostErrorFromDatabase,
   prepareLeaseDatabase,
+  prepareOpenClawStateLeaseVerification,
   resolveLeaseDatabasePath,
   renewOpenClawStateLease as renew,
+  renewOpenClawStateLeaseForHandoff as renewForHandoff,
   verifyOpenClawStateLeaseOwnership as verifyLeaseOwnership,
   releaseOpenClawStateLease as release,
   releaseOpenClawStateLeaseBestEffort as releaseBestEffort,
   type OpenClawStateLeaseOwnerIdentity as LeaseIdentity,
+  type OpenClawStateLeaseNativeSource,
 } from "./openclaw-state-lease-storage.js";
 import { renewOpenClawStateLeaseUnderWriteFence } from "./openclaw-state-lease-store.js";
 import { createOpenClawStateLeaseWorkerOwner } from "./openclaw-state-lease-worker-owner.js";
@@ -143,9 +145,8 @@ async function runStateLeaseOwnerInScope<T>(
   let assertAcquisitionCurrent: (() => void) | undefined;
   let confirmedExpiresAt: number | undefined;
   let acquisitionCommitted = false;
-  let nativeLeaseSource:
-    | { context: OpenClawStateWorkerContext; identity: DatabasePathIdentity }
-    | undefined;
+  let nativeLeaseSource: OpenClawStateLeaseNativeSource | undefined;
+  let leaseVerification: Awaited<ReturnType<typeof prepareOpenClawStateLeaseVerification>>;
   const leaseLost = new AbortController();
   const operationSignal = validated.signal
     ? AbortSignal.any([validated.signal, leaseLost.signal])
@@ -296,6 +297,8 @@ async function runStateLeaseOwnerInScope<T>(
       await workerOperations?.settle();
       disposed = true;
       workerOperations?.close();
+      leaseVerification?.release();
+      leaseVerification = undefined;
     },
   });
   const createNativeWorkerOperations = () =>
@@ -360,9 +363,9 @@ async function runStateLeaseOwnerInScope<T>(
                 },
                 assertCurrent,
                 signal,
-                (context, sourceIdentity) => {
+                (source) => {
                   acquisitionCommitted = true;
-                  nativeLeaseSource = { context, identity: sourceIdentity };
+                  nativeLeaseSource = source;
                   // A queued acquisition owns cleanup before it owns a grant.
                   workerOperations ??= createNativeWorkerOperations();
                 },
@@ -386,6 +389,9 @@ async function runStateLeaseOwnerInScope<T>(
     }
     const acquiredAt = confirmedExpiresAt - validated.leaseMs;
     phase = "owned";
+    if (nativeLeaseSource?.database) {
+      leaseVerification = await prepareOpenClawStateLeaseVerification(nativeLeaseSource, identity);
+    }
     workerOperations ??= createNativeWorkerOperations();
     // Legacy native callers release synchronously on process.exit(). Async callers
     // must unwind their scope before exiting so native worker teardown can join.
@@ -462,23 +468,12 @@ async function runStateLeaseOwnerInScope<T>(
           throw leaseLost.signal.reason;
         }
       }
-      // Durable ownership authorizes the effect; worker liveness adds no authority.
-      verifyLeaseOwnership({ ...identity, database: validated.database, transaction });
-    };
-    const renewForHandoff = () => {
-      const params = { ...identity, database: validated.database };
-      try {
-        return renew({
-          ...params,
-          operationLabel: validated.operationLabel,
-          leaseMs: validated.leaseMs,
-        });
-      } catch (error) {
-        if (!isSqliteLockError(error)) {
-          throw error;
-        }
-        return verifyLeaseOwnership(params);
+      if (!transaction && leaseVerification) {
+        leaseVerification.verify();
+        return;
       }
+      // Transactions and offline cross-process leases always read their durable owner.
+      verifyLeaseOwnership({ ...identity, database: validated.database, transaction });
     };
     const startWorker = async (expiresAt: number) => {
       const start = async (startupContext?: OpenClawStateWorkerContext) => {
@@ -498,7 +493,12 @@ async function runStateLeaseOwnerInScope<T>(
             renewDuringStartup: () => {
               assertActive();
               if (!workerStorage || !workerOperations) {
-                return renewForHandoff();
+                return renewForHandoff({
+                  ...identity,
+                  database: validated.database,
+                  operationLabel: validated.operationLabel,
+                  leaseMs: validated.leaseMs,
+                });
               }
               const execution = workerOperations;
               return workerStorage

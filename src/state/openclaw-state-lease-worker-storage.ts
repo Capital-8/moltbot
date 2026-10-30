@@ -1,5 +1,4 @@
 import { throwSqliteLifecycleErrors } from "../infra/sqlite-lifecycle-errors.js";
-import type { DatabasePathIdentity } from "../infra/sqlite-worker-identity.js";
 import {
   createSqliteWorkerWriteAdmission,
   type SqliteWorkerStore,
@@ -12,6 +11,7 @@ import { startOpenClawStateLeaseTimer } from "./openclaw-state-lease-heartbeat.j
 import {
   resolveLeaseDatabasePath,
   type OpenClawStateLeaseDatabase,
+  type OpenClawStateLeaseNativeSource,
 } from "./openclaw-state-lease-storage.js";
 import type {
   createOpenClawStateLeaseWorkerOwner,
@@ -35,7 +35,7 @@ export async function acquireLease(
   },
   assertCurrent: () => void,
   signal?: AbortSignal,
-  captureSource?: (context: OpenClawStateWorkerContext, identity: DatabasePathIdentity) => void,
+  captureSource?: (source: OpenClawStateLeaseNativeSource) => void,
 ) {
   if (database.options?.readOnly) {
     throw new Error("State lease acquisition requires writable storage");
@@ -84,7 +84,7 @@ export async function acquireLease(
     throw new Error("State lease acquisition requires an existing database");
   }
   // A held attempt can also have committed an intent needing exact-source cleanup.
-  captureSource?.(context, sourceIdentity);
+  captureSource?.({ context, identity: sourceIdentity, database: opened });
   assertAdmission();
   return result;
 }
