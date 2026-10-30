@@ -15,6 +15,8 @@ import { evaluateWorkflowRunner } from "./ci-workflow.test-support.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const workflowPath = ".github/workflows/plugin-npm-release.yml";
+const publicationRecoveryPath =
+  ".agents/skills/release-openclaw-maintainer/references/publication-recovery.md";
 const testNodeExecPath = resolveTestNodeExecPath();
 
 type Step = {
@@ -960,6 +962,19 @@ it("runs one trusted-publisher exchange job directly after selected-package plan
   expect(serialized).not.toContain("NPM_TOKEN");
   expect(serialized).not.toMatch(/\bnpm publish\b/u);
   expect(serialized).not.toMatch(/\bnpm dist-tag\b/u);
+});
+
+it("routes publication recovery through the read-only trusted-publisher preflight", () => {
+  const guidance = readFileSync(publicationRecoveryPath, "utf8");
+  const recoveryCommand = guidance
+    .split("Before resuming plugin npm publication", 2)[1]
+    ?.split("```bash", 2)[1]
+    ?.split("```", 1)[0];
+  expect(recoveryCommand).toBeDefined();
+  expect(recoveryCommand).toContain("--ref release-publish/<tooling-sha12>-<epoch>");
+  expect(recoveryCommand).toContain("-f preflight_only=true");
+  expect(recoveryCommand).toContain("-f trusted_publisher_preflight=true");
+  expect(recoveryCommand).not.toContain("release_publish_run_id");
 });
 
 it("publishes extended-stable with OIDC only and verifies every package tag", () => {

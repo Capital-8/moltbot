@@ -114,9 +114,29 @@ artifacts also require reconciliation; they do not authorize another dispatch.
 If reconciliation proves that a preparation child never existed, dispatch only
 that missing owner from the original protected tooling tag, with the exact source
 SHA as `ref` and `publish_scope=all-publishable`. For Plugin NPM Release, use
-`preflight_only=true`, `trusted_publisher_preflight=false`, and `npm_dist_tag=default`
-(`extended-stable` for that track). For Plugin ClawHub Release, use `dry_run=true`.
+`preflight_only=true` and `npm_dist_tag=default` (`extended-stable` for that
+track); leave `trusted_publisher_preflight` omitted so this artifact-qualification
+run keeps its default and produces the artifacts preparation must adopt. For
+Plugin ClawHub Release, use `dry_run=true`.
 Then supply both verified positive child IDs; adoption dispatches no new workflow.
+
+Before resuming plugin npm publication, verify the trusted-publisher exchange
+read-only from that same protected tooling tag. Use the exact source and plugin
+selection from the recovered publication; this check does not pack or publish:
+
+```bash
+gh workflow run plugin-npm-release.yml --repo openclaw/openclaw \
+  --ref release-publish/<tooling-sha12>-<epoch> \
+  -f preflight_only=true \
+  -f trusted_publisher_preflight=true \
+  -f publish_scope=all-publishable \
+  -f ref=<exact-40-character-release-sha> \
+  -f npm_dist_tag=default
+```
+
+Use `npm_dist_tag=extended-stable` for that track. Do not pass parent publication
+run IDs. Require the `Trusted publisher OIDC exchange` job to succeed before
+recovery continues; its success confirms authentication only, not publication.
 
 Publication records distinguish `unknown` (no confirmed publisher), `unverified`
 (a returned ID without an observed attempt), and `acknowledged` (verified original
