@@ -3990,18 +3990,8 @@ html.openclaw-native-web-chrome
    sidebar edge. Touch and drawer rows keep their always-visible actions beside
    the text, and an empty endcap charges the title nothing. */
 @media (hover: hover) and (pointer: fine) {
-  .shell:not(.shell:not(.shell--mobile-nav)
-    .sidebar-recent-session--child
-    .sidebar-recent-session__details-endcap:has(
-      .session-row-badges,
-      .viewer-facepile,
-      .session-row-trail
-    ) {
-    padding-inline-end: 7px;
-  }
-
-  .shell--mobile-nav)
-    .sidebar-recent-session:not(.sidebar-recent-session--child, .sidebar-recent-session--team)
+  .shell:not(.shell--mobile-nav)
+    .sidebar-recent-session:not(.sidebar-recent-session--team)
     .sidebar-recent-session__details-endcap:has(
       .session-row-badges,
       .viewer-facepile,
