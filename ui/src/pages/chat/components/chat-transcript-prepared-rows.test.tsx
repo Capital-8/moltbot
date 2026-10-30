@@ -206,6 +206,8 @@ async function transcriptFixture(
   host.connect();
   draw();
   await settle();
+  emitTranscriptResize(container, 800, viewportHeight);
+  await settle();
   return {
     container,
     host,
@@ -294,6 +296,7 @@ it("warms HTML and nearby geometry without distant DOM", async () => {
   await view.idle(0);
   for (let turn = 0; turn < 160; turn++) {
     await view.idle(10, 1);
+    await view.frame(2, false);
   }
   await view.frame(1, false);
   // The first fast scroll can cross more than the retained geometry window.
@@ -472,7 +475,7 @@ it.each([600, 1400])(
 );
 
 it.each([true, "toolCall"] as const)(
-  "warms completed frame messages with %s one per idle callback before their first mount",
+  "warms costly completed frame messages with %s within each idle budget before their first mount",
   async (content) => {
     const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
     const html = vi.spyOn(Element.prototype, "innerHTML", "set");
@@ -484,7 +487,7 @@ it.each([true, "toolCall"] as const)(
     await view.idle(0);
     expect(view.renderRow.mock.calls).toHaveLength(rendered);
 
-    await view.idle(10, 3);
+    await view.idle(10, 6);
     const warmed = view.renderRow.mock.calls[rendered]![0];
     const index = warmed.kind === "item" ? warmed.item : -1;
     expect(index).toBeGreaterThan(0);
@@ -493,7 +496,7 @@ it.each([true, "toolCall"] as const)(
     const parsesFor = (text: string) =>
       parse.mock.calls.filter(([input]) => input.includes(text)).length;
     // Initial settling can retain the pristine fragment too, so a ready row
-    // needs no work. A cold row still prepares at most one message per slice.
+    // needs no work. Each cold message consumes this slice's six-millisecond budget.
     const preparationsFor = (text: string) =>
       parsesFor(text) + html.mock.calls.filter(([input]) => input.includes(text)).length;
     expect(preparationsFor(first) + preparationsFor(second)).toBeLessThanOrEqual(1);
@@ -715,6 +718,8 @@ it("prepares ahead during scrolling and waits for measurement before admitting a
   expect(view.draw.mock.calls).toHaveLength(draws);
   expect(view.renderRow.mock.calls).toHaveLength(rendered);
   await view.frame(1, false);
+  expect(view.renderRow.mock.calls).toHaveLength(rendered);
+  await view.frame(1, false);
   expect(view.renderRow.mock.calls).toHaveLength(rendered + 1);
   expect(view.container.querySelectorAll("[data-preparing-row]")).toHaveLength(1);
 });
@@ -806,6 +811,7 @@ it("measures nearby rows before spending idle budgets on distant Markdown", asyn
 it("materializes one predicted row between scroll frames and uses the latest viewport", async () => {
   const view = await transcriptFixture(0, true, false, "retained");
   await view.idle();
+  await view.frame(1, false);
   await view.task();
   await view.scrollTo(3);
   const mounted = transcriptRows(view.container);
