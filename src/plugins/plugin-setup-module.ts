@@ -8,6 +8,7 @@ import {
   retirePluginCacheInstance,
 } from "./plugin-cache.js";
 import type { PreparedPluginGenerationArtifact } from "./plugin-generation-worker.js";
+import { isPluginSourceAcquisitionError } from "./plugin-instance-error.js";
 import { bindPluginInstanceModuleLoader } from "./plugin-instance-module-loader.js";
 import { PluginInstance } from "./plugin-instance.js";
 import { resolveBundledPluginStateOperationCapture } from "./plugin-state-operation-module-loader.js";
@@ -29,6 +30,9 @@ export function getPluginSetupModuleLoader(
   const cache = getPluginCache();
   const key = setupKey(record, source, options.stateOperations);
   const cached = cache.setupModules.get(key);
+  if (cached?.setupPreparationFailure) {
+    throw cached.setupPreparationFailure;
+  }
   if (!cached && cache.retirement) {
     throw new Error(`Plugin ${record.id} setup inventory has retired`);
   }
@@ -116,25 +120,26 @@ export async function preparePluginSetupModuleLoader(
   options: { stateOperations?: false; assertCurrent?: () => void; signal?: AbortSignal } = {},
 ): Promise<void> {
   return await withPluginSetupPreparation(options, async ({ cache, assertCurrent }) => {
-    if (cache.setupModules.has(setupKey(record, source, options.stateOperations))) {
-      return;
-    }
-    const bundled = record.origin === "bundled";
-    const capture =
-      bundled && options.stateOperations !== false
-        ? resolveBundledPluginStateOperationCapture({ rootDir, source })
-        : undefined;
-    if (!isMainThread || (bundled && !capture)) {
-      getPluginSetupModuleLoader(record, source, rootDir, options);
+    const key = setupKey(record, source, options.stateOperations);
+    if (cache.setupModules.has(key)) {
       return;
     }
     let prepared: PreparedPluginGenerationArtifact | undefined;
     try {
+      const bundled = record.origin === "bundled";
+      const capture =
+        bundled && options.stateOperations !== false
+          ? resolveBundledPluginStateOperationCapture({ rootDir, source })
+          : undefined;
+      if (!isMainThread || (bundled && !capture)) {
+        getPluginSetupModuleLoader(record, source, rootDir, options);
+        return;
+      }
       const { preparePluginGenerationArtifact } = await import("./plugin-generation-worker.js");
       assertCurrent();
       prepared = await preparePluginGenerationArtifact(capture ?? { rootDir, source });
       assertCurrent();
-      if (cache.setupModules.has(setupKey(record, source, options.stateOperations))) {
+      if (cache.setupModules.has(key)) {
         await prepared.artifact.disposeAsync();
         assertCurrent();
       } else {
@@ -155,6 +160,15 @@ export async function preparePluginSetupModuleLoader(
             { cause: cleanupError },
           );
         }
+      }
+      assertCurrent();
+      if (isPluginSourceAcquisitionError(error)) {
+        if (!cache.setupModules.has(key)) {
+          const failed = new PluginInstance(record.id, { cache });
+          failed.setupPreparationFailure = error;
+          cache.setupModules.set(key, failed);
+        }
+        return;
       }
       throw error;
     }

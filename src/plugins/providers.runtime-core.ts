@@ -648,6 +648,26 @@ export function createProviderRegistryResolver(dependencies: {
       if (!selection || !snapshot) {
         return await run(undefined);
       }
+      if (params.mode === "runtime") {
+        const request = getPluginRuntimeGatewayRequestScope()?.pluginRegistry;
+        const requestContext = getPluginRuntimeLoadContext(request);
+        for (const registry of [
+          requestContext && requestContext.workspaceDir === inputs.workspaceDir
+            ? request
+            : undefined,
+          getLoadedRuntimePluginRegistry({ env: inputs.env, workspaceDir: inputs.workspaceDir }),
+        ]) {
+          if (registry) {
+            // Loaded callbacks only identify eligible owners; the inspection below
+            // still acquires independent instances under the current metadata.
+            const { aliasOwners } = prepareRegistry(registry, selection, prepared, false);
+            selection.explicitOwnerPluginIds = sortUniqueStrings([
+              ...selection.explicitOwnerPluginIds,
+              ...aliasOwners,
+            ]);
+          }
+        }
+      }
       if (params.mode === "runtime" && params.applyAutoEnable !== false) {
         await preparePluginAutoEnableSetup({
           config:

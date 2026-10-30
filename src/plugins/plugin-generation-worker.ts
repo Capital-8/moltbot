@@ -20,7 +20,11 @@ import type {
   GenerationWorkerReply,
   GenerationWorkerCallback,
 } from "./plugin-generation-worker-contract.js";
-import { PluginSourceRecoveryUnavailableError } from "./plugin-instance-error.js";
+import {
+  markPluginSourceAcquisitionError,
+  PluginDependencyLinkError,
+  PluginSourceRecoveryUnavailableError,
+} from "./plugin-instance-error.js";
 import {
   adoptPluginNativeAdmissions,
   nativeAdmissionStateFor,
@@ -278,8 +282,11 @@ export async function preparePluginGenerationArtifact(
       const error =
         reply.error.name === "PluginSourceRecoveryUnavailableError"
           ? new PluginSourceRecoveryUnavailableError(undefined)
-          : new Error(reply.error.message);
-      throw Object.assign(error, reply.error);
+          : reply.error.name === "PluginDependencyLinkError"
+            ? new PluginDependencyLinkError(reply.error.message)
+            : new Error(reply.error.message);
+      Object.assign(error, reply.error);
+      throw reply.sourceAcquisitionFailure ? markPluginSourceAcquisitionError(error) : error;
     }
     if (reply.admission) {
       adoptPluginNativeAdmissions(
