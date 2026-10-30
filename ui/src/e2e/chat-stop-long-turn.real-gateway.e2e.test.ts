@@ -186,14 +186,13 @@ suite.define(() => {
               beforeStop,
             );
             expect(JSON.stringify(tail.response.payload)).not.toContain(prompt);
-            // One read fills the gap to the start this pane already showed.
-            const gap = await wire.waitFor(
+            // One older read fills the gap to the start this pane already showed.
+            await wire.waitFor(
               (rpc) =>
                 rpc.request.method === "chat.history" &&
-                (rpc.request.params as { offset?: number } | undefined)?.offset !== undefined,
+                JSON.stringify(rpc.response.payload).includes(prompt),
               beforeStop,
             );
-            expect(JSON.stringify(gap.response.payload)).toContain(prompt);
             await page.evaluate(
               () =>
                 new Promise<void>((resolve) => {
@@ -202,6 +201,8 @@ suite.define(() => {
             );
 
             await opening.waitFor();
+            // The filled gap merges once; the prompt never renders twice.
+            expect(await opening.count()).toBe(1);
             expect(
               await page.evaluate(
                 () =>

@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { waitForLayoutSettled } from "../pages/chat/chat-layout.browser.test-support.ts";
 import { selectChatLayoutAction } from "../test-helpers/chat-layout-menu.ts";
 import { createControlUiMockSameOriginGatewayScript } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiSessionRow } from "../test-helpers/control-ui-session-fixtures.ts";
@@ -23,6 +24,93 @@ const previewArtifact = {
 };
 
 suite.define(() => {
+  it("keeps transcript attachment icons compact beside project files", async () => {
+    await suite.withPage(createControlUiE2eContextOptions(), async ({ page }) => {
+      await installMockGateway(page, {
+        historyMessages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "attachment",
+                attachment: {
+                  kind: "document",
+                  label: "Cafe\u0301-checklist.txt",
+                  mimeType: "text/plain",
+                  url: "https://example.com/release-checklist.txt",
+                },
+              },
+              { type: "image", url: "https://example.com/layout.png", alt: "Cafe\u0301.png" },
+            ],
+          },
+        ],
+        methodResponses: {
+          "artifacts.list": { artifacts: [] },
+          "sessions.files.list": {
+            sessionKey: "main",
+            root: "/workspace",
+            files: [],
+            browser: {
+              path: "",
+              entries: [{ kind: "file", name: "README.md", path: "README.md" }],
+            },
+          },
+        },
+      });
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${suite.server.baseUrl}chat`);
+      await openChatSidePanelType(page, "Files");
+      for (const presentation of ["desktop", "narrow", "mobile"]) {
+        const mobile = presentation === "mobile";
+        if (presentation === "narrow") {
+          await page.getByRole("separator", { name: "Resize side panel" }).press("End");
+        } else if (mobile) {
+          await page.setViewportSize({ width: 390, height: 900 });
+        }
+        const selector = mobile
+          ? '.chat-workspace-mobile__group[role="list"] .chat-workspace-mobile__row'
+          : ".workspace-desktop__attachments .workspace-desktop__row";
+        const attachments = page.locator(selector);
+        await expect.poll(() => attachments.count()).toBe(2);
+        await attachments.first().waitFor();
+        await waitForLayoutSettled(page, selector);
+        for (const row of await attachments.all()) {
+          const bounds = await row.evaluate((element) => {
+            const rowRect = element.getBoundingClientRect();
+            const icons = [...element.querySelectorAll("svg")].map((icon) => {
+              const rect = icon.getBoundingClientRect();
+              return { width: rect.width, height: rect.height };
+            });
+            const name = element.querySelector('[class$="__identity"]')!.getBoundingClientRect();
+            return {
+              rowHeight: rowRect.height,
+              rowWidth: rowRect.width,
+              icons,
+              nameWidth: name.width,
+              contained: name.left >= rowRect.left && name.right <= rowRect.right,
+            };
+          });
+          for (const icon of bounds.icons) {
+            expect(icon.width).toBeGreaterThan(0);
+            expect(Math.max(icon.width, icon.height)).toBeLessThanOrEqual(20);
+          }
+          expect(bounds.icons).toHaveLength(mobile ? 2 : 1);
+          expect(bounds.rowHeight).toBeLessThanOrEqual(mobile ? 48 : 32);
+          expect(bounds.nameWidth).toBeGreaterThan(80);
+          expect(bounds.contained).toBe(true);
+          if (presentation === "narrow") {
+            expect(bounds.rowWidth).toBeLessThan(270);
+          }
+        }
+        const projectFile = page.getByRole("button", { name: "README.md", exact: true });
+        await projectFile.waitFor();
+        expect((await projectFile.boundingBox())!.height).toBeLessThanOrEqual(mobile ? 48 : 32);
+      }
+      await page.getByRole("searchbox", { name: "Search files", exact: true }).fill("CAFÉ");
+      await page.getByText("Cafe\u0301-checklist", { exact: true }).waitFor();
+    });
+  });
+
   it("keeps chat and file navigation usable when returning to a file's folder", async () => {
     await suite.withPage(createControlUiE2eContextOptions(), async ({ page }) => {
       const errors: string[] = [];
@@ -81,9 +169,18 @@ suite.define(() => {
       await file.click();
       const heading = page.getByRole("heading", { name: "Delivery notes", exact: true });
       await heading.waitFor();
+      await gateway.deferNext("sessions.files.download");
       await page.getByRole("button", { name: "More file actions", exact: true }).click();
       await page.getByRole("menuitem", { name: "Attach to session", exact: true }).click();
+      await gateway.waitForRequest("sessions.files.download");
+      await page.setViewportSize({ width: 1300, height: 900 });
+      await waitForLayoutSettled(page, "openclaw-chat-detail-panel");
+      await gateway.resolveDeferred("sessions.files.download");
       await page.getByRole("button", { name: "Remove notes.md", exact: true }).waitFor();
+      expect(await composer.inputValue()).toBe(
+        "Please review the delivery notes before publishing.",
+      );
+      expect(await gateway.getRequests("chat.send")).toHaveLength(0);
       await page.getByRole("button", { name: "Send message", exact: true }).click();
       const sent = await gateway.waitForRequest("chat.send");
       const runId = requireString(requireRecord(sent.params).idempotencyKey, "run ID");

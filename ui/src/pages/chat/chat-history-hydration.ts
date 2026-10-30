@@ -13,6 +13,7 @@ import {
 import { isSessionRunStateActive } from "../../lib/session-run-state.ts";
 import { subscribeToSharedRequest } from "../../lib/shared-request-subscription.ts";
 import {
+  CHAT_HISTORY_OLDER_PAGE_LIMIT,
   captureChatHistoryRun,
   chatHistoryRequestParams,
   requestOlderChatHistoryPage,
@@ -21,7 +22,7 @@ import {
 import { formatChatHistoryLoadError, isRetryableChatReadError } from "./chat-history-retry.ts";
 import {
   type ObservedChatHistoryResult,
-  heldHistoryGapOffset,
+  heldHistoryGapCursor,
   isHistoryCursor,
   resolveChatHistoryPagination,
   historySessionId,
@@ -192,41 +193,39 @@ export async function hydrateChatHistory(
         return undefined;
       }
     }
-    const gapOffset = isHistoryCursor(response)
-      ? null
-      : heldHistoryGapOffset({
-          result: response,
-          previousMessages: state.chatMessages,
-          previousPagination: state.chatHistoryPagination,
-          previousSessionId: state.currentSessionId ?? null,
-        });
-    if (gapOffset !== null) {
-      // A reset after a long turn returns a bounded tail. Read the rows between
-      // it and the start this pane already shows before publishing, so the
-      // opening prompt never turns into an earlier-history boundary. A failed
-      // read keeps the tail and its retryable boundary.
-      const older = await requestOlderChatHistoryPage(
-        client,
-        sessionKey,
-        requestAgentId,
-        gapOffset,
-        isCurrent,
-        read.signal,
-      ).catch(() => undefined);
+    // A window reset asks for a fresh window, not continuity with held rows.
+    if (!isHistoryCursor(response) && !requests.windowReset?.isCurrent()) {
+      const tail = response;
+      const gapCursor = heldHistoryGapCursor({
+        result: tail,
+        previousMessages: state.chatMessages,
+        previousPagination: state.chatHistoryPagination,
+        previousSessionId: state.currentSessionId ?? null,
+        maxRows: CHAT_HISTORY_OLDER_PAGE_LIMIT,
+      });
+      // A bounded tail would turn rows this pane already shows into earlier
+      // history. Read the gap before publishing; a failed read keeps the tail
+      // and its retryable boundary.
+      const older = gapCursor
+        ? await requestOlderChatHistoryPage(
+            client,
+            sessionKey,
+            requestAgentId,
+            { cursor: gapCursor },
+            isCurrent,
+            read.signal,
+          ).catch(() => undefined)
+        : undefined;
       if (!isCurrent()) {
         return undefined;
       }
-      if (
-        older &&
-        !isHistoryCursor(response) &&
-        historySessionId(older) === historySessionId(response)
-      ) {
+      if (older && !older.windowReset && historySessionId(older) === historySessionId(tail)) {
         response = {
-          ...response,
-          messages: prependUniqueNativeMessages(older.messages ?? [], response.messages ?? []),
+          ...tail,
+          messages: prependUniqueNativeMessages(older.messages ?? [], tail.messages ?? []),
           hasMore: older.hasMore,
+          olderCursor: older.olderCursor,
           nextOffset: older.nextOffset,
-          totalMessages: older.totalMessages,
         };
       }
     }
@@ -343,18 +342,21 @@ export async function hydrateChatHistory(
       ? res.sessionInfo?.activeLeafEntryId?.trim() || null
       : (previousDisplayedLeafEntryId ?? null);
     const retainsTranscriptIdentity =
+      !requests.windowReset?.isCurrent() &&
       res.windowReset !== true &&
       (!previousSessionId || !nextSessionId || previousSessionId === nextSessionId) &&
       (previousDisplayedLeafEntryId === undefined ||
         previousDisplayedLeafEntryId === nextDisplayedLeafEntryId);
-    const reconciledHistory = reconcileHistoryTail({
-      nextMessages: visibleMessages,
-      nextPagination,
-      nextSessionId,
-      previousMessages: retainsTranscriptIdentity ? previousTerminalMessages : [],
-      previousPagination,
-      previousSessionId,
-    });
+    const reconciledHistory = retainsTranscriptIdentity
+      ? reconcileHistoryTail({
+          nextMessages: visibleMessages,
+          nextPagination,
+          nextSessionId,
+          previousMessages: previousTerminalMessages,
+          previousPagination,
+          previousSessionId,
+        })
+      : null;
     const authoritativeMessages = reconciledHistory?.messages ?? visibleMessages;
     const scope = readChatSessionProjectionScope(state, {
       sessionKey,
@@ -387,6 +389,7 @@ export async function hydrateChatHistory(
       state.chatDisplayedLeafEntryId = nextDisplayedLeafEntryId;
     }
     state.chatHistoryPagination = reconciledHistory?.pagination ?? nextPagination;
+    delete requests.windowReset;
     state.currentSessionId = nextSessionId;
     applyChatPendingInputs(state, res.pendingInputs, {
       queriedRunIds: inputRunIds,
