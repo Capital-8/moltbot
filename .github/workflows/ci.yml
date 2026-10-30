@@ -70,11 +70,11 @@ jobs:
           xcodebuild -version
           sysctl -n hw.ncpu hw.memsize
           for variant in baseline disabled; do
-            settings=()
+            settings=(-showBuildSettings -json)
             if [[ "$variant" == disabled ]]; then settings+=(COMPILER_INDEX_STORE_ENABLE=NO); fi
             xcodebuild -project apps/ios/OpenClaw.xcodeproj -scheme OpenClawUITests -configuration Debug \
               -derivedDataPath apps/ios/build/SnapshotDerivedData -destination 'generic/platform=iOS Simulator' \
-              "ARCHS=$(uname -m)" ONLY_ACTIVE_ARCH=YES "${settings[@]}" -showBuildSettings -json \
+              "ARCHS=$(uname -m)" ONLY_ACTIVE_ARCH=YES "${settings[@]}" \
               > "$RUNNER_TEMP/index-store-settings/$variant.json"
           done
           node --input-type=module <<'NODE'
