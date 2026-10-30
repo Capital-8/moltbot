@@ -30,10 +30,14 @@ import {
   resolveCurrentRequesterSettleWakeBatch,
 } from "../registry/subagent-requester-settle-identity.js";
 import { isClaimedByLiveRequesterTurn } from "../registry/subagent-requester-turn-liveness.js";
-import { isSameSubagentRunOwner } from "../registry/subagent-run-generation.js";
+import {
+  getSubagentRunIdentity,
+  isSameSubagentRunOwner,
+} from "../registry/subagent-run-generation.js";
 import { captureRequesterContinuationCaller } from "../requester-cron-authority.js";
 import { transferRequesterFinalAttachment } from "../requester-final-attachment.js";
 import { getSubagentDepthFromSessionStoreInWorker } from "../spawn/subagent-depth.js";
+import { isFailedTerminalSubagentRun } from "../subagent-failure.js";
 import { reserveSubagentControllerSource } from "./subagent-announce-controller-source.js";
 import { hasAnnounceSendEvidence } from "./subagent-announce-delivery-retry.js";
 import {
@@ -474,6 +478,18 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
     const directOrigin = resolveAnnounceOrigin(requesterEntry, requesterSessionOrigin);
     // The request hash covers raw input, before transcript hooks. Keep those exact bytes
     // in the wake owner; the accepted transcript may contain only the hook's projection.
+    const retainedPrivateInput =
+      parentOnly && state.privateInput?.runId === directIdempotencyKey
+        ? state.privateInput
+        : undefined;
+    const retainedFailures = new Set(retainedPrivateInput?.representedFailureIdentities);
+    // A retry reuses old message bytes, not the freshly bounded prefix. Legacy
+    // input without provenance may replay, but cannot certify failure custody.
+    const failureHandoffChildren = (
+      retainedPrivateInput
+        ? completionRows.filter((entry) => retainedFailures.has(getSubagentRunIdentity(entry)))
+        : preparedFindings.representedChildren
+    ).filter(isFailedTerminalSubagentRun);
     const wakeMessage = buildRequesterSettleWakeMessage({
       findings: preparedFindings.text,
       requireVisibleReply,
@@ -483,14 +499,18 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
       children: completionRows,
       completionChannel: directOrigin?.channel,
       requesterOrigin: directOrigin,
-      retainedMessage:
-        parentOnly && state.privateInput?.runId === directIdempotencyKey
-          ? state.privateInput.message
-          : undefined,
+      retainedMessage: retainedPrivateInput?.message,
       retryMissingResult: !parentOnly && knownNondelivery && state.attemptCount > 0,
     });
     const dispatchState = parentOnly
-      ? { ...state, privateInput: { runId: directIdempotencyKey, message: wakeMessage } }
+      ? {
+          ...state,
+          privateInput: retainedPrivateInput ?? {
+            runId: directIdempotencyKey,
+            message: wakeMessage,
+            representedFailureIdentities: failureHandoffChildren.map(getSubagentRunIdentity),
+          },
+        }
       : state;
     controllerInput = await reserveSubagentControllerSource(
       settledBatch[0]!,
@@ -603,7 +623,7 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
             onInputCommitted: pauseNotice
               ? undefined
               : sourceReceiptAdmission.observeFailureHandoff(
-                  preparedFindings.representedChildren,
+                  failureHandoffChildren,
                   isSourceSessionEffectsAllowed,
                 ),
             onBeforeDispatch: async () => {

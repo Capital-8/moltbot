@@ -21,6 +21,7 @@ import { SessionManager } from "../sessions/session-manager.js";
 import * as announceDelivery from "../subagents/announce/subagent-announce-delivery.js";
 import { loadRequesterSessionEntry } from "../subagents/announce/subagent-announce-delivery.runtime.js";
 import { maybeWakeRequesterAfterAllChildrenSettled } from "../subagents/announce/subagent-announce.requester-settle-wake.js";
+import { mutateRequesterCompletionBatch } from "../subagents/completion/subagent-completion-admission.store.js";
 import { subagentRuns } from "../subagents/registry/subagent-registry-memory.js";
 import { mutateSubagentRuns } from "../subagents/registry/subagent-registry-persistence.js";
 import { subscribeSubagentRunChanges } from "../subagents/registry/subagent-registry-publication.js";
@@ -28,6 +29,7 @@ import {
   loadSubagentRegistryFromSqlite,
   persistRegistryFixture,
 } from "../subagents/registry/subagent-registry-state.fixture.test-support.js";
+import { clearSubagentRunsReadCacheForTest } from "../subagents/registry/subagent-registry-state.js";
 import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
 import {
   createAgentsWaitTool,
@@ -487,12 +489,16 @@ describe("native collector requester ownership", () => {
   );
 
   it.each([
-    [false, false],
-    [true, false],
-    [true, true],
-  ])(
-    "leaves omitted settle failures unacknowledged (visible failure=%s, rejected=%s)",
-    async (visibleFailure, rejected) => {
+    [false, false, undefined],
+    [true, false, undefined],
+    [true, true, undefined],
+    [true, false, "changed"],
+    [true, false, "unchanged"],
+    [true, false, "legacy"],
+    [true, false, "replacement"],
+  ] as const)(
+    "leaves omitted settle failures unacknowledged (visible failure=%s, rejected=%s, private retry=%s)",
+    async (visibleFailure, rejected, retry) => {
       await withOpenClawTestState(
         { scenario: "minimal", env: { OPENCLAW_TEST_READ_SUBAGENT_RUNS_FROM_SQLITE: "1" } },
         async () => {
@@ -539,20 +545,45 @@ describe("native collector requester ownership", () => {
               requesterAgentId: "main",
               requesterStorePath: requester.physicalStorePath,
               collect: false,
+              completionTarget: retry ? "parent" : undefined,
               collectorCompletion: undefined,
               expectsCompletionMessage: true,
               requesterSettleWake: { status: "pending", attemptCount: 0, batchRunIds },
             });
           }
           persistRegistryFixture(
-            new Map(failures.map((child) => [child.runId, subagentRuns.get(child.runId)!])),
+            new Map(
+              (retry ? children : failures).map((child) => [
+                child.runId,
+                subagentRuns.get(child.runId)!,
+              ]),
+            ),
           );
-          // Isolate transport/model execution and outer batch publication. Selection,
-          // current-source guards, commit observer, native recorder and custody are real.
+          // Transport/model execution is isolated. Private retries persist their real
+          // batch transitions, then reconstruct the retained input from SQLite.
+          let firstMessage: string | undefined;
+          let firstRunId: string | undefined;
+          const completed =
+            vi.fn<
+              Parameters<typeof maybeWakeRequesterAfterAllChildrenSettled>[0]["completeBatch"]
+            >();
           const deliver = vi.spyOn(announceDelivery, "deliverSubagentAnnouncement");
           onTestFinished(() => deliver.mockRestore());
           deliver.mockImplementation(async (dispatch) => {
             const message = dispatch.triggerMessage;
+            const firstAttempt = retry !== undefined && firstMessage === undefined;
+            const refuseInput = rejected || firstAttempt;
+            if (retry) {
+              if (firstAttempt) {
+                firstMessage = message;
+                firstRunId = dispatch.directIdempotencyKey;
+              } else {
+                expect(message).toBe(firstMessage);
+                expect(dispatch.directIdempotencyKey).toBe(firstRunId);
+              }
+              await dispatch.onBeforeDispatch?.();
+              dispatch.onAccepted?.({ runId: dispatch.directIdempotencyKey });
+            }
             const findings = message.slice(message.indexOf("Child completion results:"));
             expect(findings.length).toBeLessThanOrEqual(160_000);
             expect(findings.isWellFormed()).toBe(true);
@@ -568,6 +599,15 @@ describe("native collector requester ownership", () => {
               admittedSessionId: "parent",
               activeSessionAgentId: "main",
               sessionEntry: entry,
+              privateCompletion: retry ? true : undefined,
+              settleWakeReplay: retry
+                ? {
+                    sourceSessionKeys: dispatch.settleWakeSourceSessionKeys!,
+                    assertCurrent: () => {
+                      expect(dispatch.isSourceSessionEffectsAllowed?.()).toBe(true);
+                    },
+                  }
+                : undefined,
               assertCurrent: () => {},
               onUserTurnMediaPersisted: () => {},
               suppressVisibleSessionEffects: false,
@@ -596,7 +636,7 @@ describe("native collector requester ownership", () => {
             try {
               expect(turn.recorder).toBeDefined();
               const write = turn.recorder!.persistApproved(
-                rejected
+                refuseInput
                   ? {
                       target: async () => {
                         throw new Error("Input refused");
@@ -604,7 +644,7 @@ describe("native collector requester ownership", () => {
                     }
                   : undefined,
               );
-              if (rejected) {
+              if (refuseInput) {
                 await expect(write).rejects.toThrow("Input refused");
                 expect(onInputCommitted).not.toHaveBeenCalled();
                 expect(await loadTranscriptEvents(target)).toEqual([]);
@@ -613,13 +653,13 @@ describe("native collector requester ownership", () => {
                 expect(onInputCommitted).toHaveBeenCalledOnce();
                 await onInputCommitted.mock.results[0]?.value;
               }
-              const saved = loadSubagentRegistryFromSqlite();
-              expect(saved.get(tail.runId)?.delivery?.failureHandoff).toBeUndefined();
-              expect(Boolean(saved.get(visible.runId)?.delivery?.failureHandoff)).toBe(
-                visibleFailure && !rejected,
-              );
+              if (refuseInput) {
+                const saved = loadSubagentRegistryFromSqlite();
+                expect(saved.get(tail.runId)?.delivery?.failureHandoff).toBeUndefined();
+                expect(saved.get(visible.runId)?.delivery?.failureHandoff).toBeUndefined();
+              }
               const transcript = JSON.stringify(await loadTranscriptEvents(target));
-              if (!rejected) {
+              if (!refuseInput) {
                 expect(await loadTranscriptEvents(target)).toEqual(
                   expect.arrayContaining([
                     expect.objectContaining({
@@ -634,27 +674,89 @@ describe("native collector requester ownership", () => {
                 expect(transcript).toContain("HEALTHY_SETTLE_FINDING");
               }
               expect(transcript).not.toContain("omitted-tail saved progress");
-              if (visibleFailure && !rejected) {
+              if (visibleFailure && !refuseInput) {
                 expect(transcript).toContain("visible-failure cause");
                 expect(transcript).toContain("visible-failure saved progress");
               }
             } finally {
               await releasePreparedAgentRunUserTurn(turn);
             }
-            return { delivered: !rejected, path: "direct" };
+            return firstAttempt
+              ? {
+                  delivered: false,
+                  path: "direct",
+                  disposition: "retryable",
+                  reason: "requester_transcript_conflict",
+                }
+              : { delivered: !rejected, path: "direct" };
           });
-          expect(
-            await maybeWakeRequesterAfterAllChildrenSettled({
+          const wake = () =>
+            maybeWakeRequesterAfterAllChildrenSettled({
               requesterSessionKey: key,
               settledEntry: subagentRuns.get(tail.runId)!,
               isSourceCurrent: () => true,
-              // This transport fixture only commits the input; lifecycle batch
-              // publication is covered by the requester-settle native tests.
-              transitionBatch: () => {},
-              completeBatch: () => {},
-            }),
-          ).toBe(!rejected);
-          expect(deliver).toHaveBeenCalledOnce();
+              transitionBatch: async (entries, next, onPublished) => {
+                if (!retry) {
+                  return;
+                }
+                expect(
+                  await mutateRequesterCompletionBatch({
+                    entries,
+                    operation: { kind: "transition", state: next },
+                    assertCurrent: () => {},
+                    onPublished: () =>
+                      onPublished?.(entries.map((member) => subagentRuns.get(member.runId)!)),
+                  }),
+                ).toEqual({ applied: true, publication: "published" });
+              },
+              completeBatch: completed,
+            });
+          if (retry) {
+            expect(await wake()).toBe(false);
+            expect(deliver).toHaveBeenCalledOnce();
+            const saved = loadSubagentRegistryFromSqlite();
+            const retained = saved.get(tail.runId)!.requesterSettleWake!;
+            expect(retained).toMatchObject({
+              status: "pending",
+              attemptCount: 1,
+              privateInput: { runId: firstRunId, message: firstMessage },
+            });
+            expect(retained.nextAttemptAt).toBeGreaterThan(Date.now());
+            for (const child of saved.values()) {
+              child.requesterSettleWake!.nextAttemptAt = 0;
+              if (retry === "legacy") {
+                child.requesterSettleWake!.privateInput = {
+                  runId: firstRunId!,
+                  message: firstMessage!,
+                };
+              }
+              if (
+                (retry === "changed" || retry === "legacy") &&
+                child.runId.startsWith("healthy-")
+              ) {
+                // The frozen wave still owns this row; its old result is obsolete.
+                child.killReconciliation = { killedAt: 8, supersededAt: 9 };
+              }
+              if (retry === "replacement" && child.runId === visible.runId) {
+                child.generation = 2;
+              }
+            }
+            persistRegistryFixture(saved);
+            subagentRuns.clear();
+            clearSubagentRunsReadCacheForTest();
+            for (const [id, child] of loadSubagentRegistryFromSqlite()) {
+              subagentRuns.set(id, child);
+            }
+          }
+          const delivered = await wake();
+          expect(deliver).toHaveBeenCalledTimes(retry ? 2 : 1);
+          expect(completed.mock.calls.at(-1)?.[2]?.error).toBeUndefined();
+          expect(delivered).toBe(!rejected);
+          const saved = loadSubagentRegistryFromSqlite();
+          expect(saved.get(tail.runId)?.delivery?.failureHandoff).toBeUndefined();
+          expect(Boolean(saved.get(visible.runId)?.delivery?.failureHandoff)).toBe(
+            visibleFailure && !rejected && retry !== "legacy" && retry !== "replacement",
+          );
         },
       );
     },
