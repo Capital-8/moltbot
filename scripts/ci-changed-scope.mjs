@@ -770,6 +770,7 @@ export function resolveAllowedGeneratedMixBranch(
 // Retained-settings proof exercises these concrete producer and consumer owners.
 // Keep unrelated app/config changes out of model-download qualification.
 const MLX_SETTINGS_PROOF_INPUTS = new Set([
+  "scripts/lib/macos-mlx-settings-manifest.mts",
   "apps/macos/Sources/OpenClaw/AppProfile.swift",
   "apps/macos/Sources/OpenClaw/OpenClawPaths.swift",
   "apps/macos/Sources/OpenClaw/OpenClawConfigFile.swift",

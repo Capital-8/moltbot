@@ -138,12 +138,36 @@ await runWithFailedTrailer("macos-native", async () => {
     if (Object.keys(prepared.overlays).length !== 2) {
       throw new Error("Settings requires both test overlays");
     }
-    for (const source of [prepared.stable, prepared.fixed]) {
+    if (
+      Object.keys(prepared.testBuildManifests ?? {})
+        .toSorted()
+        .join(",") !== "fixed,stable"
+    ) {
+      throw new Error("Settings requires both focused manifest receipts");
+    }
+    for (const name of ["stable", "fixed"] as const) {
+      const source = prepared[name];
       if (
         !/^[a-f0-9]{40}$/.test(source.sha) ||
         fs.realpathSync(source.sourceRoot) !== source.sourceRoot
       ) {
         throw new Error("Invalid prepared settings source");
+      }
+      const manifest = prepared.testBuildManifests[name];
+      if (
+        manifest.semanticVerified !== true ||
+        !/^[a-f0-9]{40}$/.test(manifest.originalBlob) ||
+        ![
+          manifest.originalSHA256,
+          manifest.effectiveSHA256,
+          manifest.originalDumpSHA256,
+          manifest.effectiveDumpSHA256,
+        ].every((hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)) ||
+        createHash("sha256")
+          .update(fs.readFileSync(path.join(source.sourceRoot, "apps/macos/Package.swift")))
+          .digest("hex") !== manifest.effectiveSHA256
+      ) {
+        throw new Error("Settings focused manifest is unverified or changed");
       }
       for (const [relative, hash] of Object.entries(prepared.overlays)) {
         if (

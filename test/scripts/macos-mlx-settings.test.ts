@@ -5,6 +5,114 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { hasMlxNativeProofInputs } from "../../scripts/ci-changed-scope.mjs";
+import {
+  projectMlxSettingsManifest,
+  verifyMlxSettingsPackageProjection,
+} from "../../scripts/lib/macos-mlx-settings-manifest.mts";
+
+it("restricts the real settings test target through one manifest insertion", () => {
+  const original = fs.readFileSync(
+    new URL("../../apps/macos/Package.swift", import.meta.url),
+    "utf8",
+  );
+  const projected = projectMlxSettingsManifest(original);
+  const insertion = '            sources: ["MLXSettingsUpgradeTests.swift"],\n';
+  expect(projected.split(insertion)).toHaveLength(2);
+  expect(projected.replace(insertion, "")).toBe(original);
+  expect(() => projectMlxSettingsManifest(projected)).toThrow(/Unsupported/);
+  expect(() => projectMlxSettingsManifest(original + original)).toThrow(/Ambiguous/);
+  expect(() =>
+    projectMlxSettingsManifest(original.replace("OpenClawIPCTests", "OtherTests")),
+  ).toThrow(/Ambiguous/);
+});
+
+const packageDump = () => ({
+  name: "OpenClaw",
+  dependencies: [
+    { sourceControl: [{ identity: "dependency", requirement: { exact: ["1.0.0"] } }] },
+  ],
+  products: [{ name: "OpenClaw", targets: ["OpenClaw"], type: { executable: null } }],
+  targets: [
+    { name: "OpenClaw", type: "executable", dependencies: ["OpenClawKit"], settings: ["strict"] },
+    {
+      name: "OpenClawIPCTests",
+      type: "test",
+      dependencies: ["OpenClaw", "OpenClawKit"],
+      path: "Tests/OpenClawIPCTests",
+      sources: null as string[] | null,
+      settings: ["strict", "SwiftTesting"],
+      resources: [{ rule: "copy", path: "fixture.json" }],
+    },
+  ],
+});
+
+it("admits only the settings target source list in SwiftPM metadata", () => {
+  const original = packageDump();
+  const projected = structuredClone(original);
+  projected.targets[1]!.sources = ["MLXSettingsUpgradeTests.swift"];
+  expect(() => verifyMlxSettingsPackageProjection(original, projected)).not.toThrow();
+  expect(original.targets[1]!.sources).toBeNull();
+});
+
+it.each([
+  "production dependency",
+  "production settings",
+  "test dependency",
+  "test settings",
+  "test path",
+  "test resource",
+  "package dependency",
+  "product",
+  "extra target",
+  "extra test source",
+])("rejects a focused manifest that also changes %s", (change) => {
+  const original = packageDump();
+  const projected = structuredClone(original);
+  projected.targets[1]!.sources = ["MLXSettingsUpgradeTests.swift"];
+  switch (change) {
+    case "production dependency":
+      projected.targets[0]!.dependencies = [];
+      break;
+    case "production settings":
+      projected.targets[0]!.settings = [];
+      break;
+    case "test dependency":
+      projected.targets[1]!.dependencies = [];
+      break;
+    case "test settings":
+      projected.targets[1]!.settings = [];
+      break;
+    case "test path":
+      projected.targets[1]!.path = "OtherTests";
+      break;
+    case "test resource":
+      projected.targets[1]!.resources = [];
+      break;
+    case "package dependency":
+      projected.dependencies = [];
+      break;
+    case "product":
+      projected.products = [];
+      break;
+    case "extra target":
+      projected.targets.push(structuredClone(projected.targets[0]!));
+      break;
+    case "extra test source":
+      projected.targets[1]!.sources.push("UnrelatedTests.swift");
+      break;
+  }
+  expect(() => verifyMlxSettingsPackageProjection(original, projected)).toThrow(/package graph/);
+});
+
+it("rejects missing, duplicated or previously scoped SwiftPM test targets", () => {
+  for (const variant of ["missing", "duplicated", "scoped"]) {
+    const original = packageDump();
+    if (variant === "missing") original.targets.pop();
+    if (variant === "duplicated") original.targets.push(structuredClone(original.targets[1]!));
+    if (variant === "scoped") original.targets[1]!.sources = ["OtherTests.swift"];
+    expect(() => verifyMlxSettingsPackageProjection(original, original)).toThrow();
+  }
+});
 
 it("prepares the stable producer with its full frozen workspace graph and own cwd", () => {
   const source = fs.readFileSync(
@@ -181,6 +289,7 @@ it.skipIf(process.platform === "win32")(
 it.each([
   "scripts/test-macos-mlx-settings.mts",
   "scripts/lib/native-ci-budget.mts",
+  "scripts/lib/macos-mlx-settings-manifest.mts",
   "scripts/test-macos-native.mts",
   "test/helpers/macos-mlx-settings-producer.ts",
   "apps/macos/Tests/OpenClawIPCTests/MLXSettingsUpgradeTests.swift",

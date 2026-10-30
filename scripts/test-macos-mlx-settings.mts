@@ -4,6 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { runWithFailedTrailer } from "./lib/failed-trailer.mts";
+import {
+  mlxSettingsManifestPath,
+  projectMlxSettingsManifest,
+  verifyMlxSettingsPackageProjection,
+} from "./lib/macos-mlx-settings-manifest.mts";
 import { hasUnjoinedWork, runManagedCommand } from "./lib/managed-child-process.mts";
 import { NativeCiBudget } from "./lib/native-ci-budget.mts";
 
@@ -36,6 +41,10 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
   let canRemove = true;
   let phase = "source setup";
   let phaseEnd = performance.now() + 6 * 60_000;
+  const manifestProjections = new Map<
+    string,
+    { original: Buffer; originalBlob: string; effectiveBlob: string; effectiveSHA256: string }
+  >();
   const result: Record<string, unknown> = {
     version: 1,
     complete: false,
@@ -131,9 +140,14 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
         fs.realpathSync(file).startsWith(source + path.sep),
         "Source link escapes its own revision",
       );
+      const projection =
+        entry.relative === mlxSettingsManifestPath ? manifestProjections.get(source) : undefined;
+      if (projection) {
+        assert.equal(entry.blob, projection.originalBlob, "Original manifest identity changed");
+      }
       assert.equal(
         createHash("sha1").update(`blob ${data.length}\0`).update(data).digest("hex"),
-        entry.blob,
+        projection?.effectiveBlob ?? entry.blob,
         `Production input changed: ${entry.relative}`,
       );
     }
@@ -265,6 +279,57 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
     verify(current, currentTree);
     verifyOverlays(stable);
     verifyOverlays(current);
+    const testBuildManifests: Record<string, object> = {};
+    result.testBuildManifests = testBuildManifests;
+    for (const [name, source, tree] of [
+      ["stable", stable, stableTree],
+      ["fixed", current, currentTree],
+    ] as const) {
+      const file = path.join(source, mlxSettingsManifestPath);
+      const original = fs.readFileSync(file);
+      const entry = tree.find((item) => item.relative === mlxSettingsManifestPath);
+      assert(entry?.mode === "100644", "Settings manifest must be a tracked regular source file");
+      const originalDump = await run(
+        "swift",
+        ["package", "--package-path", "apps/macos", "dump-package"],
+        source,
+        30_000,
+        true,
+      );
+      const effective = Buffer.from(projectMlxSettingsManifest(original.toString("utf8")));
+      const effectiveSHA256 = createHash("sha256").update(effective).digest("hex");
+      manifestProjections.set(source, {
+        original,
+        originalBlob: entry.blob,
+        effectiveBlob: createHash("sha1")
+          .update(`blob ${effective.length}\0`)
+          .update(effective)
+          .digest("hex"),
+        effectiveSHA256,
+      });
+      const receipt = {
+        originalBlob: entry.blob,
+        originalSHA256: createHash("sha256").update(original).digest("hex"),
+        effectiveSHA256,
+        originalDumpSHA256: createHash("sha256").update(originalDump).digest("hex"),
+        effectiveDumpSHA256: "",
+        semanticVerified: false,
+      };
+      testBuildManifests[name] = receipt;
+      fs.writeFileSync(file, effective);
+      const effectiveDump = await run(
+        "swift",
+        ["package", "--package-path", "apps/macos", "dump-package"],
+        source,
+        30_000,
+        true,
+      );
+      verifyMlxSettingsPackageProjection(JSON.parse(originalDump), JSON.parse(effectiveDump));
+      receipt.effectiveDumpSHA256 = createHash("sha256").update(effectiveDump).digest("hex");
+      receipt.semanticVerified = true;
+      verify(source, tree);
+    }
+    Object.assign(identities, { testBuildManifests });
     const builtProducts: Record<string, object[]> = {};
     for (const [name, source, tree] of [
       ["stable", stable, stableTree],
@@ -391,19 +456,44 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
     throw error;
   } finally {
     result.sourceProcessesRetired = canRemove;
+    result.scratchRemoved = false;
+    result.testBuildManifestsRestored = false;
+    let retirementFailure: unknown;
     if (canRemove) {
-      fs.rmSync(scratch, { recursive: true, force: true });
+      try {
+        for (const [source, projection] of manifestProjections) {
+          const file = path.join(source, mlxSettingsManifestPath);
+          assert.equal(
+            sha256(file),
+            projection.effectiveSHA256,
+            "Settings manifest changed before retirement",
+          );
+          fs.writeFileSync(file, projection.original);
+          assert.equal(
+            sha256(file),
+            createHash("sha256").update(projection.original).digest("hex"),
+            "Original settings manifest was not restored",
+          );
+        }
+        result.testBuildManifestsRestored = true;
+        fs.rmSync(scratch, { recursive: true, force: true });
+        result.scratchRemoved = true;
+      } catch (error) {
+        retirementFailure = error;
+        result.complete = false;
+        result.retirementFailure = String(error);
+      }
     }
-    result.scratchRemoved = canRemove;
     const payload = JSON.stringify(result, null, 2)
       .replaceAll(scratch, "<owned-scratch>")
       .replaceAll(current, "<current-source>");
     assert(Buffer.byteLength(payload) < 128 * 1024, "Settings metadata exceeds artifact bound");
     fs.writeFileSync(path.join(proofDir, "settings-sources.json"), payload + "\n");
-    if (!canRemove) {
-      console.error(
-        `[mlx-settings] retained resources after unverified child retirement: ${scratch}`,
-      );
+    if (!result.scratchRemoved) {
+      console.error(`[mlx-settings] retained resources after incomplete retirement: ${scratch}`);
+    }
+    if (retirementFailure) {
+      throw retirementFailure;
     }
   }
 });
