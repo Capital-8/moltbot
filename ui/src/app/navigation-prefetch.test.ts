@@ -94,7 +94,10 @@ function setup(
     ];
   }
   let notify = () => {};
-  const outlet = { presentationSettled: false };
+  const outlet = {
+    presentationSettled: false,
+    settlePresentation: async () => outlet.presentationSettled,
+  };
   const transcript = { ready: false };
   const host = createShellOwner();
   const shell = document.body.appendChild(host.element);
@@ -181,6 +184,82 @@ async function idle() {
   idleCallbacks.shift()?.();
   await vi.advanceTimersByTimeAsync(0);
 }
+
+function interactionPreloads() {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  for (const route of ["chat", "new"]) {
+    const template = document.createElement("template");
+    template.id = `openclaw-interaction-preloads-${route}`;
+    template.innerHTML = `<link rel="preload" as="script" crossorigin="" fetchpriority="low" href="./assets/${route}-controls.js"><link rel="preload" as="style" crossorigin="" fetchpriority="low" href="./assets/${route}-controls.css">`;
+    document.head.append(template);
+    cleanups.push(() => template.remove());
+  }
+  return async () => {
+    await Promise.resolve();
+    const callbacks = [...frames.values()];
+    frames.clear();
+    callbacks.forEach((callback) => callback(0));
+  };
+}
+
+it("fetches closed controls after route paint without waiting for transcript readiness", async () => {
+  const frame = interactionPreloads();
+  const fixture = setup("dashboard");
+  await frame();
+  expect(hints()).toHaveLength(0);
+  fixture.outlet.presentationSettled = true;
+  fixture.notify();
+  await frame();
+  expect(hints()).toHaveLength(0);
+  await frame();
+  expect(
+    hints().map((link) => [
+      link.rel,
+      link.getAttribute("as"),
+      link.href,
+      link.getAttribute("fetchpriority"),
+    ]),
+  ).toEqual([
+    ["preload", "script", new URL("/control/assets/chat-controls.js", location.origin).href, "low"],
+    ["preload", "style", new URL("/control/assets/chat-controls.css", location.origin).href, "low"],
+  ]);
+  expect(fixture.transcript.ready).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(document.querySelector("script")).toBeNull();
+  fixture.notify();
+  await frame();
+  await frame();
+  expect(hints()).toHaveLength(2);
+  fixture.stop();
+  expect(hints()).toHaveLength(0);
+});
+
+it("retires post-paint hints on navigation and respects Save-Data before appending", async () => {
+  const frame = interactionPreloads();
+  const fixture = setup("dashboard");
+  fixture.outlet.presentationSettled = true;
+  fixture.notify();
+  await frame();
+  fixture.state.matches = [{ ...fixture.state.matches[0]!, routeId: "new-session" }];
+  connection.saveData = true;
+  fixture.notify();
+  await frame();
+  expect(hints()).toHaveLength(0);
+  connection.saveData = false;
+  fixture.notify();
+  await frame();
+  await frame();
+  expect(hints().map((link) => link.href)).toEqual([
+    new URL("/control/assets/new-controls.js", location.origin).href,
+    new URL("/control/assets/new-controls.css", location.origin).href,
+  ]);
+});
 
 it("warms New Session after presentation and leaves other routes for intent", async () => {
   const fixture = setup();

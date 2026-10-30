@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { build } from "vite";
 import { describe, expect, it } from "vitest";
+import { selectControlUiRoutePreloads } from "../../../src/gateway/control-ui-route-preloads.ts";
 import { collectControlUiBootAssets } from "../../config/control-ui-boot-preloads.ts";
 import {
   controlUiBootManifestKey,
   controlUiCodeSplitting,
   controlUiStableChunkName,
 } from "../../config/control-ui-chunking.ts";
+import { extractControlUiStartupAssetPaths } from "../../config/control-ui-startup-assets.ts";
 
 const modulePath = (relative: string) => new URL(relative, import.meta.url).pathname;
 
@@ -40,10 +42,36 @@ function buildFixture(
 }
 
 describe("Control UI build chunking", () => {
-  it("downloads closed controls and their static dependencies with only their owning routes", async () => {
+  it("counts activated route links while leaving nested template contents inert", () => {
+    const html = `
+      <script type="module" src="./assets/entry.js"></script>
+      <template data-openclaw-route-preloads="chat">
+        <link rel="modulepreload" href="./assets/chat.js">
+      </template>
+      <template id="openclaw-interaction-preloads-chat">
+        <link rel="preload" as="script" href="./assets/menu.js">
+        <template><script src="./assets/nested.js"></script></template>
+        <link rel="preload" as="style" href="./assets/menu.css">
+      </template>
+      <link rel="modulepreload" href="./assets/runtime.js">`;
+    expect(extractControlUiStartupAssetPaths(selectControlUiRoutePreloads(html, "chat"))).toEqual([
+      "assets/chat.js",
+      "assets/entry.js",
+      "assets/runtime.js",
+    ]);
+    expect(extractControlUiStartupAssetPaths(selectControlUiRoutePreloads(html, null))).toEqual([
+      "assets/entry.js",
+      "assets/runtime.js",
+    ]);
+  });
+  it("keeps closed control dependencies in post-paint hints for their owning routes", async () => {
     const effort = modulePath("../pages/chat/components/chat-effort-picker-panel.tsx");
     const plus = modulePath("../pages/chat/components/chat-composer-plus-menu-content.tsx");
     const header = modulePath("../pages/chat/components/chat-header-session-menu-content.tsx");
+    const panel = modulePath("../pages/chat/components/chat-header-panel-menu-content.tsx");
+    const microphone = modulePath("../pages/chat/components/chat-composer-microphone-menu.tsx");
+    const online = modulePath("../components/app-sidebar-online.tsx");
+    const common = "\0common-control-dependency";
     const nested = "\0closed-control-dependency";
     const rare = "\0rare-control";
     const entry = "\0closed-control-preloads";
@@ -52,14 +80,21 @@ describe("Control UI build chunking", () => {
       new Map([
         [
           entry,
-          `export const effort = () => import(${JSON.stringify(effort)}); export const plus = () => import(${JSON.stringify(plus)}); export const header = () => import(${JSON.stringify(header)});`,
+          `export { common } from ${JSON.stringify(common)}; export const effort = () => import(${JSON.stringify(effort)}); export const plus = () => import(${JSON.stringify(plus)}); export const header = () => import(${JSON.stringify(header)}); export const panel = () => import(${JSON.stringify(panel)}); export const microphone = () => import(${JSON.stringify(microphone)}); export const online = () => import(${JSON.stringify(online)});`,
         ],
-        [effort, 'export const render = () => "effort";'],
+        [
+          effort,
+          `import { common } from ${JSON.stringify(common)}; export const render = () => common;`,
+        ],
         [
           plus,
           `export { render } from ${JSON.stringify(nested)}; export const rare = () => import(${JSON.stringify(rare)});`,
         ],
         [header, 'export const render = () => "header";'],
+        [panel, 'export const render = () => "panel";'],
+        [microphone, 'export const render = () => "microphone";'],
+        [online, 'export const render = () => "online";'],
+        [common, 'export const common = "common";'],
         [nested, 'export const render = () => "nested";'],
         [rare, 'export const render = () => "rare";'],
       ]),
@@ -73,14 +108,24 @@ describe("Control UI build chunking", () => {
     const chunkFor = (id: string) =>
       built.output.find((file) => file.type === "chunk" && id in file.modules)!.fileName;
     for (const id of [effort, plus, nested]) {
-      expect(assets.interactionOnly.chat.has(chunkFor(id))).toBe(true);
-      expect(assets.interactionOnly.new.has(chunkFor(id))).toBe(true);
-      expect(assets.initial.has(chunkFor(id))).toBe(false);
+      for (const route of ["chat", "new"] as const) {
+        expect(assets.postPaintInteractionOnly[route].has(chunkFor(id))).toBe(true);
+        expect(assets[route].has(chunkFor(id))).toBe(false);
+      }
     }
-    expect(assets.interactionOnly.chat.has(chunkFor(header))).toBe(true);
-    expect(assets.new.has(chunkFor(header))).toBe(false);
-    expect(assets.chat.has(chunkFor(rare))).toBe(false);
-    expect(assets.new.has(chunkFor(rare))).toBe(false);
+    for (const id of [header, panel, microphone]) {
+      expect(assets.postPaintInteractionOnly.chat.has(chunkFor(id))).toBe(true);
+      expect(assets.postPaintInteractionOnly.new.has(chunkFor(id))).toBe(false);
+      expect(assets.chat.has(chunkFor(id))).toBe(false);
+      expect(assets.new.has(chunkFor(id))).toBe(false);
+    }
+    for (const route of ["chat", "new"] as const) {
+      expect(assets.interactionOnly[route].has(chunkFor(online))).toBe(true);
+      expect(assets[route].has(chunkFor(common))).toBe(true);
+      expect(assets.postPaintInteractionOnly[route].has(chunkFor(common))).toBe(false);
+      expect(assets.postPaintInteractionOnly[route].has(chunkFor(rare))).toBe(false);
+      expect(assets[route].has(chunkFor(rare))).toBe(false);
+    }
   });
   it("keeps the creator runtime and its copy outside shared admission and virtualizer chunks", async () => {
     const owner = modulePath("../pages/templates/creator-owner.ts");

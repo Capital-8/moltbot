@@ -50,7 +50,14 @@ export function connectShellIdle(
   const base = new URL(`${resourceBasePath.replace(/\/$/u, "")}/`, location.origin);
   const pending = new Set<string>();
   const seen = new Set(performance.getEntriesByType("resource").map((entry) => entry.name));
-  const links = new Map<HTMLLinkElement, () => void>();
+  for (const element of document.head.children) {
+    if (element instanceof HTMLLinkElement) {
+      seen.add(element.href);
+    } else if (element instanceof HTMLScriptElement && element.src) {
+      seen.add(element.src);
+    }
+  }
+  const links = new Map<HTMLLinkElement, (() => void) | undefined>();
   const intentTimers = new Map<Element, ReturnType<typeof setTimeout>>();
   const abort = new AbortController();
   let manifest: Record<string, string[]> | undefined = descriptor ? undefined : {};
@@ -59,6 +66,7 @@ export function connectShellIdle(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let idle: number | undefined;
   let intent: string | undefined;
+  let interactionFrame: number | undefined;
   // Explicit intent wins. A declared next interaction owns this route's idle work;
   // routes without one fall back to New Session.
   const nextPending = () => {
@@ -88,6 +96,50 @@ export function connectShellIdle(
     );
   };
   const ready = () => available() && outlet()?.presentationSettled === true && transcriptsReady();
+  const preloadInteractions = async () => {
+    if (interactionFrame !== undefined) {
+      cancelAnimationFrame(interactionFrame);
+      interactionFrame = undefined;
+    }
+    const routeId = router.getState().matches[0]?.routeId;
+    const route =
+      routeId && isSessionRouteId(routeId) ? "chat" : routeId === "new-session" ? "new" : null;
+    const template = route && document.getElementById(`openclaw-interaction-preloads-${route}`);
+    if (!available() || !(template instanceof HTMLTemplateElement)) {
+      return;
+    }
+    if (!(await outlet()?.settlePresentation()) || !available()) {
+      return;
+    }
+    // Fetch closed controls after the committed route has painted. Their lazy
+    // components still own evaluation; this does not wait for transcript data.
+    interactionFrame = requestAnimationFrame(() => {
+      interactionFrame = requestAnimationFrame(() => {
+        interactionFrame = undefined;
+        if (
+          !available() ||
+          router.getState().matches[0]?.routeId !== routeId ||
+          outlet()?.presentationSettled !== true
+        ) {
+          return;
+        }
+        for (const source of template.content.children) {
+          if (!(source instanceof HTMLLinkElement)) {
+            continue;
+          }
+          const href = new URL(source.getAttribute("href")!, base).href;
+          if (seen.has(href)) {
+            continue;
+          }
+          seen.add(href);
+          const link = source.cloneNode() as HTMLLinkElement;
+          link.href = href;
+          links.set(link, undefined);
+          document.head.append(link);
+        }
+      });
+    });
+  };
   const cancel = () => {
     clearTimeout(timer);
     timer = undefined;
@@ -97,6 +149,7 @@ export function connectShellIdle(
     }
   };
   const schedule = () => {
+    void preloadInteractions();
     cancel();
     if (!available() || running || (manifest && !nextPending() && !hasIdleWarmups())) {
       return;
@@ -315,12 +368,15 @@ export function connectShellIdle(
   return () => {
     active = false;
     cancel();
+    if (interactionFrame !== undefined) {
+      cancelAnimationFrame(interactionFrame);
+    }
     abort.abort();
     intentTimers.forEach((intentTimer) => clearTimeout(intentTimer));
     intentTimers.clear();
     stops.forEach((stop) => stop());
     links.forEach((finish, link) => {
-      finish();
+      finish?.();
       link.remove();
     });
     stopFavicon();

@@ -5,8 +5,6 @@ import { controlUiBootEntryRoute, controlUiBootManifestKey } from "./control-ui-
 // These common interactions download beside the route, but evaluate only on use.
 // Include the nested option entries too: opening a menu must not start a second RTT.
 const sharedInteractionEntries = new Set([
-  "ui/src/pages/chat/components/chat-effort-picker-panel.tsx",
-  "ui/src/pages/chat/components/chat-composer-plus-menu-content.tsx",
   "ui/src/pages/chat/components/chat-composer-mention-menu-engine.ts",
   "ui/src/pages/chat/components/chat-composer-emoji-engine.ts",
   "ui/src/pages/chat/components/chat-composer-slash-menu.tsx",
@@ -20,9 +18,6 @@ const sharedInteractionEntries = new Set([
   "ui/src/components/app-sidebar-online.tsx",
 ]);
 const chatInteractionEntries = new Set([
-  "ui/src/pages/chat/components/chat-composer-microphone-menu.tsx",
-  "ui/src/pages/chat/components/chat-header-panel-menu-content.tsx",
-  "ui/src/pages/chat/components/chat-header-session-menu-content.tsx",
   "ui/src/pages/chat/chat-composer-capability-host.tsx",
   "ui/src/pages/chat/components/chat-context-breakdown.tsx",
   "ui/src/components/markdown-live.ts",
@@ -36,6 +31,16 @@ const chatInteractionEntries = new Set([
   "ui/src/pages/chat/chat-command-dispatch.runtime.ts",
   "ui/src/pages/chat/chat-pane-session-operations.runtime.ts",
   // Image viewers and provider-review dialogs load only when their own UI is needed.
+]);
+// Closed controls fetch after the owning route paints; importing stays with the control.
+const sharedPostPaintInteractionEntries = new Set([
+  "ui/src/pages/chat/components/chat-effort-picker-panel.tsx",
+  "ui/src/pages/chat/components/chat-composer-plus-menu-content.tsx",
+]);
+const chatPostPaintInteractionEntries = new Set([
+  "ui/src/pages/chat/components/chat-composer-microphone-menu.tsx",
+  "ui/src/pages/chat/components/chat-header-panel-menu-content.tsx",
+  "ui/src/pages/chat/components/chat-header-session-menu-content.tsx",
 ]);
 
 export function collectControlUiStaticAssets(
@@ -73,6 +78,7 @@ export function collectControlUiBootAssets(
   }
   const routes = { chat: new Set(initial), new: new Set(initial) };
   const interactions = { chat: new Set<string>(), new: new Set<string>() };
+  const postPaintInteractions = { chat: new Set<string>(), new: new Set<string>() };
   const login = new Set(initial);
   // Browser admission signs before the shell can become interactive. Download
   // the signer first without evaluating it or requesting its dynamic fallback.
@@ -137,12 +143,28 @@ export function collectControlUiBootAssets(
       ) {
         collectControlUiStaticAssets(bundle, chunk.fileName, interactions[route]);
       }
+      if (
+        entries.some((id) => {
+          const key = controlUiBootManifestKey(id);
+          return (
+            sharedPostPaintInteractionEntries.has(key) ||
+            (route === "chat" && chatPostPaintInteractionEntries.has(key))
+          );
+        })
+      ) {
+        collectControlUiStaticAssets(bundle, chunk.fileName, postPaintInteractions[route]);
+      }
     }
   }
   // Grouping can emit dynamic re-export facades that the ungrouped capture did
   // not need. They introduce no code beyond the measured graph, but a warm
   // import still requests their URL (for example, a sidebar controller).
-  for (const assets of [...Object.values(routes), ...Object.values(interactions), login]) {
+  for (const assets of [
+    ...Object.values(routes),
+    ...Object.values(interactions),
+    ...Object.values(postPaintInteractions),
+    login,
+  ]) {
     let added;
     do {
       added = false;
@@ -161,6 +183,7 @@ export function collectControlUiBootAssets(
     } while (added);
   }
   const interactionOnly = { chat: new Set<string>(), new: new Set<string>() };
+  const postPaintInteractionOnly = { chat: new Set<string>(), new: new Set<string>() };
   for (const route of ["chat", "new"] as const) {
     for (const file of interactions[route]) {
       if (!routes[route].has(file)) {
@@ -168,8 +191,13 @@ export function collectControlUiBootAssets(
         routes[route].add(file);
       }
     }
+    for (const file of postPaintInteractions[route]) {
+      if (!routes[route].has(file)) {
+        postPaintInteractionOnly[route].add(file);
+      }
+    }
   }
-  return { initial, ...routes, login, interactionOnly };
+  return { initial, ...routes, login, interactionOnly, postPaintInteractionOnly };
 }
 
 export function controlUiBootPreloadsPlugin(): Plugin {
@@ -226,9 +254,26 @@ export function controlUiBootPreloadsPlugin(): Plugin {
             injectTo: "head" as const,
           };
         });
+        const postPaintTemplates = (["chat", "new"] as const).map((route) => ({
+          tag: "template",
+          attrs: { id: `openclaw-interaction-preloads-${route}` },
+          children: [...assets.postPaintInteractionOnly[route]]
+            .filter((file) => bundle[file]?.type === "chunk" || importedStyles.has(file))
+            .map((file) => ({
+              tag: "link",
+              attrs: {
+                rel: "preload",
+                as: file.endsWith(".css") ? "style" : "script",
+                crossorigin: "",
+                fetchpriority: "low",
+                href: `./${file}`,
+              },
+            })),
+          injectTo: "head" as const,
+        }));
         // The Gateway activates only the requested route. CSS preloads fetch bytes
         // without changing the lazy stylesheet owner's cascade insertion order.
-        return { html, tags: templates };
+        return { html, tags: [...templates, ...postPaintTemplates] };
       },
     },
   };
