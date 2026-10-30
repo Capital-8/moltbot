@@ -56,7 +56,7 @@ export async function prepareManagedServiceRuntimeFixture({
   if (runId) {
     await appendRuntime(`
       ${ledgerRuntimeImport}
-      export const { adoptUpdateRun, getUpdateRun, recordUpdateRunStep, recordUpdateRunVerification } = ledger;
+      export const { adoptUpdateRun, getUpdateRun, listUpdateRuns, recordUpdateRunStep, recordUpdateRunVerification } = ledger;
       ${options?.replaceLedgerWriter ? 'export function finishUpdateRun() { throw new Error("the previous runtime must not finalize the candidate"); }' : "export const { finishUpdateRun } = ledger;"}
     `);
   }

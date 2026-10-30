@@ -438,10 +438,14 @@ function createInstalledRuntimeLedger(modulePath) {
 }
 
 function readGatewayStop() {
-  // Only the installed-runtime ledger lists runs; before post-core repair the staged reader matches the schema.
-  return runLedger?.listUpdateRuns
-    ? findUpdateGatewayStop(runLedger.listUpdateRuns({ limit: 100 }))
-    : readManagedHandoffGatewayStop();
+  // Only the installed-runtime ledger lists runs; before post-core repair the staged reader
+  // matches the schema. An older installed candidate may not export the listing.
+  if (!runLedger?.listUpdateRuns) return readManagedHandoffGatewayStop();
+  try { return findUpdateGatewayStop(runLedger.listUpdateRuns({ limit: 100 })); }
+  catch (error) {
+    appendLog("installed runtime could not list update history; using the staged reader: " + String(error));
+    return readManagedHandoffGatewayStop();
+  }
 }
 
 async function recoverInterruptedUpdater() {
