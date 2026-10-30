@@ -436,6 +436,7 @@ describe("Control UI build chunking", () => {
     ]) {
       const file = chunks.find((chunk) => id in chunk.modules)!.fileName;
       expect(richImports, id).toContain(file);
+      expect(file, id).toBe(richChunk.fileName);
       expect(chatImports, id).not.toContain(file);
     }
     const pluginChunk = chunks.find((chunk) => pluginLoader in chunk.modules)!;

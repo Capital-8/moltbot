@@ -332,6 +332,7 @@ export async function emitRichBootToolResult(
     messageSeq,
   });
   await gateway.emitGatewayEvent("chat", { sessionKey, runId, state: "final", message });
+  return message;
 }
 
 export async function readRichBootRunnerIdentity(runnerPath: string, providedManifest?: string) {

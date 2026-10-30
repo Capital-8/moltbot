@@ -206,6 +206,29 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "packages/markdown-core/src/ir-metadata.ts":
       // Text annotations also serve plain-text consumers without loading the parser.
       return "deferred-ui-support";
+    case "ui/src/pages/chat/components/chat-rich-presentation.runtime.ts":
+    case "ui/src/pages/chat/components/chat-tool-outcome-summary.solid.tsx":
+    case "ui/src/pages/chat/components/chat-tool-render-model.ts":
+    case "ui/src/pages/chat/components/chat-message-bubble-tools.tsx":
+    case "ui/src/pages/chat/components/chat-permission-card.tsx":
+    case "ui/src/pages/chat/components/chat-tool-content.solid.tsx":
+    case "ui/src/pages/chat/components/chat-tool-cards.solid.tsx":
+    case "ui/src/pages/chat/components/chat-message-activity-operation.tsx":
+    case "ui/src/pages/chat/components/chat-diff-stat.solid.tsx":
+    case "ui/src/pages/chat/components/chat-tool-row-presentation.ts":
+    case "ui/src/pages/chat/components/chat-message-images-solid.tsx":
+    case "ui/src/pages/chat/components/chat-image-actions.tsx":
+    case "ui/src/pages/chat/components/chat-image-preview-size.ts":
+    case "ui/src/pages/chat/components/chat-image-rendition.ts":
+    case "ui/src/pages/chat/components/chat-message-image-open.ts":
+    case "ui/src/pages/chat/components/chat-message-image-loading.ts":
+    case "ui/src/pages/chat/components/chat-image-frame.tsx":
+    case "ui/src/pages/chat/components/chat-message-attachment-status-solid.tsx":
+    case "ui/src/pages/chat/components/chat-message-activity-view.tsx":
+    case "ui/src/pages/chat/components/chat-workspace-conflict.tsx":
+    case "ui/src/i18n/locales/en-chat-permissions.ts":
+      // The first rich row needs this family together; preserve one fetch and dictionary.
+      return "chat-rich-presentation-runtime";
     case "ui/src/pages/chat/components/chat-message-local-media.ts":
     case "ui/src/pages/chat/components/chat-message-attachment-availability.ts":
     case "ui/src/pages/chat/components/chat-media-playback.ts":

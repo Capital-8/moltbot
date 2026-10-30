@@ -18,6 +18,8 @@ const sharedInteractionEntries = new Set([
   "ui/src/components/app-sidebar-online.tsx",
 ]);
 const chatInteractionEntries = new Set([
+  // Fetch alongside the route, but evaluate only when a visible row needs rich content.
+  "ui/src/pages/chat/components/chat-rich-presentation.runtime.ts",
   "ui/src/pages/chat/chat-composer-capability-host.tsx",
   "ui/src/pages/chat/components/chat-context-breakdown.tsx",
   "ui/src/components/markdown-live.ts",

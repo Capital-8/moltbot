@@ -413,6 +413,7 @@ try {
         }
         let arrivalBefore: typeof bootAfter | undefined;
         let admissionReceipt: unknown;
+        let recoveryMessage: Awaited<ReturnType<typeof emitRichBootToolResult>> | undefined;
         const latestText = "Latest synthetic final after the rich event.";
         if (fixture === "first-rich-arrival") {
           // No idle wait: begin the ordinary send as soon as the semantic boot boundary passes.
@@ -474,7 +475,7 @@ try {
             );
             if (richRequestAt === undefined)
               throw new Error("Admission never requested the rich asset");
-            await emitRichBootToolResult(gateway, {
+            recoveryMessage = await emitRichBootToolResult(gateway, {
               sessionKey,
               runId,
               now,
@@ -679,7 +680,7 @@ try {
                 "V8 coverage is evaluated-source range coverage, not compiled bytes",
                 "First-rich arrival includes image decode and visible tool summary, not tool-only latency",
                 "Admission fixed-delay response has no manual release",
-                "Saved offset, old-row reveal, real Reload recovery and MCP retirement are separate proofs",
+                "Saved offset, old-row reveal and MCP retirement are separate proofs",
               ],
               base,
               head,
@@ -698,6 +699,61 @@ try {
         );
         if (pair === 0) {
           await page.screenshot({ path: path.join(output, `${variant}.png`) });
+        }
+        if (values.admission === "fail" && recoveryMessage) {
+          const row = await gateway.getSessionRow(sessionKey);
+          const recoveredHistory = {
+            sessionId: row.sessionId,
+            sessionInfo: { ...row, status: "idle", activeRunIds: [], hasActiveRun: false },
+            messages: [...scenario.historyMessages, recoveryMessage],
+            inFlightRun: null,
+          };
+          await gateway.setMethodResponse("chat.history", recoveredHistory);
+          await gateway.setMethodResponse("chat.startup", recoveredHistory);
+          server.setFixtureReader((pathname) =>
+            pathname === "/__rich-proof.png"
+              ? { body: RICH_BOOT_IMAGE, contentType: "image/png" }
+              : pathname.endsWith(CONTROL_UI_BOOTSTRAP_CONFIG_PATH)
+                ? {
+                    body: JSON.stringify(createControlUiMockBootstrapConfig(scenario)),
+                    contentType: "application/json",
+                  }
+                : undefined,
+          );
+          await Promise.all([
+            page.waitForEvent("domcontentloaded"),
+            page.getByRole("button", { name: "Reload", exact: true }).click(),
+          ]);
+          await page.locator("section.chat .chat-text").filter({ hasText: latestText }).waitFor();
+          await page.waitForFunction(() =>
+            [...document.querySelectorAll<HTMLImageElement>("section.chat img")].some((image) => {
+              const bounds = image.getBoundingClientRect();
+              return (
+                image.src.endsWith("/__rich-proof.png") &&
+                image.complete &&
+                image.naturalWidth > 0 &&
+                bounds.width > 0 &&
+                bounds.height > 0 &&
+                bounds.bottom > 0 &&
+                bounds.top < window.innerHeight &&
+                getComputedStyle(image).visibility === "visible"
+              );
+            }),
+          );
+          if (await page.locator(".chat-transcript-preparation").count()) {
+            throw new Error("Reload retained the failed rich preparation");
+          }
+          const documentCount = server.requests.filter(
+            (request) => request.url === documentPath,
+          ).length;
+          if (documentCount !== 2 || page.url() !== controlUiSessionUrl(baseUrl, sessionKey)) {
+            throw new Error("Recovery did not reload the same session exactly once");
+          }
+          await page.screenshot({ path: path.join(output, "head-recovered.png") });
+          await writeFile(
+            path.join(output, "recovery.json"),
+            JSON.stringify({ documentCount, url: page.url(), recovered: true }),
+          );
         }
         console.log(
           JSON.stringify({ pair, variant, hostLoad, readiness: data.readiness, cpu, errors }),
