@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { runWithFailedTrailer } from "./lib/failed-trailer.mts";
-import { runManagedCommand } from "./lib/managed-child-process.mts";
+import { hasUnjoinedWork, runManagedCommand } from "./lib/managed-child-process.mts";
 import { NativeCiBudget } from "./lib/native-ci-budget.mts";
 
 const stableSHA = "8b18b5578f66eab1501cba4cef2310d88bfb9a41"; // Named v2026.10.9 baseline.
@@ -82,6 +82,9 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
         "Source metadata exceeds capture bound",
       );
       return fs.readFileSync(capturePath, "utf8").trim();
+    } catch (error) {
+      canRemove = !hasUnjoinedWork(error);
+      throw error;
     } finally {
       if (fd !== undefined) {
         fs.closeSync(fd);

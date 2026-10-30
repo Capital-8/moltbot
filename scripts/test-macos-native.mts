@@ -6,7 +6,11 @@ import { performance } from "node:perf_hooks";
 import { root as openCaptureRoot } from "@openclaw/fs-safe/root";
 import { readProcessIdentity } from "@openclaw/proc-safe/identity";
 import { runWithFailedTrailer } from "./lib/failed-trailer.mts";
-import { runManagedCommand, waitForManagedProcessGroupExit } from "./lib/managed-child-process.mts";
+import {
+  hasUnjoinedWork,
+  runManagedCommand,
+  waitForManagedProcessGroupExit,
+} from "./lib/managed-child-process.mts";
 import { NativeCiBudget } from "./lib/native-ci-budget.mts";
 
 function validateSwiftTestingCompletion(eventStreamPath: string, expectedFilter?: string): void {
@@ -213,6 +217,8 @@ await runWithFailedTrailer("macos-native", async () => {
   // Foundation's Darwin temp directory belongs to the disposable OS worker instead.
   const root = fs.realpathSync(fs.mkdtempSync("/tmp/oc-test-"));
   let canRemove = true;
+  // Joined launchctl children do not establish that the Gateway service retired.
+  let appHostServiceRetired = !appHost;
   let ownedProfileState: string | undefined;
   try {
     const resourceHome = path.join(root, "home");
@@ -307,25 +313,30 @@ await runWithFailedTrailer("macos-native", async () => {
         }
       }
       canRemove = false;
-      const code = await runManagedCommand({
-        bin,
-        args: commandArgs,
-        env: childEnv,
-        cwd,
-        stdio: "inherit",
-        requireProcessTreeExit: true,
-        timeoutMs: effectiveTimeoutMs,
-        ...(settings
-          ? {
-              timeoutKillGraceMs: 5_000,
-              signalKillGraceMs: 5_000,
-              abortKillGraceMs: 5_000,
-              cleanupDrainTimeoutMs: 5_000,
-            }
-          : {}),
-      });
-      canRemove = true;
-      return code;
+      try {
+        const code = await runManagedCommand({
+          bin,
+          args: commandArgs,
+          env: childEnv,
+          cwd,
+          stdio: "inherit",
+          requireProcessTreeExit: true,
+          timeoutMs: effectiveTimeoutMs,
+          ...(settings
+            ? {
+                timeoutKillGraceMs: 5_000,
+                signalKillGraceMs: 5_000,
+                abortKillGraceMs: 5_000,
+                cleanupDrainTimeoutMs: 5_000,
+              }
+            : {}),
+        });
+        canRemove = true;
+        return code;
+      } catch (error) {
+        canRemove = !hasUnjoinedWork(error);
+        throw error;
+      }
     };
     const serviceTarget = `gui/${process.getuid?.()}/ai.openclaw.${profile}`;
     const gatewayPids = new Set<number>();
@@ -349,6 +360,9 @@ await runWithFailedTrailer("macos-native", async () => {
           gatewayPids.add(Number(pid));
         }
         return { code, text };
+      } catch (error) {
+        canRemove = !hasUnjoinedWork(error);
+        throw error;
       } finally {
         fs.closeSync(fd);
       }
@@ -421,6 +435,7 @@ await runWithFailedTrailer("macos-native", async () => {
           if (hash(configPath) !== stableWritten) {
             throw new Error("Retained config changed before producer");
           }
+          console.error(`[macos-native] Settings producer sourceSHA=${source.sha}`);
           const code = await run(
             process.execPath,
             [
@@ -613,39 +628,45 @@ await runWithFailedTrailer("macos-native", async () => {
       // A joined cleanup child retires only its process. Physical removal also
       // requires BOTH resource facts, including exceptions between these stages.
       if (settings && canRemove) {
-        const cleanupEvents = path.join(root, "settings-cleanup-events.jsonl");
-        fs.writeFileSync(path.join(state, "mlx-settings-stage"), "MLXSettingsCleanupProofTests", {
-          mode: 0o600,
-        });
-        const code = await run(
-          "swift",
-          [
-            "test",
-            "--package-path",
-            "apps/macos",
-            "--build-system",
-            "native",
-            "--enable-code-coverage",
-            "--disable-index-store",
-            "-Xswiftc",
-            "-gline-tables-only",
-            "--skip-build",
-            "--filter",
-            "MLXSettingsCleanupProofTests",
-            "--event-stream-output-path",
-            cleanupEvents,
-            "--event-stream-version",
-            "6.3",
-          ],
-          45_000,
-          settings.fixed.sourceRoot,
-          true,
-        );
-        if (code !== 0) {
-          process.exitCode ||= code;
-        } else {
-          validateSwiftTestingCompletion(cleanupEvents, "MLXSettingsCleanupProofTests");
-          settings.defaultsRemoved = true;
+        try {
+          const cleanupEvents = path.join(root, "settings-cleanup-events.jsonl");
+          fs.writeFileSync(path.join(state, "mlx-settings-stage"), "MLXSettingsCleanupProofTests", {
+            mode: 0o600,
+          });
+          const code = await run(
+            "swift",
+            [
+              "test",
+              "--package-path",
+              "apps/macos",
+              "--build-system",
+              "native",
+              "--enable-code-coverage",
+              "--disable-index-store",
+              "-Xswiftc",
+              "-gline-tables-only",
+              "--skip-build",
+              "--filter",
+              "MLXSettingsCleanupProofTests",
+              "--event-stream-output-path",
+              cleanupEvents,
+              "--event-stream-version",
+              "6.3",
+            ],
+            45_000,
+            settings.fixed.sourceRoot,
+            true,
+          );
+          if (code !== 0) {
+            process.exitCode ||= code;
+            console.error(`[macos-native] Settings Swift cleanup failed (exit ${code})`);
+          } else {
+            validateSwiftTestingCompletion(cleanupEvents, "MLXSettingsCleanupProofTests");
+            settings.defaultsRemoved = true;
+          }
+        } catch (error) {
+          process.exitCode ||= 1;
+          console.error("[macos-native] Settings Swift cleanup failed", error);
         }
       }
       if (appHost && canRemove) {
@@ -660,6 +681,7 @@ await runWithFailedTrailer("macos-native", async () => {
           });
           retired &&= groupGone && readProcessIdentity(pid) === null;
         }
+        appHostServiceRetired = retired;
         canRemove = retired;
         if (!canRemove) {
           process.exitCode ||= 1;
@@ -668,19 +690,27 @@ await runWithFailedTrailer("macos-native", async () => {
       }
       // A completed failed create may leave a database. Never delete it until every child closed.
       if (canRemove && fs.existsSync(keychain)) {
-        const cleanupCode = await run(
-          "security",
-          ["delete-keychain", keychain],
-          30_000,
-          undefined,
-          true,
-        );
-        if (cleanupCode !== 0) {
+        try {
+          const cleanupCode = await run(
+            "security",
+            ["delete-keychain", keychain],
+            30_000,
+            undefined,
+            true,
+          );
+          if (cleanupCode !== 0) {
+            if (!settings) {
+              canRemove = false;
+            }
+            process.exitCode ||= cleanupCode;
+            console.error(`[macos-native] security delete-keychain failed (exit ${cleanupCode})`);
+          }
+        } catch (error) {
           if (!settings) {
             canRemove = false;
           }
-          process.exitCode ||= cleanupCode;
-          console.error(`[macos-native] security delete-keychain failed (exit ${cleanupCode})`);
+          process.exitCode ||= 1;
+          console.error("[macos-native] security delete-keychain cleanup failed", error);
         }
       }
       if (settings && canRemove) {
@@ -701,7 +731,9 @@ await runWithFailedTrailer("macos-native", async () => {
   } finally {
     // Resource state remains pending even if run() has joined its last child.
     const resourcesRetired =
-      canRemove && (!settings || (settings.defaultsRemoved && settings.keychainRemoved));
+      canRemove &&
+      appHostServiceRetired &&
+      (!settings || (settings.defaultsRemoved && settings.keychainRemoved));
     if (resourcesRetired) {
       if (ownedProfileState) {
         fs.rmSync(ownedProfileState, { recursive: true, force: true });
