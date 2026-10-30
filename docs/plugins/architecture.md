@@ -152,6 +152,11 @@ One `PluginCache` starts on the first plugin metadata access, including CLI pref
 
 Plugin-aware config validation, startup auto-enable, and Gateway plugin bootstrap consume that snapshot instead of rebuilding manifest/index metadata independently. `PluginLookUpTable` is derived from the same snapshot and adds the startup plugin plan for the current runtime config.
 
+Startup auto-enable also retains the snapshot's scoped managed-install facts when
+reusing its manifest registry and discovery. Managed native binaries keep their
+existing reference admission; unmanaged captures and metadata isolation keep their
+existing policies.
+
 On POSIX, successful checked entry opens also publish their canonical paths to the metadata cache. For ordinary metadata paths, discovery resolves each parent directory once and reuses it for non-symlink children. These path facts last until the owner invalidates metadata; symlinks retain filesystem resolution, and actual file opens retain their descriptor-bound security checks. Windows keeps separate path resolution because admission can return a trusted root alias rather than the native spelling.
 
 Async config validation requests metadata when a rule or default needs it. Core-only settings do not load the plugin inventory; successful `config get` uses core redaction hints outside plugin, channel, and agent configuration, building the JSON schema only for missing-path diagnostics. Agent configuration keeps provider model-parameter schemas from plugins. Native-catalog privacy preferences still receive their plugin schema checks.
@@ -615,7 +620,7 @@ worker fails, the Gateway logs a warning with the reason and counts the failure 
 `status` as `workerPools.modelCatalog.workerFailures`. Other than stalled native
 admission, failures republish the affected agent catalogs on a new worker.
 
-Catalog and authentication refresh tasks carry the host's prepared Claw consent
+Catalog and authentication refresh tasks carry the host's prepared Template consent
 provenance. Worker config reconstruction and provider imports consume these facts
 without opening or copying the shared state database. Host config publication and
 Doctor retain their existing provenance refresh and artifact-preserving inspection
