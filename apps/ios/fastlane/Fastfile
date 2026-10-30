@@ -2490,20 +2490,34 @@ platform :ios do
         screenshot_phase(diagnostics, "status-bar", device: device.fetch("name"), udid: device_udid) do
           sh("xcrun", "simctl", "status_bar", device_udid, "override", *Shellwords.split(SNAPSHOT_STATUS_BAR_ARGUMENTS))
         end
-        capture_release_ios_screenshots!(
-          project: project,
-          device: device.fetch("name"),
-          output_directory: output_directory,
-          result_bundle_path: result_bundle_path,
-          result_bundle_archive_directory: result_bundle_archive_directory,
-          log_directory: log_directory,
-          capture_attempts: capture_attempts,
-          capture_attempts_path: capture_attempts_path,
-          derived_data_path: derived_data_path,
-          device_udid: device_udid,
-          snapshot_cache_directory: snapshot_cache_directory,
-          diagnostics: diagnostics
+        mermaid_trace = File.join(log_directory, "mermaid-#{device_udid}.log")
+        trace_pid = Process.spawn(
+          "xcrun", "simctl", "spawn", device_udid, "log", "stream", "--level", "debug", "--style", "compact",
+          "--predicate", 'subsystem == "ai.openclaw.mermaid-probe"',
+          out: mermaid_trace, err: [:child, :out]
         )
+        begin
+          capture_release_ios_screenshots!(
+            project: project,
+            device: device.fetch("name"),
+            output_directory: output_directory,
+            result_bundle_path: result_bundle_path,
+            result_bundle_archive_directory: result_bundle_archive_directory,
+            log_directory: log_directory,
+            capture_attempts: capture_attempts,
+            capture_attempts_path: capture_attempts_path,
+            derived_data_path: derived_data_path,
+            device_udid: device_udid,
+            snapshot_cache_directory: snapshot_cache_directory,
+            diagnostics: diagnostics
+          )
+        ensure
+          begin
+            Process.kill("TERM", trace_pid)
+            Process.wait(trace_pid)
+          rescue Errno::ESRCH, Errno::ECHILD
+          end
+        end
       end
     end
     verify_release_ios_screenshot_manifest!(
