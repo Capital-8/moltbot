@@ -226,6 +226,10 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/pages/chat/components/chat-message-attachment-status-solid.tsx":
     case "ui/src/pages/chat/components/chat-message-activity-view.tsx":
     case "ui/src/pages/chat/components/chat-workspace-conflict.tsx":
+    case "ui/src/pages/chat/components/chat-async-question-summary.tsx":
+    case "ui/src/pages/chat/components/chat-message-context-view.tsx":
+    case "ui/src/pages/chat/components/chat-activity-headline.solid.tsx":
+    case "ui/src/pages/chat/components/chat-activity-headline-selection.ts":
     case "ui/src/i18n/locales/en-chat-permissions.ts":
       // The first rich row needs this family together; preserve one fetch and dictionary.
       return "chat-rich-presentation-runtime";
