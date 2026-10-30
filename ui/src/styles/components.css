@@ -3303,3 +3303,8 @@ td.data-table-key-col {
 .sidebar-recent-session .hover-marquee {
   --hover-marquee-fade-width: 24px;
 }
+
+/* Text on a tag fill keeps its readable tone; only icons take the quieter one. */
+.sidebar-recent-session--colored .session-row-trail {
+  color: var(--session-row-muted, var(--muted));
+}
