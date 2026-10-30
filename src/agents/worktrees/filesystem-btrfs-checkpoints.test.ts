@@ -84,7 +84,7 @@ it("never probes or mutates a filesystem after checkpoint authority is revoked",
 });
 
 it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
-  "diffs immutable native snapshots after same-size restored-mtime edits and refuses replacement cleanup",
+  "diffs immutable native snapshots, detects hidden edits, and cleans retained snapshots across device changes",
   async ({ signal }) => {
     const root = await fs.mkdtemp(path.join(process.env.OPENCLAW_TEST_BTRFS_ROOT!, "checkpoint-"));
     const source = path.join(root, "source");
@@ -126,6 +126,13 @@ it.runIf(Boolean(process.env.OPENCLAW_TEST_BTRFS_ROOT))(
       );
       expect(await deleteBtrfsCheckpoint(changed.path, before.identity, options)).toBe(false);
       expect(await fs.stat(changed.path)).toBeDefined();
+      const priorMount = {
+        ...unchanged,
+        identity: { ...unchanged.identity, device: String(BigInt(unchanged.identity.device) + 1n) },
+      };
+      expect(await diffBtrfsCheckpoints(before, priorMount, options)).toBeNull();
+      expect(await deleteBtrfsCheckpoint(priorMount.path, priorMount.identity, options)).toBe(true);
+      await expect(fs.lstat(priorMount.path)).rejects.toMatchObject({ code: "ENOENT" });
       const hidden = path.join(source, ".env.local");
       await fs.writeFile(hidden, "hidden original\n");
       await fs.link(hidden, path.join(source, "source.txt"));

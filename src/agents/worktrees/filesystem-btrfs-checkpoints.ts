@@ -60,13 +60,17 @@ async function command(
   }
 }
 
-function sameIdentity(left: BtrfsCheckpointIdentity, right: BtrfsCheckpointIdentity): boolean {
+function sameStableIdentity(
+  left: BtrfsCheckpointIdentity,
+  right: BtrfsCheckpointIdentity,
+): boolean {
   return (
-    left.uuid === right.uuid &&
-    left.parentUuid === right.parentUuid &&
-    left.device === right.device &&
-    left.inode === right.inode
+    left.uuid === right.uuid && left.parentUuid === right.parentUuid && left.inode === right.inode
   );
+}
+
+function sameIdentity(left: BtrfsCheckpointIdentity, right: BtrfsCheckpointIdentity): boolean {
+  return sameStableIdentity(left, right) && left.device === right.device;
 }
 
 /** UUID identifies a subvolume; transaction generations do not identify its contents. */
@@ -242,7 +246,8 @@ export async function deleteBtrfsCheckpoint(
     return true;
   }
   const identity = await readBtrfsCheckpointIdentity(root, options, true);
-  if (!identity || !sameIdentity(identity, expected)) {
+  // st_dev can change after remount; the retained snapshot UUID still owns cleanup.
+  if (!identity || !sameStableIdentity(identity, expected)) {
     return false;
   }
   assertCurrent(options);
