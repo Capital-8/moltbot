@@ -1975,7 +1975,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
-  font-size: calc(13.5px * var(--control-ui-text-scale));
+  font-size: calc(13px * var(--control-ui-text-scale));
   font-weight: 500;
   letter-spacing: -0.008em;
   color: var(--text);
@@ -1993,7 +1993,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 .sidebar-recent-session--child .sidebar-recent-session__name {
-  font-size: calc(13px * var(--control-ui-text-scale));
+  font-size: var(--control-ui-text-sm);
 }
 
 .sidebar-child-session__status {
