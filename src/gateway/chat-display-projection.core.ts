@@ -66,7 +66,6 @@ import { projectTranscriptImageArtifacts } from "./transcript-image-artifacts.js
 export type ChatDisplayProjectionOptions = {
   resolveCronJobName?: (jobId: string) => string | undefined;
   includeCommentaryFallbacks?: boolean;
-  preserveEmptyCompleted?: boolean;
   includePluginSteering?: boolean;
   maxChars?: number;
   toolResultMaxChars?: number;
@@ -395,7 +394,6 @@ export function createChatHistoryRecoveryProjection(options?: ChatHistoryRecover
     }
     const hasVisibleAssistant = hasVisibleAssistantDisplayContent(message);
     if (
-      !options?.preserveEmptyCompleted &&
       message.role === "assistant" &&
       (message.stopReason === "stop" || message.stopReason === "length") &&
       !hasVisibleAssistant &&
@@ -526,7 +524,6 @@ type ChatHistoryRecoveryOptions = Pick<
   | "assistantErrorPending"
   | "subagentCoordination"
   | "includeCommentaryFallbacks"
-  | "preserveEmptyCompleted"
 >;
 
 export function prepareChatHistoryRecoveryMessages(
@@ -656,11 +653,7 @@ export function projectChatDisplayMessage(
   message: unknown,
   options?: ChatDisplayProjectionOptions,
 ): Record<string, unknown> | undefined {
-  // Empty completed content still carries the live terminal message contract.
-  const projected = projectChatDisplayMessages([message], {
-    ...options,
-    preserveEmptyCompleted: true,
-  });
+  const projected = projectChatDisplayMessages([message], options);
   if (
     !options?.includeCommentaryFallbacks ||
     !projected.some((entry) => entry.openclawStreamFallback)

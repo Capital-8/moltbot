@@ -560,7 +560,7 @@ const terminal = (runId = "run-a") => ({
 const projectedIds = (messages: unknown[]) =>
   projectChatDisplayMessages(messages).map((message) => message["__openclaw"]);
 
-it.each(["length", "stop"])("hides empty %s attempts only from history", (stopReason) => {
+it.each(["length", "stop"])("hides empty %s attempts when no recovery is pending", (stopReason) => {
   const empty = assistant([text("")], { stopReason, __openclaw: { runId: "run-empty" } });
   const thinking = { ...empty, content: [text(""), { type: "thinking", thinking: "" }] };
   const toolMessage = assistant([tool], { stopReason });
@@ -569,7 +569,6 @@ it.each(["length", "stop"])("hides empty %s attempts only from history", (stopRe
     toolMessage,
     answer,
   ]);
-  expect(projectChatDisplayMessage(empty)).toEqual(empty);
   expect(projectStable([empty], { assistantErrorPending: true })).toEqual([empty]);
 });
 
