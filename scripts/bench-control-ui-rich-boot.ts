@@ -232,25 +232,29 @@ try {
             ? await readFile(path.join(head, richAsset))
             : undefined;
         server.setFixtureReader((pathname) =>
-          values.admission && richAsset && pathname === `/${richAsset}`
-            ? ((richRequestAt = Date.now()),
-              {
-                body: heldCode ?? "Synthetic rich asset failure",
-                contentType: "text/javascript",
-                delayMs: values.admission === "hold" ? admissionDelayMs : undefined,
-                status: values.admission === "fail" ? 503 : 200,
-              })
-            : pathname === "/__rich-proof.png"
-              ? {
-                  body: RICH_BOOT_IMAGE,
-                  contentType: "image/png",
-                }
-              : pathname.endsWith(CONTROL_UI_BOOTSTRAP_CONFIG_PATH)
+          // A reachable document triggers the existing automatic stale-chunk recovery.
+          // Keep its probe unavailable until the manual outage-recovery step below.
+          values.admission === "fail" && pathname === "/index.html"
+            ? { body: "Synthetic document outage", contentType: "text/plain", status: 503 }
+            : values.admission && richAsset && pathname === `/${richAsset}`
+              ? ((richRequestAt = Date.now()),
+                {
+                  body: heldCode ?? "Synthetic rich asset failure",
+                  contentType: "text/javascript",
+                  delayMs: values.admission === "hold" ? admissionDelayMs : undefined,
+                  status: values.admission === "fail" ? 503 : 200,
+                })
+              : pathname === "/__rich-proof.png"
                 ? {
-                    body: JSON.stringify(createControlUiMockBootstrapConfig(scenario)),
-                    contentType: "application/json",
+                    body: RICH_BOOT_IMAGE,
+                    contentType: "image/png",
                   }
-                : undefined,
+                : pathname.endsWith(CONTROL_UI_BOOTSTRAP_CONFIG_PATH)
+                  ? {
+                      body: JSON.stringify(createControlUiMockBootstrapConfig(scenario)),
+                      contentType: "application/json",
+                    }
+                  : undefined,
         );
         await page.addInitScript(
           ({ gatewayUrl, prefs }) => {
