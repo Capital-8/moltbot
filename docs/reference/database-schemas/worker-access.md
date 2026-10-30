@@ -178,6 +178,17 @@ migrations, timers, and closure. Borrowers prevent idle eviction; explicit dispo
 can still close the connection and invalidate its claims immediately. Maintenance
 closes cached handles before migrating or replacing their storage.
 
+Artifact-preserving exact session inspections can borrow an already-prepared agent
+executor and query its original native connection without copying the database or
+WAL. This path never opens, prepares, or replaces a generation. The worker checks
+its physical source and the captured validation receipt; the request retains that
+receipt's live guard through borrower release and any private-reader fallback,
+then checks it before disclosing facts.
+Retirement joins accepted reads. Cold and synchronous-host stores, early startup
+read admission while writable preparation is pending, unprepared canonical facts,
+and active transactions retain the private-reader fallback. Revoked authority or
+changed physical identity fails instead of falling back to another owner.
+
 If PostgreSQL schema publication invalidates admission, connection opening,
 shared-state reads before their callback, and standalone feature-schema ensures
 share a brief backoff retry for at most one second, bounded by the caller's

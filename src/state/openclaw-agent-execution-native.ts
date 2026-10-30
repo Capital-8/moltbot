@@ -665,6 +665,32 @@ export function createAgentDatabaseNativeGeneration(
       };
     },
     run,
+    async runPrepared(source, operation, assertCallerCurrent) {
+      const store = openedStore;
+      if (!store) {
+        throw new Error("Agent inspection requires its retained native worker");
+      }
+      const assertPrepared = () => {
+        assertCurrent();
+        source.assertCurrent();
+        assertCallerCurrent();
+        if (!preparationPublished || !nativeIdentity) {
+          throw new AgentDatabaseExecutionAdmissionClosedError(
+            "Agent inspection lost its prepared native generation",
+          );
+        }
+      };
+      assertPrepared();
+      const result = await runSqliteWorkerStoreOperation(
+        store,
+        operation,
+        undefined,
+        assertPrepared,
+        admission(source, undefined, assertCallerCurrent),
+      );
+      assertPrepared();
+      return result;
+    },
     close() {
       lifetime.retire();
       closing ??= closeAgentDatabaseNativeGeneration({

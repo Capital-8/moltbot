@@ -3,13 +3,9 @@ import path from "node:path";
 import { racePromiseWithAbortSignal } from "../../packages/retry/src/index.js";
 import { sleepWithAbort } from "../infra/backoff.js";
 import { materializeErrorStack } from "../infra/error-graph-internal.js";
-import { formatErrorMessage } from "../infra/errors.js";
 import { isSqliteLockError } from "../infra/sqlite-error-diagnostics.js";
 import { resolveAgentDatabaseIdleHandleTtlMs } from "../infra/sqlite-handle-lifecycle.js";
-import {
-  isSqliteWorkerError,
-  retainSqliteWorkerErrorCode,
-} from "../infra/sqlite-worker-contract.js";
+import { retainSqliteWorkerErrorCode } from "../infra/sqlite-worker-contract.js";
 import {
   assertExistingDatabaseIdentity,
   type DatabasePathIdentity,
@@ -18,11 +14,11 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getGatewayRestartDrainSignal } from "../process/gateway-work-admission.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
-import { notifyListeners } from "../shared/listeners.js";
 import * as creationClaims from "./agent-creation-claim.js";
 import { AgentDatabaseExecutionAdmissionClosedError } from "./agent-database-admission-error.js";
 import {
   captureAgentDatabaseAdmission,
+  isAgentDatabaseStartupReadReady,
   retainAgentDatabaseStartupWorker,
 } from "./agent-database-admission.js";
 import {
@@ -53,7 +49,11 @@ import {
   supportsAgentDatabaseExecutionScope,
   toAgentExecutionConstraints,
 } from "./openclaw-agent-execution-scope.js";
-import { createAgentDatabaseAcceptedWork } from "./openclaw-agent-execution-work.js";
+import {
+  agentDatabaseOperationCleanupFailure,
+  createAgentDatabaseAcceptedWork,
+  reportAgentDatabaseCleanupFailure,
+} from "./openclaw-agent-execution-work.js";
 import {
   observeOpenClawDatabaseMaintenanceResource,
   runOutsideOpenClawDatabaseMaintenanceScope,
@@ -120,27 +120,8 @@ export function createAgentDatabaseExecution(
     clearTimeout(idleTimer);
     idleTimer = undefined;
   };
-  const reportCleanupFailure = (error: unknown) => {
-    // Diagnostic failures cannot turn a committed command into a replayable failure.
-    try {
-      log.warn(`Agent database cleanup failed: ${formatErrorMessage(error)}`);
-    } catch {
-      // The resource owner still retains the cleanup failure.
-    }
-  };
-  const reportTerminal = (error: unknown) => {
-    if (terminalListeners.size === 0) {
-      return;
-    }
-    const reason = error instanceof Error ? error : new Error(formatErrorMessage(error));
-    const listeners = [...terminalListeners];
-    terminalListeners.clear();
-    // Never join this notification from close/run: their accepted work must settle first.
-    void Promise.resolve().then(async () => {
-      await Promise.allSettled(acceptedWork.pending.keys());
-      notifyListeners(listeners, reason);
-    });
-  };
+  const reportCleanupFailure = (error: unknown) => reportAgentDatabaseCleanupFailure(log, error);
+  const reportTerminal = acceptedWork.reportTerminal.bind(undefined, terminalListeners);
   const finishRetirement = () => {
     lifetime.retire();
     if (executions.get(pathname) !== owner) {
@@ -150,7 +131,7 @@ export function createAgentDatabaseExecution(
     unregisterShared?.();
   };
 
-  const assertCurrent = () => {
+  const assertCurrent = (startupRead = false) => {
     if (
       !lifetime.open ||
       executions.get(pathname) !== owner ||
@@ -162,7 +143,9 @@ export function createAgentDatabaseExecution(
     }
     assertAgentDeletionExecutionCleanupAccess(owner, executionOptions);
     context.admission.assertCurrent();
-    assertAgentAdmitted();
+    if (!startupRead) {
+      assertAgentAdmitted();
+    }
     creationClaim?.assertCurrent();
   };
   const closeNative = (expected?: AgentDatabaseNativeGeneration): Promise<void> => {
@@ -297,23 +280,7 @@ export function createAgentDatabaseExecution(
           }
         } catch (cleanupError) {
           reportCleanupFailure(cleanupError);
-          const primary = error instanceof Error ? error : new Error(String(error));
-          const failure = Object.assign(
-            new Error(primary.message, {
-              cause: new AggregateError(
-                [error, cleanupError],
-                "Agent operation and cleanup failed",
-                {
-                  cause: error,
-                },
-              ),
-            }),
-            { name: primary.name },
-          );
-          // Cleanup failures preserve the primary presentation without granting a retry.
-          throw isSqliteWorkerError(error, "outcome-unknown")
-            ? retainSqliteWorkerErrorCode(failure, error)
-            : failure;
+          throw agentDatabaseOperationCleanupFailure(error, cleanupError);
         }
       }
       if (contended) {
@@ -359,11 +326,24 @@ export function createAgentDatabaseExecution(
       return creationIdentity;
     },
     getPendingPreparation: () => generation?.getPendingPreparation(),
-    borrow(borrowedPath, expected, creating, requestedPath) {
+    borrowPrepared() {
+      const startupRead = isAgentDatabaseStartupReadReady(pathname, executionOptions);
+      assertCurrent(startupRead);
+      if (nativeClosing || cleanupFailure || generation?.failure()) {
+        throw new AgentDatabaseExecutionAdmissionClosedError("Prepared execution unavailable");
+      }
+      // Early startup readers may inspect a private copy while writable preparation remains pending.
+      const preparing = startupRead || agentDatabaseLifecycle.pending.has(pathname);
+      if (preparing || !generation?.isPrepared()) {
+        return undefined;
+      }
+      return owner.borrow(pathname, undefined, undefined, undefined, generation);
+    },
+    borrow(borrowedPath, expected, creating, requestedPath, preparedGeneration) {
       const cleanup = getAgentDeletionDatabaseCleanup({ ...executionOptions, path: borrowedPath });
       const expectedIdentity = expected ? Object.freeze({ ...expected }) : undefined;
       const creatingTarget = creating ? Object.freeze({ ...creating }) : undefined;
-      if (fileIdentity) {
+      if (fileIdentity && !preparedGeneration) {
         assertExistingDatabaseIdentity(
           borrowedPath,
           `file:${fileIdentity.physicalIdentity}`,
@@ -372,6 +352,12 @@ export function createAgentDatabaseExecution(
       }
       const assertReferenceCurrent = (nativeIdentity?: AgentDatabaseExecutionFileIdentity) => {
         assertCurrent();
+        if (
+          preparedGeneration &&
+          (generation !== preparedGeneration || !preparedGeneration?.isPrepared())
+        ) {
+          throw new AgentDatabaseExecutionAdmissionClosedError("Prepared execution changed");
+        }
         assertBorrowedAgentDatabaseFileIdentity({
           borrowedPath,
           identity,
@@ -478,6 +464,9 @@ export function createAgentDatabaseExecution(
         },
         async prepare(source, signal) {
           assertBorrowed();
+          if (preparedGeneration) {
+            throw new Error("A prepared inspection cannot initialize an agent database");
+          }
           assertCreationReference(true);
           const result = run(
             source,
@@ -503,24 +492,35 @@ export function createAgentDatabaseExecution(
           try {
             assertBorrowed();
             assertCreationReference(false);
+            // Strict dispatch rechecks the captured generation after admission queues.
             const execute = () =>
-              run(
-                source,
-                operation,
-                (nativeIdentity) => {
-                  assertReferenceCurrent(nativeIdentity);
-                  assertCreationReference(false);
-                },
-                expectedIdentity,
-                runOptions?.retireNativeOnFailure,
-              );
+              preparedGeneration
+                ? preparedGeneration.runPrepared(source, operation, assertBorrowed)
+                : run(
+                    source,
+                    operation,
+                    (nativeIdentity) => {
+                      assertReferenceCurrent(nativeIdentity);
+                      assertCreationReference(false);
+                    },
+                    expectedIdentity,
+                    runOptions?.retireNativeOnFailure,
+                  );
             if (runOptions?.withAdmission) {
               const queuedReadAbort = new AbortController();
               acceptedWork.pending.set(completion.promise, { borrower, queuedReadAbort });
-              return await runOptions.withAdmission(execute, queuedReadAbort.signal);
+              const result = await runOptions.withAdmission(execute, queuedReadAbort.signal);
+              if (preparedGeneration) {
+                assertBorrowed();
+                source.assertCurrent();
+              }
+              return result;
             }
             return await execute();
           } catch (error) {
+            if (preparedGeneration) {
+              throw error;
+            }
             let retireNative = runOptions?.retireNativeOnFailure === true;
             if (capturedGeneration && generation === capturedGeneration && fileIdentity) {
               try {

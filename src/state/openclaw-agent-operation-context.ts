@@ -9,6 +9,8 @@ import type { OpenClawStateDatabase } from "./openclaw-state-db-contract.js";
 
 export type AgentWorkerOperationContext = {
   open: () => OpenClawAgentDatabase;
+  /** Never opens or prepares; an active transaction is ineligible for inspection. */
+  existing?: (validationReceiptId: string) => OpenClawAgentDatabase | undefined;
   options: OpenClawAgentDatabaseOptions & { path: string };
   admit: (
     stage: "prepare" | "transaction" | "commit",

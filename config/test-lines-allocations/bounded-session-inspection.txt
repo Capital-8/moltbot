@@ -1,2 +1,2 @@
-# Registered readiness regression: real prepared source reads without database/WAL copies.
-56
+# Registered readiness copying, prepared-owner custody, post-SQL revocation, and private fallback.
+591

@@ -15,7 +15,10 @@ import {
   isSameOpenClawAgentDatabasePath,
   resolveOpenClawAgentSqlitePath,
 } from "./openclaw-agent-db.paths.js";
-import type { OpenClawAgentDatabaseExecution } from "./openclaw-agent-execution-contract.js";
+import type {
+  OpenClawAgentDatabaseExecution,
+  PreparedAgentDatabaseExecution,
+} from "./openclaw-agent-execution-contract.js";
 import {
   createAgentDatabaseExecution,
   type AgentDatabaseExecutionState,
@@ -103,6 +106,30 @@ export async function prepareOpenClawAgentDatabaseExecution(
   } finally {
     await execution.release();
   }
+}
+
+/** A warm inspection never discovers, creates, or prepares an execution owner. */
+export function captureExistingPreparedOpenClawAgentDatabaseExecution(
+  options: OpenClawAgentDatabaseOptions,
+): PreparedAgentDatabaseExecution | undefined {
+  // This is the internal deletion ingress fence, not a caller's write permission.
+  assertAgentSessionWriteAdmission(options);
+  assertAgentDeletionCleanupAliases(options, isSameOpenClawAgentDatabasePath);
+  creationClaims.assertAgentCreationClaimAliases(options);
+  if (!supportsOpenClawAgentDatabaseExecution(options)) {
+    return undefined;
+  }
+  // Prepared owners have already registered their captured physical path and aliases.
+  const existing = executions.get(resolveOpenClawAgentSqlitePath(options));
+  if (!existing) {
+    return undefined;
+  }
+  if (existing.agentId !== normalizeAgentId(options.agentId)) {
+    throw new Error("Prepared agent execution belongs to another agent");
+  }
+  assertAgentDatabaseExecutionSharedState(options, existing.sharedDatabaseKey);
+  assertAgentDeletionExecutionCleanupAccess(existing, options);
+  return existing.borrowPrepared();
 }
 
 /** Borrow before callers yield; native opening stays lazy and release joins owned work. */

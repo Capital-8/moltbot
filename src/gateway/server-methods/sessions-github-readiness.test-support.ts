@@ -6,7 +6,9 @@ import * as workerCpu from "../../infra/worker-cpu.js";
 export function observeReadinessNativeReads(source: () => string, counts: Int32Array) {
   const create = workerCpu.createCpuTrackedWorker;
   return vi.spyOn(workerCpu, "createCpuTrackedWorker").mockImplementation((filename, options) => {
-    if (options?.eval) return create(filename, options);
+    if (options?.eval) {
+      return create(filename, options);
+    }
     const entry = typeof filename === "string" ? pathToFileURL(filename) : filename;
     const key = "openclaw.test.readinessNativeReads";
     const previous = getEnvironmentData(key);

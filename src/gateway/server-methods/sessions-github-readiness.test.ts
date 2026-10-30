@@ -32,6 +32,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { OpenClawSchema } from "../../config/zod-schema.js";
 import { inspectDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
 import { withPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
+import { sessionChanges } from "../../sessions/session-row-changes.js";
 import { holdStateRead } from "../../state/github-publication-fixtures.test-support.js";
 import { repositoryRow } from "../../state/github-publication.worker.test-support.js";
 import {
@@ -965,9 +966,22 @@ it("warm readiness reads the prepared source without whole database copies", asy
           { agentId: "main", sessionKey },
           { label: "fixture-padding-".repeat(padding) },
         );
+        // An invalidated published row must cross native SQL again, not reuse the writer postimage.
+        sessionChanges.invalidate({ sessionKey, storePath: source, factsInvalidated: true });
         const before = await databaseArtifacts([source]);
         counts.fill(0);
-        expect(await observe(f)).toMatchObject(unbound);
+        const stat = vi.spyOn(fsSync, "statSync");
+        const realpath = vi.spyOn(fsSync.realpathSync, "native");
+        syncBuiltinESMExports();
+        try {
+          expect(await observe(f)).toMatchObject(unbound);
+          expect(stat.mock.calls.some(([pathname]) => pathname === source)).toBe(false);
+          expect(realpath.mock.calls.some(([pathname]) => pathname === source)).toBe(false);
+        } finally {
+          stat.mockRestore();
+          realpath.mockRestore();
+          syncBuiltinESMExports();
+        }
         const measured = Array.from(counts);
         const after = await databaseArtifacts([source]);
         expect(Object.keys(after)).toEqual(Object.keys(before));

@@ -6,13 +6,22 @@ import type {
 import type {
   SessionEntryCohortRequest,
   SessionEntryReadWorkerInput,
+  SessionExactEntriesWorkerInput,
 } from "../config/sessions/session-entry-read.types.js";
 import type { SessionEntryWritePostimages } from "../config/sessions/session-entry-write-postimage.js";
+import {
+  readDatabasePathIdentitySync,
+  type DatabaseFileIdentity,
+} from "../infra/sqlite-worker-identity.js";
 import {
   deferSqliteWorkerCommitReceipt,
   takeSqliteWorkerOperationAdmissionAttachment,
 } from "../infra/sqlite-worker-operation-admission.js";
 import { readTrajectoryRuntimeRetentionLease } from "../trajectory/runtime-retention.contract.js";
+import {
+  assertOpenClawAgentDatabaseIdentity,
+  readOpenClawAgentDatabaseIdentity,
+} from "./openclaw-agent-db-identity.js";
 import type { createAgentDatabaseMaintenanceOwner } from "./openclaw-agent-execution-maintenance.js";
 import {
   initializeReplacementTranscript,
@@ -122,6 +131,45 @@ async function loadAgentEntryReadOperations() {
   const result = await import("../config/sessions/session-entry-read-result.worker.js");
   const cohort = await import("../config/sessions/session-entry-cohort.worker.js");
   return {
+    "session.inspection.readPrepared": (
+      input: SessionExactEntriesWorkerInput & {
+        expectedIdentity: DatabaseFileIdentity;
+        validationReceiptId: string;
+      },
+      { existing },
+    ) => {
+      if (!existing) {
+        throw new Error("This agent operation context does not own a prepared native connection");
+      }
+      const database = existing(input.validationReceiptId);
+      if (!database) {
+        return undefined;
+      }
+      const {
+        preserveSourceArtifacts: _,
+        inspectionSourcePath,
+        validationReceiptId: _receipt,
+        ...request
+      } = input;
+      const assertSource = () => {
+        assertOpenClawAgentDatabaseIdentity(database, request.expectedIdentity);
+        if (inspectionSourcePath && inspectionSourcePath !== database.path) {
+          const locator = readDatabasePathIdentitySync(inspectionSourcePath);
+          const identity = readOpenClawAgentDatabaseIdentity(database);
+          if (
+            locator.canonicalPath !== identity.canonicalPath ||
+            locator.key !== "file:" + identity.identity ||
+            locator.birthtime !== identity.birthtime
+          ) {
+            throw new Error("Session inspection locator changed after physical preparation");
+          }
+        }
+      };
+      assertSource();
+      const facts = kernel.readExactSessionEntriesWithLifecycle(request, database);
+      assertSource();
+      return facts;
+    },
     "session.entry.readResult": (input: SessionEntryReadWorkerInput, { open }) =>
       result.readSessionEntryResult(input, open()),
     "session.entry.read": (input: { sessionKey: string } | SessionEntryCohortRequest, { open }) => {
@@ -486,6 +534,7 @@ export function createAgentWorkerOperationLoaders(
   const loadMaintenanceOperations = async () => maintenance;
   return {
     "authProfiles.read": loadAgentAuthProfileOperations,
+    "session.inspection.readPrepared": loadAgentEntryReadOperations,
     "session.entry.read": loadAgentEntryReadOperations,
     "session.entry.readResult": loadAgentEntryReadOperations,
     "voice.session.read": loadAgentVoiceSessionOperations,

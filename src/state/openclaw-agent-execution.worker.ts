@@ -398,6 +398,27 @@ function openAgentDatabaseBackend(
   >(createAgentWorkerOperationLoaders(maintenance.operations));
   const context: AgentWorkerOperationContext = {
     open: openWriter,
+    existing(validationReceiptId) {
+      // execute already checked the original physical file before this synchronous operation.
+      if (
+        !database ||
+        !identity ||
+        !database.db.isOpen ||
+        getOpenClawAgentDatabaseIfOpen(options) !== database
+      ) {
+        throw new Error("Agent inspection lost its retained native database");
+      }
+      const validation = getOpenClawAgentDatabaseValidation(database);
+      if (!validation || validation.receiptId !== validationReceiptId) {
+        throw new Error("Agent inspection lost its admitted validation");
+      }
+      requestSqliteWorkerOperationAdmission({ stage: "prepare", facts: { identity, validation } });
+      // Missing canonical preparation needs the private reader, never proof writes on this handle.
+      return database.db.isTransaction ||
+        Atomics.load(new Int32Array(validation.canonicalReady), 0) !== 1
+        ? undefined
+        : database;
+    },
     options,
     admit,
     writeTransaction,

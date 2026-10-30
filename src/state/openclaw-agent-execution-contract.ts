@@ -56,17 +56,25 @@ export type OpenClawAgentDatabaseExecution = OpenClawAgentDatabaseAdmissionExecu
   release(): Promise<void>;
 };
 
+export type PreparedAgentDatabaseExecution = Pick<
+  OpenClawAgentDatabaseExecution,
+  "assertCurrent" | "captureGenerationClaim" | "fileIdentity" | "runExisting" | "release"
+>;
+
 export type AgentDatabaseFileExecutionOwner = {
   readonly kind: "file";
   readonly agentId: string;
   readonly sharedDatabaseKey: string;
   readonly creationIdentity?: DatabasePathIdentity;
   getPendingPreparation(): Promise<void> | undefined;
+  /** No owner creation, native preparation, or host filesystem inspection. */
+  borrowPrepared(): PreparedAgentDatabaseExecution | undefined;
   borrow(
     pathname: string,
     expectedIdentity?: AgentDatabaseExecutionFileIdentity,
     expectedCreationIdentity?: DatabasePathIdentity,
     requestedPath?: string,
+    preparedGeneration?: AgentDatabaseNativeGeneration,
   ): OpenClawAgentDatabaseExecution;
   closeIdle(): Promise<void>;
   retireForCleanup(): Promise<void>;
@@ -88,6 +96,12 @@ export type AgentDatabaseNativeGeneration = {
     createIfMissing?: boolean,
     signal?: AbortSignal,
   ): Promise<T | undefined>;
+  /** Dispatch only to this generation's already-open, fully prepared worker. */
+  runPrepared<T>(
+    source: AgentDatabaseRequestExecutionSource,
+    operation: (scope: AgentDatabaseExecutionScope) => Promise<T>,
+    assertCallerCurrent: () => void,
+  ): Promise<T>;
   close(): Promise<void>;
 };
 

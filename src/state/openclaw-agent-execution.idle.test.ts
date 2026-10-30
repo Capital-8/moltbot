@@ -43,6 +43,9 @@ beforeEach(() => {
     return {
       close,
       run: async () => undefined,
+      runPrepared: async () => {
+        throw new Error("An unprepared timer fixture cannot inspect");
+      },
       failure: () => undefined,
       isPrepared: () => false,
       getPendingNativeOpen: () => undefined,

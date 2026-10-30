@@ -38,6 +38,7 @@ import type {
   SessionHistoryWorkerInput,
   SessionHistoryWorkerPreparedInput,
   SessionTranscriptWorkerRequest,
+  SessionTranscriptWorkerReply,
   SessionTranscriptWorkerValues,
 } from "./session-transcript-worker.types.js";
 import { captureSessionTranscriptStorageEnvironment } from "./transcript-target-binding.js";
@@ -170,6 +171,7 @@ export function retainSessionHistoryWorkerDatabase(
       let retirement: Promise<void> | undefined;
       const preserveSourceArtifacts = isArtifactPreservingStateRead("agent", database.path);
       let inspectionIdentity: DatabaseFileIdentity | undefined;
+      let assertInspectionCurrent: (() => void) | undefined;
       const hostEffects = new Set<Promise<WorkerTaskResponse>>();
       /** Retain schema admission through reply processing without locking the consumer. */
       const readAdmissionOptions = {
@@ -259,57 +261,80 @@ export function retainSessionHistoryWorkerDatabase(
                 );
             return runWithAgentDatabaseReadAdmissionTurn(
               [database.path],
-              () =>
-                requestLane.pool.run(
+              async () => {
+                const prepareRequest = () => {
+                  assertCurrent();
+                  options.prepareRead?.();
+                  const input = prepare();
+                  if (preserveSourceArtifacts && input.kind === "session-exact-entries") {
+                    inspectionIdentity =
+                      options.readIdentity ??
+                      getSqliteDatabaseAdmissionIdentityForPath(database.path);
+                    if (
+                      inspectionIdentity &&
+                      input.expectedIdentity &&
+                      (input.expectedIdentity.key !== inspectionIdentity.key ||
+                        input.expectedIdentity.birthtime !== inspectionIdentity.birthtime)
+                    ) {
+                      throw new Error(
+                        "Session authority inspection source changed before dispatch",
+                      );
+                    }
+                    input.preserveSourceArtifacts = true;
+                    input.inspectionSourcePath = options.readSourcePath;
+                    inspectionIdentity ??= input.expectedIdentity;
+                    if (inspectionIdentity) {
+                      input.expectedIdentity = {
+                        ...inspectionIdentity,
+                        canonicalPath: database.path,
+                      };
+                    }
+                  }
+                  const projection = projectionTarget(input);
+                  const projectionReceipt = projection?.sessionId
+                    ? readSessionActorProjectionReceipt({
+                        path: database.path,
+                        sessionKey: projection.sessionKey,
+                        sessionId: projection.sessionId,
+                      })
+                    : undefined;
+                  return {
+                    ...input,
+                    database,
+                    validation: validation?.validation,
+                    projectionReceipt: projectionReceipt && {
+                      ...projectionReceipt,
+                      ...(input.kind === "history-page" && !projectionReceipt.entrySessionKey
+                        ? { contextOnly: true }
+                        : {}),
+                    },
+                  } satisfies SessionTranscriptWorkerRequest;
+                };
+                const input = preserveSourceArtifacts ? prepareRequest() : undefined;
+                if (input?.kind === "session-exact-entries") {
+                  const { readPreparedSessionEntryInspection } =
+                    await import("./session-entry-inspection.js");
+                  const prepared = await readPreparedSessionEntryInspection(
+                    input,
+                    assertCurrent,
+                    requestSignal,
+                    remainingTime(),
+                  );
+                  assertInspectionCurrent = prepared?.assertCurrent;
+                  if (prepared?.value) {
+                    const inspected: SessionTranscriptWorkerReply<"session-exact-entries"> = {
+                      ok: true,
+                      value: prepared.value,
+                    };
+                    return inspected;
+                  }
+                }
+                return requestLane.pool.run(
                   () => {
                     assertCurrent();
-                    options.prepareRead?.();
-                    const input = prepare();
-                    if (preserveSourceArtifacts && input.kind === "session-exact-entries") {
-                      inspectionIdentity =
-                        options.readIdentity ??
-                        getSqliteDatabaseAdmissionIdentityForPath(database.path);
-                      if (
-                        inspectionIdentity &&
-                        input.expectedIdentity &&
-                        (input.expectedIdentity.key !== inspectionIdentity.key ||
-                          input.expectedIdentity.birthtime !== inspectionIdentity.birthtime)
-                      ) {
-                        throw new Error(
-                          "Session authority inspection source changed before dispatch",
-                        );
-                      }
-                      input.preserveSourceArtifacts = true;
-                      input.inspectionSourcePath = options.readSourcePath;
-                      inspectionIdentity ??= input.expectedIdentity;
-                      if (inspectionIdentity) {
-                        input.expectedIdentity = {
-                          ...inspectionIdentity,
-                          canonicalPath: database.path,
-                        };
-                      }
-                    }
-                    const projection = projectionTarget(input);
-                    const projectionReceipt = projection?.sessionId
-                      ? readSessionActorProjectionReceipt({
-                          path: database.path,
-                          sessionKey: projection.sessionKey,
-                          sessionId: projection.sessionId,
-                        })
-                      : undefined;
                     requestLane.native = true;
                     owned.nativeLanes.add(requestLane);
-                    return {
-                      ...input,
-                      database,
-                      validation: validation?.validation,
-                      projectionReceipt: projectionReceipt && {
-                        ...projectionReceipt,
-                        ...(input.kind === "history-page" && !projectionReceipt.entrySessionKey
-                          ? { contextOnly: true }
-                          : {}),
-                      },
-                    } satisfies SessionTranscriptWorkerRequest;
+                    return input ?? prepareRequest();
                   },
                   {
                     inputBytes: inputBytes + (validation?.inputBytes ?? 0),
@@ -339,13 +364,18 @@ export function retainSessionHistoryWorkerDatabase(
                       }
                     },
                   },
-                ),
+                );
+              },
               [],
               requestSignal,
               readAdmissionOptions,
             );
           });
           await retirement;
+          if (preserveSourceArtifacts) {
+            assertCurrent();
+            signal?.throwIfAborted();
+          }
           const received =
             unwrapSessionTranscriptWorkerReply<SessionHistoryWorkerInput["kind"]>(reply);
           if (
@@ -389,6 +419,7 @@ export function retainSessionHistoryWorkerDatabase(
           const paired = received as SessionTranscriptWorkerValues[ReturnType<
             typeof prepare
           >["kind"]];
+          assertInspectionCurrent?.();
           const value = receive(paired);
           if (reply.ok && reply.closedHistoryDatabase) {
             await settleSessionHistoryWorkerEviction(requestLane, reply.closedHistoryDatabase);

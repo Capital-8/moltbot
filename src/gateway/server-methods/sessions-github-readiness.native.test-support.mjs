@@ -29,32 +29,34 @@ sqlite.DatabaseSync = new Proxy(sqlite.DatabaseSync, {
         Atomics.add(counts, 4, 1);
         for (const suffix of ["", "-wal", "-shm", "-journal"]) {
           const stat = fs.statSync(location + suffix, { throwIfNoEntry: false });
-          if (stat) Atomics.add(counts, 5, stat.size);
+          if (stat) {
+            Atomics.add(counts, 5, stat.size);
+          }
         }
       }
     }
     if (database.location() === source) {
       Atomics.add(counts, 1, 1);
-      if (counts.length > 6) {
-        const prepare = database.prepare;
-        database.prepare = function (sql) {
-          const statement = Reflect.apply(prepare, this, [sql]);
-          if (/select/i.test(sql) && /session_nodes/i.test(sql)) {
-            for (const method of ["get", "all", "iterate"]) {
-              const execute = statement[method];
-              statement[method] = function (...params) {
-                Atomics.add(counts, 6, 1);
-                return Reflect.apply(execute, this, params);
-              };
-            }
-          }
-          return statement;
-        };
-      }
     }
     return database;
   },
 });
+if (counts.length > 6) {
+  const prepare = sqlite.DatabaseSync.prototype.prepare;
+  sqlite.DatabaseSync.prototype.prepare = function (sql) {
+    const statement = Reflect.apply(prepare, this, [sql]);
+    if (this.location() === source && /select/i.test(sql) && /session_nodes/i.test(sql)) {
+      for (const method of ["get", "all", "iterate"]) {
+        const execute = statement[method];
+        statement[method] = function (...params) {
+          Atomics.add(counts, 6, 1);
+          return Reflect.apply(execute, this, params);
+        };
+      }
+    }
+    return statement;
+  };
+}
 const stat = fs.statSync;
 fs.statSync = function (...args) {
   if (args[0] === source) {

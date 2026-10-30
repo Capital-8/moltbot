@@ -286,19 +286,20 @@ export function getOpenClawAgentDatabaseValidationForTransfer(
 /** Readers borrow physical/canonical proof without copying the schema catalog or opening a host handle. */
 export function captureOpenClawAgentDatabaseReadValidation(
   database: Pick<ValidationDatabase, "agentId" | "path">,
-  mode: "retained" | "admission" = "retained",
+  mode: "retained" | "admission" | "prepared" = "retained",
 ) {
-  const current = getOpenClawAgentDatabaseValidationForTransfer(database);
-  if (!current) {
+  // Prepared execution supplies its registered physical path and revalidates it in the worker.
+  const known = validatedPaths.has(database.path);
+  const current =
+    (mode !== "prepared" || known) && getOpenClawAgentDatabaseValidationForTransfer(database);
+  if (current && known && mode !== "prepared") {
+    observeValidationPath(database.path, mode === "admission");
+  }
+  if (!current || Atomics.load(new Int32Array(current.valid), 0) !== 1) {
     return undefined;
   }
   let canonicalPath = database.path;
-  if (validatedPaths.has(canonicalPath)) {
-    observeValidationPath(canonicalPath, mode === "admission");
-    if (Atomics.load(new Int32Array(current.valid), 0) !== 1) {
-      return undefined;
-    }
-  } else {
+  if (!known) {
     const capturedIdentity = readDatabasePathIdentitySync(database.path);
     if (
       capturedIdentity.key !== `file:${current.identity}` ||
