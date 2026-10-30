@@ -169,6 +169,7 @@ export function scheduleGatewayRequestStart(
       request.method === "agent.identity.get" ||
       request.method === "plugins.controlUi.list" ||
       request.method === "cron.list" ||
+      request.method === "cron.modelImpact" ||
       request.method === "push.web.vapidPublicKey" ||
       request.method === "sessions.github.options" ||
       request.method === "workboard.cards.list" ||
