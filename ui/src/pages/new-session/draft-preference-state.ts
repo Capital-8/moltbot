@@ -95,6 +95,20 @@ export class DraftPreferenceState {
     return this.preferenceModeValue === "loading";
   }
 
+  prepare() {
+    const previousScope = this.preferenceScope;
+    this.synchronize();
+    if (this.preferenceScope !== previousScope) {
+      this.callbacks.changed();
+    }
+  }
+
+  synchronizeIfStarted() {
+    if (this.preferenceScope) {
+      this.prepare();
+    }
+  }
+
   synchronize() {
     const state = this.read();
     const gateway = state.source;
@@ -208,6 +222,7 @@ export class DraftPreferenceState {
   }
 
   persistPreference(agentId: string, workspace: string | undefined, patch: NewSessionPreference) {
+    this.prepare();
     return this.preparePreferenceWrite(agentId, workspace, patch)?.();
   }
 

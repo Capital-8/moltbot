@@ -13,6 +13,7 @@ import type {
 } from "../../../lib/chat/model-select-state.ts";
 import type { ChatThinkingTarget } from "../../../lib/chat/thinking.ts";
 import type { ChatModelCatalogState } from "../../../lib/model-catalog-store.ts";
+import type { ChatAccessProgramControlProps } from "./chat-access-program-control.tsx";
 import type { ChatModelAccountSection } from "./chat-model-account-control.ts";
 import type { ChatModelPickerTargetGroup } from "./chat-model-picker-options.ts";
 
@@ -48,6 +49,8 @@ export type ChatModelControlsProps = {
   accessProgramMutationDisabledReason?: string;
   requestedAccessProgram?: CyberAccessProgram;
   daybreakAccessProgram?: Exclude<CyberAccessProgram, "standard">;
+  readAccessProgramPreference?: ChatAccessProgramControlProps["readPreference"];
+  onAccessProgramOpen?: ChatAccessProgramControlProps["preparePreference"];
   onAccessProgramSelect?: (
     value: CyberAccessProgram,
     sessionKey: string,

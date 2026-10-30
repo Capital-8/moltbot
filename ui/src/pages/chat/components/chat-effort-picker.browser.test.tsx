@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, assert, describe, expect, it, onTestFinished, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { installTitleTooltips } from "../../../components/tooltip-title.ts";
@@ -406,4 +406,49 @@ it("restores the remembered permitted Daybreak choice and recovers an unavailabl
   await draw({ requested: "daybreak_red", disabled: true });
   expect(toggle().disabled).toBe(true);
   expect(option("daybreak_blue").disabled).toBe(true);
+});
+
+it("prepares remembered Access only when visible and keeps other effort controls ready", async () => {
+  const preference = createRoot((dispose) => {
+    onTestFinished(dispose);
+    const [read, write] = createSignal<
+      ReturnType<NonNullable<ChatAccessProgramControlProps["readPreference"]>>
+    >({ loading: true });
+    return { read, write };
+  });
+  const preparePreference = vi.fn();
+  const readPreference = vi.fn(preference.read);
+  const onSelect = vi.fn();
+  const access: ChatAccessProgramControlProps = {
+    sessionKey: "effort-preview",
+    disabled: false,
+    requested: "standard",
+    programs: ["standard", "daybreak_blue", "daybreak_red"],
+    readPreference,
+    preparePreference,
+    onSelect,
+  };
+  const draw = (open: boolean, props = access) =>
+    fixture(["low", "high"], "low", false, speedState(false), open, props);
+
+  await draw(false);
+  expect(preparePreference).not.toHaveBeenCalled();
+  expect(readPreference).not.toHaveBeenCalled();
+  await draw(true, { ...access, programs: ["standard"] });
+  expect(host!.querySelector(".chat-controls__access-panel")).toBeNull();
+  expect(preparePreference).not.toHaveBeenCalled();
+  expect(readPreference).not.toHaveBeenCalled();
+  const { input } = await draw(true);
+  const toggle = host!.querySelector<HTMLInputElement>(".chat-controls__access-head input")!;
+  await expect.poll(() => preparePreference.mock.calls.length).toBe(1);
+  expect(toggle.disabled).toBe(true);
+  expect(input.disabled).toBe(false);
+  expect(speed("on").disabled).toBe(false);
+
+  preference.write({ loading: false, previous: "daybreak_red" });
+  flush();
+  expect(toggle.disabled).toBe(false);
+  await userEvent.click(toggle);
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith("daybreak_red", "effort-preview");
+  expect(preparePreference).toHaveBeenCalledOnce();
 });

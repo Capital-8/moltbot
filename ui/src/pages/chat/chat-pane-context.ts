@@ -427,6 +427,7 @@ export abstract class ChatPaneContext extends ChatPaneLifecycle {
     state.connectionEpoch = this.connectionGeneration;
     state.hello = snapshot.hello;
     state.selfUser = snapshot.selfUser ?? null;
+    state.accessPreferences?.synchronizeIfStarted();
     state.assistantAgentId = assistantAgentId;
     this.refreshBoardSubscriptions();
     const routeSessionKey = this.sessionKey.trim();

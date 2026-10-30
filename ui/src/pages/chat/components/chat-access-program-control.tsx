@@ -1,4 +1,4 @@
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, For, onSettled, Show } from "solid-js";
 import type { CyberAccessProgram } from "../../../api/types.ts";
 import { DETAILS_SECTION_MOTION } from "../../../components/details-section-motion.ts";
 import { Icon } from "../../../components/solid/icon.tsx";
@@ -15,6 +15,12 @@ export type ChatAccessProgramControlProps = {
   programs?: readonly CyberAccessProgram[];
   effectiveAccessProgram?: CyberAccessProgram;
   previous?: Exclude<CyberAccessProgram, "standard">;
+  /** Chat reads remembered choices only while this lazy control is mounted. */
+  readPreference?: () => {
+    previous?: Exclude<CyberAccessProgram, "standard">;
+    loading: boolean;
+  };
+  preparePreference?: () => void;
   requested?: CyberAccessProgram;
   disabled: boolean;
   sessionKey: string;
@@ -30,7 +36,6 @@ export function ChatAccessProgramControl(props: ChatAccessProgramControlProps) {
   const selected = () => props.requested ?? props.effectiveAccessProgram;
   // Streamed snapshots must not reset native activation before the change event.
   const enabled = createMemo(() => selected() !== undefined && selected() !== "standard");
-  const disabled = createMemo(() => props.disabled);
   const unavailable = () => {
     const current = selected();
     return props.programs !== undefined &&
@@ -42,87 +47,95 @@ export function ChatAccessProgramControl(props: ChatAccessProgramControlProps) {
   };
   return (
     <Show when={programs().length > 0 || enabled()}>
-      <div
-        class="chat-controls__access-panel"
-        style={{
-          "--access-motion-duration": `${DETAILS_SECTION_MOTION.duration}ms`,
-          "--access-motion-easing": DETAILS_SECTION_MOTION.easing,
-        }}
-      >
-        <div class="chat-controls__access-head">
-          <span class="chat-controls__effort-heading">{t("chat.modelControls.daybreak")}</span>
-          <SettingsToggle
-            ariaLabel={t("chat.modelControls.daybreak")}
-            checked={enabled()}
-            disabled={disabled()}
-            onChange={(checked) => {
-              if (checked) {
-                const next =
-                  props.previous && programs().includes(props.previous)
-                    ? props.previous
-                    : programs()[0];
-                if (next) {
-                  void props.onSelect(next, props.sessionKey);
-                }
-              } else {
-                const current = selected();
-                void props.onSelect(
-                  "standard",
-                  props.sessionKey,
-                  current !== "standard" ? current : undefined,
-                );
-              }
+      {(_visible) => {
+        const preference = createMemo(() => props.readPreference?.());
+        const disabled = createMemo(() => props.disabled || preference()?.loading === true);
+        onSettled(() => {
+          props.preparePreference?.();
+        });
+        return (
+          <div
+            class="chat-controls__access-panel"
+            style={{
+              "--access-motion-duration": `${DETAILS_SECTION_MOTION.duration}ms`,
+              "--access-motion-easing": DETAILS_SECTION_MOTION.easing,
             }}
-          />
-        </div>
-        <div
-          class="chat-controls__access-choices"
-          data-expanded={enabled() ? "true" : "false"}
-          aria-hidden={enabled() ? "false" : "true"}
-          inert={!enabled()}
-        >
-          <div class="chat-controls__access-clip">
+          >
+            <div class="chat-controls__access-head">
+              <span class="chat-controls__effort-heading">{t("chat.modelControls.daybreak")}</span>
+              <SettingsToggle
+                ariaLabel={t("chat.modelControls.daybreak")}
+                checked={enabled()}
+                disabled={disabled()}
+                onChange={(checked) => {
+                  if (checked) {
+                    const previous = preference()?.previous ?? props.previous;
+                    const next =
+                      previous && programs().includes(previous) ? previous : programs()[0];
+                    if (next) {
+                      void props.onSelect(next, props.sessionKey);
+                    }
+                  } else {
+                    const current = selected();
+                    void props.onSelect(
+                      "standard",
+                      props.sessionKey,
+                      current !== "standard" ? current : undefined,
+                    );
+                  }
+                }}
+              />
+            </div>
             <div
-              class="chat-controls__access-options"
-              role="group"
-              aria-label={t("chat.modelControls.daybreak")}
-              data-chat-access-program="true"
+              class="chat-controls__access-choices"
+              data-expanded={enabled() ? "true" : "false"}
+              aria-hidden={enabled() ? "false" : "true"}
+              inert={!enabled()}
             >
-              <Show when={unavailable()}>
-                <span class="chat-controls__access-option" aria-disabled="true">
-                  {t("chat.modelControls.accessUnavailable", {
-                    program:
-                      selected() === "daybreak_red"
-                        ? t(programLabels.daybreak_red)
-                        : t(programLabels.daybreak_blue),
-                  })}
-                </span>
-              </Show>
-              <For each={programs()}>
-                {(program) => (
-                  <button
-                    type="button"
-                    class="chat-controls__access-option"
-                    data-chat-access-option={program}
-                    aria-pressed={selected() === program ? "true" : "false"}
-                    disabled={disabled()}
-                    onClick={() => {
-                      if (program !== selected()) {
-                        void props.onSelect(program, props.sessionKey);
-                      }
-                    }}
-                  >
-                    <span>{t(programLabels[program])}</span>
-                    <span class="chat-controls__access-check" aria-hidden="true">
-                      <Icon name="check" />
+              <div class="chat-controls__access-clip">
+                <div
+                  class="chat-controls__access-options"
+                  role="group"
+                  aria-label={t("chat.modelControls.daybreak")}
+                  data-chat-access-program="true"
+                >
+                  <Show when={unavailable()}>
+                    <span class="chat-controls__access-option" aria-disabled="true">
+                      {t("chat.modelControls.accessUnavailable", {
+                        program:
+                          selected() === "daybreak_red"
+                            ? t(programLabels.daybreak_red)
+                            : t(programLabels.daybreak_blue),
+                      })}
                     </span>
-                  </button>
-                )}
-              </For>
+                  </Show>
+                  <For each={programs()}>
+                    {(program) => (
+                      <button
+                        type="button"
+                        class="chat-controls__access-option"
+                        data-chat-access-option={program}
+                        aria-pressed={selected() === program ? "true" : "false"}
+                        disabled={disabled()}
+                        onClick={() => {
+                          if (program !== selected()) {
+                            void props.onSelect(program, props.sessionKey);
+                          }
+                        }}
+                      >
+                        <span>{t(programLabels[program])}</span>
+                        <span class="chat-controls__access-check" aria-hidden="true">
+                          <Icon name="check" />
+                        </span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        );
+      }}
     </Show>
   );
 }

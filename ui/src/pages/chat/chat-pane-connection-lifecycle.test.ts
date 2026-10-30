@@ -14,6 +14,7 @@ import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { sessionMutationGatewayHello } from "../../test-helpers/gateway-methods.ts";
 import { mockDocumentVisibility as trackVisibility } from "../../test-helpers/mock-cleanup.ts";
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { createStorageMock } from "../../test-helpers/storage.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import { chatHistoryRequests } from "./chat-history-state.ts";
 import { applyChatAgentsList, loadChatHistory } from "./chat-history.ts";
@@ -181,6 +182,69 @@ const setConnected = (pane: TestChatPane, value: boolean) =>
   Object.defineProperty(pane, "isConnected", { configurable: true, value });
 
 describe("chat pane connection lifecycle", () => {
+  it("refreshes demanded Access preferences on identity replacement without adopting the old load", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    onTestFinished(() => vi.unstubAllGlobals());
+    const firstLoad = createDeferred<{ status: "ok"; entries: Record<string, unknown> }>();
+    const first = reconnectPane(
+      { messages: [], sessionId: "access-session" },
+      { "users.prefs.get": firstLoad.promise, "users.prefs.set": { status: "ok" } },
+    );
+    const hello = sessionMutationGatewayHello();
+    const connected = {
+      ...first.pane.context.gateway.snapshot,
+      selfUser: { id: "access-person-a" },
+      hello: {
+        ...hello,
+        auth: { ...hello.auth, recoveryScope: first.client.recoveryScope },
+        features: {
+          methods: [...hello.features!.methods, "users.prefs.get", "users.prefs.set"],
+        },
+      },
+    };
+    first.pane.applyGatewaySnapshot(connected);
+    expect(requestCalls(first.request, "users.prefs.get")).toHaveLength(0);
+    const preferences = first.state.accessPreferences!;
+    preferences.prepare();
+    await waitForSolid(() =>
+      expect(requestCalls(first.request, "users.prefs.get")).toHaveLength(1),
+    );
+
+    const replacementRequest = createReconnectRequest(
+      { messages: [], sessionId: "access-session" },
+      {
+        "users.prefs.get": {
+          status: "ok",
+          entries: {
+            "new-session.migration.v1": true,
+            "new-session.v1:main": { daybreakAccessProgram: "daybreak_blue" },
+          },
+        },
+      },
+    );
+    first.pane.applyGatewaySnapshot({
+      ...connected,
+      client: createTestGatewayClient(replacementRequest),
+      selfUser: { id: "access-person-b" },
+    });
+    await waitForSolid(() => {
+      expect(preferences.loading).toBe(false);
+      expect(preferences.readPreference("main")?.daybreakAccessProgram).toBe("daybreak_blue");
+    });
+    expect(requestCalls(replacementRequest, "users.prefs.get")).toHaveLength(1);
+
+    firstLoad.resolve({
+      status: "ok",
+      entries: {
+        "new-session.migration.v1": true,
+        "new-session.v1:main": { daybreakAccessProgram: "daybreak_red" },
+      },
+    });
+    await Promise.allSettled(first.request.mock.results.map((result) => result.value));
+    await vi.dynamicImportSettled();
+    expect(preferences.readPreference("main")?.daybreakAccessProgram).toBe("daybreak_blue");
+  });
+
   it("uses a snapshot hydrated during connect preparation for the pipelined delta", async () => {
     const h = openingPane();
     const snapshot = {

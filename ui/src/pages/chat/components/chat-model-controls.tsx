@@ -638,6 +638,8 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
             ? {
                 requested: props.requestedAccessProgram,
                 previous: props.daybreakAccessProgram,
+                readPreference: props.readAccessProgramPreference,
+                preparePreference: props.onAccessProgramOpen,
                 effectiveAccessProgram,
                 programs: accessPrograms,
                 disabled: accessProgramDisabled,

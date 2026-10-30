@@ -24,10 +24,15 @@ import {
   createTestGatewayClient,
   type GatewayRequestHandler,
 } from "../../test-helpers/gateway-client.ts";
-import { sessionMutationGatewayHello } from "../../test-helpers/gateway-methods.ts";
+import {
+  gatewayHelloForMethods,
+  sessionMutationGatewayHello,
+} from "../../test-helpers/gateway-methods.ts";
 import { installModelPickerLayout } from "../../test-helpers/model-picker-layout.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { createStorageMock } from "../../test-helpers/storage.ts";
+import { DraftPreferenceState } from "../new-session/draft-preference-state.ts";
 import { createInitializationContext } from "./chat-application-context.test-support.ts";
 import { projectChatFields } from "./chat-field-projection.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
@@ -46,6 +51,21 @@ import { ChatPermissionPicker } from "./components/chat-permission-picker.tsx";
 import { adoptStartedChatRun, reconcileChatRunLifecycle } from "./run-lifecycle.ts";
 
 beforeEach(installModelPickerLayout);
+
+function preferenceContext(request: GatewayRequestHandler) {
+  vi.stubGlobal("localStorage", createStorageMock());
+  onTestFinished(() => vi.unstubAllGlobals());
+  const client = createTestGatewayClient(request);
+  const context = createInitializationContext(client);
+  context.gateway.snapshot.selfUser = { id: "access-person" };
+  const hello = gatewayHelloForMethods(["users.prefs.get", "users.prefs.set"]);
+  context.gateway.snapshot.hello = {
+    ...hello,
+    server: { bootId: "gateway-boot-a" },
+    auth: { ...hello.auth, recoveryScope: client.recoveryScope },
+  };
+  return context;
+}
 
 describe("chat account selection", () => {
   function mountAccountControl(
@@ -237,6 +257,84 @@ describe("chat account selection", () => {
 });
 
 describe("chat pane composer controls", () => {
+  it("leaves identity preferences unread until Access is opened", async () => {
+    const loaded = createDeferred<{
+      status: "ok";
+      entries: Record<string, unknown>;
+    }>();
+    const request = createGatewayRequestMock((method) =>
+      method === "users.prefs.get" ? loaded.promise : { status: "ok" },
+    );
+    const context = preferenceContext(request);
+    const state = createRenderTestChatPane().initialize(context);
+    state.sessionKey = "main";
+    onTestFinished(() => state.accessPreferences?.disconnect());
+    const model = renderControls(state).composerControls.model;
+    expect(request).not.toHaveBeenCalled();
+    expect(model.readAccessProgramPreference?.()).toEqual({ previous: undefined, loading: false });
+    expect(request).not.toHaveBeenCalled();
+
+    model.onAccessProgramOpen?.();
+    await waitForSolid(() => expect(request).toHaveBeenCalledOnce());
+    expect(model.readAccessProgramPreference?.().loading).toBe(true);
+    loaded.resolve({
+      status: "ok",
+      entries: {
+        "new-session.migration.v1": true,
+        "new-session.v1:main": { daybreakAccessProgram: "daybreak_red" },
+      },
+    });
+    await waitForSolid(() =>
+      expect(model.readAccessProgramPreference?.()).toEqual({
+        previous: "daybreak_red",
+        loading: false,
+      }),
+    );
+    expect(request.mock.calls.map(([method]) => method)).toEqual(["users.prefs.get"]);
+  });
+
+  it("prepares identity preferences before persisting an early Access selection", async () => {
+    const loaded = createDeferred<{
+      status: "ok";
+      entries: Record<string, unknown>;
+    }>();
+    const request = createGatewayRequestMock((method) =>
+      method === "users.prefs.get" ? loaded.promise : { status: "ok" },
+    );
+    const context = preferenceContext(request);
+    const preferences = DraftPreferenceState.forChat(context, vi.fn());
+    onTestFinished(() => preferences.disconnect());
+    const pending = preferences.persistPreference("main", undefined, {
+      cyberAccessProgram: "daybreak_red",
+      daybreakAccessProgram: "daybreak_red",
+    });
+    await waitForSolid(() => expect(request).toHaveBeenCalledOnce());
+    expect(preferences.loading).toBe(true);
+    expect(request.mock.calls[0]?.[0]).toBe("users.prefs.get");
+    loaded.resolve({
+      status: "ok",
+      entries: {
+        "new-session.migration.v1": true,
+        "new-session.v1:main": { worktreeName: "retained-name" },
+      },
+    });
+    await pending;
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "users.prefs.get",
+      "users.prefs.set",
+    ]);
+    expect(request.mock.calls[1]?.[1]).toMatchObject({
+      entries: {
+        "new-session.v1:main": {
+          worktreeName: "retained-name",
+          cyberAccessProgram: "daybreak_red",
+          daybreakAccessProgram: "daybreak_red",
+        },
+      },
+      expectedEntries: { "new-session.v1:main": { worktreeName: "retained-name" } },
+    });
+  });
+
   it("renders the selected Gateway model while keeping its model picker locked", async () => {
     const selectedSession: GatewaySessionRow = {
       key: "main",

@@ -155,8 +155,6 @@ export function renderChatPaneComposerControls(params: {
     onProviderSettings,
     onModelAccounts,
   } = params;
-  void state.accessPreferenceRevision;
-  state.accessPreferences?.synchronize();
   const sessionKey = state.sessionKey;
   const preferenceAgentId = scopedAgentListParamsForSession(state, sessionKey).agentId;
   const client = state.client;
@@ -286,8 +284,15 @@ export function renderChatPaneComposerControls(params: {
           ? undefined
           : accessProgramAccess.reason,
         requestedAccessProgram: settingsSession?.cyberAccessProgram,
-        daybreakAccessProgram: state.accessPreferences?.readPreference(preferenceAgentId ?? "main")
-          ?.daybreakAccessProgram,
+        readAccessProgramPreference: () => {
+          void state.accessPreferenceRevision;
+          return {
+            previous: state.accessPreferences?.readPreference(preferenceAgentId ?? "main")
+              ?.daybreakAccessProgram,
+            loading: state.accessPreferences?.loading === true,
+          };
+        },
+        onAccessProgramOpen: () => state.accessPreferences?.prepare(),
         contextWindowTarget: settingsPreview
           ? { ...(selectedSession ?? state.sessionsResult?.defaults), ...settingsPreview }
           : undefined,
