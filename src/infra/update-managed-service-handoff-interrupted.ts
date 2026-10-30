@@ -15,6 +15,7 @@ import type { UpdateRecovery } from "./update-recovery.js";
 import { withUpdateRunRead } from "./update-run-admission.js";
 import { findUpdateGatewayStop } from "./update-run-gateway-stop.js";
 import { readUpdateRunRecord, readUpdateRuns } from "./update-run-read.kernel.js";
+import type { UpdateRunRecord } from "./update-run-record.js";
 import { readCurrentGitUpdateRecovery } from "./update-runner-git-recovery.js";
 
 /** This one-shot helper already owns the parked state; no installed snapshot worker is needed. */
@@ -38,7 +39,8 @@ export async function recoverInterruptedManagedUpdate(params: {
   originalIdentity: string;
   timeoutMs: number;
   assertCurrent: () => void;
-  finalize: () => Promise<void>;
+  /** Returns the run as read by the installed runtime after post-core repair. */
+  finalize: () => Promise<UpdateRunRecord | undefined>;
 }) {
   const { root, assertCurrent } = params;
   const run = readManagedHandoffUpdateRun(params.runId);
@@ -125,9 +127,8 @@ export async function recoverInterruptedManagedUpdate(params: {
   ) {
     throw new Error("Installed runtime does not match this update's recorded candidate");
   }
-  await params.finalize();
+  const recovery = (await params.finalize())?.verification.recovery;
   assertCurrent();
-  const recovery = readManagedHandoffUpdateRun(params.runId)?.verification.recovery;
   if (
     packageActivationIdentity(root, true) !== identity ||
     (recovery?.serviceRestartSafe === false && recovery.dataAtRisk)

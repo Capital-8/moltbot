@@ -423,6 +423,20 @@ function shouldRecoverInterruptedUpdater() {
   return restorationArmed || readManagedHandoffGatewayStop()?.runId === params.runId;
 }
 
+// Post-core repair may advance the state schema past this helper's staged reader.
+// A fresh process loads the installed candidate's whole module graph per call.
+function createInstalledRuntimeLedger(modulePath) {
+  const call = (name, args) => {
+    const out = require("node:child_process").spawnSync(process.execPath, [...params.runtimeArgs, "--input-type=module", "-e",
+      'import { pathToFileURL } from "node:url"; const [modulePath, name, args] = JSON.parse(process.argv[1]); const value = await (await import(pathToFileURL(modulePath).href))[name](...args); process.stdout.write(JSON.stringify(value ?? null));',
+      JSON.stringify([modulePath, name, args])], { encoding: "utf8", timeout: params.recoveryTimeoutMs, maxBuffer: 16 * 1024 * 1024 });
+    if (out.status !== 0) throw new Error("installed runtime ledger " + name + " failed: " + String(out.stderr || out.error || "").slice(-400));
+    return JSON.parse(out.stdout || "null") ?? undefined;
+  };
+  return Object.fromEntries(["adoptUpdateRun", "finishUpdateRun", "getUpdateRun", "recordUpdateRunStep", "recordUpdateRunVerification"]
+    .map((name) => [name, (...args) => call(name, args)]));
+}
+
 async function recoverInterruptedUpdater() {
   const reason = "managed-service-handoff-interrupted";
   terminalRuntimePath = path.join(params.cwd, "runtime", ${JSON.stringify(MANAGED_HANDOFF_RUNTIME_ENTRY)});
@@ -451,6 +465,8 @@ async function recoverInterruptedUpdater() {
           !["ok", "warning"].includes(repaired.status)) {
           throw new Error("Interrupted update post-core repair did not complete");
         }
+        runLedger = createInstalledRuntimeLedger(params.recoveryModulePath);
+        return runLedger.getUpdateRun(params.runId);
       },
     });
     terminalRuntimePath = params.recoveryModulePath;
