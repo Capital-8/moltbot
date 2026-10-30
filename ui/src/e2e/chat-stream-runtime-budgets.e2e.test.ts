@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { projectAgentToolActivity } from "../../../src/infra/agent-activity-events.js";
+import type { ChatPaneElement } from "../pages/chat/chat-pane.tsx";
 import type { notifyRenderLifecycleForTest } from "../pages/chat/render-lifecycle.ts";
 import {
   evaluateControlUiContext,
@@ -12,7 +13,10 @@ import {
   requireString,
   waitForChatScrollIdle,
 } from "./chat-flow.test-support.ts";
-import { createControlUiE2eContextOptions } from "./control-ui-e2e-suite.test-support.ts";
+import {
+  createControlUiE2eContextOptions,
+  holdModuleResponse,
+} from "./control-ui-e2e-suite.test-support.ts";
 import { waitForCommittedComposerDraft, waitForCommittedState } from "./settle.test-support.ts";
 
 const suite = createChatFlowE2eSuite();
@@ -116,6 +120,36 @@ async function settleInitialModelCatalog(
         ?.textContent?.includes(modelName) === true,
     name,
   );
+}
+
+// The shell warms these menu bodies after transcript readiness. Their English
+// catalogs publish a pane revision even while both menus stay closed.
+async function waitForChatMenuCatalogs(page: ChatFlowPage) {
+  const names = ["chat-header-session-menu-content", "chat-composer-plus-menu-content"];
+  const available = await page.waitForFunction(
+    (modules) =>
+      modules.every((name) =>
+        performance.getEntriesByType("resource").some((entry) => entry.name.includes(name)),
+      ),
+    names,
+  );
+  await available.dispose();
+  const urls = await page.evaluate(
+    (modules) =>
+      modules.map(
+        (name) =>
+          performance.getEntriesByType("resource").find((entry) => entry.name.includes(name))!.name,
+      ),
+    names,
+  );
+  // Fetch completion is not registration. Keep import in the browser instead of
+  // Vitest's SSR transform, joining these same module-map promises and dependencies.
+  await page.evaluate(
+    `Promise.all(${JSON.stringify(urls)}.map(url => import(url))).then(() => undefined)`,
+  );
+  await page
+    .locator("openclaw-chat-pane.chat-pane-cache__pane--active")
+    .evaluate((pane: ChatPaneElement) => pane.updateComplete);
 }
 
 async function installRenderProbe(page: ChatFlowPage) {
@@ -516,6 +550,10 @@ function buildLongTranscriptFixture(messageCount: number): Array<Record<string, 
 suite.define(() => {
   it("commits a streamed delta burst in frame-bound transcript batches", async () => {
     await suite.withPage(createControlUiE2eContextOptions(), async ({ page }) => {
+      const heldMenu = await holdModuleResponse(
+        page,
+        /\/board-widget-menu[^/]*\.(?:js|tsx)(?:\?.*)?$/u,
+      );
       const gateway = await installMockGateway(
         page,
         {
@@ -589,6 +627,15 @@ suite.define(() => {
           ),
         )
         .toBe(true);
+      let catalogsJoined = false;
+      const catalogs = waitForChatMenuCatalogs(page).then(() => {
+        catalogsJoined = true;
+      });
+      await heldMenu.request;
+      await page.evaluate(() => undefined);
+      expect(catalogsJoined).toBe(false);
+      heldMenu.release();
+      await catalogs;
       await waitForChatScrollIdle(page);
       await installRenderProbe(page);
       await resetRenderProbe(page);
