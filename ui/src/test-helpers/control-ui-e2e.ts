@@ -67,6 +67,10 @@ import {
 } from "./control-ui-mock-presence.ts";
 import { createControlUiMockReactions } from "./control-ui-mock-reactions.ts";
 import { createControlUiMockResponses } from "./control-ui-mock-responses.ts";
+import {
+  normalizeControlUiMockServerIdentity,
+  type ControlUiMockServerIdentity,
+} from "./control-ui-mock-server-identity.ts";
 import { createControlUiMockSessionSubscriptions } from "./control-ui-mock-session-subscriptions.ts";
 import { parseControlUiMockRequestFrame } from "./control-ui-mock-wire.ts";
 import { createControlUiPaneRuntimeTestAdapterScript } from "./control-ui-pane-runtime.test-support.ts";
@@ -199,7 +203,7 @@ export { installControlUiMockBootstrapDocument } from "./control-ui-bootstrap-fi
 export { defaultControlUiFeatureMethods } from "./control-ui-e2e-defaults.ts";
 
 export interface ControlUiMockGatewayScenario
-  extends ControlUiMockAuth, ControlUiMockPresenceScenario {
+  extends ControlUiMockAuth, ControlUiMockPresenceScenario, ControlUiMockServerIdentity {
   bootstrapPreferences?: ControlUiBootstrapConfig["preferences"];
   /** Auto-wait for sidebar rosters unless startup is held or connect fails; true overrides those skips, false disables the wait. */
   awaitInitialRoster?: boolean;
@@ -243,17 +247,11 @@ export interface ControlUiMockGatewayScenario
   startupPendingResponses?: number;
   /** Non-release gateway checkout branch surfaced in the sidebar footer. */
   devGitBranch?: string;
-  /** Exact immutable Control UI artifact served by the mocked Gateway. */
-  serverBuildId?: string;
-  /** Exact Gateway lifecycle generation served in hello. */
-  gatewayBootId?: string;
   gatewaySuspensionPhase?: "accepting" | "preparing" | "draining" | "prepared";
   /** Optional startup update snapshot for rich local mock fixtures. */
   updateAvailable?: UpdateAvailable | null;
   /** Optional automatic-update campaign snapshot for rich local mock fixtures. */
   updateSchedule?: UpdateScheduleState | null;
-  controlUiBuildSource?: "bundled" | "configured";
-  serverVersion?: string;
   featureEvents?: string[];
   featureMethods?: string[];
   /** Simulate a legacy Gateway that predates the advertised method catalog. */
@@ -814,13 +812,10 @@ function normalizeScenario(
     heldRequests: scenario.heldRequests ?? [],
     startupPendingResponses: scenario.startupPendingResponses ?? 0,
     devGitBranch: scenario.devGitBranch?.trim() || "",
-    serverBuildId: scenario.serverBuildId?.trim() || sharedBuildInfo?.buildId || "e2e",
-    gatewayBootId: scenario.gatewayBootId?.trim() || "e2e-gateway-boot",
+    ...normalizeControlUiMockServerIdentity(scenario, sharedBuildInfo),
     gatewaySuspensionPhase: scenario.gatewaySuspensionPhase ?? "accepting",
     updateAvailable: scenario.updateAvailable ?? null,
     updateSchedule: scenario.updateSchedule ?? null,
-    controlUiBuildSource: scenario.controlUiBuildSource ?? "bundled",
-    serverVersion: scenario.serverVersion?.trim() || sharedBuildInfo?.version || "e2e",
     ...normalizeControlUiMockAuth(scenario),
     featureEvents: scenario.featureEvents ?? [],
     // Baseline scenarios represent a current Gateway. Tests for unsupported or
@@ -1680,6 +1675,8 @@ function installControlUiMockGateway(
             controlUiBuildSource: scenario.controlUiBuildSource,
             connId: "control-ui-e2e",
             version: scenario.serverVersion,
+            ...(scenario.serverCommit ? { commit: scenario.serverCommit } : {}),
+            ...(scenario.serverBuiltAt ? { builtAt: scenario.serverBuiltAt } : {}),
           },
           policy: {
             maxPayload: scenario.maxPayload,

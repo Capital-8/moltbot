@@ -74,10 +74,11 @@ suite.define(() => {
       await page.mouse.up();
       await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/about");
       const branch = page
-        .locator(".settings-kv dt", { hasText: "Branch" })
-        .locator("xpath=following-sibling::dd[1]/code");
-      await expect.poll(() => branch.textContent()).toBe(`${NORMALIZED_BRANCH}*`);
+        .locator(".about-build", { hasText: "Control UI" })
+        .locator(".about-build__branch");
+      await expect.poll(() => branch.getAttribute("title")).toBe(NORMALIZED_BRANCH);
+      await expect.poll(() => branch.textContent()).toBe(`Branch ${NORMALIZED_BRANCH}*`);
       await page.reload();
-      await expect.poll(() => branch.textContent()).toBe(`${NORMALIZED_BRANCH}*`);
+      await expect.poll(() => branch.textContent()).toBe(`Branch ${NORMALIZED_BRANCH}*`);
     }));
 });
