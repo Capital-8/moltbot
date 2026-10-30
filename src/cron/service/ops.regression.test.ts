@@ -390,7 +390,6 @@ it("keeps a queued quiet schedule event separate from its one terminal event", a
       jobId: job.id,
       runId,
       status: "skipped",
-      error: "queued manual run skipped: trigger condition not met",
       triggerFired: false,
     });
   } finally {

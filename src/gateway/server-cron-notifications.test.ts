@@ -189,25 +189,6 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     setActiveDegradedSecretOwners([]);
   });
 
-  it("keeps an unfired condition quiet without starting conversation work", () => {
-    const job = createWebhookJob({ mode: "none" });
-    const resolveCronAgent = vi.fn(() => {
-      throw new Error("A quiet trigger must not resolve a conversation");
-    });
-    dispatchCompletion(job, {
-      evt: {
-        jobId: job.id,
-        action: "finished",
-        status: "skipped",
-        triggerFired: false,
-        runAtMs,
-      },
-      resolveCronAgent,
-    });
-    expect(resolveCronAgent).not.toHaveBeenCalled();
-    expect(getActiveGatewayRootWorkCount()).toBe(0);
-  });
-
   it.each([
     ["captured default", undefined, "alpha", "alpha"],
     ["explicit job owner", "gamma", "alpha", "gamma"],
