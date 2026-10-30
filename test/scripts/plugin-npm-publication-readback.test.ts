@@ -46,7 +46,7 @@ it("retries only transient GitHub reads and honors rate-limit guidance", async (
       attempts: 2,
       deadlineMs: 20_000,
       now: () => 0,
-      delay: async (delayMs) => void waits.push(delayMs),
+      delay: async (delayMs: number) => void waits.push(delayMs),
     }),
   ).resolves.toBe("verified");
   expect(waits).toEqual([7000]);
