@@ -78,12 +78,6 @@ export type ChatModelPickerParams = {
 
 export function ChatModelPicker(params: ChatModelPickerParams) {
   const search = createChatModelSearch();
-  const preparePanel = () => {
-    if (!params.disabled) {
-      // Warm on intent so opening can reuse the evaluated panel without boot work.
-      void ChatModelPickerPanel.preload().catch(() => undefined);
-    }
-  };
   let summary: HTMLElement;
   let searchInput: HTMLInputElement | undefined;
   let details: HTMLDetailsElement | undefined;
@@ -196,8 +190,6 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
           aria-disabled={params.disabled ? "true" : "false"}
           aria-description={params.disabledReason}
           title={params.disabledReason?.trim() || undefined}
-          onPointerEnter={preparePanel}
-          onFocus={preparePanel}
         >
           {state().modelToolsUnavailable ? (
             <openclaw-tooltip prop:content={t("chat.modelControls.chatOnlyHelp")}>
