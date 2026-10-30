@@ -555,11 +555,11 @@ export async function probeLongSession(options: {
       await movePointerToTranscript();
       await page.mouse.wheel(0, -1_000_000);
       const request = await page.waitForFunction(
-        ({ key, offset }) => {
+        ({ key, cursor }) => {
           const gateway: ControlUiMockGateway = Reflect.get(window, "openclawControlUiE2eGateway");
-          return gateway.findRequests("chat.history", { sessionKey: key, offset })[0];
+          return gateway.findRequests("chat.history", { sessionKey: key, cursor })[0];
         },
-        { key: sessionKey, offset: expectedPage.offset },
+        { key: sessionKey, cursor: expectedPage.cursor },
       );
       const recorded = await request.jsonValue();
       await request.dispose();
@@ -598,16 +598,16 @@ export async function probeLongSession(options: {
       try {
         const timing = await measureRendered(async () => {
           await page.evaluate(
-            ({ key, offset }) => {
+            ({ key, cursor }) => {
               const gateway: ControlUiMockGateway = Reflect.get(
                 window,
                 "openclawControlUiE2eGateway",
               );
               gateway.resolveDeferred("chat.history", undefined, {
-                match: { sessionKey: key, offset },
+                match: { sessionKey: key, cursor },
               });
             },
-            { key: sessionKey, offset: expectedPage.offset },
+            { key: sessionKey, cursor: expectedPage.cursor },
           );
           await page.waitForFunction(
             ({ selector, count }) =>
@@ -632,7 +632,7 @@ export async function probeLongSession(options: {
           ...timing,
           positions,
           maxDisplacementPx,
-          memory: await memory(`history-${expectedPage.offset}`),
+          memory: await memory(`history-${expectedPage.loadedMessages}`),
         });
       } finally {
         await anchorSample.evaluate((state) => {
@@ -641,31 +641,34 @@ export async function probeLongSession(options: {
         await anchorSample.dispose();
       }
       await page.screenshot({
-        path: path.join(artifactDir, `${prefix}.history-${expectedPage.offset}.png`),
+        path: path.join(artifactDir, `${prefix}.history-${expectedPage.loadedMessages}.png`),
       });
     }
     await movePointerToTranscript();
     await page.mouse.wheel(0, -1_000_000);
     await entry(workload.firstEntryId).waitFor({ state: "visible" });
     await pane.locator(".chat-history-sentinel").waitFor({ state: "detached" });
-    const offsets = await page.evaluate((key) => {
-      const gateway: ControlUiMockGateway = Reflect.get(window, "openclawControlUiE2eGateway");
-      return gateway
-        .findRequests("chat.history", { sessionKey: key })
-        .map((request) => Reflect.get(request.params ?? {}, "offset"))
-        .filter((offset) => typeof offset === "number");
-    }, sessionKey);
+    const cursors = await page.evaluate(
+      ({ key, deltaCursor }) => {
+        const gateway: ControlUiMockGateway = Reflect.get(window, "openclawControlUiE2eGateway");
+        return gateway
+          .findRequests("chat.history", { sessionKey: key })
+          .map((request) => Reflect.get(request.params ?? {}, "cursor"))
+          .filter((cursor) => typeof cursor === "string" && cursor !== deltaCursor);
+      },
+      { key: sessionKey, deltaCursor: workload.deltaCursor },
+    );
     if (
-      JSON.stringify(offsets) !==
-      JSON.stringify(workload.pages.map((expectedPage) => expectedPage.offset))
+      JSON.stringify(cursors) !==
+      JSON.stringify(workload.pages.map((expectedPage) => expectedPage.cursor))
     ) {
-      throw new Error(`Unexpected older history request offsets: ${JSON.stringify(offsets)}`);
+      throw new Error(`Unexpected older history request cursors: ${JSON.stringify(cursors)}`);
     }
     const scrollBottom = await scroll("bottom");
     return save({
       messageCount: workload.messageCount,
       stages,
-      offsets,
+      cursors,
       scrollBottom,
       finalMemory: await memory("after-scroll"),
     });

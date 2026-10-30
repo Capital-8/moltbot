@@ -1,6 +1,7 @@
 // One lifecycle owner for interactive Markdown in transcripts and previews.
 import { t } from "../i18n/index.ts";
 import { registerCodeBlocksEnglish } from "../i18n/locales/en-code-blocks.ts";
+import { subscribeDocumentVisibility } from "../lib/reactive/platform.ts";
 import { isMarkdownBlockParked } from "./markdown-block-presentation.ts";
 import { updateCodeBlockWidthOverflow } from "./markdown-code-blocks.ts";
 import { MarkdownCodeHighlights } from "./markdown-code-highlight.ts";
@@ -13,11 +14,20 @@ const blockSelector = ".code-block-wrapper, .markdown-mermaid";
 export class MarkdownBlocks {
   private observing = false;
   private scanPending = false;
-  private active = true;
+  private presented = false;
+  private active = false;
   private disposed = false;
   private codeHighlights: MarkdownCodeHighlights | undefined;
 
-  constructor(private readonly root: HTMLElement) {}
+  private readonly stopVisibility: () => void;
+
+  constructor(private readonly root: HTMLElement) {
+    // Solid refs can still belong to an inert template document before adoption.
+    // Observe the rendering document so replacement readers follow the real tab.
+    this.stopVisibility = subscribeDocumentVisibility(document, () => {
+      this.update(this.presented);
+    });
+  }
 
   private readonly pendingBlocks = new Set<HTMLElement>();
   private readonly observedNodes = new Set<HTMLElement>();
@@ -79,9 +89,12 @@ export class MarkdownBlocks {
     this.codeHighlights?.prune();
   }
 
-  update(active: boolean): void {
-    this.active = active;
-    if (active) {
+  update(presented: boolean): void {
+    // Every caller, including attachment previews, shares this gate. Keep pane
+    // intent separate so revealing the browser tab cannot reactivate a hidden pane.
+    this.presented = presented;
+    this.active = presented && document.visibilityState !== "hidden";
+    if (this.active) {
       this.codeHighlights?.resume();
       this.scheduleScan();
     } else {
@@ -91,6 +104,7 @@ export class MarkdownBlocks {
 
   dispose(): void {
     this.disposed = true;
+    this.stopVisibility();
     this.release();
     this.codeHighlights?.dispose();
   }
