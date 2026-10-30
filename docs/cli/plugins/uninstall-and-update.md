@@ -245,7 +245,8 @@ the installation loads compiled output; reload doesn't run the build.
 This mode is for development only:
 
 - It applies only to plugins named in an explicit reload. Startup, config-driven
-  reloads, and setup keep using the Gateway's code.
+  reloads, and setup keep using the Gateway's code. A later config-driven reload
+  of the same plugin returns it to the code the Gateway started with.
 - Host, SDK, and build chunks shared with core keep their loaded code. Changes to
   them still require a restart.
 - JavaScript modules can't be unloaded, so each reload keeps the previous code in

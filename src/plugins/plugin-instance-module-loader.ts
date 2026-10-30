@@ -527,7 +527,8 @@ export function bindPluginInstanceModuleLoader(input: PluginInstanceModuleLoader
       // Generated files resolve imports from their captured source's package and directory.
       const sharedModule = parentSource && artifact.sharedModule?.(parentSource, specifier);
       if (sharedModule) {
-        return nextResolve(pathToFileURL(sharedModule).href, context);
+        // CommonJS default resolution rejects file URL specifiers; answer with the URL directly.
+        return { shortCircuit: true, url: pathToFileURL(sharedModule).href };
       }
       const nativeContext =
         parentSource && parentRoot
