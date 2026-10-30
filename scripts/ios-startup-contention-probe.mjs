@@ -16,14 +16,13 @@ let phase = "preflight";
 let timer;
 let sampling = true;
 let pendingSample;
-let previous = new Map();
 let previousAt;
 let count = 0;
 let bytes = 0;
 const emit = (record) => {
   const line = `${JSON.stringify({ at: new Date().toISOString(), phase, ...record })}\n`;
   if (
-    record.type === "census" &&
+    record.type === "task-sample" &&
     (count >= 110 || bytes + Buffer.byteLength(line) > 16 * 1024 * 1024)
   ) {
     sampling = false;
@@ -64,41 +63,20 @@ async function sample() {
   const phaseAtStart = phase;
   try {
     const census = JSON.parse(
-      await run("/usr/bin/sudo", ["-n", "/usr/bin/nice", "-n", "10", counter], 2_000),
+      await run(
+        "/usr/bin/sudo",
+        ["-n", "/usr/bin/nice", "-n", "10", "/usr/bin/python3", counter],
+        7_000,
+      ),
     );
-    const rows = census.processes;
-    const byPid = new Map(rows.map((row) => [row.pid, row]));
-    for (const row of rows) {
-      row.origin = "host-or-other";
-      let ancestor = row;
-      for (let depth = 0; ancestor && depth < 32; depth++) {
-        if (ancestor.role === "launchd_sim") {
-          row.origin = "simulator-descendant";
-          break;
-        }
-        ancestor = byPid.get(ancestor.parentPid);
-      }
-      const before = previous.get(row.pid);
-      row.cpuDeltaMs =
-        row.usage && before?.started === row.started && before.usage
-          ? Math.max(0, row.usage.cpuMs - before.usage.cpuMs)
-          : null;
-      row.readDeltaBytes =
-        row.usage && before?.started === row.started && before.usage
-          ? Math.max(0, row.usage.readBytes - before.usage.readBytes)
-          : null;
-      row.writtenDeltaBytes =
-        row.usage && before?.started === row.started && before.usage
-          ? Math.max(0, row.usage.writtenBytes - before.usage.writtenBytes)
-          : null;
-    }
+    if (census.outcome !== "ok") sampling = false;
     const currentCpu = cpuTimes();
     const cpuDeltas = Object.fromEntries(
       Object.keys(currentCpu).map((key) => [key, currentCpu[key] - previousCpu[key]]),
     );
     const total = Object.values(cpuDeltas).reduce((sum, n) => sum + n, 0);
     emit({
-      type: "census",
+      type: "task-sample",
       startedAt,
       phaseAtStart,
       wallMs: Math.round(performance.now() - started),
@@ -111,9 +89,7 @@ async function sample() {
             ),
       load: os.loadavg(),
       ...census,
-      processes: rows,
     });
-    previous = byPid;
     previousAt = started;
     previousCpu = currentCpu;
   } catch {
@@ -157,9 +133,9 @@ emit({
   cpuCount: os.availableParallelism(),
   totalMemoryBytes: os.totalmem(),
   intervalMs: 10_000,
-  observerTimeoutMs: 2_000,
+  observerTimeoutMs: 7_000,
   workload: "fresh-iphone-boot-no-app-no-xctest",
-  counterApi: "temporary-private-SDK-libproc",
+  counterApi: "Apple-powermetrics-tasks-1s-sample",
   sourceSha: process.env.GITHUB_SHA ?? "local",
 });
 collect();
