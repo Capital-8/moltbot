@@ -40,7 +40,7 @@ import {
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
 import { createSyntheticPluginRuntimeClient } from "../server-plugin-runtime-client.js";
-import { withSessionSendDelivery, type SessionSendDelivery } from "../session-send-delivery.js";
+import { withSessionSendDelivery } from "../session-send-delivery.js";
 import { dispatchAgentRunFromGateway } from "./agent-run-dispatch.js";
 import { createAgentTurnTestContext } from "./agent-run-dispatch.test-support.js";
 import {
@@ -433,7 +433,7 @@ describe("requester-settle processing survives later user turns", () => {
   );
 
   it("preserves live peer-delivery success and duplicate reconciliation", async () => {
-    const delivery: SessionSendDelivery = {
+    const delivery: Parameters<typeof withSessionSendDelivery>[0]["delivery"] = {
       version: 1,
       runId,
       source: { agentId: "main", sessionId: "peer-source", sessionKey: sourceSessionKey },
