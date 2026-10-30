@@ -16,8 +16,6 @@ import { rpcSourceTesting } from "../../../sessions/session-lifecycle-admission.
 import { createDeferredCore } from "../../../shared/deferred.js";
 import { prepareEmbeddedAttemptTimeout } from "../../embedded-agent-runner/run/attempt-timeout-prepare.js";
 import { createEnteredGate } from "../../entered-gate.test-support.js";
-import { buildAgentInternalEventContext } from "../../internal-events.js";
-import { RUNTIME_EVENT_USER_PROMPT } from "../../internal-runtime-context.js";
 import { resolveAgentTimeoutMs } from "../../timeout.js";
 import { consumeSubagentPauseNotice } from "../registry/subagent-delivery-state.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "../registry/subagent-lifecycle-events.js";
@@ -158,16 +156,13 @@ describe("requester settle dispatch deadline", () => {
         },
       );
       const params = wakeParams(child, completeBatch);
-      const received: Array<{ message: string; context: string; runId: string }> = [];
+      const received: Array<{ message: string; runId: string }> = [];
       startTurn.mockImplementation(async ({ controllerInput, preflight, io }) => {
         acceptTurn({ controllerInput, preflight, io });
         await withSessionTurn({ ...REQUESTER_TURN, controllerInput }, async () => {
           io.emitExecutionStarted?.();
           received.push({
             message: preflight.request.message,
-            context: JSON.stringify(
-              buildAgentInternalEventContext(preflight.request.internalEvents),
-            ),
             runId: preflight.request.idempotencyKey,
           });
         });
@@ -179,9 +174,8 @@ describe("requester settle dispatch deadline", () => {
         withGateway(context, () => maybeWakeRequesterAfterAllChildrenSettled(params)),
       ).resolves.toBe(true);
       expect(received).toHaveLength(1);
-      expect(received[0]!.message).toBe(RUNTIME_EVENT_USER_PROMPT);
-      expect(received[0]!.context).not.toContain("OBSOLETE-FINDING");
-      expect(received[0]!.context).toContain(
+      expect(received[0]!.message).not.toContain("OBSOLETE-FINDING");
+      expect(received[0]!.message).toContain(
         scenario === "superseded sibling" ? "child result" : "synthetic cancellation",
       );
       expect(received[0]!.runId).toBe(

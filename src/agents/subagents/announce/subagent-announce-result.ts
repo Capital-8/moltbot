@@ -7,7 +7,6 @@ import {
   stripInlineDirectiveTagsForDelivery,
 } from "../../../utils/directive-tags.js";
 import { prepareTerminalAssistantReply } from "../../assistant-terminal-reply.js";
-import { buildAgentInternalEventContext, type AgentInternalEvent } from "../../internal-events.js";
 import { wrapPromptDataBlock } from "../../sanitize-for-prompt.js";
 import { extractStoredAssistantText } from "../../tools/chat-history-text.js";
 import { resolveSubagentCompletionResultText } from "../completion/subagent-completion-result.js";
@@ -182,7 +181,6 @@ export function prepareChildCompletionFindings<T extends ChildCompletionRow>(
   children: T[],
 ): {
   text: string | undefined;
-  events: AgentInternalEvent[];
   representedChildren: T[];
 } {
   const sorted = children.toSorted((a, b) => {
@@ -234,34 +232,8 @@ export function prepareChildCompletionFindings<T extends ChildCompletionRow>(
       truncationMarker: `[result truncated; sessions_history sessionKey=${JSON.stringify(child.childSessionKey)} (text fields truncated to 4,000 characters)]`,
     };
     const resultBlock = wrapPromptDataBlock(result) || "Child result: (no output)";
-    const event: AgentInternalEvent = {
-      type: "task_completion",
-      source: "subagent",
-      childSessionKey: child.childSessionKey,
-      childSessionId: child.execution.transcriptTarget?.sessionId,
-      announceType: "subagent task",
-      taskLabel: truncateUtf16WithEllipsis(
-        child.taskName || child.label || child.task,
-        MAX_CHILD_COMPLETION_FIELD_CHARS,
-      ),
-      status:
-        child.endedReason === SUBAGENT_ENDED_REASON_KILLED
-          ? "unknown"
-          : (child.execution.outcome?.status ?? "unknown"),
-      statusLabel: describeSubagentOutcome(child),
-      result: "x",
-      replyInstruction: "",
-    };
-    // Charge the actual consuming renderer's framing before sharing result space.
-    // The legacy findings and typed context use the same bounded result blocks.
-    const eventFrameChars =
-      buildAgentInternalEventContext([event]).find(
-        (fragment) => fragment.kind === "conversation-data",
-      )!.text.length - 1;
     sections.push({
       child,
-      event,
-      eventFrameChars,
       result,
       childSessionKey: child.childSessionKey,
       resultBlock,
@@ -287,16 +259,13 @@ export function prepareChildCompletionFindings<T extends ChildCompletionRow>(
   }
 
   if (sections.length === 0) {
-    return { text: undefined, events: [], representedChildren: [] };
+    return { text: undefined, representedChildren: [] };
   }
 
   const heading = "Child completion results:\n\n";
   const available = MAX_CHILD_COMPLETION_FINDINGS_CHARS - heading.length;
   let minimumChars = sections.reduce(
-    (total, section) =>
-      total +
-      Math.max(section.header.length + 3, section.eventFrameChars + 1) +
-      section.minimumChars,
+    (total, section) => total + section.header.length + section.minimumChars + 3,
     0,
   );
   let included = sections.length;
@@ -307,8 +276,7 @@ export function prepareChildCompletionFindings<T extends ChildCompletionRow>(
       break;
     }
     included -= 1;
-    minimumChars -=
-      Math.max(omitted.header.length + 3, omitted.eventFrameChars + 1) + omitted.minimumChars;
+    minimumChars -= omitted.header.length + omitted.minimumChars + 3;
     const keys = wrapPromptDataBlock({
       label: "First child session keys",
       text: JSON.stringify(
@@ -342,11 +310,6 @@ export function prepareChildCompletionFindings<T extends ChildCompletionRow>(
       ...(summary ? [summary] : []),
     ].join("\n\n"),
     representedChildren: visible.map(({ child }) => child),
-    events: visible.map(({ event, resultBlock }, index) => {
-      event.result = resultBlock;
-      event.replyInstruction = index === 0 ? summary : "";
-      return event;
-    }),
   };
 }
 

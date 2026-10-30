@@ -390,7 +390,6 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
     const preparedFindings = pauseNotice
       ? {
           text: pauseNotice.acknowledgment,
-          events: [],
           representedChildren: [],
           isCurrent: () => true,
         }
@@ -475,7 +474,7 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
     const directOrigin = resolveAnnounceOrigin(requesterEntry, requesterSessionOrigin);
     // The request hash covers raw input, before transcript hooks. Keep those exact bytes
     // in the wake owner; the accepted transcript may contain only the hook's projection.
-    const wakeMessageParams: Parameters<typeof buildRequesterSettleWakeMessage>[0] = {
+    const wakeMessage = buildRequesterSettleWakeMessage({
       findings: preparedFindings.text,
       requireVisibleReply,
       parentOnly,
@@ -489,21 +488,7 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
           ? state.privateInput.message
           : undefined,
       retryMissingResult: !parentOnly && knownNondelivery && state.attemptCount > 0,
-    };
-    const wakeMessage = buildRequesterSettleWakeMessage(wakeMessageParams);
-    // Keep mixed cohorts typed through the input owner so failure custody cannot
-    // turn successful siblings' private runtime results into retained transcript text.
-    const instruction = buildRequesterSettleWakeMessage({
-      ...wakeMessageParams,
-      findings: "",
-      retainedMessage: undefined,
     });
-    const internalEvents = preparedFindings.events;
-    if (internalEvents[0]) {
-      internalEvents[0].replyInstruction = [instruction, internalEvents[0].replyInstruction]
-        .filter(Boolean)
-        .join("\n");
-    }
     const dispatchState = parentOnly
       ? { ...state, privateInput: { runId: directIdempotencyKey, message: wakeMessage } }
       : state;
@@ -589,7 +574,6 @@ async function maybeWakeRequesterAfterAllChildrenSettledBound(
             requesterSessionKey,
             requesterAgentId,
             triggerMessage: wakeMessage,
-            internalEvents,
             requesterSessionOrigin,
             directOrigin,
             sourceSessionKey: batchSessionKeys[0],

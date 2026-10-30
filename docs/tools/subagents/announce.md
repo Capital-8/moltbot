@@ -244,10 +244,12 @@ the parent still receives the cause with a progress-unavailable notice. Raw tool
 output is not promoted into a child answer.
 
 Failure diagnostics are committed with the parent's input before failure custody
-is acknowledged. Successful child results remain hidden runtime context, including
-successful siblings in a mixed completion batch; a commit callback does not grant
-permission to retain those results in the parent transcript. A bounded batch
-acknowledges failure custody only for children represented in its committed input.
+is acknowledged. Direct completion events (`subagent_announce`) keep healthy
+results in runtime context; their commit callback retains only failure diagnostics.
+Settle wakes (`subagent_settle`) instead persist the complete bounded cohort message,
+including healthy findings, as hidden input for model replay. Collector results use
+the ordinary durable tool-result boundary. A bounded batch acknowledges failure
+custody only for children represented in its committed input.
 Omitted failures remain unacknowledged and available for later inspection or
 authorized collection; settling the cohort does not certify those omitted results.
 

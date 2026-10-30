@@ -17,7 +17,6 @@ import { readSessionTranscriptRunId } from "../../../sessions/transcript-events.
 import { isSilentAssistantTranscriptMessage } from "../../../shared/chat-message-content.js";
 import { isContractToolCallBlock, readToolCallName } from "../../../shared/tool-block-contract.js";
 import { sleep } from "../../../utils/sleep.js";
-import type { AgentInternalEvent } from "../../internal-events.js";
 import { extractStoredAssistantText } from "../../tools/chat-history-text.js";
 import { resolveSubagentChildAgentId } from "../registry/subagent-child-owner-match.js";
 import { subagentRuns } from "../registry/subagent-registry-memory.js";
@@ -530,7 +529,6 @@ export async function readChildCompletionFindings(
   readSubagentRun?: AnnounceRunReader,
 ): Promise<
   PreparedAnnounceResult & {
-    events: AgentInternalEvent[];
     representedChildren: SubagentRunRecord[];
   }
 > {

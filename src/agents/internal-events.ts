@@ -327,7 +327,7 @@ export function resolveInternalEventTranscriptBody(
     : resolveAcpPromptBody(body, events, inputProvenance);
 }
 
-/** Failure custody retains diagnostics; successful results remain runtime-only context. */
+/** Direct completion custody retains diagnostics; healthy events remain runtime-only. */
 export function resolveFailureHandoffTranscriptBody(
   body: string,
   events: AgentInternalEvent[] | undefined,

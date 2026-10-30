@@ -9,7 +9,6 @@ import {
   withSessionManagerWriteAssertion,
 } from "../../agents/sessions/session-manager-write-admission.js";
 import { SessionManager } from "../../agents/sessions/session-manager.js";
-import { readChildCompletionFindings } from "../../agents/subagents/announce/subagent-announce-output.js";
 import { recordSubagentFailureHandoff } from "../../agents/subagents/registry/subagent-failure-handoff.js";
 import { subagentRuns } from "../../agents/subagents/registry/subagent-registry-memory.js";
 import {
@@ -596,7 +595,20 @@ it.each([
         [healthy.runId, healthy],
       ]),
     );
-    const batch = await readChildCompletionFindings([child, healthy]);
+    // Direct completion inputs use typed events, unlike message-embedded settle cohorts.
+    const events: NonNullable<TurnParams["request"]["internalEvents"]> = [child, healthy].map(
+      (row) => ({
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: row.childSessionKey,
+        announceType: "completion",
+        taskLabel: "child task",
+        status: row.execution.outcome!.status,
+        statusLabel: row.execution.outcome?.error ?? "completed",
+        result: row.completion!.resultText!,
+        replyInstruction: "Review the result.",
+      }),
+    );
     const provenance = {
       kind: "inter_session" as const,
       sourceSessionKey: child.childSessionKey,
@@ -606,7 +618,7 @@ it.each([
     let handoff: Promise<void> | undefined;
     const onInputCommitted = vi.fn<NonNullable<TurnParams["onInputCommitted"]>>((receipt) => {
       handoff = recordSubagentFailureHandoff({
-        entries: batch.representedChildren,
+        entries: [child, healthy],
         requester: receipt,
         assertCurrent: () => {},
       });
@@ -619,7 +631,7 @@ it.each([
       request: {
         expectedExistingSessionId: sessionId,
         deliver: false,
-        internalEvents: batch.events,
+        internalEvents: events,
       },
     });
     await withTurn(params, async (recorder) => {
@@ -692,7 +704,7 @@ it.each([
       expect(JSON.stringify(messages)).toContain("found the failing request.");
       expect(JSON.stringify(committedEvents)).not.toContain("HEALTHY_RUNTIME_ONLY");
       expect(
-        batch.events.some(
+        events.some(
           (event) => event.status === "ok" && event.result.includes("HEALTHY_RUNTIME_ONLY"),
         ),
       ).toBe(true);

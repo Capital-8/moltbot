@@ -233,14 +233,15 @@ export async function prepareAgentRunUserTurn(params: {
 
     let message = params.message;
     const runtimeContextFragments = params.client?.internal?.runtimeContextFragments;
-    // Failure custody needs diagnostics in this commit, even if later context
-    // persistence fails. The receipt itself does not authorize retaining success results.
-    let effectiveTranscriptInputText = params.onInputCommitted
-      ? resolveFailureHandoffTranscriptBody(
-          params.effectiveTranscriptInputText,
-          params.request.internalEvents,
-        )
-      : params.effectiveTranscriptInputText;
+    // Direct completion events retain failure diagnostics, not healthy runtime context.
+    // Settle inputs already carry the complete bounded cohort for hidden model replay.
+    let effectiveTranscriptInputText =
+      params.onInputCommitted && params.inputProvenance?.sourceTool === "subagent_announce"
+        ? resolveFailureHandoffTranscriptBody(
+            params.effectiveTranscriptInputText,
+            params.request.internalEvents,
+          )
+        : params.effectiveTranscriptInputText;
     let execApprovalContinuationPromptRange: ExecApprovalContinuationPromptRange | undefined;
     if (execApprovalFollowupRuntimeHandoff?.resultText !== undefined) {
       const continuation = buildExecApprovalContinuationPrompt(

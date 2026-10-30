@@ -529,7 +529,7 @@ describe("native collector requester ownership", () => {
               endedAt: 8,
               outcome: { status: "ok" as const },
             },
-            completion: { required: false, resultText: "HEALTHY_RUNTIME_ONLY".repeat(30) },
+            completion: { required: false, resultText: "HEALTHY_SETTLE_FINDING".repeat(30) },
           }));
           const children = [...healthy, ...failures];
           const batchRunIds = children.map((child) => child.runId);
@@ -552,16 +552,16 @@ describe("native collector requester ownership", () => {
           const deliver = vi.spyOn(announceDelivery, "deliverSubagentAnnouncement");
           onTestFinished(() => deliver.mockRestore());
           deliver.mockImplementation(async (dispatch) => {
-            const events = dispatch.internalEvents!;
-            expect(events.some((event) => event.childSessionKey === tail.childSessionKey)).toBe(
-              false,
-            );
-            expect(events[0]?.replyInstruction).toContain("additional child results omitted");
-            expect(events[0]?.replyInstruction).toContain("Inspect remaining children");
+            const message = dispatch.triggerMessage;
+            const findings = message.slice(message.indexOf("Child completion results:"));
+            expect(findings.length).toBeLessThanOrEqual(160_000);
+            expect(findings.isWellFormed()).toBe(true);
+            expect(message).not.toContain("omitted-tail saved progress");
+            expect(message).toContain("additional child results omitted");
+            expect(message).toContain("Inspect remaining children");
             expect(dispatch.onInputCommitted).toBeTypeOf("function");
             const onInputCommitted = vi.fn(dispatch.onInputCommitted!);
             expect(dispatch.isSourceSessionEffectsAllowed?.()).toBe(true);
-            const message = "Continue the OpenClaw runtime event.";
             const turn = await prepareAgentRunUserTurn({
               cfg: { session: { store: storePath } },
               resolvedSessionKey: key,
@@ -591,7 +591,6 @@ describe("native collector requester ownership", () => {
                 idempotencyKey: dispatch.directIdempotencyKey,
                 deliver: false,
                 expectedExistingSessionId: "parent",
-                internalEvents: events,
               },
             });
             try {
@@ -620,7 +619,20 @@ describe("native collector requester ownership", () => {
                 visibleFailure && !rejected,
               );
               const transcript = JSON.stringify(await loadTranscriptEvents(target));
-              expect(transcript).not.toContain("HEALTHY_RUNTIME_ONLY");
+              if (!rejected) {
+                expect(await loadTranscriptEvents(target)).toEqual(
+                  expect.arrayContaining([
+                    expect.objectContaining({
+                      message: expect.objectContaining({
+                        role: "user",
+                        display: false,
+                        content: message,
+                      }),
+                    }),
+                  ]),
+                );
+                expect(transcript).toContain("HEALTHY_SETTLE_FINDING");
+              }
               expect(transcript).not.toContain("omitted-tail saved progress");
               if (visibleFailure && !rejected) {
                 expect(transcript).toContain("visible-failure cause");
