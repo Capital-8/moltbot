@@ -58,6 +58,7 @@ class Probe:
             "accountingScope": "command and waited-for descendants; excludes external CoreSimulator services",
             "globalProcessScans": False,
             "stackSampling": False,
+            "spotlightMode": os.environ.get("SPOTLIGHT_PROBE_MODE", "local"),
         }, indent=2) + "\n")
 
     def run(self, label, arguments, *, timeout=180):
@@ -141,6 +142,8 @@ def main(output):
                 probe.run(f"{family}-delete", ["xcrun", "simctl", "delete", identifier])
         if any(device["state"] != "Shutdown" for device in probe.inventory(f"{family}-cleaned-up")):
             raise RuntimeError("Simulator cleanup did not leave the host idle")
+    # Count the final device's lingering host work as well as the inter-device wait.
+    probe.run("final-headroom", ["node", "scripts/lib/ios-simulator-headroom.ts"], timeout=310)
 
 
 if __name__ == "__main__":

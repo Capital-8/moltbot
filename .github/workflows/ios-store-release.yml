@@ -23,6 +23,13 @@ on:
         description: Collect the temporary resource timeline (screenshots operation only)
         type: boolean
         default: true
+      spotlight_mode:
+        description: Temporary simulator accounting condition
+        type: choice
+        default: baseline
+        options:
+          - baseline
+          - disabled
       startup_probe:
         description: Observe idle host and iPhone simulator before screenshots (temporary, no upload)
         type: boolean
@@ -41,13 +48,33 @@ env:
 
 jobs:
   screenshots:
-    name: Account for screenshot simulator controls without uploading
+    name: Account for simulator controls (Spotlight ${{ inputs.spotlight_mode }})
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'screenshots' && github.repository == 'openclaw/openclaw'
     permissions:
       contents: read
     runs-on: xcode-27-xlarge
     timeout-minutes: 90
     steps:
+      - name: Set and verify disposable runner Spotlight condition
+        timeout-minutes: 2
+        env:
+          SPOTLIGHT_MODE: ${{ inputs.spotlight_mode }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          case "$SPOTLIGHT_MODE" in
+            baseline) ;;
+            disabled) sudo -n /usr/bin/mdutil -i off /System/Volumes/Data ;;
+            *) exit 1 ;;
+          esac
+          status="$(/usr/bin/mdutil -s /System/Volumes/Data)"
+          printf '%s\n' "$status"
+          case "$SPOTLIGHT_MODE:$status" in
+            baseline:*"Indexing enabled."*|disabled:*"Indexing disabled."*) ;;
+            *) echo "Spotlight state does not match the requested condition" >&2; exit 1 ;;
+          esac
+          echo "SPOTLIGHT_PROBE_MODE=$SPOTLIGHT_MODE" >> "$GITHUB_ENV"
+
       - name: Checkout screenshot source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
