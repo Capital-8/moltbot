@@ -246,6 +246,44 @@ Neither filesystem is changed by reconstruction. If no candidate reproduces the
 saved digest, reconciliation reports both preserved paths and an inspection
 command. It cannot safely invent a merge base or choose between divergent edits.
 
+### Local workspace filesystem checkpoints
+
+Shared-state schema 37 adds one nullable TEXT column,
+`local_workspace_projections.filesystem_checkpoints_json`. It holds the local
+workspace owner's versioned accepted checkpoint identities, pending capture, and
+deferred snapshot cleanup identities. The canonical SQLite row owns this recovery
+state; filesystem snapshots contain derived workspace bytes, not an independent
+metadata store. Acceptance follows the existing synchronization settlement and
+manifest commit, using the projection owner's revision and lease checks.
+The approved capability adds durable incremental synchronization;
+the column does not change manifest, protected-mount, or authorization semantics.
+
+Only detected, supported btrfs checkpoint paths use incremental differences.
+This requires a Linux btrfs subvolume source and available btrfs-progs snapshot/send
+operations; ordinary directories (including reflink-only copies), nested subvolumes
+or mounts, and unsupported hosts use the existing full scan, with no configuration
+option.
+Generation, size, and modification time alone cannot establish unchanged content.
+Unsupported filesystems retain full synchronization. Existing rows migrate to
+NULL and take a full synchronization before publishing a reusable checkpoint.
+The pending reservation is durable before snapshot creation. A crash before
+acceptance leaves that reservation and requires full synchronization. Reuse also
+requires the module runtime identity that accepted the checkpoint: a restart or
+code upgrade discards the optimization and takes a full synchronization. Durable
+snapshot identities survive as cleanup receipts. Missing snapshots or invalid
+identities likewise require full synchronization. Superseded snapshots remain
+recorded until cleanup completes, so a crash after publication does not lose
+their cleanup ownership.
+
+The 36-to-37 migration changes only the projection table and schema metadata.
+It preserves optional table absence, manifests, and reconciliation receipts.
+Adding the nullable column validates existing STRICT table rows once. Doctor uses
+the same migration and scoped verified backup; PostgreSQL uses its consecutive
+migration owner and generated schema. Restoring a database backup does not restore
+filesystem snapshots: the workspace owner validates checkpoint identities before
+reuse and falls back to full synchronization when they no longer match. Rollback
+to an older binary requires its matching verified pre-migration backup.
+
 ### PostgreSQL index ordering migrations
 
 Explicit PostgreSQL index keys use native ordering for canonical NOT NULL and

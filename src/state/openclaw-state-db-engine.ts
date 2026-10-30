@@ -49,6 +49,10 @@ import {
   legacyTemplateStateIdentifier,
 } from "./openclaw-state-db-schema-v36-template-names.js";
 import {
+  withLegacyLocalWorkspaceCheckpoints,
+  WORKSPACE_CHECKPOINTS_POSTGRES_MIGRATION_SQL,
+} from "./openclaw-state-db-schema-v37-workspace-checkpoints.js";
+import {
   admitStateSchemaFacts,
   PostgresSchemaAdmissionUnavailableError,
 } from "./openclaw-state-db-schema-version.js";
@@ -187,9 +191,16 @@ function statePostgresVersionSql(version: number): string {
 }
 
 function createStatePostgresMigrations(): StoreSchema["postgresMigrations"] {
-  const statePostgresSchemaV35 = {
-    postgres: withLegacyTemplateStateSchema(statePostgresSchema.postgres),
+  const statePostgresSchemaV36 = {
+    postgres: withLegacyLocalWorkspaceCheckpoints(statePostgresSchema.postgres),
     postgresFragments: statePostgresSchema.postgresFragments.map((fragment) => ({
+      ...fragment,
+      sql: withLegacyLocalWorkspaceCheckpoints(fragment.sql),
+    })),
+  };
+  const statePostgresSchemaV35 = {
+    postgres: withLegacyTemplateStateSchema(statePostgresSchemaV36.postgres),
+    postgresFragments: statePostgresSchemaV36.postgresFragments.map((fragment) => ({
       ...fragment,
       tables: fragment.tables.map(legacyTemplateStateIdentifier),
       sql: withLegacyTemplateStateSchema(fragment.sql),
@@ -364,8 +375,14 @@ function createStatePostgresMigrations(): StoreSchema["postgresMigrations"] {
     {
       version: 36,
       fromSchema: statePostgresSchemaV35,
-      schema: statePostgresSchema,
+      schema: statePostgresSchemaV36,
       sql: `${TEMPLATE_STATE_POSTGRES_MIGRATION_SQL}\n${statePostgresVersionSql(36)}`,
+    },
+    {
+      version: 37,
+      fromSchema: statePostgresSchemaV36,
+      schema: statePostgresSchema,
+      sql: `${WORKSPACE_CHECKPOINTS_POSTGRES_MIGRATION_SQL}\n${statePostgresVersionSql(37)}`,
     },
   ];
 }
@@ -433,8 +450,10 @@ export function ensureStatePostgresFragment(db: PostgresSqlConnection, table: st
     throw new Error("PostgreSQL state fragments require the owner's transaction");
   }
   invalidateLocalSqliteSchemaAdmissions(db);
+  const checkpointSql =
+    facts.version < 37 ? withLegacyLocalWorkspaceCheckpoints(fragment.sql) : fragment.sql;
   const templateSql =
-    facts.version < 36 ? withLegacyTemplateStateSchema(fragment.sql) : fragment.sql;
+    facts.version < 36 ? withLegacyTemplateStateSchema(checkpointSql) : checkpointSql;
   const fragmentSql = facts.version < 35 ? withLegacyLocalWorkspaceCas(templateSql) : templateSql;
   // Lazy fragments can be created before Doctor upgrades a predecessor's index ordering.
   // sqlite-allow-raw: The schema owner installs a verified fragment under its transaction.

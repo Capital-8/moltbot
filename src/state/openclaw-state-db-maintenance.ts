@@ -69,19 +69,10 @@ import {
   needsPublicationDraftMigration,
   statePublicationDraftMigration,
 } from "./openclaw-state-db-schema-v28-publication.js";
-import {
-  stateLocalWorkspaceManifestMigration,
-  withLegacyLocalWorkspaceManifests,
-} from "./openclaw-state-db-schema-v31-workspace-manifests.js";
-import {
-  stateLocalWorkspaceCasMigration,
-  withLegacyLocalWorkspaceCas,
-} from "./openclaw-state-db-schema-v35-workspace-cas.js";
-import {
-  stateTemplateNamesMigration,
-  withLegacyTemplateStateSchema,
-  withLegacyTemplateStateCompatibility,
-} from "./openclaw-state-db-schema-v36-template-names.js";
+import * as manifests from "./openclaw-state-db-schema-v31-workspace-manifests.js";
+import * as workspaceCas from "./openclaw-state-db-schema-v35-workspace-cas.js";
+import * as templates from "./openclaw-state-db-schema-v36-template-names.js";
+import * as checkpoints from "./openclaw-state-db-schema-v37-workspace-checkpoints.js";
 import {
   assertSupportedStateSchemaVersion,
   readStateSchemaContentVersion,
@@ -295,7 +286,7 @@ function assertOpenClawStateDatabaseVersionForMigration(
   assertSqliteSchemaTablesPresent(
     database,
     options.pathname,
-    withLegacyTemplateStateSchema(OPENCLAW_STATE_SCHEMA_SQL),
+    templates.withLegacyTemplateStateSchema(OPENCLAW_STATE_SCHEMA_SQL),
     {
       allowedMissingTables: [
         ...(options.version === 5
@@ -542,10 +533,11 @@ export const versionedStateMigrations = [
   stateHeadLayoutMigration,
   stateWriteIndexMigration,
   statePublicationDraftMigration,
-  stateLocalWorkspaceManifestMigration,
+  manifests.stateLocalWorkspaceManifestMigration,
   cronIdentity.stateCronIdentityMigration,
-  stateLocalWorkspaceCasMigration,
-  stateTemplateNamesMigration,
+  workspaceCas.stateLocalWorkspaceCasMigration,
+  templates.stateTemplateNamesMigration,
+  checkpoints.stateLocalWorkspaceCheckpointsMigration,
 ] as const;
 
 /** Recent version migrations own only their tables; Doctor owns unrelated historical repair. */
@@ -565,11 +557,12 @@ export function migrateBoundedStateSchema(
     statePublicationDraftMigration,
     stateClientCredentialMigration,
     stateAutomationPolicyMigration,
-    stateLocalWorkspaceManifestMigration,
+    manifests.stateLocalWorkspaceManifestMigration,
     ...stateIndexOrderingMigrations,
     cronIdentity.stateCronIdentityMigration,
-    stateLocalWorkspaceCasMigration,
-    stateTemplateNamesMigration,
+    workspaceCas.stateLocalWorkspaceCasMigration,
+    templates.stateTemplateNamesMigration,
+    checkpoints.stateLocalWorkspaceCheckpointsMigration,
   ];
   const pending = migrations.filter(({ version }) => version > previousVersion);
   // An undeclared destination keeps the legacy full runner and full-backup requirement.
@@ -583,14 +576,22 @@ export function migrateBoundedStateSchema(
   const indexes = getCanonicalSqliteNamedIndexContracts(OPENCLAW_STATE_SCHEMA_SQL).filter((index) =>
     tables.has(index.tableName),
   );
+  const checkpointSourceSchema =
+    previousVersion < 37
+      ? checkpoints.withLegacyLocalWorkspaceCheckpoints(OPENCLAW_STATE_SCHEMA_SQL)
+      : OPENCLAW_STATE_SCHEMA_SQL;
   const predecessorSchema =
     previousVersion < 36
-      ? withLegacyTemplateStateSchema(OPENCLAW_STATE_SCHEMA_SQL)
-      : OPENCLAW_STATE_SCHEMA_SQL;
+      ? templates.withLegacyTemplateStateSchema(checkpointSourceSchema)
+      : checkpointSourceSchema;
   const casSourceSchema =
-    previousVersion < 35 ? withLegacyLocalWorkspaceCas(predecessorSchema) : predecessorSchema;
+    previousVersion < 35
+      ? workspaceCas.withLegacyLocalWorkspaceCas(predecessorSchema)
+      : predecessorSchema;
   const manifestSourceSchema =
-    previousVersion < 31 ? withLegacyLocalWorkspaceManifests(casSourceSchema) : casSourceSchema;
+    previousVersion < 31
+      ? manifests.withLegacyLocalWorkspaceManifests(casSourceSchema)
+      : casSourceSchema;
   const indexSourceSchema =
     previousVersion < 27 ? withLegacyStateWriteIndexes(manifestSourceSchema) : manifestSourceSchema;
   const sourceSchema =
@@ -602,11 +603,11 @@ export function migrateBoundedStateSchema(
       (!pending.includes(statePublicationDraftMigration) && needsPublicationDraftMigration(db)) ||
       findMissingLazyStateStartupColumn(createSqliteTableContractReader(db)) !== undefined ||
       collectSqliteSchemaIssues(db, sourceSchema, {
-        ...withLegacyTemplateStateCompatibility(STATE_RUNTIME_SCHEMA_COMPATIBILITY),
+        ...templates.withLegacyTemplateStateCompatibility(STATE_RUNTIME_SCHEMA_COMPATIBILITY),
         allowedMissingColumns: [
           ...(STATE_RUNTIME_SCHEMA_COMPATIBILITY.allowedMissingColumns ?? []),
           ...pending.flatMap((migration) => migration.columns),
-        ].map(withLegacyTemplateStateSchema),
+        ].map(templates.withLegacyTemplateStateSchema),
         allowedMissingIndexes: [
           ...(STATE_RUNTIME_SCHEMA_COMPATIBILITY.allowedMissingIndexes ?? []),
           ...indexes.map((index) => index.name),

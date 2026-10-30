@@ -57,12 +57,33 @@ Doctor completes recognized schema-1 databases that predate the audit ledger bef
 | 33      | Native PostgreSQL ordering for predicate-proven non-null partial-index keys; metadata-only SQLite advance ([#183443](https://github.com/openclaw/openclaw/pull/183443))                                                                                                                                                                        | Unreleased          |
 | 34      | Durable default cron partition binding, independent of the state directory                                                                                                                                                                                                                                                                     | Unreleased          |
 | 35      | Content-addressed local workspace directory packs and source path sets, with compact per-projection file fingerprints                                                                                                                                                                                                                          | Unreleased          |
-
-| 36 | Starter install tables, record versions, and provenance use canonical Template names; unrelated data and absent optional provenance stay unchanged | Unreleased |
+| 36      | Starter install tables, record versions, and provenance use canonical Template names; unrelated data and absent optional provenance stay unchanged                                                                                                                                                                                             | Unreleased          |
+| 37      | Durable filesystem checkpoint identities and interrupted-capture recovery state on local workspace projections                                                                                                                                                                                                                                 | Unreleased          |
 
 Earlier beta releases first included schema 1 in `v2026.5.30-beta.1`, schema 2
 in `v2026.7.2-beta.1`, schema 3 in `v2026.7.2-beta.2`, schema 5 in
 `v2026.7.2-beta.4`, and schema 6 in `v2026.7.2-beta.5`.
+
+### State schema 37
+
+Schema 37 adds nullable `filesystem_checkpoints_json` to existing
+`local_workspace_projections`. The local workspace owner stores versioned
+accepted snapshots, pending captures, and deferred cleanup identities there.
+Existing projections start with NULL and require a full synchronization before
+using an incremental checkpoint. The migration preserves manifests, fingerprints,
+pending reconciliation receipts, and optional storage that has never been used.
+Checkpoint reuse requires the accepting module runtime identity. Restart or code
+upgrade takes a full synchronization and retains durable identities for cleanup.
+A pending reservation precedes snapshot creation; acceptance follows existing
+synchronization settlement and manifest commit. A crash before acceptance forces
+full synchronization.
+
+SQLite startup and Doctor migrate 36 to 37 through the existing bounded migration
+and verified backup owners. PostgreSQL has the same column and consecutive
+migration. The column addition validates existing STRICT rows; it does not walk
+workspaces or create snapshots. Older binaries refuse schema 37. Rollback restores
+the verified pre-migration backup with its matching binary. Missing filesystem
+snapshots or interrupted captures after restore require full synchronization.
 
 ### State schema 36
 

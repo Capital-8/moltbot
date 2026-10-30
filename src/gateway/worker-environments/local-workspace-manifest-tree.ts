@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+  MAX_WORKSPACE_INVENTORY_ENTRIES,
+  MAX_WORKSPACE_INVENTORY_PATH_BYTES,
+  MAX_WORKSPACE_INVENTORY_TOTAL_BYTES,
+} from "./workspace-inventory-limits.js";
 import type { WorkerWorkspaceManifestEntry } from "./workspace-manifest.js";
 
 export type LocalWorkspaceManifestNode =
@@ -289,4 +294,36 @@ export function updateLocalWorkspaceManifestTree(
     }
   }
   return { records: [...touched.values()], removed: [...removed] };
+}
+
+export function assertLocalWorkspaceManifestSize(
+  records: ReadonlyMap<string, LocalWorkspaceManifestRecord>,
+): void {
+  // A partial traversal's budget excludes untouched nodes; the resulting
+  // inventory must still satisfy the same whole-workspace limits.
+  let count = 0;
+  let pathBytes = 0;
+  let contentBytes = 0;
+  for (const { node } of records.values()) {
+    if (!node.path) {
+      continue;
+    }
+    count++;
+    pathBytes += Buffer.byteLength(node.path);
+    contentBytes +=
+      node.type === "file"
+        ? node.size
+        : node.type === "symlink"
+          ? Buffer.byteLength(node.target)
+          : 0;
+  }
+  if (count > MAX_WORKSPACE_INVENTORY_ENTRIES) {
+    throw new Error("Gateway workspace manifest has too many entries");
+  }
+  if (pathBytes > MAX_WORKSPACE_INVENTORY_PATH_BYTES) {
+    throw new Error("Gateway workspace manifest paths exceed their byte limit");
+  }
+  if (contentBytes > MAX_WORKSPACE_INVENTORY_TOTAL_BYTES) {
+    throw new Error("Gateway workspace manifest exceeds its eligible byte limit");
+  }
 }

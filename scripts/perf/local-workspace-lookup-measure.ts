@@ -102,6 +102,7 @@ try {
             source_paths_digest: null,
             canonical_fingerprints: null,
             projection_fingerprints: null,
+            filesystem_checkpoints_json: null,
             checkpoint_json: heavy
               ? JSON.stringify({ synthetic: "x".repeat(2 * 1024 * 1024) })
               : null,

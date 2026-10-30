@@ -2371,6 +2371,7 @@ CREATE TABLE IF NOT EXISTS local_workspace_projections (
   source_paths_digest BLOB,
   canonical_fingerprints BLOB,
   projection_fingerprints BLOB,
+  filesystem_checkpoints_json TEXT,
   CHECK (baseline_json IS NULL OR baseline_ref IS NOT NULL),
   CHECK ((journal_json IS NULL) = (journal_pack IS NULL))
 ) STRICT;

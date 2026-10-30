@@ -4,6 +4,40 @@ import type {
   LocalWorkspaceMutation,
   LocalWorkspaceProjection,
 } from "./local-workspace-store.types.js";
+import type { LocalWorkspaceOwner } from "./local-workspace-types.js";
+
+/** Initial reconciliation state is published as one owner-bound row. */
+export function createLocalWorkspaceProjectionRow(
+  owner: LocalWorkspaceOwner,
+  projectionPath: string,
+  baseCommit: string,
+  sourcePaths: string,
+): Omit<LocalWorkspaceProjection, "revision"> {
+  return {
+    worktree_id: owner.worktree.id,
+    agent_id: owner.agentId,
+    session_key: owner.sessionKey,
+    session_id: owner.sessionId,
+    lifecycle_revision: owner.lifecycleRevision,
+    projection_path: projectionPath,
+    base_commit: baseCommit,
+    source_paths_json: sourcePaths,
+    baseline_json: null,
+    baseline_ref: null,
+    tree_root_digest: null,
+    source_paths_digest: null,
+    canonical_fingerprints: null,
+    projection_fingerprints: null,
+    filesystem_checkpoints_json: null,
+    checkpoint_json: null,
+    pending_ref: null,
+    pending_target: null,
+    journal_json: null,
+    journal_pack: null,
+    paused_runtimes_json: null,
+    created_at_ms: Date.now(),
+  };
+}
 
 function freezeProjection(row: LocalWorkspaceProjection): LocalWorkspaceProjection {
   const pack = row.journal_pack;

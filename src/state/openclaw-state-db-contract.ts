@@ -171,6 +171,8 @@ export const STATE_SCHEMA_MIGRATION_DESCRIPTIONS = {
   "local-workspace-cas-v35":
     "local workspace baselines → shared immutable trees and compact scan fingerprints",
   "template-names-v36": "starter installs and provenance → canonical Template storage names",
+  "local-workspace-checkpoints-v37":
+    "local workspace scans → durable filesystem checkpoints and interrupted-capture recovery",
   "operator-approvals-system-agent": "operator approvals → OpenClaw system changes",
   "session-watch-cursor-provenance-v4": "session watch cursors → provenance column",
   "strict-tables-v3": "tables → SQLite STRICT typing",

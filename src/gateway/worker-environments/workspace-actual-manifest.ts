@@ -186,6 +186,8 @@ type ActualWorkspaceManifestOptions = {
   baseCommit: string | null;
   preserveDirectories?: ReadonlySet<string>;
   includePaths?: ReadonlySet<string>;
+  // A filesystem checkpoint proves all other top-level trees are unchanged.
+  changedRoots?: ReadonlySet<string>;
   buildCacheInputs?: ReadonlySet<string>;
   signal?: AbortSignal;
 };
@@ -460,6 +462,9 @@ export async function scanActualWorkspaceManifest(
     };
     for await (const directoryEntry of await fs.opendir(absoluteDirectory)) {
       const name = directoryEntry.name;
+      if (!relativeDirectory && params.changedRoots && !params.changedRoots.has(name)) {
+        continue;
+      }
       const relative = relativeDirectory ? `${relativeDirectory}/${name}` : name;
       checkTraversal(relative);
       if (!relativeDirectory && name === ".git") {
@@ -483,12 +488,17 @@ export async function scanActualWorkspaceManifest(
   if (params.includePaths) {
     const includedParents = new Set<string>();
     const derivedOnlyDirectories = new Set<string>();
-    const paths = Array.from(params.includePaths, (relative) => ({
-      relative,
-      depth: relative.split("/").length,
-    })).toSorted(
-      (left, right) => right.depth - left.depth || left.relative.localeCompare(right.relative),
-    );
+    const paths = Array.from(params.includePaths)
+      .filter(
+        (relative) => !params.changedRoots || params.changedRoots.has(relative.split("/", 1)[0]!),
+      )
+      .map((relative) => ({
+        relative,
+        depth: relative.split("/").length,
+      }))
+      .toSorted(
+        (left, right) => right.depth - left.depth || left.relative.localeCompare(right.relative),
+      );
     // Siblings are independent, but parent classification needs every deeper
     // membership result. Join each depth before admitting the next one.
     for (let start = 0; start < paths.length;) {
@@ -507,7 +517,7 @@ export async function scanActualWorkspaceManifest(
       });
       start = end;
     }
-  } else {
+  } else if (params.changedRoots?.size !== 0) {
     await runScans(0, 1, async () => {
       await walk("");
     });

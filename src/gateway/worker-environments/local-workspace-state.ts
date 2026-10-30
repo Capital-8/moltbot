@@ -13,6 +13,10 @@ import {
   localWorkspaceProjectionPath,
 } from "./local-workspace-checkout.js";
 import {
+  localWorkspaceFilesystemCheckpoints,
+  type PreparedLocalWorkspaceFilesystemCheckpoint,
+} from "./local-workspace-filesystem-checkpoints.js";
+import {
   admitLocalWorkspaceSourcePaths,
   captureLocalWorkspaceArchiveBaseline,
   parseLocalWorkspaceSourcePaths,
@@ -23,6 +27,7 @@ import type {
   LocalWorkspaceManifestAction,
   LocalWorkspaceManifestCheckpoint,
 } from "./local-workspace-manifest-scan.js";
+import { createLocalWorkspaceProjectionRow } from "./local-workspace-publication.js";
 import type { LocalWorkspaceStore, LocalWorkspaceProjection } from "./local-workspace-store.js";
 import type { LocalWorkspaceOwner } from "./local-workspace-types.js";
 import { AcceptedWorkspacePublicationIndeterminateError } from "./workspace-accepted-publication.js";
@@ -104,6 +109,13 @@ export function projectionOperations(
   ) => {
     row = await store.update(current(), patch, owner.workerAuthority, manifest);
   };
+  const filesystem = localWorkspaceFilesystemCheckpoints({
+    projectionPath,
+    current,
+    update,
+    assertCurrent,
+    signal,
+  });
   const repairBaseline = async () => {
     const repair = await store.manifest(current(), {
       kind: "repair",
@@ -202,7 +214,10 @@ export function projectionOperations(
     current();
     return snapshot;
   };
-  const scan = async (target: Direction): Promise<LocalWorkspaceManifestCheckpoint> => {
+  const scan = async (
+    target: Direction,
+    prepared?: PreparedLocalWorkspaceFilesystemCheckpoint,
+  ): Promise<LocalWorkspaceManifestCheckpoint> => {
     if (owner.worktree.snapshotRef) {
       await buildCacheInputs();
     }
@@ -211,6 +226,7 @@ export function projectionOperations(
       kind: "scan",
       target,
       canonicalRoot: owner.worktree.path,
+      ...(prepared ? { filesystem: prepared } : {}),
     });
     current();
     if (snapshot.kind !== "scan") {
@@ -464,7 +480,8 @@ export function projectionOperations(
   };
   const synchronize = async (target: Direction) => {
     await settle();
-    const snapshot = await scan(target);
+    const prepared = await filesystem.prepare(target, sourcePath(target));
+    const snapshot = await scan(target, prepared);
     if (snapshot.resultingRoot !== snapshot.previousRoot) {
       await update({
         pending_ref: workerWorkspaceResultRef(randomUUID()),
@@ -472,6 +489,9 @@ export function projectionOperations(
         checkpoint_json: JSON.stringify(snapshot),
       });
       await settle(false, snapshot);
+    }
+    if (prepared && snapshot.filesystemAdmissionRef) {
+      await filesystem.accept(prepared, snapshot.resultingRoot, snapshot.filesystemAdmissionRef);
     }
   };
   const prepare = async (dependencies?: {
@@ -491,29 +511,7 @@ export function projectionOperations(
       });
       owner.assertCurrent();
       row = await store.create(
-        {
-          worktree_id: owner.worktree.id,
-          agent_id: owner.agentId,
-          session_key: owner.sessionKey,
-          session_id: owner.sessionId,
-          lifecycle_revision: owner.lifecycleRevision,
-          projection_path: projectionPath,
-          base_commit: baseCommit,
-          source_paths_json: sourcePaths,
-          baseline_json: null,
-          baseline_ref: null,
-          tree_root_digest: null,
-          source_paths_digest: null,
-          canonical_fingerprints: null,
-          projection_fingerprints: null,
-          checkpoint_json: null,
-          pending_ref: null,
-          pending_target: null,
-          journal_json: null,
-          journal_pack: null,
-          paused_runtimes_json: null,
-          created_at_ms: Date.now(),
-        },
+        createLocalWorkspaceProjectionRow(owner, projectionPath, baseCommit, sourcePaths),
         owner.workerAuthority,
       );
     }
@@ -721,6 +719,7 @@ export function projectionOperations(
         await cleanupAccepted();
       }
       current();
+      await filesystem.remove();
       await fs.rm(parent, { recursive: true, force: true });
       await store.delete(current(), owner.workerAuthority);
     },

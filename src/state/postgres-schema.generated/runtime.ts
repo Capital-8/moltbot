@@ -315,7 +315,7 @@ export const statePostgresRuntime = {
       indexes: [],
       dependencies: [],
       activation: "first-use",
-      sql: '-- Generated runtime DDL; the owner supplies search_path and the transaction.\n\nCREATE TABLE "local_workspace_manifest_nodes" (\n  "worktree_id" text COLLATE "C" NOT NULL,\n  "path" text COLLATE "C" NOT NULL,\n  "node_json" text COLLATE "C" NOT NULL,\n  PRIMARY KEY ("worktree_id", "path")\n);\n\nCREATE TABLE "local_workspace_projections" (\n  "worktree_id" text COLLATE "C" NOT NULL,\n  "agent_id" text COLLATE "C" NOT NULL,\n  "session_key" text COLLATE "C" NOT NULL,\n  "session_id" text COLLATE "C" NOT NULL,\n  "lifecycle_revision" text COLLATE "C",\n  "projection_path" text COLLATE "C" NOT NULL,\n  "base_commit" text COLLATE "C" NOT NULL,\n  "source_paths_json" text COLLATE "C" NOT NULL,\n  "baseline_json" text COLLATE "C",\n  "baseline_ref" text COLLATE "C",\n  "pending_ref" text COLLATE "C",\n  "pending_target" text COLLATE "C",\n  "paused_runtimes_json" text COLLATE "C",\n  "journal_json" text COLLATE "C",\n  "journal_pack" bytea,\n  "revision" bigint NOT NULL DEFAULT 0,\n  "created_at_ms" bigint NOT NULL,\n  "checkpoint_json" text COLLATE "C",\n  "tree_root_digest" bytea,\n  "source_paths_digest" bytea,\n  "canonical_fingerprints" bytea,\n  "projection_fingerprints" bytea,\n  PRIMARY KEY ("worktree_id"),\n  CHECK (("pending_target" IN (\'canonical\', \'projection\'))),\n  CHECK ("journal_pack" IS NULL OR (octet_length("journal_pack") <= 268435456)),\n  CHECK (("revision" >= 0)),\n  CHECK ("baseline_json" IS NULL OR "baseline_ref" IS NOT NULL),\n  CHECK ((("journal_json" IS NULL) = ("journal_pack" IS NULL))),\n  UNIQUE ("projection_path")\n);\n\nCREATE TABLE "local_workspace_source_path_sets" (\n  "path_digest" bytea NOT NULL,\n  "paths_zstd" bytea NOT NULL,\n  "sweep_epoch" bigint NOT NULL,\n  PRIMARY KEY ("path_digest"),\n  CHECK ((octet_length("path_digest") = 32))\n);\n\nCREATE TABLE "local_workspace_tree_packs" (\n  "tree_digest" bytea NOT NULL,\n  "records_json" text COLLATE "C" NOT NULL,\n  "children_json" text COLLATE "C" NOT NULL,\n  "sweep_epoch" bigint NOT NULL,\n  PRIMARY KEY ("tree_digest"),\n  CHECK ((octet_length("tree_digest") = 32))\n);\n\nALTER TABLE "local_workspace_manifest_nodes" ADD FOREIGN KEY ("worktree_id") REFERENCES "local_workspace_projections" ("worktree_id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;\n',
+      sql: '-- Generated runtime DDL; the owner supplies search_path and the transaction.\n\nCREATE TABLE "local_workspace_manifest_nodes" (\n  "worktree_id" text COLLATE "C" NOT NULL,\n  "path" text COLLATE "C" NOT NULL,\n  "node_json" text COLLATE "C" NOT NULL,\n  PRIMARY KEY ("worktree_id", "path")\n);\n\nCREATE TABLE "local_workspace_projections" (\n  "worktree_id" text COLLATE "C" NOT NULL,\n  "agent_id" text COLLATE "C" NOT NULL,\n  "session_key" text COLLATE "C" NOT NULL,\n  "session_id" text COLLATE "C" NOT NULL,\n  "lifecycle_revision" text COLLATE "C",\n  "projection_path" text COLLATE "C" NOT NULL,\n  "base_commit" text COLLATE "C" NOT NULL,\n  "source_paths_json" text COLLATE "C" NOT NULL,\n  "baseline_json" text COLLATE "C",\n  "baseline_ref" text COLLATE "C",\n  "pending_ref" text COLLATE "C",\n  "pending_target" text COLLATE "C",\n  "paused_runtimes_json" text COLLATE "C",\n  "journal_json" text COLLATE "C",\n  "journal_pack" bytea,\n  "revision" bigint NOT NULL DEFAULT 0,\n  "created_at_ms" bigint NOT NULL,\n  "checkpoint_json" text COLLATE "C",\n  "tree_root_digest" bytea,\n  "source_paths_digest" bytea,\n  "canonical_fingerprints" bytea,\n  "projection_fingerprints" bytea,\n  "filesystem_checkpoints_json" text COLLATE "C",\n  PRIMARY KEY ("worktree_id"),\n  CHECK (("pending_target" IN (\'canonical\', \'projection\'))),\n  CHECK ("journal_pack" IS NULL OR (octet_length("journal_pack") <= 268435456)),\n  CHECK (("revision" >= 0)),\n  CHECK ("baseline_json" IS NULL OR "baseline_ref" IS NOT NULL),\n  CHECK ((("journal_json" IS NULL) = ("journal_pack" IS NULL))),\n  UNIQUE ("projection_path")\n);\n\nCREATE TABLE "local_workspace_source_path_sets" (\n  "path_digest" bytea NOT NULL,\n  "paths_zstd" bytea NOT NULL,\n  "sweep_epoch" bigint NOT NULL,\n  PRIMARY KEY ("path_digest"),\n  CHECK ((octet_length("path_digest") = 32))\n);\n\nCREATE TABLE "local_workspace_tree_packs" (\n  "tree_digest" bytea NOT NULL,\n  "records_json" text COLLATE "C" NOT NULL,\n  "children_json" text COLLATE "C" NOT NULL,\n  "sweep_epoch" bigint NOT NULL,\n  PRIMARY KEY ("tree_digest"),\n  CHECK ((octet_length("tree_digest") = 32))\n);\n\nALTER TABLE "local_workspace_manifest_nodes" ADD FOREIGN KEY ("worktree_id") REFERENCES "local_workspace_projections" ("worktree_id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;\n',
     },
     {
       id: "user_profiles",
@@ -8860,6 +8860,18 @@ export const statePostgresRuntime = {
         identity: false,
         default: null,
         position: 22,
+      },
+    },
+    {
+      table: "local_workspace_projections",
+      kind: "column",
+      value: {
+        name: "filesystem_checkpoints_json",
+        type: "text",
+        nullable: true,
+        identity: false,
+        default: null,
+        position: 23,
       },
     },
     {

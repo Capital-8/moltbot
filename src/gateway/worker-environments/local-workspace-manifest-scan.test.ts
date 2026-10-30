@@ -4,7 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { deserialize } from "node:v8";
 import { inflateRawSync } from "node:zlib";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { trackSqliteStatementExecutions } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { requireGit } from "../../agents/worktrees/git.js";
@@ -25,6 +25,7 @@ import {
 import {
   executeLocalWorkspaceManifestRead,
   readLocalWorkspaceManifestRows,
+  type LocalWorkspaceManifestAction,
 } from "./local-workspace-manifest-scan.js";
 import {
   createLocalWorkspaceManifestTree,
@@ -36,6 +37,8 @@ import type { LocalWorkspaceMutation } from "./local-workspace-store.types.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+
+afterEach(() => vi.restoreAllMocks());
 
 it.each(["edit", "delete one-child root", "delete two-sided root"])(
   "keeps a complete incremental pack graph through acceptance and GC after %s",
@@ -239,6 +242,48 @@ async function repairFixture(historicalCache = false) {
   };
   return { projection, canonical, snapshot, treeRoot, records };
 }
+
+it("uses checkpoint deltas only for the accepted content and current host admission", async () => {
+  const { canonical, projection, snapshot, records } = await repairFixture();
+  const action = { kind: "scan" as const, target: "projection" as const, canonicalRoot: canonical };
+  const capture = (
+    filesystem: Extract<LocalWorkspaceManifestAction, { kind: "scan" }>["filesystem"],
+  ) =>
+    executeLocalWorkspaceManifestRead(
+      { ...snapshot, records: new Map(records) },
+      { ...action, filesystem },
+    );
+  const first = await capture({ root: canonical });
+  if (first.kind !== "scan") {
+    throw new Error("Missing snapshot inventory");
+  }
+  const checkpoint = {
+    root: canonical,
+    previousRoot: snapshot.row.baseline_ref!,
+    admissionRef: first.filesystemAdmissionRef!,
+    changedRoots: [] as string[],
+  };
+  const lstat = vi.spyOn(fs, "lstat");
+  const unchanged = await capture(checkpoint);
+  expect(unchanged.kind === "scan" && unchanged.resultingRoot).toBe(snapshot.row.baseline_ref);
+  expect(lstat.mock.calls.filter(([file]) => String(file).endsWith("nested/file.txt"))).toEqual([]);
+
+  const file = path.join(canonical, "nested/file.txt");
+  const before = await fs.stat(file);
+  await fs.writeFile(file, "modified");
+  await fs.utimes(file, before.atime, before.mtime);
+  const edited = await capture({ ...checkpoint, changedRoots: ["nested"] });
+  expect(edited.kind === "scan" && edited.currentManifestRaw).toContain(hash("modified"));
+  const stale = await capture({ ...checkpoint, previousRoot: "stale" });
+  expect(stale.kind === "scan" && stale.currentManifestRaw).toContain(hash("modified"));
+
+  // The host index can acquire an existing ignored file without a subvolume edit.
+  await fs.writeFile(path.join(canonical, "new.txt"), "host admission");
+  await requireGit(canonical, ["add", "new.txt"]);
+  const admitted = await capture(checkpoint);
+  expect(admitted.kind === "scan" && admitted.currentManifestRaw).toContain(hash("host admission"));
+  expect(await fs.readFile(path.join(projection, "nested/file.txt"), "utf8")).toBe("baseline");
+});
 
 it.each([
   ["projection", false],

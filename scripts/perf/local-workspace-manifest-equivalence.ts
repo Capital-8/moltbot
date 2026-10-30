@@ -284,6 +284,7 @@ if (mode === "prepare") {
                   source_paths_digest: null,
                   canonical_fingerprints: null,
                   projection_fingerprints: null,
+                  filesystem_checkpoints_json: null,
                 });
           await store.update(created, {}, undefined, baseline);
           const scanned = await store.manifest(store.get()!, {

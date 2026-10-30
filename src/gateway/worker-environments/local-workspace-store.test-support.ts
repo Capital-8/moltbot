@@ -65,6 +65,7 @@ export function localWorkspaceProjectionFixture(
     source_paths_digest: null,
     canonical_fingerprints: null,
     projection_fingerprints: null,
+    filesystem_checkpoints_json: null,
     checkpoint_json: null,
     pending_ref: null,
     pending_target: null,

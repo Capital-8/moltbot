@@ -26,6 +26,7 @@ import {
   selectLocalWorkspaceCanonicalPaths,
 } from "./local-workspace-inventory.js";
 import {
+  assertLocalWorkspaceManifestSize,
   createLocalWorkspaceManifestTree,
   localWorkspaceManifestRootReference,
   updateLocalWorkspaceManifestTree,
@@ -58,7 +59,17 @@ export type LocalWorkspaceBaselineDocument = {
 };
 
 export type LocalWorkspaceManifestAction =
-  | { kind: "scan"; target: "canonical" | "projection"; canonicalRoot: string }
+  | {
+      kind: "scan";
+      target: "canonical" | "projection";
+      canonicalRoot: string;
+      filesystem?: {
+        root: string;
+        previousRoot?: string;
+        admissionRef?: string;
+        changedRoots?: string[];
+      };
+    }
   | { kind: "materialize" }
   | { kind: "convert" }
   | { kind: "repair"; canonicalRoot: string }
@@ -525,6 +536,43 @@ export async function executeLocalWorkspaceManifestRead(
     assertCurrent: () => undefined,
   });
   const retained = [...buildCacheInputPaths(canonicalPaths)];
+  // Host index changes can admit paths without changing the source subvolume.
+  // Bind the diff to both the accepted content and the freshly selected namespace.
+  const filesystemAdmissionRef = action.filesystem
+    ? createHash("sha256")
+        .update(JSON.stringify([...canonicalPaths].toSorted()))
+        .digest("hex")
+    : undefined;
+  const changedRoots =
+    action.filesystem?.changedRoots &&
+    action.filesystem.previousRoot === row.baseline_ref &&
+    action.filesystem.admissionRef === filesystemAdmissionRef
+      ? new Set(action.filesystem.changedRoots)
+      : undefined;
+  changedRoots?.delete(".git");
+  if (changedRoots?.size === 0 && row.tree_root_digest && row.baseline_ref) {
+    const document = manifestDocument([], row.base_commit, retained);
+    const treeRoot = localWorkspaceDigestReference(row.tree_root_digest);
+    return {
+      version: 1,
+      kind: "scan",
+      previousRoot: row.baseline_ref,
+      resultingRoot: row.baseline_ref,
+      treeRoot,
+      previousTreeRoot: treeRoot,
+      preparations: [],
+      records: [],
+      removed: [],
+      baseManifestRaw: document.rawManifest,
+      baseManifestRef: document.manifestRef,
+      currentManifestRaw: document.rawManifest,
+      currentManifestRef: document.manifestRef,
+      buildCacheInputs: retained,
+      filesystemAdmissionRef,
+    };
+  }
+  const affected = (entryPath: string) =>
+    !changedRoots || changedRoots.has(entryPath.split("/", 1)[0]!);
   const preserveDirectories = new Set<string>();
   for (const [entryPath, { node }] of records) {
     if (entryPath === "") {
@@ -546,19 +594,24 @@ export async function executeLocalWorkspaceManifestRead(
     ? localWorkspaceDigestReference(row.tree_root_digest)
     : null;
   const scanStartedAtMs = Date.now();
-  const fingerprintScan = prepareLocalWorkspaceFingerprints(
-    records,
-    previousTreeRoot ?? records.get("")!.treeRef,
-    previousTreeRoot ? previousFingerprints : null,
-    scanStartedAtMs,
-  );
+  const fingerprintScan = action.filesystem
+    ? undefined
+    : prepareLocalWorkspaceFingerprints(
+        records,
+        previousTreeRoot ?? records.get("")!.treeRef,
+        previousTreeRoot ? previousFingerprints : null,
+        scanStartedAtMs,
+      );
   await scanActualWorkspaceManifest({
-    root: action.target === "canonical" ? row.projection_path : action.canonicalRoot,
+    root:
+      action.filesystem?.root ??
+      (action.target === "canonical" ? row.projection_path : action.canonicalRoot),
     baseCommit: row.base_commit,
     includePaths: action.target === "projection" ? canonicalPaths : undefined,
     preserveDirectories,
+    changedRoots,
     buildCacheInputs: new Set(retained),
-    reuseFile: fingerprintScan.reuseFile,
+    reuseFile: fingerprintScan?.reuseFile,
     onEntry(node, identity) {
       seen.add(node.path);
       const previous = records.get(node.path);
@@ -566,12 +619,12 @@ export async function executeLocalWorkspaceManifestRead(
         changes.push({ path: node.path, node });
       }
       if (identity !== undefined) {
-        fingerprintScan.observe(node.path, identity);
+        fingerprintScan?.observe(node.path, identity);
       }
     },
   });
   for (const entryPath of records.keys()) {
-    if (entryPath !== "" && !seen.has(entryPath)) {
+    if (entryPath !== "" && affected(entryPath) && !seen.has(entryPath)) {
       changes.push({ path: entryPath });
     }
   }
@@ -598,6 +651,9 @@ export async function executeLocalWorkspaceManifestRead(
     }
   }
   const delta = updateLocalWorkspaceManifestTree(records, changes);
+  if (changedRoots) {
+    assertLocalWorkspaceManifestSize(records);
+  }
   const currentNodes: LocalWorkspaceManifestNode[] = [];
   for (const entryPath of inspected) {
     const current = records.get(entryPath);
@@ -610,7 +666,7 @@ export async function executeLocalWorkspaceManifestRead(
   const replace = row.tree_root_digest === null;
   const treeRoot = records.get("")!.treeRef;
   const resultingRoot = localWorkspaceManifestRootReference(records, row.base_commit);
-  const blob = fingerprintScan.encode(records, treeRoot);
+  const blob = fingerprintScan?.encode(records, treeRoot) ?? null;
   const changedFingerprint =
     blob !== null &&
     blob !== previousFingerprints &&
@@ -664,5 +720,6 @@ export async function executeLocalWorkspaceManifestRead(
     currentManifestRaw: current.rawManifest,
     currentManifestRef: current.manifestRef,
     buildCacheInputs: retained,
+    ...(filesystemAdmissionRef ? { filesystemAdmissionRef } : {}),
   };
 }

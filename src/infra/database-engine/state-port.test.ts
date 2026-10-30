@@ -206,6 +206,41 @@ it("captures only the credential retirement scope plus required schema metadata 
   ]);
 });
 
+it("keeps filesystem checkpoints out of schema-36 backup and import catalogs", async () => {
+  for (const version of [36, 37]) {
+    const descriptor = await loadStatePortDescriptor(version);
+    const workspace = descriptor.fragments!.find(
+      (fragment) => fragment.id === "local_workspace_projections",
+    )!;
+    using source = openNodeSqliteDatabase(":memory:");
+    source.exec(workspace.sqlite);
+    const column = "filesystem_checkpoints_json";
+    const expected = version >= 37;
+    expect(
+      rows(source, "PRAGMA table_info(local_workspace_projections)").some(
+        (row) => row.name === column,
+      ),
+    ).toBe(expected);
+    expect(workspace.preData.includes(column)).toBe(expected);
+    expect(
+      workspace.tables
+        .find((table) => table.name === "local_workspace_projections")!
+        .columns.some((entry) => entry.name === column),
+    ).toBe(expected);
+    expect(
+      workspace.expectedCatalog.some(
+        (fact) =>
+          fact.kind === "column" &&
+          fact.table === "local_workspace_projections" &&
+          typeof fact.value === "object" &&
+          fact.value !== null &&
+          "name" in fact.value &&
+          fact.value.name === column,
+      ),
+    ).toBe(expected);
+  }
+});
+
 it("retains the v29 catalog and backs up only policy-fence metadata", async () => {
   const predecessor = await loadStatePortDescriptor(29);
   const current = await loadStatePortDescriptor(30);

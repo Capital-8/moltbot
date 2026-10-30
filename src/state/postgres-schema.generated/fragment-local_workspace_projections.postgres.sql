@@ -30,6 +30,7 @@ CREATE TABLE "local_workspace_projections" (
   "source_paths_digest" bytea,
   "canonical_fingerprints" bytea,
   "projection_fingerprints" bytea,
+  "filesystem_checkpoints_json" text COLLATE "C",
   PRIMARY KEY ("worktree_id"),
   CHECK (("pending_target" IN ('canonical', 'projection'))),
   CHECK ("journal_pack" IS NULL OR (octet_length("journal_pack") <= 268435456)),

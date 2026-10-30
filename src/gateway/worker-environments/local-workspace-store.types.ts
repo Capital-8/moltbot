@@ -49,6 +49,7 @@ export type LocalWorkspaceManifestScan = {
   currentManifestRaw: string;
   currentManifestRef: string;
   buildCacheInputs: string[];
+  filesystemAdmissionRef?: string;
 };
 
 export type LocalWorkspaceManifestValue =

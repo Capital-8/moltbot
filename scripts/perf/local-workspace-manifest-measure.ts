@@ -136,6 +136,7 @@ async function seedState(rawManifest: string, paths: string[]) {
             source_paths_digest: null,
             canonical_fingerprints: null,
             projection_fingerprints: null,
+            filesystem_checkpoints_json: null,
           });
       await store.update(created, {}, undefined, {
         rawManifest,
