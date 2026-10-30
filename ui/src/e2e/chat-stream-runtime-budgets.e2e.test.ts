@@ -74,6 +74,11 @@ type ToolProjectionProbe = {
 };
 
 type ScopedWindow = Window & {
+  ocStreamBudgetTrace?: {
+    events: Array<{ at: number; kind: string; detail: string; keys?: string[] }>;
+    dropped: number;
+    record: (kind: string, detail: string, keys?: string[]) => void;
+  };
   openclawRenderLifecycleTestHook?: typeof notifyRenderLifecycleForTest;
   ocStreamPerf?: StreamPerfProbe;
   ocIdleProbe?: { longTasks: number; longTaskMs: number };
@@ -143,6 +148,10 @@ async function installRenderProbe(page: ChatFlowPage) {
       ) {
         return;
       }
+      // Replace the adapter callback; its getter is a dispatcher, not the previous probe.
+      if (nativeCommit) {
+        scope.ocStreamBudgetTrace?.record(phase, element.localName);
+      }
       const probe = scope.ocStreamPerf!;
       if (phase === "commit") {
         if (nativeCommit) {
@@ -166,6 +175,7 @@ async function installRenderProbe(page: ChatFlowPage) {
 async function resetRenderProbe(page: ChatFlowPage) {
   await page.evaluate(() => {
     const scope = window as ScopedWindow;
+    scope.ocStreamBudgetTrace?.record("reset", "stream-probe");
     scope.ocStreamPerf = {
       mutationBatches: 0,
       invalidations: 0,
@@ -199,6 +209,9 @@ async function emitDeltaBurstInPage(
       const postNext = () => channel.port2.postMessage(null);
       const emitNext = () => {
         emitted += 1;
+        if (emitted === 1 || emitted === Math.floor(targetCount / 2) || emitted === targetCount) {
+          scope.ocStreamBudgetTrace?.record("emit", String(emitted));
+        }
         const chunk = ` delta ${emitted} with **bold${emitted}** and \`code${emitted}\` tail`;
         gateway.emit("chat", {
           deltaText: chunk,
@@ -503,10 +516,37 @@ function buildLongTranscriptFixture(messageCount: number): Array<Record<string, 
 suite.define(() => {
   it("commits a streamed delta burst in frame-bound transcript batches", async () => {
     await suite.withPage(createControlUiE2eContextOptions(), async ({ page }) => {
-      const gateway = await installMockGateway(page, {
-        deferredMethods: ["models.list"],
-        heldMethods: ["sessions.describe"],
-      });
+      const gateway = await installMockGateway(
+        page,
+        {
+          deferredMethods: ["models.list"],
+          heldMethods: ["sessions.describe"],
+        },
+        {
+          // Only mock wire metadata and the existing native lifecycle hook; no source reads.
+          afterInitScript: `(() => {
+          const trace = { events: [], dropped: 0 };
+          trace.record = (kind, detail, keys) => {
+            if (trace.events.length === 256) { trace.dropped += 1; return; }
+            trace.events.push({ at: performance.now(), kind, detail, ...(keys ? { keys } : {}) });
+          };
+          for (const type of ["pointerover", "pointerout", "overlay-after-show", "overlay-after-hide"]) {
+            document.addEventListener(type, (event) => {
+              const target = event.target;
+              if (!(target instanceof Element)) return;
+              const button = type.startsWith("overlay-")
+                ? (target.localName === "openclaw-tooltip" ? target.querySelector(".chat-send-btn--send, .chat-send-btn--stop") : null)
+                : target.closest(".chat-send-btn--send, .chat-send-btn--stop");
+              if (button) trace.record(type, button.classList.contains("chat-send-btn--stop") ? "Stop" : "Send");
+            }, { passive: true });
+          }
+          window.ocStreamBudgetTrace = trace;
+          window.openclawRenderLifecycleTestHook = (host, phase) => {
+            if (host instanceof HTMLElement && (host.localName === "openclaw-chat-page" || host.localName === "openclaw-chat-pane")) trace.record(phase, host.localName);
+          };
+        })();`,
+        },
+      );
       await page.goto(`${suite.server.baseUrl}chat`);
       await gateway.waitForRequest("sessions.messages.subscribe");
       await settleInitialModelCatalog(page, gateway);
@@ -578,9 +618,41 @@ suite.define(() => {
         })
         .not.toBeNull();
 
-      const probe = await readRenderProbe(page);
+      // Capture the asserted counters and bounded trace in the same browser task.
+      const { probe, trace: diagnostic } = await page.evaluate(() => {
+        const scope = window as ScopedWindow;
+        const trace = scope.ocStreamBudgetTrace;
+        trace?.record("sample", "final");
+        return {
+          probe: scope.ocStreamPerf!,
+          trace: trace
+            ? {
+                events: trace.events,
+                dropped: trace.dropped,
+                keyLimit: 16,
+                missingBoundaries: [
+                  "reset:stream-probe",
+                  "emit:1",
+                  "emit:120",
+                  "emit:240",
+                  "sample:final",
+                ].filter(
+                  (boundary) =>
+                    !trace.events.some((event) => boundary === event.kind + ":" + event.detail),
+                ),
+              }
+            : null,
+        };
+      });
       // Text updates reach the transcript without re-preparing its page or pane.
       // The visible tail and mutation batches above prove the stream rendered.
+      if (
+        probe.commits !== 0 ||
+        probe.mutationBatches < MIN_BURST_MUTATION_BATCHES ||
+        probe.mutationBatches > MAX_BURST_MUTATION_BATCHES
+      ) {
+        console.error("STREAM_BUDGET_TRACE", JSON.stringify({ probe, trace: diagnostic }));
+      }
       expect(probe.commits).toBe(0);
       expect(probe.mutationBatches).toBeGreaterThanOrEqual(MIN_BURST_MUTATION_BATCHES);
       expect(probe.mutationBatches).toBeLessThanOrEqual(MAX_BURST_MUTATION_BATCHES);
