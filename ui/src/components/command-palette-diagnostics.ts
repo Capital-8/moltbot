@@ -36,7 +36,7 @@ async function openDiagnosticSession(
   const prepared = await client.request<DiagnosticsPrepareResult>(
     "diagnostics.prepare",
     { agentId },
-    { signal },
+    { signal, timeoutMs: 45_000 },
   );
   if (!isCurrent()) {
     return false;
