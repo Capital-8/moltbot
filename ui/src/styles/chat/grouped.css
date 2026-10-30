@@ -1425,13 +1425,6 @@ button.chat-reply-attribution__target:disabled {
   color: var(--muted);
 }
 
-.chat-group:has([data-copy-feedback]:not([hidden])) {
-  --chat-footer-disclosure-opacity: 1;
-  --chat-footer-disclosure-pointer-events: auto;
-  --chat-footer-detail-position: static;
-  --chat-persistent-footer-opacity: 1;
-}
-
 .chat-group
   :is(.chat-group-footer-actions, .chat-message-actions-row)
   :is(
@@ -2106,6 +2099,19 @@ button.chat-reply-attribution__target:disabled {
   .chat-group.user.chat-group--peer {
     --chat-persistent-footer-opacity: 1;
   }
+}
+
+/* Feedback belongs to its message toolbar, whose local disclosure overrides the
+   group state. Keep only that row revealed after pointer and keyboard focus leave. */
+.chat-group
+  :is(.chat-group-footer, .chat-message-actions-row):has([data-copy-feedback]:not([hidden])) {
+  --chat-footer-disclosure-opacity: 1;
+  --chat-footer-disclosure-pointer-events: auto;
+  --chat-footer-detail-position: static;
+  --chat-persistent-footer-opacity: 1;
+  --chat-message-action-opacity: 0.6;
+  --chat-message-action-pointer-events: auto;
+  --chat-footer-action-opacity: 0.6;
 }
 
 /* Optional two-sided conversation skin. Keep activity/tool surfaces and

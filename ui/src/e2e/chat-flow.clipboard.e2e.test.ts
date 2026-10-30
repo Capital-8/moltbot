@@ -367,6 +367,13 @@ suite.define(() => {
           await page.mouse.move(0, 0);
           const feedback = message.getByRole("status").filter({ hasText: "Copy failed" });
           await feedback.waitFor({ state: "visible" });
+          // A fading footer is still geometrically visible; prove its settled opacity.
+          await message.evaluate(async (node) => {
+            await Promise.all(
+              node.getAnimations({ subtree: true }).map((animation) => animation.finished),
+            );
+          });
+          await captureFailure(page, "message-feedback-" + width);
           expect(
             await feedback.evaluate((element) =>
               element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),

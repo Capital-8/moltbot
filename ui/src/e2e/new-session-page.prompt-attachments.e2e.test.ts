@@ -96,6 +96,13 @@ suite.define(() => {
       await permission.click();
       await firstPage.locator('[data-chat-permission-option="read-only"]').click();
       await pollAttribute(permission, "data-chat-select-value").toBe("read-only");
+      // Rendered selection precedes the debounced durable draft transaction.
+      await waitForCommittedNewSessionDraft(
+        firstPage,
+        "restore this prompt after restart and incognito",
+        1,
+        "read-only",
+      );
       await firstPage.reload();
       await pollAttribute(permission, "data-chat-select-value").toBe("read-only");
       await pollValue(firstMessage).toBe("restore this prompt after restart and incognito");

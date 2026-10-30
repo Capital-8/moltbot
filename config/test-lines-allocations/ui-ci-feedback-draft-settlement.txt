@@ -1,0 +1,3 @@
+# Existing browser regressions now await footer animation and verify committed permission before reload.
+# Extends the existing independent IndexedDB receipt; no duplicate suite or relaxed assertions.
+27
