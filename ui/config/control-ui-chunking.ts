@@ -233,11 +233,6 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/i18n/locales/en-chat-permissions.ts":
       // The first rich row needs this family together; preserve one fetch and dictionary.
       return "chat-rich-presentation-runtime";
-    case "ui/src/pages/chat/components/chat-message-local-media.ts":
-    case "ui/src/pages/chat/components/chat-message-attachment-availability.ts":
-    case "ui/src/pages/chat/components/chat-media-playback.ts":
-      // Eager workspace admission needs availability, not image renderers.
-      return "chat-message-media-runtime";
     case "ui/src/pages/chat/chat-provider-review-controller.tsx":
       return "chat-provider-review";
     // Keep optional compression groups separate from code evaluated by text-only Chat.
