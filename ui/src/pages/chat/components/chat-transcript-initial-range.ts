@@ -438,6 +438,7 @@ export class TranscriptInitialRange {
       let admitted = 0;
       let warmed = false;
       let canMaterialize = false;
+      let preparedCandidate: string | undefined;
       let candidates = 0;
       for (
         let step = moving || warmOnly ? 1 : this.idleMeasureStep;
@@ -467,6 +468,9 @@ export class TranscriptInitialRange {
           candidates++;
         }
         canMaterialize ||= Boolean(canPrepareRow);
+        if (canPrepareRow) {
+          preparedCandidate ??= row.key;
+        }
         // Distant HTML must not evict the nearby fragments needed by the next scroll.
         const mode = arrivingViewport || step <= 8 ? "fragment" : "html";
         const warm = () =>
@@ -505,6 +509,13 @@ export class TranscriptInitialRange {
           this.preparingRowKey = row.key;
           admitted++;
         }
+      }
+      if (warmOnly && preparedCandidate && performance.now() < deadline) {
+        // A fully warm viewport can use the rest of this slice to prepare one
+        // DOM row, before the next scroll frame reaches it.
+        this.preparedRowKeys.add(preparedCandidate);
+        this.preparingRowKey = preparedCandidate;
+        admitted++;
       }
       if (!admitted) {
         if (warmOnly && (warmed || canMaterialize)) {

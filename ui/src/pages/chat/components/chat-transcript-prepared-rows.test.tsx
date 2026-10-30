@@ -48,7 +48,6 @@ async function transcriptFixture(
   viewportHeight = 600,
   completedFrame: boolean | "toolCall" = false,
   retainStride = 1,
-  canFollowEnd = true,
 ) {
   let now = 1;
   let nextFrame = 0;
@@ -194,7 +193,6 @@ async function transcriptFixture(
     },
     initialOffset,
     undefined,
-    { canFollowEnd: () => canFollowEnd },
   );
   disposers.push(() => {
     disposed = true;
@@ -781,17 +779,14 @@ it("measures nearby rows before spending idle budgets on distant Markdown", asyn
 
 it("materializes one predicted row between scroll frames and uses the latest viewport", async () => {
   const view = await transcriptFixture(0, true, false, "retained");
+  await view.idle();
+  await view.task();
   await view.scrollTo(3);
   const mounted = transcriptRows(view.container);
   await view.task();
   expect(transcriptRows(view.container)).toEqual(mounted);
   await view.frame(1, false);
-  await view.task();
   expect(transcriptRows(view.container)).toEqual(mounted);
-  const warmed = view.renderRow.mock.calls.length;
-  await view.task();
-  expect(view.renderRow.mock.calls).toHaveLength(warmed);
-  await view.frame(1, false);
   await view.task();
   const prepared = transcriptRows(view.container).find((row) => !mounted.includes(row));
   expect(prepared).toBeDefined();
@@ -889,6 +884,11 @@ it("prepares ahead of the active upward overscan", async () => {
   await view.frame(2);
   await view.scrollTo(5);
   expect(view.container.querySelector('[data-virtual-row-key="fragment:1"]')).toBeNull();
+  const firstActiveIndex = Math.min(
+    ...transcriptRows(view.container)
+      .filter((row) => !row.hasAttribute("data-prepared-row"))
+      .map((row) => Number(row.dataset.index)),
+  );
 
   await view.frame(1, false);
   await view.task();
@@ -897,9 +897,11 @@ it("prepares ahead of the active upward overscan", async () => {
   await view.frame(1, false);
   await view.task();
 
-  const firstFragment = view.container.querySelector('[data-virtual-row-key="fragment:1"]');
-  expect(firstFragment).not.toBeNull();
-  expect(firstFragment?.getAttribute("data-prepared-row")).toBe("true");
+  const prepared = view.container.querySelector<HTMLElement>(
+    "[data-preparing-row][data-prepared-row]",
+  );
+  expect(prepared).not.toBeNull();
+  expect(Number(prepared!.dataset.index)).toBeLessThan(firstActiveIndex);
   expect(view.container.scrollTop).toBe(500);
 });
 
@@ -924,26 +926,11 @@ it("advances a relative timestamp without refreshing its message", async () => {
   }
 });
 
-it("renders the latest reader destination once before paint", async () => {
-  const view = await transcriptFixture(0, true, false, false, 600, false, 1, false);
-  await view.frame(8);
-  const rendered = view.renderRow.mock.calls.length;
-  await view.scrollTo(60);
-  // A later animation callback can advance past the native scroll event's range.
-  view.container.scrollTop = 12_000;
-  await view.frame(1, false);
-  const entered = view.renderRow.mock.calls.slice(rendered).map(([row]) => row.key);
-  expect(entered).not.toContain("fragment:60");
-  expect(entered).toContain("fragment:120");
-  expect(view.container.querySelector('[data-virtual-row-key="fragment:120"]')).not.toBeNull();
-});
-
 it("updates the settled scroll window without re-entering the caller renderer", async () => {
   const view = await transcriptFixture(0, true);
   await view.frame(8);
   const draws = view.draw.mock.calls.length;
   await view.scrollTo(120);
-  await view.frame(1, false);
   expect(view.draw.mock.calls).toHaveLength(draws);
   expect(view.container.querySelector('[data-virtual-row-key="fragment:120"]')).not.toBeNull();
   expect(view.container.scrollTop).toBe(12_000);

@@ -210,23 +210,22 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       invalidate,
     });
     this.virtualizer = new Virtualizer({
-      onChange: (view) => {
+      onChange: (view, sync) => {
         // Settled motion redraws locally; initial placement and held history need the caller.
         const redraw = view.isScrolling && this.isPositionSettled && !this.prependAnchor.hasPrepend;
         // Read while measured layout is clean; a native clamp needs its rows now.
         const { threadInnerElement: inner, headerHeight: top, offsetState } = this;
         const moved = redraw && inner && this.layout.commitRange(inner, view.getTotalSize() + top);
-        // Reader movement can advance again in an animation callback. Sample
-        // that destination before paint instead of mounting both windows.
+        // A read-back inside the committed window can share the next frame.
+        // A fast scroll reaching new rows still needs them before this paint.
         const defer = redraw && !(moved || this.canAutoFollow() || offsetState.hasPendingAnchor);
-        this.presentation.commitChange(() => {
-          if (defer) {
-            offsetState.syncNativeOffset?.();
-            // The read-back can notify onChange; this commit includes its range.
-            this.presentation.cancelChange();
-          }
-          (redraw ? (this.renderPreviousRows ?? invalidate) : invalidate)();
-        }, defer);
+        this.presentation.commitChange(
+          () => (redraw ? (this.renderPreviousRows ?? invalidate) : invalidate)(),
+          defer &&
+            (offsetState.measuringOffset
+              ? this.renderer.coversViewport(view.calculateRange())
+              : !sync),
+        );
         // A caller render can replace the queued redraw without replacing this geometry receipt.
         this.scheduleEndReconcile(view.getTotalSize());
       },
@@ -272,7 +271,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     // Initial placement owns compensation; an estimated end is not a native scroll target.
     this.virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
     // A boot re-anchor can precede its native extent; only reader geometry may override it.
-    const syncOffset = () => this.initialRange.reading && this.offsetState.syncNativeOffset?.();
+    const syncOffset = () => this.initialRange.reading && this.offsetState.syncNativeOffset?.(true);
     this.presentation = createTranscriptPresentation(
       () => this.scrollElement,
       this.virtualizer,
