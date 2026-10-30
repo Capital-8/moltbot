@@ -45,6 +45,12 @@ actor GatewayEndpointStore {
         case password
     }
 
+    struct LocalPortConflict: LocalizedError {
+        let message: String
+
+        var errorDescription: String? { self.message }
+    }
+
     private static let envOverrideWarnings = LockIsolated<Set<Credential>>([])
 
     struct SSHRouteIdentity: Equatable, Sendable {
@@ -947,7 +953,7 @@ extension GatewayEndpointStore {
                 "Use distinct ports for gateway.port and gateway.remote.url, then retry."
         }
         if let conflict {
-            throw NSError(domain: "Gateway", code: 1, userInfo: [NSLocalizedDescriptionKey: conflict])
+            throw LocalPortConflict(message: conflict)
         }
         return try self.localEndpoint(
             config: self.localConfig(
