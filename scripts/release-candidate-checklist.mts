@@ -196,9 +196,11 @@ export function parseArgs(argv: string[]) {
   const args = stripLeadingPackageManagerSeparator(argv);
   const terminatorIndex = args.indexOf("--");
   const cliArgs = terminatorIndex === -1 ? args : args.slice(0, terminatorIndex);
+  const helpIndex = cliArgs.findIndex((arg) => arg === "-h" || arg === "--help");
+  const parsedArgs = helpIndex === -1 ? cliArgs : cliArgs.slice(0, helpIndex);
   if (
-    cliArgs.includes("--full-release-validation-run-id") &&
-    cliArgs.includes("--full-release-run")
+    parsedArgs.includes("--full-release-validation-run-id") &&
+    parsedArgs.includes("--full-release-run")
   ) {
     throw new Error(
       "Use --full-release-validation-run-id; do not combine it with the deprecated --full-release-run alias.",
@@ -237,9 +239,8 @@ export function parseArgs(argv: string[]) {
     windowsNodeInstallerDigests: "",
     outputDir: "",
   };
-  const helpIndex = cliArgs.findIndex((arg) => arg === "-h" || arg === "--help");
   parseFlagArgs(
-    helpIndex === -1 ? cliArgs : cliArgs.slice(0, helpIndex),
+    parsedArgs,
     options,
     [
       ...(

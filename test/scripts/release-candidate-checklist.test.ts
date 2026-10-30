@@ -308,6 +308,25 @@ describe("release candidate checklist", () => {
     ).toThrow(message);
   });
 
+  it("keeps help short-circuiting before deprecated alias conflict checks", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "./scripts/tsx.mjs",
+        "scripts/release-candidate-checklist.mts",
+        "--help",
+        "--full-release-validation-run-id",
+        "111",
+        "--full-release-run",
+        "222",
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Usage: pnpm release:candidate");
+  });
+
   it("requires an explicit prepared route and preserves historical normal state semantics", () => {
     const normal = parseArgs(["--tag", "v2026.9.1", "--publish-workflow-ref", publishWorkflowRef]);
     expect(normal.publicationRoute).toBe("normal");
