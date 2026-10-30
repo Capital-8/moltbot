@@ -153,19 +153,19 @@ await runWithFailedTrailer("macos-native", async () => {
       ) {
         throw new Error("Invalid prepared settings source");
       }
-      const manifest = prepared.testBuildManifests[name];
+      const manifestReceipt = prepared.testBuildManifests[name];
       if (
-        manifest.semanticVerified !== true ||
-        !/^[a-f0-9]{40}$/.test(manifest.originalBlob) ||
+        manifestReceipt.semanticVerified !== true ||
+        !/^[a-f0-9]{40}$/.test(manifestReceipt.originalBlob) ||
         ![
-          manifest.originalSHA256,
-          manifest.effectiveSHA256,
-          manifest.originalDumpSHA256,
-          manifest.effectiveDumpSHA256,
+          manifestReceipt.originalSHA256,
+          manifestReceipt.effectiveSHA256,
+          manifestReceipt.originalDumpSHA256,
+          manifestReceipt.effectiveDumpSHA256,
         ].every((hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)) ||
         createHash("sha256")
           .update(fs.readFileSync(path.join(source.sourceRoot, "apps/macos/Package.swift")))
-          .digest("hex") !== manifest.effectiveSHA256
+          .digest("hex") !== manifestReceipt.effectiveSHA256
       ) {
         throw new Error("Settings focused manifest is unverified or changed");
       }

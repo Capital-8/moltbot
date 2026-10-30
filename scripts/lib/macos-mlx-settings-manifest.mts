@@ -7,10 +7,7 @@ const testSources = ["MLXSettingsUpgradeTests.swift"];
 export function projectMlxSettingsManifest(original: string): string {
   const target = `.testTarget(\n            name: "${targetName}",\n`;
   const start = original.indexOf(target);
-  assert(
-    start >= 0 && original.indexOf(target, start + 1) === -1,
-    "Ambiguous settings test target",
-  );
+  assert(start >= 0 && !original.includes(target, start + 1), "Ambiguous settings test target");
   const settings = original.indexOf("            swiftSettings: [", start);
   assert(settings > start, "Settings test target has no compiler settings");
   const body = original.slice(start + target.length, settings);

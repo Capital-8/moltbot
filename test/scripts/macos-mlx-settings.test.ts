@@ -107,9 +107,15 @@ it.each([
 it("rejects missing, duplicated or previously scoped SwiftPM test targets", () => {
   for (const variant of ["missing", "duplicated", "scoped"]) {
     const original = packageDump();
-    if (variant === "missing") original.targets.pop();
-    if (variant === "duplicated") original.targets.push(structuredClone(original.targets[1]!));
-    if (variant === "scoped") original.targets[1]!.sources = ["OtherTests.swift"];
+    if (variant === "missing") {
+      original.targets.pop();
+    }
+    if (variant === "duplicated") {
+      original.targets.push(structuredClone(original.targets[1]!));
+    }
+    if (variant === "scoped") {
+      original.targets[1]!.sources = ["OtherTests.swift"];
+    }
     expect(() => verifyMlxSettingsPackageProjection(original, original)).toThrow();
   }
 });

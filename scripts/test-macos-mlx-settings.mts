@@ -152,6 +152,7 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
       );
     }
   };
+  let failure: Error | undefined;
   try {
     assert.equal(await run("git", ["rev-parse", "HEAD"], current, 30_000, true), selectedSHA);
     const currentTree = await entries(selectedSHA);
@@ -453,12 +454,11 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
     result.complete = true;
   } catch (error) {
     result.failure = { phase, detail: String(error) };
-    throw error;
+    failure = error instanceof Error ? error : new Error(String(error));
   } finally {
     result.sourceProcessesRetired = canRemove;
     result.scratchRemoved = false;
     result.testBuildManifestsRestored = false;
-    let retirementFailure: unknown;
     if (canRemove) {
       try {
         for (const [source, projection] of manifestProjections) {
@@ -479,7 +479,10 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
         fs.rmSync(scratch, { recursive: true, force: true });
         result.scratchRemoved = true;
       } catch (error) {
-        retirementFailure = error;
+        const retirementError = error instanceof Error ? error : new Error(String(error));
+        failure = failure
+          ? new AggregateError([failure, retirementError], "Settings proof and retirement failed")
+          : retirementError;
         result.complete = false;
         result.retirementFailure = String(error);
       }
@@ -492,8 +495,8 @@ await runWithFailedTrailer("macos-mlx-settings", async () => {
     if (!result.scratchRemoved) {
       console.error(`[mlx-settings] retained resources after incomplete retirement: ${scratch}`);
     }
-    if (retirementFailure) {
-      throw retirementFailure;
-    }
+  }
+  if (failure) {
+    throw failure;
   }
 });
