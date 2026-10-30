@@ -133,6 +133,45 @@ describe("refreshSlashCommands", () => {
     ]);
   });
 
+  it("reads a project session's own catalog instead of agent-scoped metadata", async () => {
+    const { client, request } = catalogFixture();
+    request
+      .mockResolvedValueOnce(commandResult("alpha_session_skill"))
+      .mockResolvedValueOnce(commandResult("rebound_session_skill"));
+    const sessionKey = "agent:main:project-session";
+    beginChatMetadataPublication(client, { agentId: "main", sessionKey }).publish(
+      commandResult("agent_only"),
+    );
+    // Sessions without an execution root keep the startup metadata catalog.
+    await refreshSlashCommands({ client, agentId: "main", sessionKey });
+    expect(commandByName("agent_only")).toBeDefined();
+    expect(request).not.toHaveBeenCalled();
+    const refreshScoped = (sessionSkillScope: string) =>
+      refreshSlashCommands({ client, agentId: "main", sessionKey, sessionSkillScope });
+    await refreshScoped('[null,"/alpha"]');
+    expect(commandByName("alpha_session_skill")).toBeDefined();
+    expect(commandByName("agent_only")).toBeUndefined();
+    expect(request).toHaveBeenLastCalledWith("commands.list", {
+      agentId: "main",
+      sessionKey,
+      includeArgs: true,
+      scope: "text",
+    });
+    // A changed execution root is a different catalog, never the cached one.
+    await refreshScoped('["wt",null]');
+    expect(commandByName("rebound_session_skill")).toBeDefined();
+    // Explicit invalidation of the scoped entry forces a fresh read.
+    invalidateSessionSlashCommands(client, {
+      agentId: "main",
+      sessionKey,
+      sessionSkillScope: '["wt",null]',
+    });
+    request.mockResolvedValueOnce(commandResult("refreshed_session_skill"));
+    await refreshScoped('["wt",null]');
+    expect(commandByName("refreshed_session_skill")).toBeDefined();
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
   it("never sends a project with an existing session's catalog request", async () => {
     const { client, request } = catalogFixture();
     request.mockResolvedValue(commandResult("session_skill"));

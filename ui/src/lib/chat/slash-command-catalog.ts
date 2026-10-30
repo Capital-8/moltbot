@@ -27,10 +27,20 @@ type RemoteSlashCommandScope = {
   sessionKey?: string;
   /** Registered project selected by a New session draft; never combined with sessionKey. */
   projectId?: string;
+  /**
+   * The existing session's execution-root facts. Agent-scoped chat metadata cannot carry
+   * that session's project skills, so a scoped session reads its own commands.list.
+   */
+  sessionSkillScope?: string;
 };
 
 function remoteSlashCommandCacheKey(scope: RemoteSlashCommandScope): string {
-  return JSON.stringify([scope.agentId ?? null, scope.sessionKey ?? null, scope.projectId ?? null]);
+  return JSON.stringify([
+    scope.agentId ?? null,
+    scope.sessionKey ?? null,
+    scope.projectId ?? null,
+    scope.sessionSkillScope ?? null,
+  ]);
 }
 
 function loadRemoteSlashCommands(
@@ -38,8 +48,11 @@ function loadRemoteSlashCommands(
   scope: RemoteSlashCommandScope,
 ): Promise<SlashCommandDef[]> {
   const { agentId, sessionKey, projectId } = scope;
-  // Chat metadata is agent/session scoped; a selected project needs its own catalog.
-  const metadata = projectId ? undefined : peekChatMetadata(client, { agentId, sessionKey });
+  // Chat metadata carries agent-scoped commands; a project needs its own catalog.
+  const metadata =
+    projectId || scope.sessionSkillScope
+      ? undefined
+      : peekChatMetadata(client, { agentId, sessionKey });
   // Store-held metadata carries app-level invalidation on config changes and logical reconnects,
   // so no TTL applies here. The cache below owns only commands.list-derived entries.
   if (metadata) {
@@ -94,7 +107,7 @@ function loadRemoteSlashCommands(
 
 export function invalidateSessionSlashCommands(
   client: GatewayBrowserClient,
-  scope: { agentId: string; sessionKey: string },
+  scope: { agentId?: string; sessionKey: string; sessionSkillScope?: string },
 ): void {
   refreshSeq += 1;
   remoteSlashCommandCache.get(client)?.delete(remoteSlashCommandCacheKey(scope));
@@ -117,6 +130,7 @@ export async function refreshSlashCommands(params: {
   agentId?: string | null;
   sessionKey?: string;
   projectId?: string;
+  sessionSkillScope?: string;
   shouldApply?: () => boolean;
 }): Promise<void> {
   const seq = ++refreshSeq;
@@ -127,6 +141,7 @@ export async function refreshSlashCommands(params: {
         agentId,
         sessionKey: params.sessionKey,
         projectId,
+        sessionSkillScope: params.sessionKey ? params.sessionSkillScope || undefined : undefined,
       })
     : undefined;
   if (seq !== refreshSeq || params.shouldApply?.() === false) {
