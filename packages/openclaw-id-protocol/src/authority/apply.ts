@@ -265,7 +265,11 @@ async function applyTarget(
             [target.invite_id]: { ...invite, status: "consumed", pending: null },
           },
         },
-        [{ type: "notify_owners", event: "redemption_resolved", ref: target.invite_id }],
+        // The seq moved: republish so clients that sign at the snapshot's seq + 1 stay current.
+        [
+          { type: "notify_owners", event: "redemption_resolved", ref: target.invite_id },
+          { type: "publish_snapshot" },
+        ],
       );
     }
     default:

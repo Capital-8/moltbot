@@ -329,6 +329,8 @@ describe(acceptanceTitle(11), () => {
     );
     const denied = await submitStatement(pending.state, deny, tunnel);
     expect(denied.state.invites[FIXTURE_INVITE_ID]?.status).toBe("consumed");
+    // A denial bumps seq like any change, so the published snapshot must follow it.
+    expect(denied.ok && denied.events).toContainEqual({ type: "publish_snapshot" });
     expect(await admitted(denied.state, world.invitee.peer)).toBe(false);
   });
 });
