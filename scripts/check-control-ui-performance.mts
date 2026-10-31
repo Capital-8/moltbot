@@ -74,9 +74,9 @@ const controlUiPerformanceBudgets = {
   // 308,922 B: 309,201 B. Vyctor Brzezowski approved exceeding the budget on 2026-10-30.
   // Retain 64 B build variance.
   totalCssGzipBytes: 309_265,
-  // Bounded transcript rows and footer style isolation measure 1,598,475 B raw.
-  // Preserve 64 B variance; startup and gzip ceilings are unchanged.
-  totalCssRawBytes: 1_598_539,
+  // Long-tail containment and Apps discovery reservation measure 1,598,572 B raw.
+  // Keep the existing 64 B variance for the measured rendering and layout-stability wins.
+  totalCssRawBytes: 1_598_636,
 } satisfies Record<string, number>;
 export const CONTROL_UI_PERFORMANCE_BUDGETS = Object.freeze(controlUiPerformanceBudgets);
 
