@@ -363,7 +363,9 @@ it.each(["spawn", "phase"])(
     await expect(cli.updateCommand({ yes: true, restart: false })).rejects.toEqual(
       new cli.ExitError(1),
     );
-    expect(checks.getTriageFailures()).toContainEqual(
+    expect(
+      vi.mocked(cli.runUpdateFailureTriage).mock.calls.map(([call]) => call.failure),
+    ).toContainEqual(
       expect.objectContaining({
         error:
           failureKind === "spawn"
