@@ -4,7 +4,7 @@
  * Add --owner-source <saved-core.ts> to load a baseline at the canonical owner URL.
  * Add --message-mib 5 (or 20) --operations 5 --warmups 1 for a giant code-heavy reply.
  * Add --shape mixed for many short fences and inline spans instead of one large fence.
- * Add --shape fallback for mixed code with blockquotes that require the canonical parser.
+ * Add --shape fallback for the pathological mixed-code and blockquote fixture.
  * Add --regions-source <saved-regions.ts> to compare code-region implementations.
  * Add --count-scans for a separate work-count pass, outside timing/allocation comparisons.
  * Add --async to measure the production worker route, including total process CPU and RSS.

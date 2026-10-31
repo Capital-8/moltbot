@@ -1,2 +1,2 @@
-# Range equivalence, a baseline-red 20 MiB scan, worker responsiveness, and publication authority.
-271
+# Range and streaming equivalence, large-input work bounds, worker responsiveness, and publication authority.
+397
