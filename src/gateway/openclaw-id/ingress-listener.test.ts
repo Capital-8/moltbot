@@ -101,6 +101,20 @@ describe("OpenClaw ID ingress listener", () => {
     );
   });
 
+  it("keeps headersDistinct readable after the contract headers are stripped", async () => {
+    const { seen, listener } = await setup();
+    const response = await request(listener.socketPath, {
+      "x-openclaw-id-proxy-token": listener.proxyToken,
+      "x-openclaw-id-peer-key": PEER_KEY,
+      "if-modified-since": "Sat, 31 Oct 2026 00:00:00 GMT",
+    });
+    expect(response.status).toBe(200);
+    const { req } = seen[0]!;
+    expect(req.headersDistinct["if-modified-since"]).toEqual(["Sat, 31 Oct 2026 00:00:00 GMT"]);
+    expect(req.headersDistinct["x-openclaw-id-proxy-token"]).toBeUndefined();
+    expect(req.headersDistinct["x-openclaw-id-peer-key"]).toBeUndefined();
+  });
+
   it.each<[string, (token: string) => Record<string, string>]>([
     ["no token", () => ({ "x-openclaw-id-peer-key": PEER_KEY })],
     [
