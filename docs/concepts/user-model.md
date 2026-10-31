@@ -70,6 +70,15 @@ The personal file supplements, rather than replaces, the shared file, overriding
 conflicting shared user preferences, not project rules or security policy. The
 workspace-root `USER.md` remains shared regardless of the workspace directory's name.
 
+Group and channel bootstrap contexts omit the selected personal overlay and do
+not open its file. Cron and subagent bootstrap contexts also omit personal
+profiles; their existing shared-file allowlists still apply. Host-resolved chat
+type takes precedence over session-key fallback classification. Withholding the
+overlay does not reassign the session or change which person can edit a file.
+This is not private-audience admission: shared web sessions that are classified
+as direct, explicit personal-instructions tool results, enabled filesystem tools,
+and previously delivered history retain their existing boundaries.
+
 Codex connections without a managed inference relay use shared workspace
 preferences only: they omit the selected personal overlay because native thread
 instructions can be inherited by child agents. Managed relay connections retain

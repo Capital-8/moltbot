@@ -8,10 +8,25 @@ read_when:
 
 # Authenticated profile audience proposal
 
-**Status: proposed, not implemented or accepted.** This document requests owner
-decisions before changes to disclosure, permissions, or public plugin contracts.
-It does not establish a new security guarantee or complete
+**Status: partial bootstrap implementation and proposed wider contract.** The
+review slice below is implemented in this draft; the remaining behavior and
+interfaces require owner decisions. This does not establish full person-level
+privacy or complete
 [#186068](https://github.com/openclaw/openclaw/issues/186068).
+
+## Implemented review slice
+
+The code in this draft omits automatically selected personal USER.md overlays
+from group, channel, cron, and subagent bootstrap contexts before opening those
+files. The final common bootstrap filter also removes personal-marked sources
+added by hooks. Shared defaults and existing subagent/cron file allowlists stay
+in place. Session profile selection and authenticated self-service editing are
+unchanged. Authoritative chat type still overrides session-key classification.
+
+This is deliberately smaller than the contract below. It does not implement
+private-audience admission for shared web tasks, gate personal-tool responses,
+confine raw files, or change Knowledge/LCM grants or retained history. A direct or
+unknown bootstrap classification is not evidence of a person-private audience.
 
 ## Existing foundation
 
@@ -129,7 +144,8 @@ is not sufficient proof. All enabled mutation paths must satisfy this boundary.
 
 ## Proposed implementation
 
-This is a proposed code design, not code shipped by this PR. The owner map was
+Except for the implemented bootstrap slice above, this remains a proposed code
+design, not runtime code shipped by this PR. The owner map was
 checked against main at
 [7861f59337f9](https://github.com/openclaw/openclaw/commit/7861f59337f9163040c9ccfb1c1f682ede689e27).
 Refresh the actual implementation checkout before coding; do not revive retired
