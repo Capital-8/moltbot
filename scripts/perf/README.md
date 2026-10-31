@@ -3188,9 +3188,13 @@ whole-window GC and event-loop metrics. With `--trace-gc` or allocation profilin
 the owned Node process runs `--trace-gc-nvp`. The shared trace reader identifies
 the main isolate before Gateway startup and reads promotion between diagnostic
 window markers after process exit and log drainage. It supports legacy NVP and
-JSON traces. `wholeSoakGc` reports promoted bytes, decimal `promotedMbPerTurn`,
-and minor/major GC seconds per minute from the diagnostic observer. Missing
-capture markers or malformed promotion traces fail the capture. `wholeSoakGc` and
+JSON traces. A complete `wholeSoakGc` reports `status: "complete"`, promoted bytes,
+decimal `promotedMbPerTurn`, and minor/major GC seconds per minute from the
+diagnostic observer. Missing markers or interleaved/malformed native output
+produce `status: "unavailable"` with a reason and no promotion totals; independently
+captured heap profiles, CPU counters, and observer GC timings remain available.
+Unavailable promotion is not zero and cannot establish a promotion improvement.
+`wholeSoakGc` and
 `wholeSoakDiagnostics` span all measured cohorts **and the idle gaps**, stopping
 before final forced collection and the edit control. The latter includes
 event-loop p99/max and GC duration by kind. The continuous allocation window

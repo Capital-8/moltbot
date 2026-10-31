@@ -1,2 +1,2 @@
-113
-# Distinct-principal fanout, live runtime and membership preparation, and bounded wire-metric regressions.
+142
+# Distinct-principal fanout, live runtime and membership preparation, bounded wire metrics, and incomplete GC trace reporting.

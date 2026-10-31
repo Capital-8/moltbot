@@ -12,6 +12,7 @@ import {
   measureGatewayAllocations,
   readGatewayCpuUsage,
   readGatewayGcTrace,
+  readGatewayGcTraceDiagnostic,
   readGatewayHeapProfile,
   readGatewayResources,
   startGatewayDiagnostics,
@@ -992,6 +993,17 @@ it("accounts only the identified main isolate inside the requested heap capture"
     gcCount: 1,
     excludedWorkerGcCount: 0,
   });
+  expect(readGatewayGcTraceDiagnostic(logPath, "measured")).toMatchObject({
+    status: "complete",
+    promotedBytes: 1280,
+    gcCount: 2,
+  });
+  await writeFile(logPath, trace.replace(/^(.*"round-1".*)$/m, "interleaved worker output $1"));
+  expect(readGatewayGcTraceDiagnostic(logPath, "measured")).toMatchObject({
+    status: "complete",
+    promotedBytes: 1280,
+    gcCount: 2,
+  });
   expect(() => readGatewayGcTrace(logPath, "missing")).toThrow("complete heap capture window");
   for (const malformed of [
     trace.replace("promoted=1024", "promoted=NaN"),
@@ -1000,6 +1012,23 @@ it("accounts only the identified main isolate inside the requested heap capture"
   ]) {
     await writeFile(logPath, malformed);
     expect(() => readGatewayGcTrace(logPath, "measured")).toThrow("promoted byte count");
+  }
+  for (const malformed of [
+    trace.replace('"gc":"mc","promoted":256}', '"gc":"mc",interleaved worker output'),
+    trace.replace(
+      'OPENCLAW_GATEWAY_BENCH_GC {"phase":"diagnostics-start"',
+      'interleaved worker output OPENCLAW_GATEWAY_BENCH_GC {"phase":"diagnostics-start"',
+    ),
+  ]) {
+    await writeFile(logPath, malformed);
+    expect(() => readGatewayGcTrace(logPath, "measured")).toThrow();
+    const diagnostic = readGatewayGcTraceDiagnostic(logPath, "measured");
+    expect(diagnostic).toEqual({
+      status: "unavailable",
+      logPath,
+      profilePath: "measured",
+      reason: expect.any(String),
+    });
   }
   await writeFile(logPath, trace.replace('"phase":"identify-stop"', '"phase":"missing"'));
   expect(() => readGatewayGcTrace(logPath, "measured")).toThrow("invalid heap capture start");

@@ -126,6 +126,9 @@ export function readGatewayGcTrace(
   let gcCount = 0;
   let excludedWorkerGcCount = 0;
   for (const line of readFileSync(logPath, "utf8").split("\n")) {
+    if ((identifying || capturing) && line.indexOf(GATEWAY_GC_TRACE_MARKER) > 0) {
+      throw new Error("GC trace contains an interleaved capture marker");
+    }
     if (line.startsWith(GATEWAY_GC_TRACE_MARKER)) {
       const marker: { phase: string; pid: number; profilePath?: string } = JSON.parse(
         line.slice(GATEWAY_GC_TRACE_MARKER.length),
@@ -211,6 +214,20 @@ export function readGatewayGcTrace(
     gcCount,
     excludedWorkerGcCount,
   };
+}
+
+/** Corrupted native output invalidates promotion totals, not independent profile artifacts. */
+export function readGatewayGcTraceDiagnostic(...args: Parameters<typeof readGatewayGcTrace>) {
+  try {
+    return { status: "complete" as const, ...readGatewayGcTrace(...args) };
+  } catch {
+    return {
+      status: "unavailable" as const,
+      logPath: args[0],
+      profilePath: args[1],
+      reason: "GC trace is unreadable or incomplete; exact promotion totals are unavailable",
+    };
+  }
 }
 
 export async function controlGatewayProfile(

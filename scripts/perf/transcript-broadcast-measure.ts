@@ -134,7 +134,7 @@ import {
   controlGatewayProfile,
   readGatewayCpuProfile,
   readGatewayHeapProfile,
-  readGatewayGcTrace,
+  readGatewayGcTraceDiagnostic,
   readGatewayCpuUsage,
   startGatewayDiagnostics,
   readGatewayResources,
@@ -4206,8 +4206,16 @@ function latencySummary(latenciesMs: number[]) {
   };
 }
 function readPromotion(profilePath: string, operationCount: number) {
-  const gcTrace = readGatewayGcTrace(path.join(output, "gateway.stdout.log"), profilePath);
-  return { gcTrace, promotedBytesPerOperation: gcTrace.promotedBytes / operationCount };
+  const gcTrace = readGatewayGcTraceDiagnostic(
+    path.join(output, "gateway.stdout.log"),
+    profilePath,
+  );
+  return {
+    gcTrace,
+    ...(gcTrace.status === "complete"
+      ? { promotedBytesPerOperation: gcTrace.promotedBytes / operationCount }
+      : {}),
+  };
 }
 function readAuthorityAllocation(profilePath: string, operationCount: number) {
   // Node's inspector declarations omit the CDP sample IDs emitted by heap sampling.
@@ -8169,11 +8177,15 @@ try {
   await cleanup();
   const wholeChatGc =
     wholeChatDiagnosticsEnabled && wholeWorkloadDiagnostics && values["trace-gc"]
-      ? readGatewayGcTrace(path.join(output, "gateway.stdout.log"), "whole-chat", "diagnostics")
+      ? readGatewayGcTraceDiagnostic(
+          path.join(output, "gateway.stdout.log"),
+          "whole-chat",
+          "diagnostics",
+        )
       : undefined;
   let wholeSoakGc;
   if (soakScenario && wholeWorkloadDiagnostics && (values.allocations || values["trace-gc"])) {
-    const trace = readGatewayGcTrace(
+    const trace = readGatewayGcTraceDiagnostic(
       path.join(output, "gateway.stdout.log"),
       "whole-soak",
       "diagnostics",
@@ -8184,7 +8196,9 @@ try {
       ...trace,
       completedTurns,
       wallMs,
-      promotedMbPerTurn: trace.promotedBytes / 1_000_000 / completedTurns,
+      ...(trace.status === "complete"
+        ? { promotedMbPerTurn: trace.promotedBytes / 1_000_000 / completedTurns }
+        : {}),
       scavengeSecondsPerMinute:
         ((wholeWorkloadDiagnostics.gc.minorDurationMs?.total ?? 0) * 60) / wallMs,
       majorSecondsPerMinute:
@@ -8561,7 +8575,7 @@ try {
           idleDiagnostics,
           idleGc:
             values["trace-gc"] || values.allocations
-              ? readGatewayGcTrace(
+              ? readGatewayGcTraceDiagnostic(
                   path.join(output, "gateway.stdout.log"),
                   "session-idle",
                   "diagnostics",
@@ -8632,7 +8646,7 @@ try {
                   );
                 }
                 const gcTrace = values["trace-gc"]
-                  ? readGatewayGcTrace(
+                  ? readGatewayGcTraceDiagnostic(
                       path.join(output, "gateway.stdout.log"),
                       `round-${sample.round}`,
                       "diagnostics",
@@ -8642,7 +8656,12 @@ try {
                   operationCount,
                   timingGateEligible: !values["trace-gc"],
                   ...(gcTrace
-                    ? { gcTrace, promotedBytesPerOperation: gcTrace.promotedBytes / operationCount }
+                    ? {
+                        gcTrace,
+                        ...(gcTrace.status === "complete"
+                          ? { promotedBytesPerOperation: gcTrace.promotedBytes / operationCount }
+                          : {}),
+                      }
                     : {}),
                   millisecondsPerOperation: Object.fromEntries(
                     Object.entries(sample.diagnostics.gateway.gc).map(([kind, metric]) => [
