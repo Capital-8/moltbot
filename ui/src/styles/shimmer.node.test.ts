@@ -43,6 +43,12 @@ describe("Control UI shimmer ownership", () => {
       [],
     );
   });
+
+  it("keeps Carapace skeleton lines on the shared placeholder base", () => {
+    const carapace = fs.readFileSync(path.join(uiSource, "styles/carapace-control-ui.css"), "utf8");
+    expect(carapace).toContain(".oc-skeleton-line {");
+    expect(carapace).not.toMatch(/\.oc-skeleton-line[^{]*\{[^}]*background/u);
+  });
 });
 
 // Decorative glows named "shimmer" animate opacity or filter on artwork, not a sweep.
