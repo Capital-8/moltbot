@@ -335,6 +335,12 @@ it.each(["reclaim", "move", "idle suspend"] as const)(
     const destroy = vi.fn(async () => {
       expect(reconcileWorkspace).toHaveBeenCalledOnce();
     });
+    // The dispatch harness publishes its own build receipt when attaching.
+    // Use that same fixture build for current-runtime admission, including features.
+    support.testState.prepareInstallation = async () => ({
+      ...support.BUNDLE_ARTIFACT,
+      ...createDispatchEnvironmentFixtures().attached.bootstrapReceipt,
+    });
     const service = support.createService(support.createProvider({ destroy }), { tunnelManager });
     vi.mocked(harness.environments.get).mockImplementation(service.get);
     vi.mocked(harness.environments.startTunnel).mockImplementation(service.startTunnel);
