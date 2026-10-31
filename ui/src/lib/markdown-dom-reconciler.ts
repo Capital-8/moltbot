@@ -1,4 +1,6 @@
+import { restoreMarkdownCodeDisplay } from "../components/markdown-code-display.ts";
 import { SESSION_TITLE_TARGET_SELECTOR } from "../components/session-progress-hovercard-target.ts";
+import type { ChatRowDisplay } from "./chat/row-display-facts.ts";
 import { markdownContentHtml, type MarkdownContent } from "./markdown-content.ts";
 
 /** A renderer supplies only the lifecycle of its retained media island. */
@@ -98,6 +100,7 @@ function parseCanonical(
   prefix: string,
   incremental: boolean,
   sessionTitleSelector: string | undefined,
+  display?: ChatRowDisplay,
 ): CanonicalNode[] {
   const template = document.createElement("template");
   const prepared = typeof html !== "string";
@@ -166,6 +169,13 @@ function parseCanonical(
       }
     }
     return nodes.map((node, index): CanonicalNode => {
+      if (
+        display &&
+        node instanceof HTMLElement &&
+        node.matches("pre > code:not(.markdown-block-art)")
+      ) {
+        restoreMarkdownCodeDisplay(node, display);
+      }
       const key = node instanceof Element ? node.getAttribute("data-markdown-key") : null;
       const hasMedia = mediaAncestors.has(node) || slots.has(node);
       const element = node instanceof Element ? node : undefined;
@@ -281,6 +291,7 @@ export class MarkdownDomReconciler {
     container: ParentNode,
     private readonly registerSessionTitle?: MarkdownSessionTitleRegistration,
     private readonly sessionTitleSelector = SESSION_TITLE_TARGET_SELECTOR,
+    private readonly display?: () => ChatRowDisplay | undefined,
   ) {
     this.range = createRange(container);
   }
@@ -400,6 +411,7 @@ export class MarkdownDomReconciler {
             media?.prefix ?? "",
             previous.incremental,
             this.registerSessionTitle ? this.sessionTitleSelector : undefined,
+            this.display?.(),
           );
           const remaining = previous.children.splice(completedNodes.length);
           if (remaining.length) {
@@ -499,6 +511,7 @@ export class MarkdownDomReconciler {
           prefix,
           fragment.incremental,
           this.registerSessionTitle ? this.sessionTitleSelector : undefined,
+          this.display?.(),
         );
         fragment.prefix = prefix;
         fragment.parsedHtml = fragment.html;
@@ -606,6 +619,14 @@ export class MarkdownDomReconciler {
       patchAttributes(node.element, node.attributes, source.attributes!);
       node.attributes = source.attributes!;
       node.children = this.reconcile(node.content!, node.children, source.children, media);
+      const display = this.display?.();
+      if (
+        display &&
+        node.element instanceof HTMLElement &&
+        node.element.matches("pre > code:not(.markdown-block-art)")
+      ) {
+        restoreMarkdownCodeDisplay(node.element, display);
+      }
       node.tag = source.tag;
     } else {
       clearRenderedRange(node);
@@ -620,14 +641,28 @@ export class MarkdownDomReconciler {
             .replaceAll("\r", "&#13;");
         }
         const registerSessionTitle = this.registerSessionTitle;
+        const display = this.display?.();
         const targets = registerSessionTitle
-          ? [...template.content.querySelectorAll<HTMLElement>(this.sessionTitleSelector)]
+          ? [
+              ...template.content.querySelectorAll<HTMLElement>(
+                display
+                  ? `${this.sessionTitleSelector}, pre > code:not(.markdown-block-art), code[data-code-highlight]`
+                  : this.sessionTitleSelector,
+              ),
+            ]
           : [];
+        if (display) {
+          for (const target of targets) {
+            if (target.matches("pre > code:not(.markdown-block-art), code[data-code-highlight]")) {
+              restoreMarkdownCodeDisplay(target, display);
+            }
+          }
+        }
         node.end.before(template.content);
         if (registerSessionTitle && targets.length) {
-          const releases = targets.map((target) =>
-            registerSessionTitle(target, document.createElement("span")),
-          );
+          const releases = targets
+            .filter((target) => target.matches(this.sessionTitleSelector))
+            .map((target) => registerSessionTitle(target, document.createElement("span")));
           node.releaseSessionTitles = () => releases.forEach((release) => release());
         }
       }

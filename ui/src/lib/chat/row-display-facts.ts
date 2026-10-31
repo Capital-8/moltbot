@@ -36,7 +36,99 @@ const linkSchema = json.object({
     }),
   ),
 });
+const highlightClasses = new Set(
+  [
+    "keyword",
+    "built_in",
+    "type",
+    "literal",
+    "number",
+    "operator",
+    "punctuation",
+    "property",
+    "regexp",
+    "string",
+    "char",
+    "subst",
+    "symbol",
+    "class",
+    "title",
+    "function",
+    "params",
+    "comment",
+    "doctag",
+    "meta",
+    "section",
+    "tag",
+    "name",
+    "attr",
+    "attribute",
+    "variable",
+    "bullet",
+    "code",
+    "emphasis",
+    "strong",
+    "formula",
+    "link",
+    "quote",
+    "selector-tag",
+    "selector-id",
+    "selector-class",
+    "selector-attr",
+    "selector-pseudo",
+    "template-tag",
+    "template-variable",
+    "addition",
+    "deletion",
+  ]
+    .map((scope) => `hljs-${scope}`)
+    .concat([
+      "language_",
+      "constant_",
+      "function_",
+      "class_",
+      "inherited__",
+      "invoke__",
+      "constructor_",
+      "prompt_",
+      "documentation_",
+      "keyword_",
+      "string_",
+      "parameter_",
+      "escape_",
+      "special_",
+      "heading_",
+    ]),
+);
+export function isCodeHighlightClass(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 128 &&
+    value.split(" ").every((name) => highlightClasses.has(name))
+  );
+}
+export const codeHighlightClassesSchema = json.array(
+  json.refine(json.text, isCodeHighlightClass),
+  32,
+);
+const codeHighlightOffsetsSchema = json.object({
+  end: json.refine(
+    json.number,
+    (value) => Number.isSafeInteger(value) && value >= 0 && value <= 50_000,
+  ),
+  runs: json.refine(
+    json.array(json.number, 384),
+    (runs) =>
+      runs.length % 3 === 0 && runs.every((value) => Number.isSafeInteger(value) && value >= 0),
+  ),
+});
+export type CodeHighlightOffsets = json.SnapshotValue<typeof codeHighlightOffsetsSchema>;
+export type CapturedCodeRows = {
+  classes: string[];
+  rows: Record<string, Record<string, CodeHighlightOffsets>>;
+};
 export const chatRowDisplaySchema = json.object({
+  code: json.optional(boundedRecord(codeHighlightOffsetsSchema, 8, 16)),
   links: json.optional(boundedRecord(linkSchema, 8, 4096)),
   images: json.optional(
     boundedRecord(
@@ -64,7 +156,14 @@ export type ChatLinkDisplay = json.SnapshotValue<typeof linkSchema>;
 type RowDisplaySnapshot = { rowDisplay?: Record<string, ChatRowDisplayFacts> };
 
 export type ChatRowDisplay = {
-  read: () => { scope: string; facts: ChatRowDisplayFacts | undefined } | undefined;
+  read: () =>
+    | {
+        scope: string;
+        messageId?: string;
+        facts: ChatRowDisplayFacts | undefined;
+        codeClasses?: string[];
+      }
+    | undefined;
   write: (update: Partial<ChatRowDisplayFacts>) => void;
 };
 

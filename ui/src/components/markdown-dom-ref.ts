@@ -115,6 +115,7 @@ export function createMarkdownRef(
         ? (target, label) => registerSessionTitleTarget(target, label, display())
         : registerSessionTitleTarget,
       display ? MARKDOWN_LINK_DISPLAY_TARGET_SELECTOR : undefined,
+      display,
     );
     setOwner(current);
   };

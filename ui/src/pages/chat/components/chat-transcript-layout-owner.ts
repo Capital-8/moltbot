@@ -1,5 +1,6 @@
 import type { Virtualizer } from "@tanstack/virtual-core";
 import { CONTROL_UI_BUILD_INFO } from "../../../build-info.ts";
+import { captureMarkdownCodeRows } from "../../../components/markdown-code-display.ts";
 import { i18n } from "../../../i18n/index.ts";
 import { fnv1aUtf16 } from "../../../lib/fnv1a.ts";
 import { getExpandedToolCards, getExpandedUserMessages } from "../chat-thread.ts";
@@ -143,6 +144,19 @@ export class TranscriptLayoutOwner {
       if (!this.viewport?.isConnected || !this.ready || instance.scrollElement !== this.viewport) {
         return;
       }
+      const measured = new Map(instance.getVirtualItems().map((item) => [item.key, item]));
+      const code = captureMarkdownCodeRows(
+        [...instance.elementsCache].flatMap(([id, element]) => {
+          const item = measured.get(id);
+          return item && element.isConnected ? [{ element, start: item.start, end: item.end }] : [];
+        }),
+        {
+          top: this.viewport.getBoundingClientRect().top,
+          height: instance.scrollRect?.height ?? 0,
+          offset: instance.scrollOffset ?? 0,
+        },
+        () => this.persistRows(instance, false),
+      );
       this.rowLayout?.writeRows(
         Object.fromEntries(
           [...instance.elementsCache].flatMap(([id, element]) => {
@@ -164,6 +178,7 @@ export class TranscriptLayoutOwner {
             return [[key, size]];
           }),
         ),
+        code,
       );
     };
     // The reveal owner admits this work; reuse measured sizes after paint.

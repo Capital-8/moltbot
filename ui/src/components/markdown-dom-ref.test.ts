@@ -3,10 +3,103 @@ import { expect, it, onTestFinished, vi } from "vitest";
 import type { ChatRowDisplayFacts } from "../lib/chat/row-display-facts.ts";
 import { mountSolid } from "../test-helpers/mount-solid.ts";
 import { renderSolidRef } from "../test-helpers/render-solid-ref.ts";
+import { captureMarkdownCodeRows, trackMarkdownCodeDisplay } from "./markdown-code-display.ts";
 import { createMarkdownRef } from "./markdown-dom-ref.ts";
+import { highlightCodeHtml } from "./markdown-highlight-runtime.ts";
 import { updateLinkReaderDisplay } from "./markdown-link-display.ts";
 import { toStreamingMarkdownDomParts } from "./markdown-live.ts";
 import { partitionMarkdownHtml, toSanitizedMarkdownHtml } from "./markdown.ts";
+
+it.each([1, 28])("restores the visible syntax of a %i-line cached fence before commit", (lines) => {
+  let facts: ChatRowDisplayFacts = {};
+  let codeClasses: string[] = [];
+  const display = {
+    read: () => ({ scope: "cached-code", messageId: "cached-code", facts, codeClasses }),
+    write: (update: Partial<ChatRowDisplayFacts>) => {
+      facts = { ...facts, ...update };
+    },
+  };
+  const mount = (html: string) =>
+    renderSolidRef(
+      () =>
+        createMarkdownRef(
+          () => ({ content: `<div class="is-collapsible">${html}</div>`, incremental: true }),
+          () => display,
+        ),
+      {
+        targetElement: Object.assign(document.createElement("div"), {
+          className: "chat-virtual-row",
+        }),
+      },
+    );
+  const source = "const cached = true;\n".repeat(lines);
+  const warm = mount(
+    `<pre><code class="hljs language-ts">${highlightCodeHtml(source, "ts")}</code></pre>`,
+  );
+  const code = warm.container.querySelector<HTMLElement>("code")!;
+  vi.spyOn(code, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 600, 140));
+  trackMarkdownCodeDisplay(code);
+  const captured = captureMarkdownCodeRows(
+    [{ element: code.closest<HTMLElement>(".chat-virtual-row")!, start: 0, end: 1000 }],
+    { top: 0, height: 400, offset: 0 },
+    () => {},
+  );
+  facts = { code: captured.rows["cached-code"] };
+  codeClasses = captured.classes;
+  warm.unmount();
+  // The persisted display record and raw message are the only inputs after reload.
+  facts = JSON.parse(JSON.stringify(facts));
+  const reload = mount(`<pre><code class="language-ts">${source}</code></pre>`);
+  expect(reload.container.querySelector("code")?.textContent).toBe(source);
+  expect(
+    [...reload.container.querySelectorAll("code span")].map((span) => [
+      span.className,
+      span.textContent,
+    ]),
+  ).toEqual(
+    Array.from({ length: Math.min(lines, 7) }, () => [
+      ["hljs-keyword", "const"],
+      ["hljs-literal", "true"],
+    ]).flat(),
+  );
+  reload.unmount();
+  const changed = mount('<pre><code class="language-ts">changed source</code></pre>');
+  expect(changed.container.querySelector("code")?.textContent).toBe("changed source");
+  expect(changed.container.querySelector(".hljs-keyword")).toBeNull();
+  changed.unmount();
+});
+
+it("captures visible and lower-margin fences while excluding earlier and distant rows", () => {
+  const mounts: ReturnType<typeof renderSolidRef>[] = [];
+  const items = [-300, 100, 600, 1000].map((top, index) => {
+    const view = renderSolidRef(
+      () =>
+        createMarkdownRef(
+          () => ({
+            content: `<div class="is-collapsible"><pre><code class="hljs language-ts">${highlightCodeHtml("const ready = true;\n", "ts")}</code></pre></div>`,
+          }),
+          () => ({
+            read: () => ({ scope: `scope-${index}`, messageId: `row-${index}`, facts: {} }),
+            write: () => {},
+          }),
+        ),
+      {
+        targetElement: Object.assign(document.createElement("div"), {
+          className: "chat-virtual-row",
+        }),
+      },
+    );
+    mounts.push(view);
+    const code = view.container.querySelector<HTMLElement>("code")!;
+    vi.spyOn(code, "getBoundingClientRect").mockReturnValue(new DOMRect(0, top, 600, 140));
+    trackMarkdownCodeDisplay(code);
+    return { element: code.closest<HTMLElement>(".chat-virtual-row")!, start: top, end: top + 140 };
+  });
+  onTestFinished(() => mounts.forEach((view) => view.unmount()));
+  const captured = captureMarkdownCodeRows(items, { top: 0, height: 400, offset: 0 }, () => {});
+  expect(Object.keys(captured.rows)).toEqual(["row-1", "row-2"]);
+  expect(captured.classes).toEqual(["hljs-keyword", "hljs-literal"]);
+});
 
 it("publishes only differing PR facts and excludes query-bearing URLs from the cache", () => {
   const pr = "https://github.com/example/project/pull/42";

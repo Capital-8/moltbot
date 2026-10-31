@@ -4,6 +4,7 @@ import { registerCodeBlocksEnglish } from "../i18n/locales/en-code-blocks.ts";
 import { cancelLayout, scheduleLayout } from "../lib/layout-frame.ts";
 import { subscribeDocumentVisibility } from "../lib/reactive/platform.ts";
 import { measureCodeBlockWidthOverflow } from "./markdown-code-blocks.ts";
+import { trackMarkdownCodeDisplay } from "./markdown-code-display.ts";
 import { MarkdownCodeHighlights } from "./markdown-code-highlight.ts";
 import { enhanceMarkdownTables, releaseMarkdownTables } from "./markdown-tables.ts";
 
@@ -183,6 +184,7 @@ export class MarkdownBlocks {
       if (!viewport || !code) {
         continue;
       }
+      trackMarkdownCodeDisplay(code);
       if (code.hasAttribute("data-code-highlight")) {
         (this.codeHighlights ??= new MarkdownCodeHighlights(root)).sync(wrapper, viewport, code);
       }

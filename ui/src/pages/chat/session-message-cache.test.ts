@@ -142,6 +142,10 @@ describe("session message cache", () => {
     { messageReactions: { reply: [{ emoji: "👍", count: 1, identities: [{ id: "peer" }] }] } },
     { composer: { id: "saved", provider: "example", name: "Saved", permissionMode: "full" } },
     { rowDisplay: { reply: { links: { source: { title: "Saved title" } } } } },
+    {
+      codeClasses: ["hljs-keyword"],
+      rowDisplay: { reply: { code: { source: { end: 5, runs: [0, 5, 0] } } } },
+    },
     { rowDisplay: { reply: { images: { source: { width: 480, height: 240, rendition: 480 } } } } },
     { avatarSources: { ops: "/avatar/ops?v=1", cleared: null } },
     {

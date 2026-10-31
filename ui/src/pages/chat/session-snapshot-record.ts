@@ -9,6 +9,7 @@ import {
   chatThumbnailWeight,
   projectChatRowDisplay,
   rowDisplaySchema,
+  codeHighlightClassesSchema,
 } from "../../lib/chat/row-display-facts.ts";
 import {
   isChatTranscriptMetadata,
@@ -66,6 +67,7 @@ const snapshotSchema = json.object(
     headerViewers: json.optional(chatHeaderViewersSnapshotSchema),
     headerSharing: json.optional(json.nullable(chatHeaderSharingSnapshotSchema)),
     rowDisplay: json.optional(rowDisplaySchema),
+    codeClasses: json.optional(codeHighlightClassesSchema),
     avatarSources: json.optional(avatarSourcesSchema),
     composer: json.optional(
       json.nullable(

@@ -31,6 +31,10 @@ export function installWarmReloadBrowserProbe(route: string) {
     domStates: [] as Array<{ atMs: number; rows: number; sidebarRows: number; board: boolean }>,
     animationSamples: [] as ReloadAnimationSample[],
     animationProbeMs: 0,
+    codeStyles: [] as Array<{
+      atMs: number;
+      blocks: Array<{ key: string; signature: string; syntaxSpans: number }>;
+    }>,
     animationPolicy:
       "Recognized skeleton shimmer or opacity/visibility-only fades with at most 64 elements; fades containing images, canvas, video or iframes are excluded. Signatures retain content, attributes, appearance and geometry, except intermediate opacity. No whole-page animation mask.",
     masks: [] as Array<{
@@ -325,6 +329,8 @@ export function installWarmReloadBrowserProbe(route: string) {
   };
   let previous = "";
   let previousRows = "";
+  let codeVersion = -1;
+  let previousCodeStyles = "";
   const sample = () => {
     if (data.stopped) {
       stopGateway?.();
@@ -333,6 +339,51 @@ export function installWarmReloadBrowserProbe(route: string) {
     }
     sampleAnimations();
     const rowElements = [...document.querySelectorAll(".chat-virtual-row")];
+    if (codeVersion !== domVersion) {
+      codeVersion = domVersion;
+      const blocks = rowElements.flatMap((row) =>
+        [...row.querySelectorAll("pre > code:not(.markdown-block-art)")].flatMap((code, index) => {
+          const box = code.getBoundingClientRect();
+          if (box.width <= 0 || box.height <= 0 || box.bottom <= 0 || box.top >= innerHeight) {
+            return [];
+          }
+          const runs: Array<{ text: string; color: string }> = [];
+          const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+          let lines = 0;
+          for (let node = walker.nextNode(); node && lines < 7; node = walker.nextNode()) {
+            let text = node.textContent ?? "";
+            for (const match of text.matchAll(/\n/gu)) {
+              if (++lines === 7) {
+                text = text.slice(0, match.index + 1);
+                break;
+              }
+            }
+            if (!text) {
+              continue;
+            }
+            const color = getComputedStyle(node.parentElement!).color;
+            const previous = runs.at(-1);
+            if (previous?.color === color) {
+              previous.text += text;
+            } else {
+              runs.push({ text, color });
+            }
+          }
+          return [
+            {
+              key: hash(`${row.getAttribute("data-virtual-row-key")}:${index}:${code.textContent}`),
+              signature: hash(JSON.stringify(runs)),
+              syntaxSpans: code.querySelectorAll('[class*="hljs-"]').length,
+            },
+          ];
+        }),
+      );
+      const signature = JSON.stringify(blocks);
+      if (signature !== previousCodeStyles) {
+        data.codeStyles.push({ atMs: performance.now(), blocks });
+        previousCodeStyles = signature;
+      }
+    }
     const rows = rowElements.length;
     const sidebarRows = document.querySelectorAll("openclaw-app-sidebar [data-session-key]").length;
     const board = Boolean(document.querySelector("openclaw-board-view iframe"));

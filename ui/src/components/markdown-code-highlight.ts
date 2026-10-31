@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { listen } from "../lib/reactive/listener.ts";
 import { observeIntersection } from "../lib/reactive/observers.ts";
+import { trackMarkdownCodeDisplay } from "./markdown-code-display.ts";
 import type { CodeHighlightReply, CodeHighlightRequest } from "./markdown-code-highlight-chunks.ts";
 
 let worker: Worker | undefined;
@@ -94,8 +95,8 @@ export class MarkdownCodeHighlights {
       this.retire(current);
     }
     const tail =
-      code.firstChild instanceof Text && code.childNodes.length === 1
-        ? code.firstChild
+      code.lastChild instanceof Text
+        ? code.lastChild
         : document.createTextNode(code.textContent ?? "");
     if (tail.parentNode !== code) {
       code.replaceChildren(tail);
@@ -107,7 +108,7 @@ export class MarkdownCodeHighlights {
       language: code.getAttribute("data-code-highlight") ?? "",
       tail,
       visible: false,
-      applied: 0,
+      applied: (code.textContent?.length ?? 0) - tail.length,
       next: 0,
       complete: false,
     };
@@ -273,6 +274,7 @@ export class MarkdownCodeHighlights {
         const chunk = reply.chunks![block.next]!;
         // Solid's delegated disclosure handler runs after the root click listener.
         if (!block.wrapper.classList.contains("is-expanded") && chunk.to > reply.previewEnd) {
+          trackMarkdownCodeDisplay(block.code);
           return;
         }
         const fragment = (sanitizer ??= DOMPurify(window)).sanitize(
@@ -291,6 +293,7 @@ export class MarkdownCodeHighlights {
         if (block.next === reply.chunks!.length) {
           block.reply = undefined;
           block.tail.remove();
+          trackMarkdownCodeDisplay(block.code);
           this.finish(block);
           return;
         }

@@ -1,4 +1,5 @@
-import type { BrowserContextOptions, Page } from "playwright";
+import path from "node:path";
+import type { BrowserContextOptions, Locator, Page } from "playwright";
 import { expect, it } from "vitest";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { chatMessage } from "./chat-flow.test-support.ts";
@@ -36,7 +37,79 @@ async function setThemeMode(page: Page, mode: "dark" | "light"): Promise<void> {
   }, mode);
 }
 
+function codeColors(code: Locator) {
+  return code.evaluate((element) => {
+    const bottom = (element.closest(".code-block-viewport") ?? element).getBoundingClientRect()
+      .bottom;
+    return {
+      text: element.textContent,
+      colors: [...element.querySelectorAll("span")]
+        .filter((span) => span.getBoundingClientRect().bottom <= bottom + 1)
+        .map((span) => getComputedStyle(span).color),
+    };
+  });
+}
+
 suite.define(() => {
+  it.each([28, 400])(
+    "paints a saved %i-line fence with final syntax before its highlighter loads",
+    async (lines) => {
+      await suite.withPage(desktop, async ({ page }) => {
+        const source = "let x;\n".repeat(lines);
+        await installMockGateway(page, {
+          historyMessages: [
+            chatMessage("assistant", `\`\`\`ts\n${source}\n\`\`\``, {
+              __openclaw: { id: "cached-code", seq: 1 },
+            }),
+          ],
+        });
+        await page.goto(`${suite.server.baseUrl}chat`);
+        const code = page.locator('.chat-thread [data-entry-id="cached-code"] pre code');
+        await code.locator(".hljs-keyword").waitFor();
+        const final = await codeColors(code);
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestIdleCallback(() => resolve()));
+            }),
+        );
+        await page.evaluate(async () => {
+          await Reflect.get(
+            document.querySelector(".chat-pane-cache__pane--active")!,
+            "sessionSnapshotStore",
+          ).flush();
+        });
+        const release = Promise.withResolvers<void>();
+        await page.route(
+          /markdown-(?:highlight-runtime|code-highlight\.worker)/u,
+          async (route) => {
+            await release.promise;
+            await route.continue();
+          },
+        );
+        try {
+          await page.reload();
+          await code.waitFor();
+          const first = await codeColors(code);
+          if (process.env.OPENCLAW_CAPTURE_UI_PROOF === "1") {
+            await page.screenshot({
+              path: path.join(suite.artifactDir, `syntax-${lines}-first.png`),
+            });
+          }
+          expect(first.colors.length).toBeGreaterThan(0);
+          expect(first).toEqual(final);
+          release.resolve();
+          await page.waitForFunction(
+            () => window.openclawControlUi?.snapshot().routeReady === true,
+          );
+          expect(await codeColors(code)).toEqual(first);
+        } finally {
+          release.resolve();
+        }
+      });
+    },
+  );
+
   it.each([
     { key: "Enter", theme: "dark", width: 1440, overflow: true },
     { key: "Space", theme: "light", width: 390, overflow: false },

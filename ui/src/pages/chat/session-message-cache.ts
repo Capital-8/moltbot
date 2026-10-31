@@ -17,6 +17,7 @@ import {
   MAX_CHAT_THUMBNAIL_BYTES,
   type ChatDisplayFacts,
   type ChatRowDisplayFacts,
+  type CapturedCodeRows,
 } from "../../lib/chat/row-display-facts.ts";
 import { parseSnapshot } from "../../lib/snapshot-json.ts";
 import type {
@@ -108,6 +109,7 @@ export type ChatSessionSnapshot = {
   headerSharing?: ChatHeaderSharingSnapshot | null;
   details?: ChatDetailsSnapshot;
   rowDisplay?: Record<string, ChatRowDisplayFacts>;
+  codeClasses?: string[];
   avatarSources?: Record<string, string | null>;
   composer?: ChatComposerSnapshot | null;
   // The board provider validates cached payloads before they can reach a view.
@@ -177,7 +179,9 @@ export function createChatDisplayFacts(
           return (
             snapshot && {
               scope: JSON.stringify([key, snapshot.sessionId, messageId]),
+              messageId,
               facts: snapshot.rowDisplay?.[messageId],
+              codeClasses: snapshot.codeClasses,
             }
           );
         },
@@ -205,7 +209,7 @@ export type ChatWidgetLayout = {
   read: (key: string) => number | undefined;
   readRows: () => Readonly<Record<string, number>> | undefined;
   write: (key: string, size: number | null, row?: string, settled?: boolean) => number | undefined;
-  writeRows: (heights: Record<string, number>) => void;
+  writeRows: (heights: Record<string, number>, code?: CapturedCodeRows) => void;
   invalidateRow: (rowKey: string | undefined) => void;
 };
 
@@ -233,10 +237,33 @@ export function createChatWidgetLayout() {
         admitted ??= captureWidgetLayoutReservation(snapshot);
         return snapshot?.sessionId === admitted?.sessionId ? snapshot : undefined;
       };
-      const writeHeights = (heights: Record<string, number>) => {
+      const writeHeights = (heights: Record<string, number>, code?: CapturedCodeRows) => {
         const snapshot = current();
+        if (!snapshot) {
+          return;
+        }
+        let rowDisplay = snapshot.rowDisplay;
+        if (code) {
+          for (const id of new Set([...Object.keys(rowDisplay ?? {}), ...Object.keys(code.rows)])) {
+            const previous = rowDisplay?.[id];
+            const next = code.rows[id];
+            if (JSON.stringify(previous?.code) === JSON.stringify(next)) {
+              continue;
+            }
+            rowDisplay = { ...rowDisplay };
+            const { code: _code, ...facts } = previous ?? {};
+            const candidate = next ? { ...facts, code: next } : facts;
+            rowDisplay[id] = JSON.stringify(candidate).length <= 8192 ? candidate : facts;
+          }
+        }
+        const codeClasses = code
+          ? JSON.stringify(code.classes) === JSON.stringify(snapshot.codeClasses ?? [])
+            ? snapshot.codeClasses
+            : code.classes
+          : snapshot.codeClasses;
         if (
-          !snapshot ||
+          rowDisplay === snapshot.rowDisplay &&
+          codeClasses === snapshot.codeClasses &&
           Object.entries(heights).every(([key, size]) => snapshot.widgetHeights?.[key] === size)
         ) {
           return;
@@ -247,7 +274,12 @@ export function createChatWidgetLayout() {
             ...Object.entries(heights),
           ].slice(-100),
         );
-        cacheChatSessionSnapshot(cache, host, target, { ...snapshot, widgetHeights });
+        cacheChatSessionSnapshot(cache, host, target, {
+          ...snapshot,
+          widgetHeights,
+          rowDisplay,
+          codeClasses,
+        });
       };
       const invalidateRow = (rowKey: string | undefined, widgetKey?: string) => {
         const snapshot = current();
@@ -509,6 +541,7 @@ export function cacheChatSessionSnapshot(
         headerSharing:
           incoming.headerSharing === undefined ? retained?.headerSharing : incoming.headerSharing,
         rowDisplay: incoming.rowDisplay ?? retained?.rowDisplay,
+        codeClasses: incoming.codeClasses ?? retained?.codeClasses,
         avatarSources: incoming.avatarSources ?? retained?.avatarSources,
         messageReactions: incoming.messageReactions ?? retained?.messageReactions,
         widgetHeights: incoming.widgetHeights ?? retained?.widgetHeights,
@@ -542,6 +575,7 @@ export function cacheChatSessionSnapshot(
     existing.snapshot.headerSharing === snapshot.headerSharing &&
     existing.snapshot.details === snapshot.details &&
     existing.snapshot.rowDisplay === snapshot.rowDisplay &&
+    existing.snapshot.codeClasses === snapshot.codeClasses &&
     existing.snapshot.avatarSources === snapshot.avatarSources &&
     samePagination(existing.snapshot.pagination, snapshot.pagination)
   ) {
