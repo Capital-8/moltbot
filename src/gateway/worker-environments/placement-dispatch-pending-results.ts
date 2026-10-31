@@ -15,7 +15,7 @@ import type { PlacementTurnClaimCurrentCheck } from "./placement-turn-claims.typ
 import {
   matchesWorkspaceResultClaim,
   isCurrentWorkerWorkspacePendingResultOwner,
-} from "./placement-workspace-result.js";
+} from "./placement-workspace-result-owner.js";
 import {
   createWorkerWorkspaceReconcileRequest,
   recoverSessionWorkspaceCheckpoint,

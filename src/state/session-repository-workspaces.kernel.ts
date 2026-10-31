@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { Selectable, Updateable } from "kysely";
 import { REPOSITORY_BRANCH_PREFIX_PATTERN } from "../config/repository-branch-prefix.js";
-import { readWorkerPlacementMovesReadOnly } from "../gateway/worker-environments/placement-move-intent.js";
+import { readWorkerPlacementMovesReadOnly } from "../gateway/worker-environments/placement-move-row-codec.js";
 import { getRequired } from "../gateway/worker-environments/placement-row-codec.js";
 import {
   matchesWorkspaceResultClaim,
   pendingResultFromRow,
-} from "../gateway/worker-environments/placement-workspace-result.js";
+} from "../gateway/worker-environments/placement-workspace-result-owner.js";
 import { findWorkerEnvironment } from "../gateway/worker-environments/store-row-codec.js";
 import {
   createSqliteQueryCache,
