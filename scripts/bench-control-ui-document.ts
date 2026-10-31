@@ -1,16 +1,20 @@
 // Real document HTTP/auth owners; no Gateway CLI build, model, or real account.
 // pnpm exec tsx scripts/bench-control-ui-document.ts --port 19671 --warm 11
 // --serve --bundle-dir dist/control-ui serves the existing browser cold-load bench.
+// --asset-burst --root-kind bundled|resolved measures synthetic concurrent asset reads.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
+import { loadavg } from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { buffer } from "node:stream/consumers";
 import { parseArgs } from "node:util";
+import { gzipSync } from "node:zlib";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { OpenClawConfig } from "../src/config/types.openclaw.js";
+import type { ControlUiRootState } from "../src/gateway/server-control-ui-root.js";
 
 const { values } = parseArgs({
   options: {
@@ -19,15 +23,24 @@ const { values } = parseArgs({
     route: { type: "string", default: "/chat" },
     "bundle-dir": { type: "string" },
     serve: { type: "boolean", default: false },
+    "asset-burst": { type: "boolean", default: false },
+    "root-kind": { type: "string" },
     out: { type: "string" },
   },
 });
 const port = Number(values.port);
 const warm = Number(values.warm);
 const route = values.route;
+const assetRootKind = values["root-kind"] ?? "bundled";
 assert(Number.isInteger(port) && port >= 19600 && port <= 19699, "port must be 19600–19699");
 assert(Number.isInteger(warm) && warm >= 1, "warm must be a positive integer");
 assert(route === "/" || route === "/chat", "route must be / or /chat");
+assert(assetRootKind === "bundled" || assetRootKind === "resolved", "Unknown --root-kind");
+assert(!values["root-kind"] || values["asset-burst"], "--root-kind requires --asset-burst");
+assert(
+  !values["asset-burst"] || (!values.serve && !values["bundle-dir"]),
+  "--asset-burst owns synthetic assets; exclude --serve and --bundle-dir",
+);
 const scratch = path.resolve(".local");
 await mkdir(scratch, { recursive: true });
 const root = await mkdtemp(path.join(scratch, "document-bench-"));
@@ -203,11 +216,16 @@ try {
     { include: ["diagnostic.phase.completed"] },
   );
   const auth = { mode: "trusted-proxy" as const, trustedProxy, allowTailscale: false };
+  const controlUiRoot: Extract<ControlUiRootState, { kind: "bundled" | "resolved" }> = {
+    kind: values["asset-burst"] ? assetRootKind : "bundled",
+    path: bundleDir,
+    realPath: await realpath(bundleDir),
+  };
   const listener = createGatewayHttpServer({
     clients: new Set(),
     controlUiEnabled: true,
     controlUiBasePath: "",
-    controlUiRoot: { kind: "bundled", path: bundleDir, realPath: await realpath(bundleDir) },
+    controlUiRoot,
     openAiChatCompletionsEnabled: false,
     openResponsesEnabled: false,
     handleHooksRequest: async () => false,
@@ -237,7 +255,139 @@ try {
     realBundle: Boolean(values["bundle-dir"]),
     limitations,
   };
-  if (values.serve) {
+  if (values["asset-burst"]) {
+    const { startGatewayBenchDiagnostics } = await import("./lib/gateway-bench-diagnostics.ts");
+    const { getTrackedWorkerLifecycleSnapshot } = await import("../src/infra/worker-cpu.js");
+    const { readControlUiRootAsset } = await import("../src/gateway/server-control-ui-root.js");
+    const directory = path.join(bundleDir, "assets");
+    await mkdir(directory);
+    // A large UI chunk ahead of seven small runtime modules exposes head-of-line waiting.
+    // Generate code-shaped text so negotiated gzip reads have realistic compression work.
+    const sizes = [1024 * 1024, ...Array<number>(7).fill(8 * 1024)];
+    const payload = (size: number, revision: number) =>
+      Buffer.from(
+        Array.from(
+          { length: Math.ceil(size / 32) },
+          (_, index) =>
+            `export const v${index} = "${revision}-${((index * 2654435761) >>> 0).toString(36)}";\n`,
+        )
+          .join("")
+          .slice(0, size),
+      );
+    const samples = [];
+    // Match ordinary cold-load proof: prime only the document, never a second worker.
+    await readControlUiRootAsset(controlUiRoot, "index.html", true);
+    for (const encoding of ["identity", "gzip"] as const) {
+      const assets = sizes.map((size, index) => {
+        const body = payload(size, 0);
+        return { name: `burst-${encoding}-${index}.js`, body, compressed: gzipSync(body) };
+      });
+      await Promise.all(
+        assets.map(async (asset) => {
+          await writeFile(path.join(directory, asset.name), asset.body);
+          await writeFile(path.join(directory, `${asset.name}.gz`), asset.compressed);
+        }),
+      );
+      const measure = async (temperature: string) => {
+        const finishDiagnostics = startGatewayBenchDiagnostics();
+        const workersBefore = getTrackedWorkerLifecycleSnapshot();
+        const hostLoadBefore = loadavg();
+        const cpuBefore = process.cpuUsage();
+        const began = performance.now();
+        const results = await Promise.allSettled(
+          assets.map(async (asset) => {
+            const started = performance.now();
+            const response = await new Promise<import("node:http").IncomingMessage>(
+              (resolve, reject) => {
+                request(
+                  `${origin}/assets/${asset.name}`,
+                  { agent: false, headers: { "accept-encoding": encoding } },
+                  resolve,
+                )
+                  .once("error", reject)
+                  .end();
+              },
+            );
+            const responseStartMs = performance.now() - started;
+            const body = await buffer(response);
+            return {
+              name: asset.name,
+              responseStartMs,
+              responseEndMs: performance.now() - started,
+              completedAtMs: performance.now() - began,
+              status: response.statusCode,
+              encoding: response.headers["content-encoding"] ?? "identity",
+              body,
+            };
+          }),
+        );
+        const elapsedMs = performance.now() - began;
+        const cpu = process.cpuUsage(cpuBefore);
+        const diagnostics = finishDiagnostics();
+        const taskCount = diagnostics.groups
+          .filter(
+            (group) =>
+              group.channel === "openclaw.worker.task" &&
+              group.operation.startsWith("control-ui-file.worker."),
+          )
+          .reduce((sum, group) => sum + group.count, 0);
+        const cached = assetRootKind === "bundled" && temperature === "repeat";
+        const readsPerAsset = assetRootKind === "bundled" && encoding === "gzip" ? 2 : 1;
+        assert.equal(taskCount, cached ? 0 : assets.length * readsPerAsset);
+        const records = results.map((result, index) => {
+          if (result.status === "rejected") {
+            throw result.reason;
+          }
+          const { body, ...response } = result.value;
+          const expectedEncoding = encoding === "gzip" && assetRootKind === "bundled";
+          const expected = expectedEncoding ? assets[index]!.compressed : assets[index]!.body;
+          assert.equal(response.status, 200, `${response.name}: HTTP status`);
+          assert.equal(response.encoding, expectedEncoding ? "gzip" : "identity");
+          assert(body.equals(expected), `${response.name}: response bytes changed`);
+          return { ...response, bytes: body.byteLength, sha256: sha256(body) };
+        });
+        return {
+          encoding,
+          temperature,
+          elapsedMs,
+          cpuMs: { user: cpu.user / 1000, system: cpu.system / 1000 },
+          taskCount,
+          hostLoad: { before: hostLoadBefore, after: loadavg() },
+          workersBefore,
+          workersAfter: getTrackedWorkerLifecycleSnapshot(),
+          diagnostics,
+          responses: records,
+        };
+      };
+      samples.push(await measure("cold-assets"));
+      for (let repeat = 0; repeat < warm; repeat++) {
+        samples.push(await measure("repeat"));
+      }
+      if (assetRootKind === "resolved") {
+        const changed = assets[1]!;
+        changed.body = payload(sizes[1]!, 1);
+        changed.compressed = gzipSync(changed.body);
+        await writeFile(path.join(directory, changed.name), changed.body);
+        await writeFile(path.join(directory, `${changed.name}.gz`), changed.compressed);
+        samples.push(await measure("rewritten"));
+      }
+    }
+    const report = {
+      type: "asset-burst-report",
+      rootKind: assetRootKind,
+      sizes,
+      samples,
+      limitations: [
+        "Synthetic concurrent HTTP reads after an index-only prime; no browser or network shaping.",
+        "Cold means uncached asset names, not cold filesystem pages. Gzip fixture generation precedes timing.",
+        "Process CPU includes all Gateway fixture workers; byte validation and hashing follow timing.",
+      ],
+    };
+    if (values.out) {
+      await writeFile(path.resolve(values.out), `${JSON.stringify(report, null, 2)}\n`);
+    }
+    emit(report);
+  } else if (values.serve) {
     emit({ type: "ready", ...fixture });
     await new Promise<void>((resolve) => {
       const stop = () => {
