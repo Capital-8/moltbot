@@ -9,7 +9,9 @@ Nothing in OpenClaw loads this package yet. Its JS API is the tailcat spike bind
 `index.d.ts` (generated) for the full surface.
 
 This crate is its own Cargo workspace. It is not a member of `crates/Cargo.toml`, so the shared Rust
-workspace job does not compile iroh.
+workspace job does not compile iroh. `.github/workflows/iroh-node.yml` builds and tests it, only when
+this directory or that workflow changes: linux x64 (gnu) runs Clippy, the tests, wire compat and the
+throughput check; linux arm64, darwin arm64 and win32 x64 build and run `test/binding.test.cjs`.
 
 ## Build
 
