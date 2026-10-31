@@ -47,9 +47,13 @@ refusal. Every other refusal leaves the state unchanged and has no events.
 
 ### Admission
 
-`isAdmitted(state, peerKey, fp)` is what the tunnel child asks for every connection: the key
-is not revoked and belongs to a member or to an active owner device (certificate in the
-current epoch, nothing in its chain revoked). Discovery is not consulted; withholding a
+`isAdmitted(state, peerKey, fp, now)` is what the tunnel child asks for every connection: the
+key is not revoked and belongs to a member or to an owner device active at `now` (certificate
+in the current epoch, nothing in its chain revoked, and the certificate and every ancestor
+issued no later than `now` plus 300 seconds of clock skew and not expired). Enrollment and
+root re-certification refuse a certificate outside its window (`expired`, `not_yet_valid`).
+`nextOwnerExpiry(state, now)` gives the next expiry boundary, at which the Gateway closes the
+sessions that device already has open. Discovery is not consulted; withholding a
 snapshot cannot keep a removed key admitted (G4).
 
 `snapshotBody(state, bindingSeq, now)` builds the MembershipSnapshot the Gateway signs with

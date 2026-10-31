@@ -30,7 +30,7 @@ const tunnel = { channel: "tunnel" as const, now: WORLD_NOW };
 const mailbox = { channel: "mailbox" as const, now: WORLD_NOW };
 
 async function admitted(state: AuthorityState, peer: IrohEndpointKey): Promise<boolean> {
-  return isAdmitted(state, peer, await fingerprint(peer));
+  return isAdmitted(state, peer, await fingerprint(peer), WORLD_NOW);
 }
 
 async function addBob(world: Awaited<ReturnType<typeof buildWorld>>) {
@@ -185,7 +185,7 @@ describe(acceptanceTitle(8), () => {
   it("kit enrollment adds the new device, notifies owners, and leaves every chain at depth 0", async () => {
     const world = await buildWorld();
     expect(
-      activeOwnerCerts(world.state)
+      activeOwnerCerts(world.state, WORLD_NOW)
         .map((cert) => cert.chain.length)
         .toSorted((a, b) => a - b),
     ).toEqual([0, 1]);
@@ -193,7 +193,7 @@ describe(acceptanceTitle(8), () => {
     expect(formatEd25519PublicKey(root.publicKey)).toBe(world.rootPub);
     const phone = await worldKey("kit-phone");
     let state = world.state;
-    for (const cert of activeOwnerCerts(state)) {
+    for (const cert of activeOwnerCerts(state, WORLD_NOW)) {
       const recert = await signStatement(
         "OwnerDeviceCert",
         { ...cert.body, issued_at: WORLD_NOW - 1 },
@@ -214,7 +214,9 @@ describe(acceptanceTitle(8), () => {
       event: "kit_used",
       ref: await fingerprint(phone.pub),
     });
-    expect(activeOwnerCerts(added.state).map((cert) => cert.chain.length)).toEqual([0, 0, 0]);
+    expect(activeOwnerCerts(added.state, WORLD_NOW).map((cert) => cert.chain.length)).toEqual([
+      0, 0, 0,
+    ]);
     expect(await admitted(added.state, phone.peer)).toBe(true);
   });
 });
