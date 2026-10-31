@@ -27,6 +27,7 @@ import { waitForSolid } from "../test-helpers/solid-settle.ts";
 import * as sidebarAgentSessionRows from "./app-sidebar-agent-session-rows.ts";
 import type { AppSidebarSessionNavigationElement } from "./app-sidebar-session-navigation.ts";
 import { SidebarSessionProjection } from "./app-sidebar-session-projection.ts";
+import * as sidebarSessionTree from "./app-sidebar-session-tree.ts";
 import { getAppSidebarOwner } from "./app-sidebar.tsx";
 import * as sessionLeadingIndicator from "./session-leading-indicator.ts";
 import { setSessionsGrouping } from "./session-organizer-menu.runtime.ts";
@@ -128,6 +129,34 @@ async function update(sidebar: Sidebar, change: (() => void) | Partial<Sidebar>)
 }
 
 describe("sidebar projection memo", () => {
+  it("reuses equivalent child windows but refreshes changed parent membership", async () => {
+    const first = session("first-parent");
+    const parent = session("second-parent");
+    const child = session("shared-child", { parentSessionKey: parent.key });
+    const { sidebar } = await mount([first, parent, child]);
+    sidebar.sessionsStatusFilter = "active";
+    const data = sidebar.sessionData;
+    const source = data.sessionsResult!.sessions.find((row) => row.key === child.key)!;
+    const loaded = new Set([first.key, parent.key]);
+    data.loadedChildSessionKeys = loaded;
+    data.childSessionRowsByParent = { [first.key]: [source], [parent.key]: [] };
+    const readParent = () => sidebar.findSidebarMenuSessionByKey(parent.key)!;
+    const hidden = readParent();
+    expect(hidden.children).toHaveLength(0);
+
+    data.childSessionRowsByParent = { [first.key]: [source], [parent.key]: [] };
+    expect(readParent()).toBe(hidden);
+
+    // The canonical row, ancestry and loaded sets stay fixed; only the accepted bucket moves.
+    data.childSessionRowsByParent = { [first.key]: [], [parent.key]: [source] };
+    const visible = readParent();
+    expect(visible.children.map((row) => row.key)).toEqual([child.key]);
+    expect(data.loadedChildSessionKeys).toBe(loaded);
+    expect(data.sessionsResult!.sessions.find((row) => row.key === child.key)).toBe(source);
+
+    data.childSessionRowsByParent = { [first.key]: [], [parent.key]: [source] };
+    expect(readParent()).toBe(visible);
+  });
   it("reuses a held roster without enumerating it for each navigation read", async () => {
     const first = session("first");
     const { sidebar } = await mount([first]);
@@ -459,13 +488,16 @@ describe("sidebar projection memo", () => {
     const home = session("main", { lastMessagePreview: "Home before" });
     const first = session("first");
     const second = session("second", { owner: { actor: bob } });
+    const third = session("third");
     const projectHome = vi.spyOn(sidebarAgentSessionRows, "projectSidebarHomeSession");
+    const projectTree = vi.spyOn(sidebarSessionTree, "projectSessionTree");
     const describeState = vi.spyOn(sessionLeadingIndicator, "describeSessionState");
-    const { sidebar, row, publish } = await mount([home, first, second]);
+    const { sidebar, row, publish } = await mount([home, first, second, third]);
     publish([
       { ...home, lastMessagePreview: "Home after" },
       { ...first, label: "Renamed first" },
       second,
+      third,
     ]);
     await settleLitElement(sidebar);
     expect(row(first.key)?.textContent).toContain("Renamed first");
@@ -476,7 +508,14 @@ describe("sidebar projection memo", () => {
     await update(sidebar, { activeRouteId: "chat", sessionKey: first.key });
     expect(sidebar.findSidebarSessionByKey(first.key)?.visuallyActive).toBe(true);
     expect(row(first.key)?.querySelector("a")?.getAttribute("aria-current")).toBe("page");
+    const unchanged = sidebar.findSidebarMenuSessionByKey(third.key);
+    projectTree.mockClear();
     await update(sidebar, { sessionKey: second.key });
+    const inventoryBuilds = projectTree.mock.calls.filter(([input]) =>
+      input.roots.some((row) => row.key === first.key),
+    );
+    expect(inventoryBuilds).toHaveLength(0);
+    expect(sidebar.findSidebarMenuSessionByKey(third.key)).toBe(unchanged);
     expect(sidebar.findSidebarSessionByKey(first.key)?.visuallyActive).toBe(false);
     expect(sidebar.findSidebarSessionByKey(second.key)?.visuallyActive).toBe(true);
     expect(row(first.key)).toBe(firstRow);
@@ -484,7 +523,7 @@ describe("sidebar projection memo", () => {
     expect(firstRow?.querySelector("a")?.getAttribute("aria-current")).toBeNull();
     expect(secondRow?.querySelector("a")?.getAttribute("aria-current")).toBe("page");
     expect(describeState).not.toHaveBeenCalled();
-    publish([home, { ...first, hasActiveRun: true, unread: true }, second]);
+    publish([home, { ...first, hasActiveRun: true, unread: true }, second, third]);
     await settleLitElement(sidebar);
     expect(describeState).toHaveBeenCalled();
     expect(row(first.key)?.querySelector(".sr-only")?.textContent).toContain("Unread");

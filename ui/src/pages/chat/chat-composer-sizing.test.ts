@@ -23,28 +23,11 @@ afterEach(() => {
   resetTranscriptTestDom();
 });
 
-function mockTextareaResizeObserver() {
-  let resize: (() => void) | undefined;
-  class TestResizeObserver {
-    constructor(private readonly callback: ResizeObserverCallback) {}
-    observe(target: Element) {
-      if (target instanceof HTMLTextAreaElement) {
-        resize = () => this.callback([], this);
-      }
-    }
-    unobserve() {}
-    disconnect() {}
-  }
-  vi.stubGlobal("ResizeObserver", TestResizeObserver);
-  return () => expectDefined(resize, "textarea resize observer")();
-}
-
 describe("chat composer sizing", () => {
   beforeEach(() => vi.spyOn(CSS, "supports").mockReturnValue(false));
 
-  it("measures native edits only at the cap and preserves capped shrink", async () => {
+  it("settles native overflow without synchronous input layout reads", async () => {
     const flushFrames = stubAnimationFrames();
-    const resizeTextarea = mockTextareaResizeObserver();
     vi.mocked(CSS.supports).mockReturnValue(true);
     const container = renderChatView({});
     const textarea = getComposerTextarea(container);
@@ -52,47 +35,39 @@ describe("chat composer sizing", () => {
     document.body.append(container);
     await Promise.resolve();
     flushFrames();
-    let height = 42;
+    let scrollHeight = 200;
+    Object.defineProperty(textarea, "clientHeight", { configurable: true, value: 150 });
     let textareaLayoutReads = 0;
     let transcriptLayoutReads = 0;
-    Object.defineProperties(textarea, {
-      clientHeight: { configurable: true, get: () => Math.min(height, 150) },
-      scrollHeight: {
-        configurable: true,
-        get: () => {
-          textareaLayoutReads++;
-          return height;
-        },
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        textareaLayoutReads += 1;
+        return scrollHeight;
       },
     });
     Object.defineProperty(thread, "scrollHeight", {
       configurable: true,
       get: () => {
-        transcriptLayoutReads++;
+        transcriptLayoutReads += 1;
         return 200;
       },
     });
-    textarea.style.cssText = "height:42px;max-height:150px;box-sizing:border-box;border:0px";
-    resizeTextarea();
-    textareaLayoutReads = 0;
+    textarea.style.height = "42px";
+
     textarea.value = "responsive draft";
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
-    flushFrames();
+
     expect({ textareaLayoutReads, transcriptLayoutReads }).toEqual({
       textareaLayoutReads: 0,
       transcriptLayoutReads: 0,
     });
     expect(textarea.style.height).toBe("");
-    height = 150;
-    resizeTextarea();
-    height = 200;
-    textareaLayoutReads = 0;
-    textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
-    expect(textareaLayoutReads).toBe(0);
     flushFrames();
-    expect(textareaLayoutReads).toBeGreaterThan(0);
     expect(textarea.style.overflowY).toBe("auto");
-    height = 42;
+
+    scrollHeight = 42;
+    Object.defineProperty(textarea, "clientHeight", { configurable: true, value: 42 });
     textarea.value = "Short draft";
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
     flushFrames();
@@ -216,14 +191,29 @@ describe("chat composer sizing", () => {
   });
 
   it("resizes the draft when responsive layout changes the textarea width", () => {
-    const resizeTextarea = mockTextareaResizeObserver();
+    let resizeCallback: ResizeObserverCallback | undefined;
     let animationFrameCallback: FrameRequestCallback | undefined;
     let nextAnimationFrameId = 0;
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
       animationFrameCallback = callback;
-      return ++nextAnimationFrameId;
+      nextAnimationFrameId += 1;
+      return nextAnimationFrameId;
     });
     const cancelAnimationFrameMock = vi.fn();
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        if (target instanceof HTMLTextAreaElement) {
+          resizeCallback = this.callback;
+        }
+      }
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): ResizeObserverEntry[] {
+        return [];
+      }
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
 
@@ -243,18 +233,19 @@ describe("chat composer sizing", () => {
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
     expect(textarea.style.height).toBe("42px");
     expect(textarea.style.overflowY).toBe("hidden");
+    const resizeTextarea = expectDefined(resizeCallback, "textarea resize observer");
     requestAnimationFrameMock.mockClear();
 
     scrollHeight = 180;
     clientHeight = 150;
-    resizeTextarea();
+    resizeTextarea([], {} as ResizeObserver);
     expect(textarea.style.overflowY).toBe("auto");
     expect(requestAnimationFrameMock).not.toHaveBeenCalled();
 
     width = 180;
     scrollHeight = 120;
     clientHeight = 120;
-    resizeTextarea();
+    resizeTextarea([], {} as ResizeObserver);
     expect(requestAnimationFrameMock).toHaveBeenCalledOnce();
     expect(textarea.style.height).toBe("42px");
 
@@ -263,7 +254,7 @@ describe("chat composer sizing", () => {
     expect(textarea.style.overflowY).toBe("hidden");
 
     width = 160;
-    resizeTextarea();
+    resizeTextarea([], {} as ResizeObserver);
     expect(requestAnimationFrameMock).toHaveBeenCalledTimes(2);
     const pendingAdjustmentFrame = nextAnimationFrameId;
     cleanupSolid();

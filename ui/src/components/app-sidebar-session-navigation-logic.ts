@@ -131,7 +131,9 @@ export type SidebarSessionNavigationState = {
   routeSessionKey: string;
   selectedAgentId: string;
   activeRowKey: string | null;
+  visuallyActiveRowKey: string | null;
   visibleSessionRows: GatewaySessionRow[];
+  toSidebarInventorySession: (row: SessionRow, isChild?: boolean) => SidebarRecentSession;
   toSidebarSession: (row: SessionRow, isChild?: boolean) => SidebarRecentSession;
 };
 
@@ -171,10 +173,7 @@ export function buildSidebarSessionNavigationState(input: {
     archivedFilter: input.statusFilter,
     compareSessions: input.compareSessions,
   });
-  const toSidebarSession = (row: SessionRow, isChild = false): SidebarRecentSession => {
-    const active = row.key === navigation.activeRowKey;
-    const visuallyActive =
-      input.highlightCurrentSession && row.key === navigation.currentSessionKey;
+  const toSidebarInventorySession = (row: SessionRow, isChild = false): SidebarRecentSession => {
     const selfUserId = context?.gateway.snapshot.selfUser?.id;
     const isRunVisuallyActive =
       row.archived !== true &&
@@ -195,8 +194,6 @@ export function buildSidebarSessionNavigationState(input: {
         defaultAgentId,
         selfUserId,
         i18n.getLocale(),
-        active,
-        visuallyActive,
         isRunVisuallyActive,
         workSession,
         pullRequest,
@@ -234,8 +231,8 @@ export function buildSidebarSessionNavigationState(input: {
           renameValue: resolveSessionRenameValue(row),
           subtitle: resolveSessionWorkSubtitle(row),
           workContext: resolveSessionWorkContext(row),
-          active,
-          visuallyActive,
+          active: false,
+          visuallyActive: false,
           hasActiveRun: row.archived !== true && isSessionRunStateActive(row),
           isRunVisuallyActive,
           gatewayHasActiveRun: row.hasActiveRun,
@@ -323,12 +320,20 @@ export function buildSidebarSessionNavigationState(input: {
       },
     );
   };
+  const visuallyActiveRowKey = input.highlightCurrentSession ? navigation.currentSessionKey : null;
   return {
     routeSessionKey: navigation.currentSessionKey,
     selectedAgentId: navigation.selectedAgentId,
     activeRowKey: navigation.activeRowKey,
+    visuallyActiveRowKey,
     visibleSessionRows: navigation.visibleSessions,
-    toSidebarSession,
+    toSidebarInventorySession,
+    toSidebarSession: (row, isChild) =>
+      input.rowProjection.select(
+        toSidebarInventorySession(row, isChild),
+        row.key === navigation.activeRowKey,
+        row.key === visuallyActiveRowKey,
+      ),
   };
 }
 
