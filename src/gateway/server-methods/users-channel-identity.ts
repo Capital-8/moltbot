@@ -42,8 +42,9 @@ export const usersChannelIdentityHandlers: GatewayRequestHandlers = {
     async (options) => {
       try {
         const action = await preparePersonalProfileAction(options, "operator.sessions.read");
-        if (action.owner === GATEWAY_OWNER_PROFILE_ID)
+        if (action.owner === GATEWAY_OWNER_PROFILE_ID) {
           throw new Error("Sign in with your own profile to link a channel account.");
+        }
         const { params, context, client } = options;
         const plugin = getChannelPlugin(params.channelId);
         const links = await listCanonicalUserChannelIdentities(action.owner);
@@ -78,8 +79,9 @@ export const usersChannelIdentityHandlers: GatewayRequestHandlers = {
         const key = JSON.stringify([action.owner, channelId, accountId]);
         if (params.action === "poll" || params.action === "cancel") {
           const flow = pending.get(key);
-          if (!flow || flow.requestId !== params.requestId)
+          if (!flow || flow.requestId !== params.requestId) {
             throw new Error("Account linking expired. Connect again from your profile.");
+          }
           if (params.action === "cancel") {
             cancel(key);
             options.respond(true, { status: "cancelled" } satisfies UsersChannelIdentityResult);
@@ -101,14 +103,16 @@ export const usersChannelIdentityHandlers: GatewayRequestHandlers = {
           options.respond(true, { status: "ready" } satisfies UsersChannelIdentityResult);
           return;
         }
-        if (linked.length)
+        if (linked.length) {
           throw new Error("Disconnect your linked account before connecting another one.");
+        }
         const adapter = await plugin?.identityLink?.prepare(context.getRuntimeConfig(), accountId);
         action.assertCurrent();
-        if (!adapter)
+        if (!adapter) {
           throw new Error(
             "Account linking is not configured for this channel account. Ask your Gateway administrator.",
           );
+        }
         const ready = createDeferredCore<string>();
         const session = createProviderBrowserAuthSession({
           signal: action.signal,
@@ -124,7 +128,9 @@ export const usersChannelIdentityHandlers: GatewayRequestHandlers = {
         cancel(key);
         const requestId = randomUUID();
         const cleanup = setTimeout(() => {
-          if (pending.get(key) === flow) cancel(key);
+          if (pending.get(key) === flow) {
+            cancel(key);
+          }
         }, TIMEOUT_MS + 60_000);
         cleanup.unref();
         const flow: Pending = {

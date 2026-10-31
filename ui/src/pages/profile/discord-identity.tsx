@@ -30,8 +30,9 @@ export function DiscordIdentity() {
         asOptionalRecord(event.payload)?.reason === "profile-identity" &&
         !state.busy &&
         !state.flow
-      )
+      ) {
         void state.load();
+      }
     });
     state.sync(context.gateway.snapshot);
     return () => {

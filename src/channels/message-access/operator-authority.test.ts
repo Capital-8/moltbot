@@ -777,34 +777,62 @@ it.each([
           });
           expect(authorize(fixture.cfg, turn).senderIsOwner).toBe(false);
           for (const [action, params] of [
-            ["patch", { label: "forbidden" }],
+            ["patch", { icon: "forbidden" }],
             ["owner_profiles", {}],
           ] as const) {
-            await expect(sessions(action, params)).rejects.toThrow("Only assign_owner");
+            await expect(sessions(action, params)).rejects.toThrow(
+              "only permits archive, restore, and stop",
+            );
           }
         }
         if (role === "admin") {
           expect((await assign(humanSessionKey, requester.id)).details).toMatchObject(updated);
           expect(loadSessionEntry(scope(humanSessionKey))?.owner?.actor).toEqual(requester);
         }
-        await run(() =>
-          callInProcessGatewayToolWithCreation(
-            "sessions.create",
-            {
-              key: spawnedSessionKey,
-              agentId: "main",
-              visibility: "shared",
-              parentSessionKey: turn.SessionKey,
-              spawnDepth: 1,
-            },
-            {
-              via: "spawn",
-              actor: agent,
-              requesterSessionKey: turn.SessionKey,
-              inheritedToolPolicy: { version: 1, allow: [], deny: [] },
-            },
-          ),
-        );
+        const spawn = () =>
+          run(() =>
+            callInProcessGatewayToolWithCreation(
+              "sessions.create",
+              {
+                key: spawnedSessionKey,
+                agentId: "main",
+                visibility: "shared",
+                parentSessionKey: turn.SessionKey,
+                spawnDepth: 1,
+              },
+              {
+                via: "spawn",
+                actor: agent,
+                requesterSessionKey: turn.SessionKey,
+                inheritedToolPolicy: { version: 1, allow: [], deny: [] },
+              },
+            ),
+          );
+        if (role === "member") {
+          // A profile write grant does not make a shared-channel viewer a participant.
+          await expect(spawn()).rejects.toThrow("session is shared for this connection");
+          const created = await execute("sessions_create", "member-create", {
+            label: "Member work",
+          });
+          const details = created.details;
+          if (
+            !details ||
+            typeof details !== "object" ||
+            !("sessionKey" in details) ||
+            typeof details.sessionKey !== "string"
+          ) {
+            throw new Error("sessions_create did not return a session key");
+          }
+          expect(loadSessionEntry(scope(details.sessionKey))).toMatchObject({
+            createdVia: "operator",
+            createdActor: { type: "human", source: "profile", id: requester.id },
+          });
+          await expect(assign(details.sessionKey, requester.id)).rejects.toThrow(
+            "session is shared for this connection",
+          );
+          return;
+        }
+        await spawn();
         expect(loadSessionEntry(scope(spawnedSessionKey))).toMatchObject({
           createdVia: "spawn",
           createdActor: agent,

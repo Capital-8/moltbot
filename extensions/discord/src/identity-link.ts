@@ -5,7 +5,9 @@ import { resolveDiscordActivitiesConfig } from "./activities/config.js";
 import { fetchDiscordJson } from "./oauth-http.js";
 
 function credentials(cfg: OpenClawConfig, accountId: string) {
-  if (!listDiscordAccountIds(cfg).includes(accountId)) return undefined;
+  if (!listDiscordAccountIds(cfg).includes(accountId)) {
+    return undefined;
+  }
   const account = resolveDiscordAccount({ cfg, accountId });
   const oauth = resolveDiscordActivitiesConfig(account.config);
   const applicationId = oauth.enabled
@@ -19,7 +21,9 @@ function credentials(cfg: OpenClawConfig, accountId: string) {
 export const discordIdentityLink: NonNullable<ChannelPlugin["identityLink"]> = {
   async prepare(cfg, accountId) {
     const credential = credentials(cfg, accountId);
-    if (!credential) return undefined;
+    if (!credential) {
+      return undefined;
+    }
     return {
       isCurrent(current) {
         const value = credentials(current, accountId);

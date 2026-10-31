@@ -4,7 +4,10 @@ import { discordIdentityLink } from "./identity-link.js";
 import { fetchDiscordJson } from "./oauth-http.js";
 
 // Provider boundary: the real adapter owns OAuth fields and immutable identity parsing.
-vi.mock("./oauth-http.js", () => ({ fetchDiscordJson: vi.fn() }));
+vi.mock("./oauth-http.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./oauth-http.js")>()),
+  fetchDiscordJson: vi.fn(),
+}));
 const cfg: OpenClawConfig = {
   channels: {
     discord: {
@@ -37,11 +40,11 @@ it("uses identify-only authorization and verifies the authenticated user before 
       assertCurrent,
     }),
   ).resolves.toEqual({ senderId: "987654321098765432" });
-  expect(
-    new URLSearchParams(String(vi.mocked(fetchDiscordJson).mock.calls[0]![0].init.body)).get(
-      "redirect_uri",
-    ),
-  ).toBe(redirectUri);
+  const tokenBody = vi.mocked(fetchDiscordJson).mock.calls[0]![0].init.body;
+  if (!(tokenBody instanceof URLSearchParams)) {
+    throw new Error("Expected a URL-encoded OAuth token request body");
+  }
+  expect(tokenBody.get("redirect_uri")).toBe(redirectUri);
   expect(vi.mocked(fetchDiscordJson).mock.calls[1]![0]).toMatchObject({
     url: "https://discord.com/api/v10/users/@me",
     init: { headers: { Authorization: "Bearer test-access-token" } },

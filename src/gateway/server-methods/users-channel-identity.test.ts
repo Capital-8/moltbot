@@ -129,7 +129,7 @@ beforeEach(async () => {
               isCurrent: () => providerCurrent,
               authorizationUrl: ({ state: id, redirectUri }) =>
                 "https://discord.example/authorize?" +
-                new URLSearchParams({ state: id, redirect_uri: redirectUri }),
+                new URLSearchParams({ state: id, redirect_uri: redirectUri }).toString(),
               exchange,
             }
           : undefined,
@@ -203,19 +203,29 @@ it.each(["connection", "scope", "provider", "cancel"])(
       connect: gatewayConnect(["operator.sessions.write"]),
     };
     clients.add(observer);
-    if (change === "connection") clients.delete(alice);
-    if (change === "scope") alice.connect.scopes = [];
-    if (change === "provider") providerCurrent = false;
-    if (change === "cancel")
+    if (change === "connection") {
+      clients.delete(alice);
+    }
+    if (change === "scope") {
+      alice.connect.scopes = [];
+    }
+    if (change === "provider") {
+      providerCurrent = false;
+    }
+    if (change === "cancel") {
       await rpc(alice, {
         action: "cancel",
         channelId: "discord",
         accountId: "default",
         requestId: flow.requestId,
       });
+    }
     const response = callback(flow, cookie);
-    if (change === "cancel") expect(response).toBe(410);
-    else expect((await terminal(flow, observer)).status).toBe("failed");
+    if (change === "cancel") {
+      expect(response).toBe(410);
+    } else {
+      expect((await terminal(flow, observer)).status).toBe("failed");
+    }
     expect(exchange).not.toHaveBeenCalled();
     expect(await listCanonicalUserChannelIdentities(owner(alice))).toEqual([]);
   },

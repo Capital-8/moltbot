@@ -7,6 +7,7 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationGatewaySnapshot } from "../../app/context.ts";
 import { hasOperatorSelfReadAccess } from "../../app/operator-access.ts";
 import { formatUiError } from "../../lib/format-error.ts";
+import { reserveExternalWindowForDeferredNavigation } from "../../lib/open-external-url.ts";
 
 export class DiscordIdentityState {
   accounts: NonNullable<UsersChannelIdentityResult["accounts"]> = [];
@@ -38,8 +39,9 @@ export class DiscordIdentityState {
       this.profileId === profileId &&
       this.connectionId === connectionId &&
       this.available === available
-    )
+    ) {
       return;
+    }
     this.dispose();
     this.client = snapshot.client;
     this.profileId = profileId;
@@ -50,21 +52,24 @@ export class DiscordIdentityState {
     this.error = null;
     this.busy = false;
     this.loading = false;
-    if (available) void this.load();
+    if (available) {
+      void this.load();
+    }
     this.publish();
   }
   private clearFlow() {
     clearTimeout(this.timer);
-    if (this.flow)
+    if (this.flow) {
       document.cookie =
         "openclaw-channel-link-" + this.flow.nonce + "=; Path=/; Max-Age=0; SameSite=Lax";
+    }
     this.flow = null;
   }
   dispose() {
     this.generation++;
     const flow = this.flow;
     this.clearFlow();
-    if (flow && this.client)
+    if (flow && this.client) {
       void this.client
         .request("users.channelIdentity", {
           action: "cancel",
@@ -73,12 +78,14 @@ export class DiscordIdentityState {
           requestId: flow.requestId,
         })
         .catch(() => {});
+    }
     this.client = null;
     this.available = false;
   }
   private request(params: UsersChannelIdentityParams) {
-    if (!this.client || !this.available)
+    if (!this.client || !this.available) {
       throw new Error("Reconnect to manage your Discord identity.");
+    }
     return this.client.request<UsersChannelIdentityResult>("users.channelIdentity", params);
   }
   async load() {
@@ -87,12 +94,18 @@ export class DiscordIdentityState {
     this.publish();
     try {
       const result = await this.request({ action: "status", channelId: "discord" });
-      if (generation !== this.generation) return;
+      if (generation !== this.generation) {
+        return;
+      }
       this.accounts = result.accounts ?? [];
-      if (!this.selected) this.accountId = this.accounts[0]?.accountId ?? "";
+      if (!this.selected) {
+        this.accountId = this.accounts[0]?.accountId ?? "";
+      }
       this.error = null;
     } catch (error) {
-      if (generation === this.generation) this.error = formatUiError(error);
+      if (generation === this.generation) {
+        this.error = formatUiError(error);
+      }
     } finally {
       if (generation === this.generation) {
         this.loading = false;
@@ -101,7 +114,9 @@ export class DiscordIdentityState {
     }
   }
   async connect() {
-    if (this.busy || !this.selected?.available || this.flow) return;
+    if (this.busy || !this.selected?.available || this.flow) {
+      return;
+    }
     const generation = this.generation;
     const accountId = this.accountId;
     const nonce = crypto.randomUUID();
@@ -113,8 +128,7 @@ export class DiscordIdentityState {
       nonce +
       "; Path=/; Max-Age=300; SameSite=Lax" +
       (location.protocol === "https:" ? "; Secure" : "");
-    const popup = window.open("about:blank", "_blank");
-    if (popup) popup.opener = null;
+    const popup = reserveExternalWindowForDeferredNavigation();
     this.busy = true;
     this.error = null;
     this.publish();
@@ -129,17 +143,23 @@ export class DiscordIdentityState {
         popup?.close();
         return;
       }
-      if (!result.requestId || !result.authorizationUrl)
+      if (!result.requestId || !result.authorizationUrl) {
         throw new Error("Discord sign-in could not be started. Try again.");
+      }
       this.flow = { requestId: result.requestId, accountId, nonce, url: result.authorizationUrl };
-      if (popup) popup.location.href = result.authorizationUrl;
+      if (popup) {
+        popup.location.href = result.authorizationUrl;
+      }
       this.timer = setTimeout(() => void this.poll(), 1500);
     } catch (error) {
       popup?.close();
-      if (generation === this.generation) this.error = formatUiError(error);
+      if (generation === this.generation) {
+        this.error = formatUiError(error);
+      }
     } finally {
-      if (!this.flow || this.flow.nonce !== nonce)
+      if (!this.flow || this.flow.nonce !== nonce) {
         document.cookie = cookie + "=; Path=/; Max-Age=0; SameSite=Lax";
+      }
       if (generation === this.generation) {
         this.busy = false;
         this.publish();
@@ -149,7 +169,9 @@ export class DiscordIdentityState {
   private async poll() {
     const flow = this.flow;
     const generation = this.generation;
-    if (!flow) return;
+    if (!flow) {
+      return;
+    }
     try {
       const result = await this.request({
         action: "poll",
@@ -157,21 +179,28 @@ export class DiscordIdentityState {
         accountId: flow.accountId,
         requestId: flow.requestId,
       });
-      if (generation !== this.generation || this.flow !== flow) return;
+      if (generation !== this.generation || this.flow !== flow) {
+        return;
+      }
       if (result.status === "pending") {
         this.timer = setTimeout(() => void this.poll(), 1500);
         return;
       }
       this.clearFlow();
-      if (result.status === "linked") await this.load();
-      else this.error = result.message ?? "Discord sign-in was not completed. Try again.";
+      if (result.status === "linked") {
+        await this.load();
+      } else {
+        this.error = result.message ?? "Discord sign-in was not completed. Try again.";
+      }
     } catch (error) {
       if (generation === this.generation && this.flow === flow) {
         this.clearFlow();
         this.error = formatUiError(error);
       }
     }
-    if (generation === this.generation) this.publish();
+    if (generation === this.generation) {
+      this.publish();
+    }
   }
   async disconnect() {
     await this.mutate("disconnect");
@@ -180,27 +209,34 @@ export class DiscordIdentityState {
     await this.mutate("cancel");
   }
   private async mutate(action: "disconnect" | "cancel") {
-    if (this.busy) return;
+    if (this.busy) {
+      return;
+    }
     const generation = this.generation;
     const flow = this.flow;
     this.busy = true;
     this.error = null;
     this.publish();
     try {
-      if (action === "cancel" && flow)
+      if (action === "cancel" && flow) {
         await this.request({
           action,
           channelId: "discord",
           accountId: flow.accountId,
           requestId: flow.requestId,
         });
-      else if (action === "disconnect")
+      } else if (action === "disconnect") {
         await this.request({ action, channelId: "discord", accountId: this.accountId });
-      if (generation !== this.generation) return;
+      }
+      if (generation !== this.generation) {
+        return;
+      }
       this.clearFlow();
       await this.load();
     } catch (error) {
-      if (generation === this.generation) this.error = formatUiError(error);
+      if (generation === this.generation) {
+        this.error = formatUiError(error);
+      }
     } finally {
       if (generation === this.generation) {
         this.busy = false;
