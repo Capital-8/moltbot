@@ -52,8 +52,17 @@ export type LinkCommit = {
   binding: unknown;
 };
 
-/** A refused write: a stable code the UI matches, and detail for logs. */
-export type AuthorityRefusal = { ok: false; code: string; detail: string };
+/**
+ * A refused write: a stable code the UI matches, and detail for logs. `events` are
+ * side effects the refusal itself requires (the conflicting-rotation owner alert);
+ * the state change behind them is already committed.
+ */
+export type AuthorityRefusal = {
+  ok: false;
+  code: string;
+  detail: string;
+  events?: AuthorityEvent[];
+};
 
 /** Accepted write and the effects to perform. */
 export type AuthorityAccepted = {
@@ -272,6 +281,16 @@ export function createOpenClawIdAuthority(
           now,
         );
         const result = await submitStatement(current.authority, input, { channel, now });
+        if (!result.ok && result.persist) {
+          // A refusal with a security transition (the conflict freeze) still commits it.
+          await commit({ ...current, authority: result.state });
+          return {
+            ok: false,
+            code: result.code,
+            detail: result.detail,
+            events: [...expiry, ...result.events],
+          };
+        }
         if (!result.ok) {
           if (expiry.length > 0) {
             await commit(current);

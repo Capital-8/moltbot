@@ -40,6 +40,11 @@ Root supremacy: an R-signed statement is accepted wherever a device-signed one i
 the mailbox. When the state is frozen, root-signed writes are refused except from the local
 operator.
 
+The conflicting rotation itself is refused (`conflicting_rotation`), but the refusal has
+`persist: true`: its `state` is frozen and its `events` carry the `rotation_conflict` owner
+notice. The Gateway persists that state and performs those events before it reports the
+refusal. Every other refusal leaves the state unchanged and has no events.
+
 ### Admission
 
 `isAdmitted(state, peerKey, fp)` is what the tunnel child asks for every connection: the key
