@@ -140,7 +140,12 @@ describe("Codex one-shot cleanup receipts", () => {
       // has recorded thread/start once the turn is accepted.
       await run.waitForTurnAccepted();
       const start = await waitForHarnessRequest(harness, "thread/start");
-      expect(start.params).toMatchObject({ config: { "features.code_mode": false } });
+      expect(start.params).toMatchObject({
+        config: {
+          "features.shell_tool": false,
+          "features.code_mode": false,
+        },
+      });
       const { dynamicTools } = start.params as { dynamicTools: CodexDynamicToolSpec[] };
       expect(
         flattenCodexDynamicToolFunctions(dynamicTools)
