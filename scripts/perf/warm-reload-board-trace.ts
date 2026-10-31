@@ -14,7 +14,9 @@ const phaseNames = new Set(
 );
 
 function safeTraceArguments(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") return {};
+  if (!value || typeof value !== "object") {
+    return {};
+  }
   const result: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(value)) {
     if (typeof field === "number" || typeof field === "boolean") {
@@ -116,8 +118,12 @@ export async function startBoardSandboxTrace(page: Page, output: string) {
       } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       const ids = new Map<string | number, number>();
       const identity = (value: string | number | undefined) => {
-        if (value === undefined) return undefined;
-        if (!ids.has(value)) ids.set(value, ids.size + 1);
+        if (value === undefined) {
+          return undefined;
+        }
+        if (!ids.has(value)) {
+          ids.set(value, ids.size + 1);
+        }
         return ids.get(value);
       };
       const traceEvents = trace.traceEvents
@@ -212,8 +218,9 @@ export function installBoardSandboxPhaseProbe() {
       ![...document.querySelectorAll<HTMLIFrameElement>(".board-widget__frame")].some(
         (frame) => frame.contentWindow === event.source,
       )
-    )
+    ) {
       return;
+    }
     const phase = event.data?.method ?? event.data?.type;
     if (
       [

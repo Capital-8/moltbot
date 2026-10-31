@@ -2,7 +2,7 @@ import { WIDGET_HTML_MAX_UTF8_BYTES } from "../../../../packages/gateway-protoco
 import { formatUiError } from "../format-error.ts";
 import { listen } from "../reactive/listener.ts";
 import { readResponseTextWithLimit } from "../response-body.ts";
-import { WidgetSandboxHost } from "../widget-sandbox-host.ts";
+import { WidgetSandboxHost, type WidgetSandboxHostOptions } from "../widget-sandbox-host.ts";
 import type { BoardWidget } from "./types.ts";
 import type { BoardWidgetFrameUrl } from "./view-types.ts";
 import {
@@ -339,7 +339,7 @@ export class BoardWidgetSandboxHost {
     );
   }
 
-  private documentOptions(): ConstructorParameters<typeof WidgetSandboxHost>[0] {
+  private documentOptions(): WidgetSandboxHostOptions {
     const options = this.options;
     return {
       frame: options.frame,

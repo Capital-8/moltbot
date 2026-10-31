@@ -120,20 +120,26 @@ function appendAssistant(sessionKey: string, sessionId: string, content: unknown
 }
 
 function installBoardGeometryProbe() {
-  if (window !== window.top) return;
+  if (window !== window.top) {
+    return;
+  }
   const heights: number[] = [];
   Reflect.set(window, "warmBoardGeometry", heights);
   const observed = new WeakSet<Element>();
   const resize = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
-      if (height > 0 && heights.at(-1) !== height) heights.push(height);
+      if (height > 0 && heights.at(-1) !== height) {
+        heights.push(height);
+      }
     }
   });
   new MutationObserver((records) => {
-    for (const record of records)
+    for (const record of records) {
       for (const node of record.addedNodes) {
-        if (!(node instanceof Element)) continue;
+        if (!(node instanceof Element)) {
+          continue;
+        }
         for (const cell of [node, ...node.querySelectorAll(".board-widget")]) {
           if (cell.matches(".board-widget") && !observed.has(cell)) {
             observed.add(cell);
@@ -141,6 +147,7 @@ function installBoardGeometryProbe() {
           }
         }
       }
+    }
   }).observe(document, { childList: true, subtree: true });
 }
 

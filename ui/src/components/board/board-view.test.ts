@@ -185,8 +185,11 @@ describe("openclaw-board-view", () => {
     expect(changed.querySelector("openclaw-panel-loading-skeleton")).not.toBeNull();
     const previousMode = document.documentElement.dataset.themeMode;
     onTestFinished(() => {
-      if (previousMode === undefined) delete document.documentElement.dataset.themeMode;
-      else document.documentElement.dataset.themeMode = previousMode;
+      if (previousMode === undefined) {
+        delete document.documentElement.dataset.themeMode;
+      } else {
+        document.documentElement.dataset.themeMode = previousMode;
+      }
     });
     document.documentElement.dataset.themeMode = previousMode === "light" ? "dark" : "light";
     expect((await restored()).querySelector("openclaw-panel-loading-skeleton")).not.toBeNull();

@@ -13,7 +13,7 @@ type WidgetSandboxProxyOptions = {
   sandboxOrigin: string;
   sandboxUrl: string;
 };
-type WidgetSandboxHostOptions = WidgetSandboxProxyOptions & {
+export type WidgetSandboxHostOptions = WidgetSandboxProxyOptions & {
   documentKey: string;
   /** Restricts the untrusted inner document, not the trusted transport shell. */
   allowScripts?: boolean;

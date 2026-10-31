@@ -21,7 +21,7 @@ function cacheChatBoardSnapshot(
   const contentHeights = savedHeights ?? existing?.board?.contentHeights;
   if (
     snapshot !== null
-      ? existing?.board?.snapshot === snapshot && existing.board.contentHeights === contentHeights
+      ? existing?.board?.snapshot === snapshot && existing?.board?.contentHeights === contentHeights
       : existing?.board === null
   ) {
     return;
@@ -40,7 +40,9 @@ export function cacheChatBoardContentHeightAfterHydration(
   isCurrent: () => boolean,
 ): void {
   afterHydration(host, () => {
-    if (!isCurrent()) return;
+    if (!isCurrent()) {
+      return;
+    }
     const cache = host.chatMessagesBySession;
     const existing = readChatSessionSnapshot(cache, host, target);
     if (

@@ -157,7 +157,9 @@ export function createBoardViewState(
         for (const widget of props.snapshot.widgets.filter(
           (entry) => entry.tabId === activeTab()?.tabId,
         )) {
-          if (widget.contentKind !== "html") continue;
+          if (widget.contentKind !== "html") {
+            continue;
+          }
           const height = props.callbacks.heightLayout.read(
             boardWidgetHeightKey(widget, width, widget.name === props.pageWidgetName),
           );
