@@ -41,7 +41,6 @@ function initialInteraction(): RailInteraction {
 // Transient DOM interaction stays here; the transcript session owns reader position.
 export function createPositionRail(props: PositionRailParams) {
   let connected = true;
-  const initialViewportHeight = window.innerHeight;
 
   let session: ChatTranscriptSession | null = null;
   let interactionState = initialInteraction();
@@ -177,7 +176,7 @@ export function createPositionRail(props: PositionRailParams) {
       markerIds.length,
       markerIndexes,
       viewportOffset,
-      viewportHeight ?? initialViewportHeight,
+      viewportHeight ?? window.innerHeight,
       currentActiveId ?? markerIds[0],
       interactionState.focusedId,
       interactionState.hoveredId,

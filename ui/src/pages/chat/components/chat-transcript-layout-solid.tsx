@@ -77,16 +77,6 @@ function TranscriptRows(props: {
   const virtualRows = createMemo(() => {
     return props.snapshot.virtualizer.getVirtualItems();
   });
-  const rowMinimum = createMemo(() => {
-    const layout = props.snapshot.layout;
-    // First-visit rows have no admitted footprint to reserve.
-    if (!layout.rowLayout?.readRows()) {
-      return () => 0;
-    }
-    // Share the viewport sample instead of reading it between each row's style writes.
-    const viewportHeight = window.innerHeight;
-    return (index: number) => layout.rowMinimum(index, viewportHeight);
-  });
   const rowRef = (key: string) => {
     const measureRef = props.measureRowRefFor(key);
     return elementRef((element: HTMLDivElement) => {
@@ -133,7 +123,7 @@ function TranscriptRows(props: {
                     ]}
                     style={{
                       "contain-intrinsic-block-size": `${virtualRow().size}px`,
-                      "min-height": `${rowMinimum()(index())}px`,
+                      "min-height": `${props.snapshot.layout.rowMinimum(index())}px`,
                     }}
                     data-index={String(virtualRow().index)}
                     data-virtual-row-key={row()?.key}

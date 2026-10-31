@@ -88,23 +88,16 @@ export class TranscriptLayoutOwner {
     this.rowPresentation = `${presentation.length}:${fnv1aUtf16(presentation)}`;
   }
 
-  private rowLayoutKey(
-    index: number,
-    width = this.rowWidth,
-    viewportHeight?: number,
-  ): string | undefined {
+  private rowLayoutKey(index: number, width = this.rowWidth): string | undefined {
     const row = this.rows[index];
     return width > 0 && this.paneWidth > 0 && row?.revision
-      ? `row:v1:${width}:${this.paneWidth}:${viewportHeight ?? window.innerHeight}:${this.rowGutter}:${this.rowPresentation}:${row.revision}:${JSON.stringify(row.key)}`
+      ? `row:v1:${width}:${this.paneWidth}:${window.innerHeight}:${this.rowGutter}:${this.rowPresentation}:${row.revision}:${JSON.stringify(row.key)}`
       : undefined;
   }
 
-  readonly rowMinimum = (index: number, viewportHeight?: number): number => {
-    if (!this.rowLayout) {
-      return 0;
-    }
-    const key = this.rowLayoutKey(index, this.rowWidth, viewportHeight);
-    return key ? (this.rowLayout.read(key) ?? 0) : 0;
+  readonly rowMinimum = (index: number): number => {
+    const key = this.rowLayoutKey(index);
+    return key ? (this.rowLayout?.read(key) ?? 0) : 0;
   };
 
   restoreRows(
@@ -120,9 +113,8 @@ export class TranscriptLayoutOwner {
     if (!heights) {
       return;
     }
-    const viewportHeight = window.innerHeight;
     this.rows.forEach((row, index) => {
-      const key = this.rowLayoutKey(index, width, viewportHeight);
+      const key = this.rowLayoutKey(index);
       const minimum = key ? (heights[key] ?? 0) : 0;
       if (minimum > (instance.itemSizeCache.get(row.key) ?? 0)) {
         instance.resizeItem(index, minimum);
