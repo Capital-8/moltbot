@@ -957,7 +957,6 @@ select.input {
 
 .oc-sensitive-input:focus-within {
   border-color: var(--field-focus-border);
-  box-shadow: var(--field-focus-shadow);
 }
 
 /* Carapace Sensitive Input adapted to the Control UI token contract. */
@@ -2462,7 +2461,6 @@ td.data-table-key-col {
 .agent-select--compact .agent-select__trigger:hover:not(:disabled),
 .agent-select--compact .agent-select__trigger[aria-expanded="true"] {
   color: var(--text);
-  box-shadow: none;
   background: color-mix(in srgb, var(--bg-hover) 84%, transparent);
 }
 
@@ -3421,9 +3419,7 @@ td.data-table-key-col {
   .input
 ) {
   corner-shape: superellipse(1.5);
-  transition:
-    border-color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+  transition: border-color var(--duration-fast) var(--ease-out);
 
   &::placeholder {
     color: var(--muted);
@@ -3433,7 +3429,6 @@ td.data-table-key-col {
   &[aria-expanded="true"]:not(.oc-menu-item) {
     outline: none;
     border-color: var(--field-focus-border);
-    box-shadow: var(--field-focus-shadow);
   }
 
   @media (forced-colors: active) {
@@ -3451,5 +3446,15 @@ td.data-table-key-col {
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+}
+
+/* Ghost triggers have no border to recolor, so focus draws one in the same place. */
+@media not (forced-colors: active) {
+  .agent-select--compact .agent-select__trigger:focus-visible,
+  .sidebar-session-owner-filter .picker-select__trigger:focus-visible,
+  .sidebar-session-filter-panel .picker-select__trigger:focus-visible {
+    outline: 1px solid var(--field-focus-border);
+    outline-offset: -1px;
   }
 }

@@ -303,8 +303,7 @@
   --field-font-size: var(--control-ui-text-sm);
   --field-bg: color-mix(in srgb, var(--bg) 80%, var(--bg-elevated) 20%);
   --field-border: color-mix(in srgb, var(--border) 70%, transparent);
-  --field-focus-border: color-mix(in srgb, var(--accent) 55%, var(--border));
-  --field-focus-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+  --field-focus-border: color-mix(in srgb, var(--accent) 85%, var(--text));
   --chat-text-size: var(--control-ui-text-md);
   --chat-block-gap: var(--chat-text-size);
 

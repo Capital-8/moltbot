@@ -26,7 +26,6 @@ openclaw-multi-select {
 .multi-select:focus-within,
 .multi-select--open {
   border-color: var(--field-focus-border);
-  box-shadow: var(--field-focus-shadow);
 }
 
 .multi-select[data-disabled] {
