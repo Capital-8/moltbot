@@ -163,7 +163,11 @@ export function showOwnerDevicesDialog(params: { client: GatewayBrowserClient })
                 {t("openclawId.notOwnerDevice")}
               </div>
             </Show>
-            <div class="list openclaw-id-devices__list" role="list">
+            <div
+              class="list openclaw-id-devices__list"
+              role="list"
+              style={{ "max-height": "50vh", "overflow-y": "auto" }}
+            >
               <For each={devices()}>
                 {(device) => (
                   <DeviceRow

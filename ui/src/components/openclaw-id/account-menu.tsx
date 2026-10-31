@@ -66,12 +66,30 @@ function makeReachableBlocker(status: OpenClawIdStatusResult): string | undefine
   return status.services.loaderDomain ? undefined : t("openclawId.needsLoaderDomain");
 }
 
-// A non-interactive line of the section (status text, not a command).
-function infoLine(id: string, text: string, className = "sidebar-openclaw-id__info"): MenuEntry {
+// Spacing of the section's status lines, aligned with the menu's rows. Inline
+// so the sketch adds no Control UI CSS; the sidebar-openclaw-id__info hook
+// lets a later stylesheet take over.
+const INFO_STYLE = { padding: "2px 8px 6px", "font-size": "var(--control-ui-text-xs)" };
+
+// The section's heading line.
+function titleLine(id: string, text: string): MenuEntry {
   return {
     kind: "content",
     id: `openclaw-id-${id}`,
-    content: <div class={`sidebar-customize-menu__title ${className}`}>{text}</div>,
+    content: <div class="sidebar-customize-menu__title sidebar-openclaw-id__title">{text}</div>,
+  };
+}
+
+// A non-interactive status line of the section (not a command), in normal case.
+function infoLine(id: string, text: string): MenuEntry {
+  return {
+    kind: "content",
+    id: `openclaw-id-${id}`,
+    content: (
+      <div class="muted sidebar-openclaw-id__info" style={INFO_STYLE}>
+        {text}
+      </div>
+    ),
   };
 }
 
@@ -135,7 +153,7 @@ export function openClawIdMenuEntries(status: OpenClawIdStatusResult | null): Me
     return [];
   }
   return [
-    infoLine("title", t("openclawId.menuTitle"), "sidebar-openclaw-id__title"),
+    titleLine("title", t("openclawId.menuTitle")),
     ...accountEntries(status),
     ...reachabilityEntries(status),
     renderSidebarMenuAction(PEOPLE, t("openclawId.people"), "users"),
