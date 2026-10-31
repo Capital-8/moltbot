@@ -10,7 +10,7 @@ import { PLUGIN_SOURCE_CAPTURE_PREFIX } from "./plugin-source-capture-path.js";
 
 /** Bun's native plugin resolver remains the owner even when Node hooks are available. */
 export function useNodeModuleHooks(): boolean {
-  return !process.versions.bun;
+  return !process.versions.bun && typeof Module.registerHooks === "function";
 }
 
 // Resolution and Jiti must accept the same source family, including typed JSX variants.
