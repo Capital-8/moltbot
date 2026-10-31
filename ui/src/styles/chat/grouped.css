@@ -89,7 +89,7 @@
     .chat-bubble--tool-shell + .chat-bubble:not(.chat-bubble--tool-shell),
     .chat-bubble:not(.chat-bubble--tool-shell) + .chat-bubble--tool-shell
   ) {
-  margin-block-start: var(--chat-message-type-boundary-gap);
+  margin-block-start: var(--space-1);
 }
 
 :is(.chat-group > .chat-group-messages, .chat-agent-run-body)
@@ -234,7 +234,6 @@
   --chat-footer-disclosure-pointer-events: none;
   --chat-action-gap: calc(4px + var(--chat-message-gap));
   position: relative;
-  --chat-message-action-size: 24px;
   align-self: stretch;
   margin-top: 4px;
 }
@@ -549,7 +548,7 @@
 
 .chat-message-actions-row
   :is(.chat-copy-btn, .chat-reply-btn, .chat-read-aloud-btn, .chat-group-rewind) {
-  min-height: var(--chat-message-action-size);
+  min-height: 24px;
 }
 
 .chat-message-footer {
@@ -1105,7 +1104,7 @@ img.chat-avatar {
 .chat-group.chat-group--reply > :is(.chat-avatar, .chat-avatar-slot),
 .chat-message--reply > :is(.chat-avatar, .chat-avatar-slot) {
   align-self: start;
-  margin-top: calc(var(--chat-reply-attribution-line-height) + var(--chat-reply-attribution-gap));
+  margin-top: calc(20px + var(--chat-reply-attribution-gap));
   position: relative;
   z-index: 1;
   display: grid;
@@ -1129,7 +1128,7 @@ img.chat-avatar {
 .chat-group.assistant.chat-group--reply > :is(.chat-avatar, .chat-avatar-slot) {
   grid-row: 1 / span 2;
   margin-top: calc(
-    var(--chat-reply-attribution-line-height) + var(--chat-reply-attribution-gap) + 4px +
+    20px + var(--chat-reply-attribution-gap) + 4px +
       (var(--chat-text-size) * 1.5 - var(--chat-avatar-column)) / 2
   );
 }
@@ -1182,16 +1181,14 @@ img.chat-avatar {
   gap: 6px;
   min-width: 0;
   width: 100%;
-  font-size: var(--chat-reply-attribution-font-size);
+  font-size: 13px;
   font-weight: 400;
-  line-height: var(--chat-reply-attribution-line-height);
+  /* A whole-pixel line box keeps the 16px avatar on integer offsets. */
+  line-height: 20px;
   white-space: nowrap;
 }
 
-/* A whole-pixel line box keeps the 16px avatar on integer offsets. */
 :root {
-  --chat-reply-attribution-font-size: 13px;
-  --chat-reply-attribution-line-height: 20px;
   --chat-reply-attribution-gap: 6px;
 }
 
@@ -1377,8 +1374,8 @@ button.chat-reply-attribution__target:disabled {
     position: absolute;
     inset-block-end: 0;
     inset-inline-start: -10px;
-    width: var(--chat-touch-target);
-    height: var(--chat-touch-target);
+    width: 44px;
+    height: 44px;
     pointer-events: inherit;
   }
 
@@ -2035,7 +2032,7 @@ button.chat-reply-attribution__target:disabled {
 
   .chat-reply-attribution--reply {
     align-items: center;
-    min-height: var(--chat-reply-attribution-line-height);
+    min-height: 20px;
   }
 
   .chat-reply-attribution--reply .chat-reply-attribution__label {
