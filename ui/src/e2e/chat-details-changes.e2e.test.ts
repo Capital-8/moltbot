@@ -138,7 +138,7 @@ suite.define(() => {
     },
   );
 
-  it("shares read-only Uncommitted demand between Environment and Review and recovers retained counts", async () => {
+  it("separates read-only Uncommitted summary and patch demand and recovers retained counts", async () => {
     await suite.withPage({ viewport: { width: 1180, height: 800 } }, async ({ page }) => {
       await page.clock.install();
       const result = (additions: number, deletions: number) => ({
@@ -178,37 +178,59 @@ suite.define(() => {
       await readCount().toBe(1);
       await expect.poll(() => action.textContent()).toContain("+248");
       expect(await action.textContent()).toContain("−61");
-      expect((await reads())[0]?.params).toMatchObject({ scope: "uncommitted" });
+      const summaryMatch = { scope: "uncommitted", summaryOnly: true };
+      const initialParams = (await reads())[0]?.params;
+      expect(initialParams).toMatchObject(summaryMatch);
+      // SAFETY: the assertion above verifies the recorded request params object.
+      const patchParams = { ...(initialParams as Record<string, unknown>) };
+      delete patchParams.summaryOnly;
       expect(await page.locator(".session-diff").count()).toBe(0);
 
       await closeChatDetails(page);
       await pauseVirtualClock(page);
       await page.clock.fastForward(60_000);
-      await gateway.deferNext("sessions.diff", { scope: "uncommitted" });
+      await gateway.deferNext("sessions.diff", summaryMatch);
       await page.clock.resume();
       await openChatDetails(page);
       await readCount().toBe(2);
-      await gateway.rejectDeferred("sessions.diff", {
-        code: "UNAVAILABLE",
-        message: "Checkout unavailable",
-      });
+      await gateway.rejectDeferred(
+        "sessions.diff",
+        { code: "UNAVAILABLE", message: "Checkout unavailable" },
+        { match: summaryMatch },
+      );
       expect(await action.textContent()).toContain("+248");
       expect(await action.textContent()).toContain("−61");
 
       await closeChatDetails(page);
       await pauseVirtualClock(page);
       await page.clock.fastForward(60_000);
-      await gateway.setMethodResponse("sessions.diff", { ...result(12480, 1030), truncated: true });
-      await gateway.deferNext("sessions.diff", { scope: "uncommitted" });
+      await gateway.deferNext("sessions.diff", summaryMatch);
       await page.clock.resume();
       await openChatDetails(page);
       await readCount().toBe(3);
-      // Review must join the Environment read, not issue a competing request.
+      await gateway.deferNext("sessions.diff", patchParams, { exactParams: true });
       await action.click();
       const review = page.locator(".session-diff");
+      await readCount().toBe(4);
       await expect.poll(() => review.getAttribute("aria-busy")).toBe("true");
-      expect(await reads()).toHaveLength(3);
-      await gateway.resolveDeferred("sessions.diff");
+
+      // The older summary cannot complete Review or replace its retained counts.
+      await gateway.resolveDeferred("sessions.diff", result(310, 72), { match: summaryMatch });
+      await expect.poll(() => review.getAttribute("aria-busy")).toBe("true");
+      expect(await action.textContent()).toContain("+248");
+      expect(await action.textContent()).toContain("−61");
+      expect(await review.textContent()).not.toContain("full patch result");
+
+      const recovered = result(12480, 1030);
+      await gateway.resolveDeferred(
+        "sessions.diff",
+        {
+          ...recovered,
+          truncated: true,
+          files: [{ ...recovered.files[0], patch: "@@ -1 +1 @@\n-before\n+full patch result" }],
+        },
+        { match: patchParams, exactParams: true },
+      );
       await expect.poll(() => review.getAttribute("aria-busy")).toBe("false");
       await expect.poll(() => action.textContent()).toContain("+12,480");
       expect(await action.textContent()).toContain("−1,030");
@@ -221,10 +243,14 @@ suite.define(() => {
           .textContent(),
       ).toBe("Uncommitted");
       expect(await review.locator(".session-diff__filename").allTextContents()).toEqual(["app.ts"]);
-      expect(await reads()).toHaveLength(3);
-      for (const params of [{ scope: "all" }, { summaryOnly: true }]) {
-        expect(await gateway.getRequests("sessions.diff", params)).toHaveLength(0);
-      }
+      await review.locator(".session-diff__file-toggle").click();
+      await expect.poll(() => review.textContent()).toContain("full patch result");
+      expect(await reads()).toHaveLength(4);
+      expect(await gateway.getRequests("sessions.diff", summaryMatch)).toHaveLength(3);
+      expect(
+        await gateway.getRequests("sessions.diff", patchParams, { exactParams: true }),
+      ).toHaveLength(1);
+      expect(await gateway.getRequests("sessions.diff", { scope: "all" })).toHaveLength(0);
       for (const method of [
         "sessions.files.list",
         "sessions.files.get",

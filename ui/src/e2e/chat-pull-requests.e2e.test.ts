@@ -423,29 +423,56 @@ suite.define(() => {
         await openDetailsPullRequests(page);
         await pollCount(chips).toBe(count);
         await page.locator(".chat").evaluate(finishElementAnimations);
-        const bounds = await stack.evaluate((element) => {
+        const bounds = await stack.evaluate((element, isMobile) => {
           const detailsBounds = element
             .closest(".chat-mobile-host, .chat-details")!
             .getBoundingClientRect();
           const stackBounds = element.getBoundingClientRect();
+          const scrollPort = isMobile
+            ? element
+            : element.closest<HTMLElement>(".chat-details-desktop-body")!;
+          const portBounds = scrollPort.getBoundingClientRect();
           return {
             detailsBottom: detailsBounds.bottom,
             stackLeft: stackBounds.left,
             stackWidth: stackBounds.width,
-            fitsHorizontally: element.scrollWidth <= element.clientWidth + 1,
+            portLeft: portBounds.left + scrollPort.clientLeft,
+            portRight: portBounds.left + scrollPort.clientLeft + scrollPort.clientWidth,
+            fitsHorizontally: scrollPort.scrollWidth <= scrollPort.clientWidth + 1,
             rows: [...element.children].map((row) => {
               const rect = row.getBoundingClientRect();
-              return { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width };
+              return {
+                top: rect.top,
+                bottom: rect.bottom,
+                left: rect.left,
+                width: rect.width,
+                contentLeft: isMobile
+                  ? rect.left
+                  : row.querySelector(".chat-pr__link")!.getBoundingClientRect().left,
+              };
             }),
           };
-        });
+        }, mobile);
         expect(bounds.fitsHorizontally).toBe(true);
         let previousBottom = 0;
         for (const row of bounds.rows) {
           expect(row.top).toBeGreaterThanOrEqual(previousBottom);
           expect(row.bottom).toBeLessThanOrEqual(bounds.detailsBottom);
-          expect(row.left).toBeCloseTo(bounds.stackLeft, 1);
-          expect(row.width).toBeCloseTo(bounds.stackWidth, 1);
+          if (mobile) {
+            expect(row.left).toBeCloseTo(bounds.stackLeft, 1);
+            expect(row.width).toBeCloseTo(bounds.stackWidth, 1);
+          } else {
+            const first = bounds.rows[0]!;
+            expect(row.contentLeft).toBeCloseTo(bounds.stackLeft, 1);
+            expect(row.left).toBeCloseTo(first.left, 1);
+            expect(row.width).toBeCloseTo(first.width, 1);
+            expect(row.left).toBeGreaterThanOrEqual(bounds.portLeft);
+            expect(row.left + row.width).toBeLessThanOrEqual(bounds.portRight);
+            expect(row.left).toBeLessThanOrEqual(bounds.stackLeft);
+            expect(row.left + row.width).toBeGreaterThanOrEqual(
+              bounds.stackLeft + bounds.stackWidth,
+            );
+          }
           previousBottom = row.bottom;
         }
       }
@@ -575,7 +602,12 @@ suite.define(() => {
             rowBox.x + rowBox.width <= detailsBox.x + detailsBox.width &&
             detailsBox.x >= 0 &&
             detailsBox.x + detailsBox.width <= viewport.width &&
-            (await row.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)),
+            (await row.evaluate((element, isMobile) => {
+              const scrollPort = isMobile
+                ? element
+                : element.closest<HTMLElement>(".chat-details-desktop-body")!;
+              return scrollPort.scrollWidth <= scrollPort.clientWidth + 1;
+            }, mobile)),
           );
         })
         .toBe(true);
