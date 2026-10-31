@@ -112,7 +112,9 @@ results and landing: [PR #189180](https://github.com/openclaw/openclaw/pull/1891
 
 Private target-resolution support retirement starts at `187b16c7855`.
 The four-case registrar has no invocation; its SDK facade has been private and
-excluded from packaging since `780bc791470`. Baseline and candidate proof are pending.
+excluded from packaging since `780bc791470`. Untouched baseline: 146 passed and one
+Windows-only skip across eight suites. Candidate validation and landing:
+[PR #189230](https://github.com/openclaw/openclaw/pull/189230).
 The module and four named-export queries observed zero references at 08:44 UTC:
 public coverage 2,115 complete of 2,527; frozen bundled source `7c99ae1dd41`
 169 complete of 179. Incomplete coverage leaves external reliance unknown.
@@ -129,6 +131,15 @@ Reply session preparation: 23 suites plus the initialization registrar retain
 persistence settlement and prompt preparation. CLI plugin lifecycle: 25 suites
 retain 176 declarations and need one contention-proof repair; retired synthetic
 local-state scaffolding remains a later support-only candidate. Source review only.
+
+Further completed source review: reply run/model selection retains 104 declarations
+across 23 suites and three invoked registrars; reply tools/directives retain 161
+across 25 suites and one invoked registrar. Remaining CLI plugin validation retains
+106 across 22 suites and native-artifact support. Fireworks, NVIDIA, Together, and
+Novita retain 45 across 13 suites and one invoked deadline registrar. Catalog,
+onboarding, payload, polling, live-provider, authority, and lifecycle contracts
+remain independent. Local owners/support, relevant history, and static CI routes
+were traced; broader framework closure is bounded. No runtime proof claimed.
 
 Remaining: declaration-level review across remaining core, plugins, UI, native apps,
 root/script suites and shared fixtures; close owner-reading gaps and land subsequent batches.
