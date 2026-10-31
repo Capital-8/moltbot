@@ -679,11 +679,12 @@ it.each([false, true])(
       { messages: [nativeHistoryMessage(1)], sessionId: "current" },
     );
     state.currentSessionId = "current";
-    state.chatMessages = held;
+    state.chatMessages = [{ role: "toolResult", content: "Synthetic activity" }, ...held];
     state.chatHistoryPagination = { hasMore: true, needsBoundary: true, totalMessages: 5 };
 
     await pane.loadOlderMessages();
 
+    // The synthetic prefix has no native identity or live/pending custody; residency retires it.
     expect(state.chatMessages.map(nativeHistorySeq)).toEqual([1, 2, 3, 4, 5]);
     expect(state.chatMessages.slice(1)).toEqual(held);
     expectHistoryPagination(state, pagination(5));
@@ -759,15 +760,16 @@ it.each([
   },
 );
 
-it("does not refill repeatedly when a fresh native page has no usable older edge", async () => {
+it.each([false, true])("silently stops unanchored history (trimmed=%s)", async (trimmed) => {
   const { pane, state, request } = historyPane();
-  state.chatHistoryPagination = { hasMore: true, totalMessages: 4 };
+  state.chatMessages = [{ role: "toolResult", content: "Synthetic activity" }];
+  state.chatHistoryPagination = { hasMore: true, ...(trimmed ? { needsBoundary: true } : {}) };
 
   await pane.loadOlderMessages();
 
   expect(request).not.toHaveBeenCalled();
-  expect(pane.history.olderError).toContain("no usable older boundary");
-  expect(state.chatHistoryPagination.hasMore).toBe(true);
+  expect(pane.history.olderError).toBeNull();
+  expect(pane.hasOlderMessages()).toBe(false);
 });
 
 it.each([false, true])("recovers an unavailable older edge (held prefix=%s)", async (prefix) => {

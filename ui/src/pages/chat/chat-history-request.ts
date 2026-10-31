@@ -367,32 +367,26 @@ type OlderHistorySelector =
 export function chatHistoryPageSelector(
   state: ChatState,
   direction: "older" | "newer",
-): OlderHistorySelector {
+): OlderHistorySelector | null {
   const pagination = state.chatHistoryPagination;
   const hasMore = direction === "older" ? pagination.hasMore : pagination.hasNewer;
-  const needsBoundary =
-    direction === "older"
-      ? pagination.hasMore && pagination.needsBoundary
-      : pagination.needsNewerBoundary;
-  const cursor =
-    direction === "older" ? pagination.hasMore && pagination.olderCursor : pagination.newerCursor;
-  if (hasMore) {
-    if (needsBoundary) {
-      const messageId = nativeHistoryMessageSourceId(
-        chatHistoryWindowBoundary(state.chatMessages, pagination, direction),
-      );
-      const sessionId = state.currentSessionId?.trim();
-      if (messageId && sessionId) {
-        return { messageId, sessionId };
-      }
-    } else if (cursor) {
-      return { cursor };
-    }
+  if (!hasMore) {
+    return null;
   }
-  throw new Error(`History has no usable ${direction} boundary. Reload the session to retry.`);
+  const needsBoundary =
+    direction === "older" ? pagination.needsBoundary : pagination.needsNewerBoundary;
+  const cursor = direction === "older" ? pagination.olderCursor : pagination.newerCursor;
+  if (!needsBoundary && cursor) {
+    return { cursor };
+  }
+  const messageId = nativeHistoryMessageSourceId(
+    chatHistoryWindowBoundary(state.chatMessages, pagination, direction),
+  );
+  const sessionId = state.currentSessionId?.trim();
+  return messageId && sessionId ? { messageId, sessionId } : null;
 }
 
-async function requestOlderChatHistoryPage(
+export async function requestOlderChatHistoryPage(
   client: GatewayBrowserClient,
   sessionKey: string,
   requestAgentId: string | undefined,

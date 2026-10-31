@@ -25,6 +25,7 @@ import {
 import { captureChatConnectionOwner } from "./chat-connection-owner.ts";
 import { rewindChatHistory, switchChatHistoryBranch } from "./chat-history-actions.ts";
 import { hasVisibleOlderHistoryPage } from "./chat-history-page-visibility.ts";
+import { chatHistoryPageSelector } from "./chat-history-request.ts";
 import {
   chatHistoryRequests,
   getChatHistoryLoadState,
@@ -137,7 +138,7 @@ export abstract class ChatPaneHistory extends ChatPaneHistoryPackets {
     if (parseCatalogSessionKey(state.sessionKey)) {
       return Boolean(this.history.catalogCursor && !this.history.catalogLoading);
     }
-    return state.chatHistoryPagination.hasMore && !state.chatLoading;
+    return chatHistoryPageSelector(state, "older") !== null && !state.chatLoading;
   }
 
   protected async loadNewerMessages(): Promise<boolean> {
