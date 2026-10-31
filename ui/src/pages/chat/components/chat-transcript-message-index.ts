@@ -90,6 +90,7 @@ type ChainEntry = {
 // invalidate the chain and its immutable indexes.
 const chains = new WeakMap<object, ChainEntry>();
 const indexes = createTranscriptMemo<TranscriptIndex>();
+const rowRevisions = createTranscriptMemo<string>();
 const presentationRows = createTranscriptMemo<readonly TranscriptRow<ChatRenderItem>[]>();
 
 // Fold only the final presentation, after causal run/turn ownership is settled.
@@ -348,20 +349,25 @@ export function projectTranscriptIndex(
       ) {
         return { kind: "item", key, item };
       }
-      const messages = groups.flatMap((group) =>
-        group.messages.map(({ message }) => [
-          nativeHistoryMessageIdentity(message) ?? message,
-          props.messageReactions?.get(persistedMessageEntryId(message) ?? "") ?? [],
-        ]),
-      );
-      const content = JSON.stringify(
-        item.kind === "agent-run-frame"
-          ? [item.outcome.kind, messages]
-          : messages.length
-            ? messages
-            : item,
-      );
-      return { kind: "item", key, item, revision: `${content.length}:${fnv1aUtf16(content)}` };
+      // Settled items keep their identity across unrelated live-tail changes.
+      // Reactions replace their map; active and continuation rows never enter this memo.
+      const revision = rowRevisions(item, [key, props.messageReactions], () => {
+        const messages = groups.flatMap((group) =>
+          group.messages.map(({ message }) => [
+            nativeHistoryMessageIdentity(message) ?? message,
+            props.messageReactions?.get(persistedMessageEntryId(message) ?? "") ?? [],
+          ]),
+        );
+        const content = JSON.stringify(
+          item.kind === "agent-run-frame"
+            ? [item.outcome.kind, messages]
+            : messages.length
+              ? messages
+              : item,
+        );
+        return `${content.length}:${fnv1aUtf16(content)}`;
+      });
+      return { kind: "item", key, item, revision };
     };
     for (const item of chain.transcriptItems) {
       const rendered =

@@ -319,6 +319,28 @@ it("changes the footprint revision when the same message ID receives new content
   expect(replay.kind === "item" && replay.revision).toBe(before.kind === "item" && before.revision);
 });
 
+it("does not serialize settled history again when a live status changes the row model", () => {
+  let serializations = 0;
+  const message = makeMessage("older", 1, {
+    role: "user",
+    metadata: {
+      toJSON: () => {
+        serializations++;
+        return { label: "Settled history" };
+      },
+    },
+  });
+  const items = chatItems({ messages: [message] });
+  serializations = 0;
+  const before = indexFor(chainFor(items)).rows[0]!;
+  expect(serializations).toBe(1);
+  const during = indexFor(
+    chainFor([...items, { kind: "reading-indicator", key: "waiting", startedAt: 32 }]),
+  ).rows[0]!;
+  expect(during.kind === "item" && during.revision).toBe(before.kind === "item" && before.revision);
+  expect(serializations).toBe(1);
+});
+
 it("invalidates only a changed reaction row while retaining other cached footprints", () => {
   const chain = projectHistory([
     finalAnswer("answer", 2),

@@ -509,7 +509,7 @@ export function createCanvasWidget(
     sandboxOrigin = new URL(frame.src).origin;
     releaseTheme = registerWidgetThemeFrame(frame, sandboxOrigin);
     scrollNonce = generateUUID();
-    releaseMessages = observeWindowMessage(window, frame.contentWindow!, handleMessage);
+    releaseMessages = observeWindowMessage(window, frame, handleMessage);
     sandboxHost = new WidgetSandboxHost({
       frame,
       sandboxOrigin,

@@ -5,6 +5,7 @@ import { extractToolCardsCached } from "../../lib/chat/tool-cards.ts";
 import * as displayText from "../../lib/strip-thinking-tags.ts";
 import { buildChatItems, type BuildChatItemsProps } from "./chat-thread-build.ts";
 import * as duplicatePreparation from "./chat-thread-duplicates.ts";
+import * as threadItems from "./chat-thread-items.ts";
 import { createProps } from "./chat-thread.test-support.ts";
 import {
   buildCachedChatItems,
@@ -189,6 +190,39 @@ it.each([{ runWorking: true }, { subagentWait: { runId: "child", startedAt: 1 } 
 );
 
 describe("incremental history build equivalence", () => {
+  it("searches each source once per query across canvas lookahead and visible rows", () => {
+    const messages = [
+      message("request", "user", 1, "Request"),
+      message("match", "assistant", 2, "Needle answer"),
+      message("other-request", "user", 3, "Another request"),
+      message("other-answer", "assistant", 4, "Unrelated answer"),
+    ];
+    const matches = vi.spyOn(threadItems, "messageMatchesSearchQuery");
+    try {
+      for (const query of ["Needle", "Unrelated"]) {
+        matches.mockClear();
+        const items = buildChatItems(
+          createProps({ messages, searchOpen: true, searchQuery: query }),
+        );
+        const visible = items.flatMap((item) =>
+          item.kind === "group"
+            ? item.messages.flatMap((entry) =>
+                normalizeMessage(entry.message).content.flatMap((block) =>
+                  block.type === "text" ? [block.text] : [],
+                ),
+              )
+            : [],
+        );
+        expect(visible).toEqual([`${query} answer`]);
+        for (const source of messages) {
+          expect(matches.mock.calls.filter(([message]) => message === source)).toHaveLength(1);
+        }
+      }
+    } finally {
+      matches.mockRestore();
+    }
+  });
+
   it.each([
     { searchOpen: false, showToolCalls: true },
     { searchOpen: false, showToolCalls: false },

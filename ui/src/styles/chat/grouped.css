@@ -83,14 +83,6 @@
   max-width: none;
 }
 
-:is(.chat-group-messages, .chat-agent-run-body)
-  > :is(
-    .chat-bubble--tool-shell + .chat-bubble:not(.chat-bubble--tool-shell),
-    .chat-bubble:not(.chat-bubble--tool-shell) + .chat-bubble--tool-shell
-  ) {
-  margin-block-start: var(--chat-message-type-boundary-gap);
-}
-
 :is(.chat-group > .chat-group-messages, .chat-agent-run-body)
   > :is(
     .chat-bubble--tool-shell + .chat-bubble:not(.chat-bubble--tool-shell),
@@ -168,15 +160,11 @@
 /* Shared threads keep the author name visible beside the gutter avatar. The
    other footer details stay focusable but leave the row layout until reveal. */
 .chat-group-footer--persistent-identity {
-  position: relative;
   opacity: var(--chat-persistent-footer-opacity, 1);
-  pointer-events: var(--chat-footer-disclosure-pointer-events, none);
 }
 
-.chat-group-footer--persistent-identity .chat-confirm-wrap,
-.chat-group-footer--persistent-identity .chat-group-timestamp,
-.chat-group-footer--persistent-identity .msg-meta__summary,
-.chat-group-footer--persistent-identity .chat-group-footer-actions {
+.chat-group-footer--persistent-identity
+  :is(.chat-confirm-wrap, .chat-group-timestamp, .msg-meta__summary, .chat-group-footer-actions) {
   position: var(--chat-footer-detail-position, absolute);
   opacity: var(--chat-footer-open-detail-opacity, var(--chat-footer-disclosure-opacity, 0));
   pointer-events: var(
@@ -223,8 +211,7 @@
   flex: 0 0 auto;
 }
 
-.chat-group.user .chat-group-footer-actions,
-.chat-group.assistant .chat-group-footer-actions,
+.chat-group:is(.user, .assistant) .chat-group-footer-actions,
 .chat-group.assistant .chat-message-actions-row,
 .chat-group.user.chat-group--peer .chat-message-actions-row {
   justify-content: flex-start;
@@ -258,16 +245,14 @@
   pointer-events: auto;
 }
 
-.chat-group-footer > .chat-message-reactions,
-.chat-message-actions-row > .chat-message-reactions {
+:is(.chat-group-footer, .chat-message-actions-row) > .chat-message-reactions {
   min-width: 0;
   margin-top: 0;
 }
 
 /* One chip and its add button stay together while metadata yields width.
    Longer reaction inventories retain their wrapping layout. */
-.chat-group-footer > .chat-message-reactions--single,
-.chat-message-actions-row > .chat-message-reactions--single {
+:is(.chat-group-footer, .chat-message-actions-row) > .chat-message-reactions--single {
   flex-shrink: 0;
   max-width: 100%;
 }
@@ -377,11 +362,6 @@
     transform: translateY(35%);
     opacity: 0;
   }
-}
-
-.chat-reaction-action {
-  opacity: var(--chat-message-action-opacity, 0);
-  pointer-events: var(--chat-message-action-pointer-events, none);
 }
 
 .chat-group .chat-reaction-action:hover {
@@ -532,16 +512,15 @@
   justify-content: center;
 }
 
-/* Each action row consumes only its own message's disclosure state. */
-.chat-group {
+/* Each action row consumes only its own message's disclosure state. Closing-footer
+   hover state stops before the potentially large message subtree. */
+.chat-group,
+.chat-group > .chat-group-messages {
   --chat-final-disclosure-opacity: 0;
   --chat-final-disclosure-pointer-events: none;
 }
 
-/* Closing-footer hover state stops before the potentially large message subtree. */
 .chat-group > .chat-group-messages {
-  --chat-final-disclosure-opacity: 0;
-  --chat-final-disclosure-pointer-events: none;
   --chat-footer-detail-position: initial;
 }
 
@@ -552,6 +531,7 @@
   --chat-message-action-pointer-events: var(--chat-final-disclosure-pointer-events);
 }
 
+.chat-reaction-action,
 :is(.chat-group-footer-actions, .chat-message-actions-row)
   :is(.chat-copy-btn, .chat-reply-btn, .chat-read-aloud-btn, .chat-group-rewind) {
   opacity: var(--chat-message-action-opacity, 0);
@@ -666,8 +646,7 @@
     --chat-footer-disclosure-pointer-events: auto;
   }
   .chat-group:not(.chat-group--peer) > .chat-group-footer,
-  .chat-group:not(.chat-group--peer) .chat-message-actions-row,
-  .chat-group:not(.chat-group--peer) .chat-message-footer {
+  .chat-group:not(.chat-group--peer) :is(.chat-message-actions-row, .chat-message-footer) {
     --chat-message-action-opacity: var(--chat-footer-disclosure-opacity, 0);
     --chat-message-action-pointer-events: var(--chat-footer-disclosure-pointer-events, none);
   }
@@ -1002,10 +981,6 @@
   letter-spacing: -0.02em;
 }
 
-img.chat-avatar.user {
-  object-fit: cover;
-}
-
 /* The frame stays square while loading and when the image falls back. */
 .chat-avatar-slot {
   position: relative;
@@ -1036,9 +1011,7 @@ img.chat-avatar.user {
   display: none;
 }
 
-.chat-avatar.assistant,
-.chat-avatar.other,
-.chat-avatar.tool {
+.chat-avatar:is(.assistant, .other, .tool) {
   background: var(--secondary);
   color: var(--muted);
 }
@@ -1134,8 +1107,7 @@ img.chat-avatar {
   box-shadow: none;
 }
 
-.chat-group--reply > .chat-avatar-slot > .chat-avatar,
-.chat-message--reply > .chat-avatar-slot > .chat-avatar {
+:is(.chat-group--reply, .chat-message--reply) > .chat-avatar-slot > .chat-avatar {
   border: 0;
   background: var(--bg);
   outline: 0;
@@ -1305,16 +1277,14 @@ button.chat-reply-attribution__target:disabled {
   cursor: var(--cursor-default);
 }
 
-.chat-reply-attribution__excerpt {
+.chat-reply-attribution__excerpt,
+.chat-reply-attribution__unavailable {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .chat-reply-attribution__unavailable {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--muted);
   font-weight: 400;
 }
@@ -1481,19 +1451,6 @@ button.chat-reply-attribution__target:disabled {
   --chat-text-link: var(--link-on-tint);
 }
 
-/* User bubbles have different styling */
-.chat-group.user .chat-bubble {
-  --chat-bubble-background: var(--chat-participant-surface);
-  background: var(--chat-bubble-background);
-
-  :where(.shell[data-background-managed]) & {
-    background:
-      linear-gradient(var(--chat-bubble-background), var(--chat-bubble-background)),
-      var(--bg-content, var(--bg));
-  }
-  border-color: transparent;
-}
-
 :root[data-theme="dark"]
   .chat-group.user:not(.chat-group--sender-tint)
   > .chat-group-messages
@@ -1513,9 +1470,9 @@ button.chat-reply-attribution__target:disabled {
   box-shadow: inset 0 1px 0 var(--card-highlight);
 }
 
-/* Theme selection must not outrank the bare sent-media shell below. */
-:where(:root[data-theme-mode="light"]) .chat-group.user .chat-bubble {
-  border-color: transparent;
+/* Participant surfaces override the generic light bubble in either theme. */
+.chat-group.user .chat-bubble {
+  --chat-bubble-background: var(--chat-participant-surface);
   background: var(--chat-bubble-background);
 
   :where(.shell[data-background-managed]) & {
@@ -1523,6 +1480,11 @@ button.chat-reply-attribution__target:disabled {
       linear-gradient(var(--chat-bubble-background), var(--chat-bubble-background)),
       var(--bg-content, var(--bg));
   }
+  border-color: transparent;
+}
+
+/* Theme selection must not outrank the bare sent-media shell below. */
+:where(:root[data-theme-mode="light"]) .chat-group.user .chat-bubble {
   color: var(--text-strong);
   box-shadow: none;
 }
@@ -1546,15 +1508,6 @@ button.chat-reply-attribution__target:disabled {
       linear-gradient(var(--chat-bubble-background), var(--chat-bubble-background)),
       var(--bg-content, var(--bg));
   }
-}
-
-.chat-group.user.chat-group--sender-tint .chat-bubble:hover {
-  border-color: transparent;
-}
-
-:root[data-theme-mode="light"] .chat-group.user.chat-group--sender-tint .chat-bubble:hover {
-  border-color: transparent;
-  box-shadow: none;
 }
 
 /* Ephemeral drafts share sent-turn geometry, typography, and identity tint. */
