@@ -15,7 +15,11 @@ const stopped = () =>
     "registry-stopped",
     "Knowledge store registry stopped; retry the original request.",
   );
-type Pending = { resolve(value: unknown): void; reject(error: unknown): void };
+type Pending = {
+  resolve(value: unknown): void;
+  reject(error: unknown): void;
+  authority?: { signal: Int32Array<SharedArrayBuffer>; assertCurrent(): void };
+};
 const registryEntrypoint = createPluginRuntimeProcessEntrypoint(
   "knowledgeRegistry",
   import.meta.url,
@@ -43,12 +47,35 @@ export class RegistryClient {
     op: Op,
     ...args: Parameters<RegistryOperations[Op]>
   ): Promise<ReturnType<RegistryOperations[Op]>> {
+    return this.dispatch(op, args);
+  }
+  /** Permission mutations ask their original host owner immediately before
+   * the worker's synchronous effect, not only before dispatch. */
+  callGuarded<Op extends keyof RegistryOperations>(
+    assertCurrent: () => void,
+    op: Op,
+    ...args: Parameters<RegistryOperations[Op]>
+  ): Promise<ReturnType<RegistryOperations[Op]>> {
+    assertCurrent();
+    return this.dispatch(op, args, {
+      signal: new Int32Array(new SharedArrayBuffer(8)),
+      assertCurrent,
+    });
+  }
+  private async dispatch<Op extends keyof RegistryOperations>(
+    op: Op,
+    args: Parameters<RegistryOperations[Op]>,
+    authority?: Pending["authority"],
+  ): Promise<ReturnType<RegistryOperations[Op]>> {
     const worker = this.start(),
       id = ++this.nextId;
     const value = await new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, authority });
       worker.ref();
-      worker.postMessage({ id, op, args } satisfies RegistryRequest, []);
+      worker.postMessage(
+        { id, op, args, authority: authority?.signal.buffer } satisfies RegistryRequest,
+        [],
+      );
     });
     if (value && typeof value === "object" && "bindings" in value && "stores" in value) {
       // SAFETY: only snapshot-returning registry operations answer with both bindings and stores.
@@ -96,6 +123,23 @@ export class RegistryClient {
     worker.on("message", (message: RegistryResponse) => {
       const call = this.pending.get(message.id);
       if (!call) {
+        return;
+      }
+      if (message.type === "assert") {
+        const authority = call.authority;
+        if (!authority) {
+          return;
+        }
+        let allowed = false;
+        try {
+          authority.assertCurrent();
+          allowed = true;
+        } catch {
+          /* Denied by the original owner. */
+        }
+        Atomics.store(authority.signal, 1, allowed ? 1 : 2);
+        Atomics.store(authority.signal, 0, 1);
+        Atomics.notify(authority.signal, 0);
         return;
       }
       this.pending.delete(message.id);
