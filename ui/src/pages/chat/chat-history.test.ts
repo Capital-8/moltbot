@@ -526,7 +526,7 @@ describe("full tail after a long live turn", () => {
   it.each(["selection", "claim"] as const)(
     "discards a held Stop-gap response after its %s retires",
     async (retirement) => {
-      const entered = createDeferred<void>();
+      const entered = createDeferred();
       const pending = createDeferred<ChatHistoryResult>();
       let current: TestState | undefined;
       const reply = {
@@ -572,7 +572,7 @@ describe("full tail after a long live turn", () => {
   it("keeps the fresh tail's lazy edge when a bounded gap packet cannot fit beside it", async () => {
     const tail = { ...tailFrom(4, 83), messages: [81, 82, 83].map(call) };
     const gap = Array.from({ length: 80 }, (_, index) =>
-      Array.from({ length: 5 }, (_, fragment) =>
+      Array.from({ length: 5 }, (_fragment, fragment) =>
         message("assistant", `gap ${index + 1} fragment ${fragment}`, {
           id: `gap-${index + 1}`,
           seq: index + 1,

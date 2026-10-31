@@ -50,6 +50,20 @@ import { getChatSessionProjection, publishChatSessionProjection } from "./histor
 import { resetToolStream } from "./tool-stream-state.ts";
 
 export abstract class ChatPaneHistory extends ChatPaneHistoryPackets {
+  protected bindTranscriptViewport(pageState: NonNullable<ChatPaneHistory["state"]>): void {
+    // Task tabs can precede main chat in DOM order; viewport reads and commands
+    // must resolve through the same transcript owner.
+    pageState.chatIsProgrammaticScroll = () => this.transcript.isProgrammaticScroll;
+    pageState.chatIsMaintenanceScroll = () => this.transcript.isMaintenanceScroll;
+    pageState.chatScrollElement = () => this.transcript.scrollElement;
+    pageState.chatScrollToEnd = (options) => this.transcript.scrollToEnd(options);
+    pageState.chatCancelScroll = () => this.transcript.cancelScroll();
+    pageState.transcriptMessagesRetired = (messages) =>
+      this.retireTranscriptMessageSources(messages);
+    pageState.readTranscriptAnchorSource = () => this.readTranscriptAnchorSource();
+    pageState.beforeHistoryTailRestore = () => this.retireTranscriptReads();
+  }
+
   private activeCatalogContinuation: symbol | null = null;
   private activeOlderLoad: Promise<boolean> | null = null;
   private activeOlderRead: AbortController | null = null;

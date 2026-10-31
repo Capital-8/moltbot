@@ -74,7 +74,9 @@ it("rejects around coverage that cannot coexist with the newest charged local ou
   reduceChatSessionProjection(host, { type: "localOutput", message: output });
   const before = host.chatMessages;
   const coverage = host.chatHistoryPagination;
-  const messages = [2, 3].map((seq) => ({ ...durable(seq), content: "y".repeat(80 * 1024) }));
+  const messages = [2, 3].map((seq) =>
+    Object.assign(durable(seq), { content: "y".repeat(80 * 1024) }),
+  );
   const packet = prepareChatHistoryPacket(messages, { hasMore: false });
   expect(packet.boundedPacket).toBe(true);
   const result = { messages, packet };

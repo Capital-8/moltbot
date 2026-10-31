@@ -84,16 +84,6 @@ export type ChatPaneInputChanges = {
 
 /** Synchronous pane facts and domain resources; Solid owns publication and commits. */
 export abstract class ChatPaneStateOwner {
-  protected bindTranscriptViewport(pageState: NonNullable<ChatPaneStateOwner["state"]>): void {
-    // Task tabs can precede main chat in DOM order; viewport reads and commands
-    // must resolve through the same transcript owner.
-    pageState.chatIsProgrammaticScroll = () => this.transcript.isProgrammaticScroll;
-    pageState.chatIsMaintenanceScroll = () => this.transcript.isMaintenanceScroll;
-    pageState.chatScrollElement = () => this.transcript.scrollElement;
-    pageState.chatScrollToEnd = (options) => this.transcript.scrollToEnd(options);
-    pageState.chatCancelScroll = () => this.transcript.cancelScroll();
-  }
-
   protected readonly mobileScrollFades = createMobileSheetScrollFades();
   readonly presentation = {
     active: false,

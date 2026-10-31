@@ -20,8 +20,10 @@ import {
   sessionMutationGatewayHello,
 } from "../../test-helpers/gateway-methods.ts";
 import { dispatchChatSlashCommand } from "./chat-commands.ts";
-import { admitChatHistoryPages } from "./chat-history-snapshot.ts";
-import { commitCurrentChatHistorySnapshot } from "./chat-history-snapshot.ts";
+import {
+  admitChatHistoryPages,
+  commitCurrentChatHistorySnapshot,
+} from "./chat-history-snapshot.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
 import { getChatSessionProjection, reduceChatSessionProjection } from "./history-merge.ts";
 import { readChatSessionSnapshot, type ChatMessageCache } from "./session-message-cache.ts";

@@ -557,18 +557,20 @@ export function selectChatHistoryResidency(
   );
   // Older outcomes use only spare ordinary capacity. They cannot block a new
   // page or spend an exemption needed only for the newest outcome/source pair.
-  for (let index = localOutputs.length - 2; !localPair && index >= 0; index--) {
-    const output = localOutputs[index]!;
-    const weight = messageWeight(output);
-    if (
-      outputCost.count + 1 > CHAT_RESIDENT_ENTRY_TARGET ||
-      outputCost.weight + weight > CHAT_RESIDENT_WEIGHT_TARGET
-    ) {
-      continue;
+  if (!localPair) {
+    for (let index = localOutputs.length - 2; index >= 0; index--) {
+      const output = localOutputs[index]!;
+      const weight = messageWeight(output);
+      if (
+        outputCost.count + 1 > CHAT_RESIDENT_ENTRY_TARGET ||
+        outputCost.weight + weight > CHAT_RESIDENT_WEIGHT_TARGET
+      ) {
+        continue;
+      }
+      admittedOutputs.add(output);
+      outputCost.count += 1;
+      outputCost.weight += weight;
     }
-    admittedOutputs.add(output);
-    outputCost.count += 1;
-    outputCost.weight += weight;
   }
   const admitted = messages.filter((message) => {
     const source = nativeHistoryMessageSourceIdentity(message);

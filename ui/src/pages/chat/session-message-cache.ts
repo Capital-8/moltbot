@@ -523,11 +523,11 @@ export function cacheChatSessionSnapshot(
   cache: ChatMessageCache,
   host: ChatMessageCacheHost,
   target: ChatMessageCacheTarget,
-  incoming: ChatSessionSnapshot,
+  unfilteredSnapshot: ChatSessionSnapshot,
 ): void {
   // Pane-local outcomes have no replay authority in any cache target. Read the
   // existing projection only; cache writes must never initialize a display owner.
-  incoming = withoutChatLocalOutputs(incoming, readChatLocalOutputs(host));
+  const incoming = withoutChatLocalOutputs(unfilteredSnapshot, readChatLocalOutputs(host));
   const cacheKey = resolveChatSnapshotKey(host, target);
   const existing = getSessionCacheValue(cache, cacheKey);
   const retained =

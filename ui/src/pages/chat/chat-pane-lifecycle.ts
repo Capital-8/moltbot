@@ -319,10 +319,6 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionObservation {
     pageState.getWorkContext = () => this.workContext;
     pageState.isRouteSessionPending = () => this.routeResolutionPending;
     this.bindTranscriptViewport(pageState);
-    pageState.transcriptMessagesRetired = (messages) =>
-      this.retireTranscriptMessageSources(messages);
-    pageState.readTranscriptAnchorSource = () => this.readTranscriptAnchorSource();
-    pageState.beforeHistoryTailRestore = () => this.retireTranscriptReads();
     pageState.reviewQueuedMessageEdit = () => this.reviewQueuedMessageEdit(pageState);
     pageState.createChatSession = () => this.createSession();
     pageState.confirmConversationReset = () => this.confirmConversationReset();
