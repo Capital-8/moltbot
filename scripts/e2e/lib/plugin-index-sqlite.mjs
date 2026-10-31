@@ -84,19 +84,28 @@ function readBoundedIndexRow(db, table, keyColumn, key, jsonColumns, columns) {
 }
 
 function readCurrentSqlitePluginIndex(db) {
-  const row = readBoundedIndexRow(
-    db,
-    "config_machine_state",
-    "state_key",
-    STATE_KEY,
-    ["value_json"],
-    "value_json",
-  );
+  if (!tableExists(db, "config_machine_state")) {
+    return {};
+  }
+  const row = db
+    .prepare(
+      `SELECT json_extract(value_json, '$.index.installRecords') AS install_records_json,
+              json_extract(value_json, '$.index.plugins') AS plugins_json
+         FROM config_machine_state
+        WHERE state_key = ?`,
+    )
+    .get(STATE_KEY);
   if (!row) {
     return {};
   }
-  const value = parseIndexJsonText(row.value_json, "plugin index value_json");
-  return value?.index && typeof value.index === "object" ? value.index : {};
+  return {
+    installRecords: row.install_records_json
+      ? parseIndexJsonText(row.install_records_json, "plugin index install_records_json")
+      : {},
+    plugins: row.plugins_json
+      ? parseIndexJsonText(row.plugins_json, "plugin index plugins_json")
+      : [],
+  };
 }
 
 function readPreV13SqlitePluginIndex(db) {

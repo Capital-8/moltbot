@@ -1146,11 +1146,10 @@ function assertSessionMetadataMigrated(stateDir, stage) {
   assert(direct?.sessionId === LEGACY_SESSION_DIRECT_ID, "direct legacy session row missing");
   assert(group?.sessionId === LEGACY_SESSION_GROUP_ID, "channel legacy session row missing");
   if (getScenario() === "acpx-openclaw-tools-bridge") {
-    assertStrict.deepEqual(
-      group.acp,
-      LEGACY_ACP_META,
-      "saved ACP session or model selection changed",
-    );
+    const acp =
+      group.acp ??
+      readMigratedAcpSessionMeta(stateDir, "agent:main:slack:channel:cupgrade", "main");
+    assertStrict.deepEqual(acp, LEGACY_ACP_META, "saved ACP session or model selection changed");
   }
   const migratedSessions = [
     [LEGACY_SESSION_MAIN_ID, main],
@@ -1208,6 +1207,29 @@ function assertSessionMetadataMigrated(stateDir, stage) {
     main.skillsSnapshot?.resolvedSkills === undefined,
     "heavy resolvedSkills cache was persisted into migrated session metadata",
   );
+}
+
+function readMigratedAcpSessionMeta(stateDir, sessionKey, agentId) {
+  const databaseKey = `@acp:v1:${Buffer.from(JSON.stringify([agentId, sessionKey]), "utf8").toString("base64url")}`;
+  const dbPath = path.join(stateDir, "state", "openclaw.sqlite");
+  return readDatabase(dbPath, (db) => {
+    const row = db.prepare("SELECT * FROM acp_sessions WHERE session_key = ?").get(databaseKey);
+    if (!row) {
+      return undefined;
+    }
+    return {
+      backend: row.backend,
+      agent: row.agent,
+      runtimeSessionName: row.runtime_session_name,
+      ...(row.identity_json ? { identity: JSON.parse(row.identity_json) } : {}),
+      mode: row.mode,
+      ...(row.runtime_options_json ? { runtimeOptions: JSON.parse(row.runtime_options_json) } : {}),
+      ...(row.cwd != null ? { cwd: row.cwd } : {}),
+      state: row.state,
+      lastActivityAt: row.last_activity_at,
+      ...(row.last_error != null ? { lastError: row.last_error } : {}),
+    };
+  });
 }
 
 function readMigratedSessionStore(stateDir, targetStorePath) {

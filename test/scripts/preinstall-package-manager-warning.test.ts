@@ -79,6 +79,46 @@ describe("install runtime enforcement", () => {
     expect(result.stderr).toContain(`detected Node ${nodeVersion}`);
   });
 
+  it("accepts the executing Bun only when its canonical launcher marker matches", () => {
+    const probeNodeRuntime = vi.fn();
+    const reportError = vi.fn();
+
+    expect(
+      enforceSupportedNodeRuntime(
+        {
+          bunVersion: "1.4.4",
+          bunLauncher: "/opt/bun/bin/bun",
+          engine: EXPECTED_NODE_ENGINE_RANGE,
+          execPath: "/opt/bun/bin/bun",
+          probeNodeRuntime,
+        },
+        reportError,
+      ),
+    ).toBe(true);
+    expect(probeNodeRuntime).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a Bun launcher marker for another executable", () => {
+    const probeNodeRuntime = vi.fn(() => null);
+    const reportError = vi.fn();
+
+    expect(
+      enforceSupportedNodeRuntime(
+        {
+          bunVersion: "1.4.4",
+          bunLauncher: "/opt/other/bin/bun",
+          engine: EXPECTED_NODE_ENGINE_RANGE,
+          execPath: "/opt/bun/bin/bun",
+          probeNodeRuntime,
+        },
+        reportError,
+      ),
+    ).toBe(false);
+    expect(probeNodeRuntime).toHaveBeenCalledOnce();
+    expect(reportError).toHaveBeenCalledWith(expect.stringContaining("detected Node missing"));
+  });
+
   it.each(
     [
       {

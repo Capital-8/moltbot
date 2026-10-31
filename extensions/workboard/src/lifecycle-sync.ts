@@ -561,6 +561,7 @@ export function createWorkboardLifecycleService(params: {
       const owner = ++generation;
       const recoverPreparedBefore = params.now?.() ?? Date.now();
       serviceReader = AsyncResource.bind(params.readSessions);
+      const readSessions = serviceReader;
       workboardLifecycleGatewayState.readSessions = serviceReader;
       let begun = false;
       const onMatched: WorkboardLifecycleMatchHandler = async (input) => {
@@ -577,7 +578,7 @@ export function createWorkboardLifecycleService(params: {
             }
             if (cards.some((card) => needsWorkboardLifecycleReconciliation(card))) {
               try {
-                const snapshot = await params.readSessions({
+                const snapshot = await readSessions({
                   includeUnknown: cards.some(
                     (card) => !card.metadata?.archivedAt && cardSessionKey(card) === "unknown",
                   ),
@@ -596,7 +597,7 @@ export function createWorkboardLifecycleService(params: {
                     continue;
                   }
                   (describedIncognitoKeys ??= new Set()).add(sessionKey);
-                  const exact = await params.readSessions({ includeUnknown: false, sessionKey });
+                  const exact = await readSessions({ includeUnknown: false, sessionKey });
                   snapshot.sessions.push(...exact.sessions);
                 }
                 await syncWorkboardLifecycleSessions({
@@ -645,7 +646,7 @@ export function createWorkboardLifecycleService(params: {
                   store: params.store,
                   event,
                   context,
-                  readSessions: params.readSessions,
+                  readSessions,
                   allowIdleRunningTerminal: true,
                   onMatched,
                 });
@@ -674,7 +675,7 @@ export function createWorkboardLifecycleService(params: {
             store: params.store,
             event,
             context,
-            readSessions: params.readSessions,
+            readSessions,
             onMatched,
           }),
         );
