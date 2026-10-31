@@ -3,11 +3,7 @@ import type { ModelCatalogResult } from "../../api/types.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import { invalidateModelCatalogCache } from "../../lib/model-catalog-cache.ts";
 import { loadModelCatalog } from "../../lib/model-catalog-store.ts";
-import {
-  catalogDiscoveryError,
-  loadModelProvidersData,
-  type ModelProvidersData,
-} from "./load.ts";
+import { catalogDiscoveryError, loadModelProvidersData, type ModelProvidersData } from "./load.ts";
 import type { ControllerHost } from "./page-controller.ts";
 
 export type ModelProviderRefreshReason = "publication" | "replacement" | "forced";
