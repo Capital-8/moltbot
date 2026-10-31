@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type { ControlUiLinkReaderDocument } from "../../../src/shared/control-ui-link-reader.js";
+import { openChatPanels } from "../test-helpers/chat-layout-menu.ts";
 import {
   readerUrl as url,
   readerFile,
@@ -86,10 +87,7 @@ it("keeps check navigation, refresh, and long content usable in a narrow native 
       ).toBe(true);
       const initialDocument = await panel.locator(".lr-document").elementHandle();
       await page.setViewportSize({ width: 390, height: 844 });
-      await page
-        .locator(".chat-pane-cache__pane--active .agent-chat__header--mobile")
-        .getByRole("button", { name: "Panels", exact: true })
-        .click();
+      await openChatPanels(page, "mobile");
       await content.waitFor({ state: "visible" });
       expect(await initialDocument!.evaluate((node) => node.isConnected)).toBe(true);
       expect(

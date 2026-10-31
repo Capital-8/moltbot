@@ -1,13 +1,17 @@
-import type { ModelDecisionCapabilities } from "@openclaw/model-catalog-core/model-catalog-types";
+import type {
+  DecisionAnswerCapabilities,
+  ModelDecisionCapabilities,
+} from "@openclaw/model-catalog-core/model-catalog-types";
+import { DecisionContractError } from "./contract-error.js";
 import type { DecisionBatchResultV2, DecisionBatchV2 } from "./types-v2.js";
 import {
   decisionEntry,
   decisionJsonLimits,
+  exactKeys,
   finiteJson,
   isPlainDecisionRecord,
   validDecisionCriteria,
 } from "./validation-common.js";
-import { DecisionContractError, exactKeys } from "./validation.js";
 
 const MAX_JSON_BYTES = decisionJsonLimits.maxBytes;
 const MAX_IMAGE_BYTES = 4 * 1_048_576;
@@ -169,7 +173,7 @@ export function validateDecisionBatchV2(batch: unknown): batch is DecisionBatchV
 export function validateDecisionResultV2(
   batch: DecisionBatchV2,
   value: unknown,
-  capabilities?: ModelDecisionCapabilities,
+  capabilities?: DecisionAnswerCapabilities | ModelDecisionCapabilities,
 ): value is DecisionBatchResultV2 {
   // The supplied batch is normally admitted already; guarding it also makes this pure boundary safe.
   try {
@@ -186,7 +190,7 @@ export function validateDecisionResultV2(
 export function validateAdmittedDecisionResultV2(
   batch: DecisionBatchV2,
   value: unknown,
-  capabilities?: ModelDecisionCapabilities,
+  capabilities?: DecisionAnswerCapabilities,
 ): value is DecisionBatchResultV2 {
   if (
     finiteJson(value, { rejectProxies: true }) !== "valid" ||

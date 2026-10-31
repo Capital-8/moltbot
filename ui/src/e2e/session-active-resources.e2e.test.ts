@@ -136,7 +136,10 @@ suite.define(() => {
         const explicitEnvironmentId = "manual-desktop";
         const gateway = await openResources(page, {
           sessions: [row, notes],
-          deferredMethods: ["desktop.observe"],
+          deferredMethods: [
+            "desktop.observe",
+            ...(scenario === "mobile" ? ["environments.status"] : []),
+          ],
           historyMessages: [{ role: "assistant", content: "Your existing desktop is ready." }],
           methodResponses: {
             "sessions.list": list(!staleRoster, staleRoster ? 1000 : undefined),
@@ -157,9 +160,11 @@ suite.define(() => {
             "desktop.observe": desktop,
           },
         });
-        if (width === 390) {
-          await pane(page).locator(".agent-chat__header--mobile").waitFor();
-          await openChatPanels(pane(page), "mobile");
+        if (scenario === "mobile") {
+          await gateway.waitForRequest("environments.status");
+          await openChatSidePanelType(page, "Subagents");
+          await selectChatLayoutAction(pane(page), "Minimize side panel");
+          await gateway.resolveDeferred("environments.status", environment);
         }
         await desktopTab(page).waitFor();
         const observe = await gateway.waitForRequest("desktop.observe");
@@ -176,7 +181,7 @@ suite.define(() => {
         const desktopBox = await pane(page).locator(".desktop-surface").boundingBox();
         expect(desktopBox!.width).toBeLessThanOrEqual(width);
         if (width === 390) {
-          // Open the discovered panel dock while retaining Chat above it.
+          // Mobile discovery opens the panel dock while retaining Chat above it.
           expect(chatBox!.height).toBeGreaterThan(100);
           await pane(page).locator('.chat-mobile-host[data-mode="dock"]').waitFor();
           expect(desktopBox!.width).toBeGreaterThan(width - 32);
@@ -264,8 +269,6 @@ suite.define(() => {
           await gateway.emitGatewayEvent("node.runnerInventory.changed", {
             nodeId: "worker-desktop",
           });
-          await pane(page).locator(".agent-chat__header--mobile").waitFor();
-          await openChatPanels(pane(page), "mobile");
           await desktopTab(page).waitFor();
           await assertNoProvisioning(gateway);
           return;
