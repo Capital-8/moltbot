@@ -173,9 +173,11 @@ function prepareSessionRowRuntime(
       defaultAgentId: tryResolveSessionCompatibilityOwnerAgentId(cfg, record.key),
     });
   let facts: unknown[] = [];
-  const prepare = (record: records.MaterializedRow) => {
+  const prepare = (
+    record: records.MaterializedRow,
+    preparedFacts: records.SnapshotOptions["preparedFacts"],
+  ) => {
     const run = active(record);
-    const preparedFacts = record.facts?.present();
     const childOwnerSessionKeys = resolveSessionChildOwners({
       key: record.key,
       entry: record.entry,
@@ -257,9 +259,11 @@ function prepareSessionRowRuntime(
     subagentRuns,
     active,
     read(record: records.MaterializedRow) {
+      // Placement and pending permission facts can change without a row publication.
+      const preparedFacts = record.facts?.present();
       let value = rows?.get(record.materialized);
-      if (!value) {
-        value = prepare(record);
+      if (!value || value.preparedFacts !== preparedFacts) {
+        value = prepare(record, preparedFacts);
         rows?.set(record.materialized, value);
       }
       return value;
@@ -278,6 +282,8 @@ export function prepareSessionRowPublication(
   let factsRevision: number | undefined;
   return (client?: GatewayClient | null, projectRun?: VisibleActiveSessionRunProjector) => {
     const recipient = prepareSessionRowRecipient(read, client, view);
+    let presentation: ReturnType<typeof prepareProjectedSessionPresentation> | undefined;
+    let presentationRuntime: typeof runtime;
     return {
       getAudienceKey() {
         // Fixed-domain prefixes keep the opaque sharing key intact without re-encoding it.
@@ -300,14 +306,18 @@ export function prepareSessionRowPublication(
           );
           factsRevision = recipient.publicationState?.factsRevision;
         }
-        return prepareProjectedSessionPresentation(
+        if (presentationRuntime !== runtime) {
+          presentationRuntime = runtime;
+          presentation = undefined;
+        }
+        return (presentation ??= prepareProjectedSessionPresentation(
           read,
           client,
           now,
           projectRun,
           recipient,
           runtime,
-        );
+        ));
       },
     };
   };

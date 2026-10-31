@@ -331,11 +331,11 @@ export function prepareSessionSharingRole<
     if (sessionCap === "none") {
       return "viewer";
     }
-    isMember ??= readMembership?.(target);
-    if (isMember === undefined) {
+    const member = isMember ?? readMembership?.(target);
+    if (member === undefined) {
       throw new SessionMutationFactsUnavailableError();
     }
-    return isMember ? "member" : "viewer";
+    return member ? "member" : "viewer";
   };
 }
 
