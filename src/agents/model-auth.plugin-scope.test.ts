@@ -569,17 +569,15 @@ test.each([
   ([scope, runtimeScope]) => ({ scope, runtimeScope, active: false }),
 );
 
-test(
-  "ambient discovery skips a plugin-owned provider without a live credential",
-  async (f) => {
+test.each([false, true])(
+  "ambient discovery never carries plugin-owned credentials (active=%s)",
+  async (_active, f) => {
     const options = { config: f.cfg, syntheticAuthProviderRefs: [id] };
-    expect(() => providerRuntime.resolveProviderSyntheticAuthWithPlugin(f.lookup)).toThrow(
-      "live credential or no-auth evidence is missing",
-    );
     expect(resolveAmbientAgentCredentialsForDiscovery(options)).not.toHaveProperty(id);
     await expect(prepareAmbientAgentCredentialsForDiscovery(options)).resolves.not.toHaveProperty(
       id,
     );
+    expect(f.hook).not.toHaveBeenCalled();
   },
-  { active: false },
+  (active) => ({ active }),
 );

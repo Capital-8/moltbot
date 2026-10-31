@@ -1,5 +1,6 @@
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveProviderAuthScope } from "../plugins/provider-auth-scope.js";
 import {
   prepareProviderSyntheticAuthWithPlugin,
   resolveProviderSyntheticAuthWithPlugin,
@@ -102,6 +103,19 @@ function resolveAmbientCredentialInputs(
   for (const provider of syntheticAuthProviderRefs) {
     const normalizedProvider = normalizeProviderId(provider);
     if (!authoritativeSyntheticAuthProviderRefs.has(normalizedProvider) && credentials[provider]) {
+      continue;
+    }
+    // Plugin-owned credentials are instance-bound: they resolve only inside the owning
+    // plugin's request scope and must never become transferable discovery facts.
+    // Catalog availability resolves them per model in that scope.
+    if (
+      resolveProviderAuthScope({
+        provider,
+        config: options.config,
+        env: options.env,
+        workspaceDir: options.workspaceDir,
+      }) === "plugin"
+    ) {
       continue;
     }
     if (
