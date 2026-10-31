@@ -188,7 +188,8 @@ export async function recoverPendingWorkspaceResults(
                 workspace,
                 assertCurrent: recovery.assertCurrent,
                 authority: pending.repositoryDiskAuthority,
-                hasPendingMove: projection.moves.has(pending.sessionId),
+                move: projection.moves.get(pending.sessionId),
+                currentWorkspace: recovery.workspace,
               });
               return;
             }

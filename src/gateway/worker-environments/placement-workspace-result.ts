@@ -8,6 +8,7 @@ import {
   requireRepositoryWorkspaceDiskAuthority,
 } from "../../state/session-repository-workspaces.authority.js";
 import { findSessionRepositoryWorkspaceInDatabase } from "../../state/session-repository-workspaces.kernel.js";
+import { readWorkerPlacementMovesReadOnly } from "./placement-move-intent.js";
 import {
   resolvePlacementTurnEnvironment,
   type WorkerSessionPlacementRecord,
@@ -275,13 +276,36 @@ export function recordStagedWorkerWorkspaceResult(
     ensureRepositoryWorkspacePendingResultSchema(db);
   }
   const { row: pending, placement } = assertPendingClaim(db, claim);
-  if (pending.repository_disk_authority_json !== null) {
-    throw new Error("A disk-authoritative result cannot stage a mirrored checkpoint");
+  const diskExport = pending.repository_disk_authority_json !== null;
+  if (diskExport) {
+    const move = readWorkerPlacementMovesReadOnly(db, [claim.sessionId]).get(claim.sessionId);
+    const repository = findSessionRepositoryWorkspaceInDatabase(db, placement);
+    if (
+      placement.state !== "draining" ||
+      move?.target.kind !== "gateway" ||
+      move.abandonSource ||
+      move.source.environmentId !== placement.environmentId ||
+      move.source.ownerEpoch !== placement.activeOwnerEpoch ||
+      move.source.generation + 1 !== placement.generation ||
+      claim.claimId !== claim.runId ||
+      !claim.claimId.startsWith("reclaim-") ||
+      !stagedResultRef.startsWith("refs/openclaw/worker-results/gateway-export-") ||
+      repositoryWorkspaceId !== pending.repository_workspace_id ||
+      repository?.workspaceId !== repositoryWorkspaceId ||
+      !repository.diskAuthority
+    ) {
+      throw new Error("A disk-authoritative result cannot stage a mirrored checkpoint");
+    }
+    assertRepositoryWorkspaceDiskIdentity(
+      repository.diskAuthority,
+      findWorkerEnvironment(db, placement.environmentId),
+    );
   }
   if (pending.workspace_accepted_at_ms !== null) {
     throw new Error(`Cannot restage accepted worker workspace result for ${claim.sessionId}`);
   }
   if (
+    !diskExport &&
     pending.staged_result_ref &&
     (pending.staged_result_ref !== stagedResultRef ||
       (pending.repository_workspace_id ?? undefined) !== repositoryWorkspaceId)
