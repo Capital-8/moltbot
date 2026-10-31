@@ -282,7 +282,9 @@ export function projectSidebarAgentSessionRows({
       sourceRowInputs.length,
       ...sourceRowInputs,
       childKeysByParent.size,
-      ...[...childKeysByParent].flatMap(([key, children]) => [key, children.length, ...children]),
+      ...[...childKeysByParent].flatMap(([key, children]) =>
+        [key, children.length].concat(children),
+      ),
       childVisibilityInputs.length,
       ...childVisibilityInputs,
     ],

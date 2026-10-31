@@ -512,7 +512,7 @@ describe("sidebar projection memo", () => {
     projectTree.mockClear();
     await update(sidebar, { sessionKey: second.key });
     const inventoryBuilds = projectTree.mock.calls.filter(([input]) =>
-      input.roots.some((row) => row.key === first.key),
+      input.roots.some((root) => root.key === first.key),
     );
     expect(inventoryBuilds).toHaveLength(0);
     expect(sidebar.findSidebarMenuSessionByKey(third.key)).toBe(unchanged);
