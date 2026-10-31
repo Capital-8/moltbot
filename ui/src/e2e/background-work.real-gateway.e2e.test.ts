@@ -317,12 +317,6 @@ suite.define(() => {
         });
         await capture(page, "desktop-process-output", processStop);
         await assertParent();
-        const switchTab = async (label: string) => {
-          await parent
-            .locator(".side-panel__header .tabstrip-tab")
-            .filter({ hasText: label })
-            .click();
-        };
         expect(await parent.locator(".side-panel__header .tabstrip-tab").allTextContents()).toEqual(
           expect.arrayContaining([
             expect.stringContaining("Subagents"),
@@ -332,7 +326,7 @@ suite.define(() => {
 
         proof.stage = "mobile child Stop through history-owned exact run";
         await page.setViewportSize({ width: 390, height: 844 });
-        await switchTab("Subagents");
+        await openChatSidePanelType(parent, "Subagents");
         const mobileChildStop = detail.getByRole("button", {
           name: `Stop ${fixture.childLabel}`,
           exact: true,
@@ -396,7 +390,7 @@ suite.define(() => {
           .waitFor();
 
         proof.stage = "mobile exact process Stop and retained terminal output";
-        await switchTab("Processes");
+        await openChatSidePanelType(parent, "Processes");
         await processStop.waitFor();
         await capture(page, "mobile-process-output", processStop);
         const beforeProcessStop = wire.completed.length;
@@ -483,7 +477,7 @@ suite.define(() => {
           "desktop-reloaded-process-output",
           processes.getByRole("button", { name: "Back to Processes", exact: true }),
         );
-        await switchTab("Subagents");
+        await openChatSidePanelType(parent, "Subagents");
         await childOpen.click();
         await detail.getByText(fixture.childText, { exact: true }).waitFor();
         await assertParent();
