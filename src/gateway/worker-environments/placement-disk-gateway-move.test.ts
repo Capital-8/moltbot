@@ -103,26 +103,30 @@ it.each([
     ...admittedBuild,
     ...(scenario === "paused-refresh" ? { bundleHash: "c".repeat(64) } : {}),
   };
-  writePlacementEnvironmentFixture(openOpenClawStateDatabase(), {
-    ...original,
-    ...(paused
-      ? {
-          bootstrapReceipt: admittedBuild,
-          retention: {
-            policy: {
-              version: 1 as const,
-              ownerBinding: "a".repeat(64),
-              computeWindowSeconds: 600,
+  writePlacementEnvironmentFixture(
+    openOpenClawStateDatabase(),
+    {
+      ...original,
+      ...(paused
+        ? {
+            bootstrapReceipt: admittedBuild,
+            retention: {
+              policy: {
+                version: 1 as const,
+                ownerBinding: "a".repeat(64),
+                computeWindowSeconds: 600,
+              },
+              observation,
+              operation: null,
+              runtimeReady: false,
             },
-            observation,
-            operation: null,
-            runtimeReady: false,
-          },
-        }
-      : {}),
-    nodeDeviceId: "repository-node-fixture",
-    sharedHost: false,
-  });
+          }
+        : {}),
+      nodeDeviceId: "repository-node-fixture",
+      sharedHost: false,
+    },
+    { replaceBootstrapReceipt: true },
+  );
   const destroy = vi.fn(
     async (lease: Parameters<ReturnType<typeof createProvider>["destroy"]>[0]) => {
       lease.assertCurrent?.();

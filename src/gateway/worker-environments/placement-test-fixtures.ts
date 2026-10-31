@@ -134,6 +134,7 @@ export function publishWorkerEnvironmentFixture(db: EngineConnection, environmen
 export function writePlacementEnvironmentFixture(
   database: OpenClawStateDatabase,
   environment: PlacementEnvironmentFixture,
+  options: { replaceBootstrapReceipt?: true } = {},
 ): void {
   const values = {
     environment_id: environment.environmentId,
@@ -211,7 +212,7 @@ export function writePlacementEnvironmentFixture(
               ...(environment.retention !== undefined
                 ? { retention_json: values.retention_json }
                 : {}),
-              ...(environment.bootstrapReceipt !== undefined
+              ...(options.replaceBootstrapReceipt && environment.bootstrapReceipt !== undefined
                 ? {
                     bootstrap_bundle_hash: values.bootstrap_bundle_hash,
                     bootstrap_openclaw_version: values.bootstrap_openclaw_version,
