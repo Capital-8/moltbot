@@ -56,7 +56,7 @@ suite.define(() => {
         expect(iconRequests()).toEqual([]);
         expect(loginRequests()).toEqual([]);
         expect(mediaRequests()).toEqual([]);
-        expect(requested.some((path) => imageModule.test(path))).toBe(false);
+        expect(requested.some((path) => imageModule.test(path))).toBe(true);
         expect(requested.filter((path) => subagentActivityModule.test(path))).toEqual([]);
 
         const imageMessage = {

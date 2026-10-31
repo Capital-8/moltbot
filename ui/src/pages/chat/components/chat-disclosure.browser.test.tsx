@@ -125,7 +125,22 @@ describe.runIf(browserMode)("chat disclosure activation", () => {
       };
 
       view.update({
-        props: { ...props, stream: "First rich live answer\nMEDIA:https://example.com/proof.png" },
+        props: {
+          ...props,
+          messages: [
+            ...props.messages,
+            {
+              role: "assistant",
+              content: "First rich live answer",
+              openclawAsyncDelivery: {
+                itemId: "rich-recovery-question",
+                questions: [{ title: "First rich live answer" }],
+              },
+              timestamp: 101,
+              __openclaw: { id: "rich-recovery-question" },
+            },
+          ],
+        },
         transcript,
       });
       transcript.update();

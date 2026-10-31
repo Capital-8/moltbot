@@ -40,6 +40,7 @@ import { createAsyncQuestionPresentation } from "./chat-async-question.ts";
 import * as chatMessage from "./chat-message-group-frame.ts";
 import { releaseChatMediaResourceOwner } from "./chat-message-media.ts";
 import { createAttachmentBlock } from "./chat-message.test-support.ts";
+import { chatRichPresentation } from "./chat-rich-presentation.ts";
 import {
   getTranscriptState,
   resetTranscriptSession,
@@ -561,6 +562,8 @@ describe("chat transcript invalidation", () => {
   it.each([false, true])(
     "refreshes a retained question's Answer action (durable=%s)",
     async (durable) => {
+      // Keep module preparation separate from the retained action contract.
+      await chatRichPresentation.load();
       vi.spyOn(draftStore, "readDurableComposerDraft").mockResolvedValue({ status: "not-found" });
       vi.spyOn(draftStore, "writeDurableComposerDraft").mockResolvedValue({ status: "persisted" });
       const props = threadProps("pane-retained-question", "agent:main:retained-question", [
