@@ -127,7 +127,12 @@ device in the latest snapshot), or one device fingerprint (`fp:<hex>`). Payload 
 | `root_statement`    | a device holding the kit  | gateway     | R-signed statements under the pinned root; held for direct confirmation when older than the current epoch (spec 8.4) |
 | `revocation`        | owner device              | gateway     | Revocation chain rules                                                                                               |
 | `enrollment`        | new device / owner device | fp / owners | SAS protocol (below)                                                                                                 |
-| `notice`            | Gateway                   | owners      | none: a hint; the device confirms at the Gateway directly                                                            |
+| `notice`            | Gateway                   | owners / fp | none: a hint; the device confirms at the Gateway directly                                                            |
+
+Notice events are `MAILBOX_NOTICE_EVENTS`. `seq_conflict` goes only to the one device fingerprint
+whose `root_statement` the Gateway refused for a stale seq (`noticeRecipientAllowed`); its `ref` is
+the Gateway's current seq in decimal (`parseSeqConflictRef`). Discovery delivers it only to a
+device of the claw's owner account, in the control lane. Every other event goes to `owners`.
 
 The Gateway accepts only `GATEWAY_MAILBOX_KINDS` (`invite_redemption`, `root_statement`,
 `revocation`) from the mailbox. **A device-signed MembershipChange that arrives through the

@@ -143,3 +143,9 @@ N decodes the kit (`decodeKit`), derives R (`deriveRootSigner`), checks fp(R), v
 binding against R, then signs with R: its own OwnerDeviceCert, a re-certification of every
 active owner device (chain compaction), and `MembershipChange add_owner_device`. These go to
 the Gateway through the mailbox; the Gateway emits `notify_owners: kit_used`. N drops R.
+
+N signs its `add_owner_device` at the seq of Discovery's snapshot + 1. When that snapshot lags
+the Gateway (a failed publication), the Gateway refuses the statement as `seq_conflict`,
+republishes its snapshot and mails N's device fingerprint a `notice` with `event: "seq_conflict"`
+and `ref` = its current seq. While N still holds R it re-reads the K_gw-signed snapshot, checks
+it is at least `ref`, and signs again at that seq + 1; otherwise it asks the user to retry.
