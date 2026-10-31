@@ -8,12 +8,12 @@ import { acquireAgentRunPreparedModelRuntime } from "../src/agents/prepared-mode
 import { closeProviderTransportDispatcherPool } from "../src/agents/provider-transport-dispatcher-pool.js";
 import { setRuntimeConfigSnapshot } from "../src/config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../src/config/types.openclaw.js";
+import { DecisionContractError } from "../src/decisions/contract-error.js";
 import {
   evaluateDecisionV2InRegistry,
   prepareDecisionProviderReload,
 } from "../src/decisions/runtime.js";
 import type { DecisionBatchV2 } from "../src/decisions/types-v2.js";
-import { DecisionContractError } from "../src/decisions/validation.js";
 import * as fetchGuard from "../src/infra/net/fetch-guard.js";
 import { fetchWithRuntimeDispatcher } from "../src/infra/net/runtime-fetch.js";
 import { createHttp1Agent } from "../src/infra/net/undici-runtime.js";

@@ -2,6 +2,7 @@ import type {
   DecisionAnswerCapabilities,
   ModelDecisionCapabilities,
 } from "@openclaw/model-catalog-core/model-catalog-types";
+import { DecisionContractError } from "./contract-error.js";
 import type { DecisionBatchResultV2, DecisionBatchV2 } from "./types-v2.js";
 import {
   decisionEntry,
@@ -10,7 +11,7 @@ import {
   isPlainDecisionRecord,
   validDecisionCriteria,
 } from "./validation-common.js";
-import { DecisionContractError, exactKeys } from "./validation.js";
+import { exactKeys } from "./validation-common.js";
 
 const MAX_JSON_BYTES = decisionJsonLimits.maxBytes;
 const MAX_IMAGE_BYTES = 4 * 1_048_576;
