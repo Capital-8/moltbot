@@ -1,8 +1,12 @@
 // Control UI tests cover the responsive disconnected login gate.
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { BrowserContextOptions, Page } from "playwright";
 import { assert, expect, it } from "vitest";
 import { ConnectErrorDetailCodes } from "../../../packages/gateway-protocol/src/connect-error-details.js";
+import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
+import { takeControlUiScreenshotFrame } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { controlUiE2eBuiltModuleRequest } from "./control-ui-built-module.test-support.ts";
 import {
@@ -108,6 +112,65 @@ suite.define(() => {
     expect(await gateway.getRequests("connect")).toHaveLength(1);
   });
 
+  it("reloads a protocol mismatch once, then keeps visible manual recovery", async () => {
+    const page = await newPage();
+    const artifactDir = createControlUiE2eArtifactDir("protocol-mismatch-recovery");
+    const documents: string[] = [];
+    page.on("request", (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+        documents.push(request.url());
+      }
+    });
+    const gateway = await installMockGateway(page, { deferredMethods: ["connect"] });
+    const mismatch = {
+      code: "INVALID_REQUEST",
+      message: "protocol mismatch",
+      details: {
+        code: ConnectErrorDetailCodes.PROTOCOL_MISMATCH,
+        gatewayBuildId: "protocol-build",
+        reloadRequired: true,
+      },
+    };
+    await page.goto(suite.server.baseUrl);
+    await gateway.waitForRequest("connect");
+    const reloaded = page.waitForEvent("domcontentloaded");
+    await gateway.rejectDeferred("connect", mismatch);
+    await reloaded;
+    await expect.poll(() => documents.length).toBe(2);
+    expect(new URL(documents[1]!).searchParams.has("openclaw_mount_recovery")).toBe(true);
+
+    await gateway.waitForRequest("connect");
+    await page.clock.install();
+    await gateway.rejectDeferred("connect", mismatch);
+    const failure = page.locator('.login-gate__failure[data-kind="protocol-mismatch"]');
+    await failure.waitFor();
+    expect((await failure.textContent())?.toLowerCase()).toContain("supported connection protocol");
+    const refresh = failure.locator(".login-gate__failure-refresh");
+    expect(await refresh.isVisible()).toBe(true);
+    await page.clock.runFor(120_000);
+    expect(documents).toHaveLength(2);
+    expect(await gateway.getRequests("connect")).toHaveLength(1);
+    await page.clock.resume();
+    const before = await takeControlUiScreenshotFrame(page, failure, [refresh], {
+      animations: "disabled",
+    });
+    await writeFile(path.join(artifactDir, "before-manual-recovery.png"), before.png);
+
+    const refreshed = page.waitForEvent("domcontentloaded");
+    await refresh.click();
+    await refreshed;
+    await expect.poll(() => documents.length).toBe(3);
+    await gateway.waitForRequest("connect");
+    await gateway.resolveDeferred("connect");
+    const shell = page.locator("openclaw-app-shell");
+    await shell.waitFor();
+    await expect.poll(() => page.locator("openclaw-login-gate").count()).toBe(0);
+    const after = await takeControlUiScreenshotFrame(page, shell, [page.locator(".shell")], {
+      animations: "disabled",
+    });
+    await writeFile(path.join(artifactDir, "after-manual-recovery.png"), after.png);
+  });
+
   it("lets reload-required recovery outrank a manually pinned login gate", async () => {
     const page = await newPage();
     await page.addInitScript(() => {
@@ -148,14 +211,21 @@ suite.define(() => {
     expect(await page.locator("openclaw-login-gate").count()).toBe(0);
   });
 
-  it("keeps the session header available while disabling Gateway actions on reconnect", async () => {
+  it("keeps offline session actions and layout controls available while reconnecting", async () => {
     const page = await newPage();
-    const sessionKey = "agent:main:main";
+    const mutations = await holdModuleResponse(
+      page,
+      controlUiE2eBuiltModuleRequest("ui/src/lib/sessions/session-mutation-operations.runtime.ts"),
+    );
+    const sessionKey = "agent:main:offline-actions";
     const gateway = await installMockGateway(page, { sessionKey });
 
-    await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey, "dashboard"));
+    await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey, "dashboard"), {
+      waitUntil: "commit",
+    });
     const header = page.locator(".chat-pane__header");
     await header.waitFor({ state: "visible" });
+    mutations.release();
     const actions = header.locator(".chat-header-session-menu__trigger");
     await actions.click();
     const split = page.getByRole("menuitem", { name: "Open split view", exact: true });
@@ -177,7 +247,20 @@ suite.define(() => {
     expect(await outlet.getAttribute("aria-disabled")).toBeNull();
     expect(await header.isVisible()).toBe(true);
 
-    expect(await actions.isVisible()).toBe(false);
+    expect(await actions.isVisible()).toBe(true);
+    await actions.click();
+    const archive = page.getByRole("menuitem", { name: "Archive session", exact: true });
+    await archive.waitFor({ state: "visible" });
+    expect(await archive.isEnabled()).toBe(true);
+    expect(
+      await page.getByRole("menuitem", { name: "Mark as unread", exact: true }).isDisabled(),
+    ).toBe(true);
+    await page.getByRole("menuitem", { name: "Advanced", exact: true }).click();
+    const deleteSession = page.getByRole("menuitem", { name: "Delete…", exact: true });
+    await deleteSession.waitFor({ state: "visible" });
+    expect(await deleteSession.isEnabled()).toBe(true);
+    await actions.click();
+    await deleteSession.waitFor({ state: "hidden" });
     expect(await header.getByRole("button", { name: "Details", exact: true }).isEnabled()).toBe(
       true,
     );
@@ -192,6 +275,9 @@ suite.define(() => {
     await panels.click();
     await sideHeader.waitFor({ state: "hidden" });
     await gateway.setOnline(true);
+    await expect
+      .poll(() => page.evaluate(() => window.openclawControlUi?.snapshot().gatewayPhase))
+      .toBe("connected");
     await actions.waitFor();
     await actions.click();
     expect(await split.isEnabled()).toBe(true);

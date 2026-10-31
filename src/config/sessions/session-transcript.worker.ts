@@ -14,10 +14,7 @@ import { serveOwnedWorkerTasks } from "../../infra/worker-task-server.js";
 import { cloneEnvWithPlatformSemantics } from "../config-env-vars.js";
 import type { SessionIdentityEvidenceResult } from "./session-accessor.sqlite-entry-availability.js";
 import { isSessionHistoryReadOperation } from "./session-history-read-operation-kind.js";
-import {
-  encodeSessionTranscriptWorkerError,
-  encodeSessionTranscriptRequestError,
-} from "./session-history-worker-errors.js";
+import { encodeSessionTranscriptRequestError } from "./session-history-worker-errors.js";
 import { withSessionTranscriptProjectionReceipt } from "./session-transcript-projection-facts-scope.js";
 import {
   withHistoryDatabase,
@@ -29,9 +26,21 @@ import type {
   SessionTranscriptWorkerValues,
 } from "./session-transcript-worker.types.js";
 
-const startup: { databaseEngineSelection?: DatabaseEngineSelection } | undefined = workerData;
+const startup:
+  | { databaseEngineSelection?: DatabaseEngineSelection; prewarmHistory?: true }
+  | undefined = workerData;
 if (startup?.databaseEngineSelection) {
   installDatabaseEngineSelection(startup.databaseEngineSelection);
+}
+
+// Pool tasks can choose any idle worker, including one created first for a light read.
+if (startup?.prewarmHistory) {
+  await Promise.all([
+    import("../../gateway/session-history-worker-reader.js"),
+    import("../../gateway/chat-history-page-kernel.js"),
+    import("../../gateway/chat-history-response-page.js"),
+    import("../../gateway/session-history-snapshot.js"),
+  ]);
 }
 
 let releaseReadValidation:
@@ -162,15 +171,6 @@ serveOwnedWorkerTasks(
         };
       }
       if (request.kind === "prewarm") {
-        // Maintenance needs database admission, not a second resident chat presentation graph.
-        if (request.history) {
-          await Promise.all([
-            import("../../gateway/session-history-worker-reader.js"),
-            import("../../gateway/chat-history-page-kernel.js"),
-            import("../../gateway/chat-history-response-page.js"),
-            import("../../gateway/session-history-snapshot.js"),
-          ]);
-        }
         const { withOpenClawAgentDatabaseReadOnly } =
           await import("../../state/openclaw-agent-db-readonly.js");
         const opened = withOpenClawAgentDatabaseReadOnly(() => undefined, {
@@ -298,7 +298,7 @@ serveOwnedWorkerTasks(
           await import("./session-accessor.sqlite-archive-read.js");
         return {
           kind: "session-archive-presence" as const,
-          registered: readTranscriptArchivePresenceInWorker({
+          registered: await readTranscriptArchivePresenceInWorker({
             ...request,
             env: cloneEnvWithPlatformSemantics(request.env),
           }),
@@ -322,19 +322,10 @@ serveOwnedWorkerTasks(
             }
           : { kind: request.kind, ...cold.readSessionColdStorageInventoryInWorker(options) };
       }
-      if (request.kind === "session-store-target") {
-        const { readSessionStoreTargetResult } =
-          await import("./session-store-target-inventory.js");
-        request.request.env = cloneEnvWithPlatformSemantics(request.request.env);
-        const read = readSessionStoreTargetResult(request.request);
-        if (!read.ok) {
-          const readError = encodeSessionTranscriptWorkerError(read.error);
-          if (!readError) {
-            throw read.error;
-          }
-          return { kind: "session-store-target", readError };
-        }
-        return read.value;
+      if (request.kind === "session-target-prepare" || request.kind === "session-store-target") {
+        const { readSessionStoreTargetWorkerRequest } =
+          await import("./session-store-target.worker.js");
+        return readSessionStoreTargetWorkerRequest(request);
       }
       if (request.kind === "session-retirement-read") {
         const { readSessionRetirementInWorker } =
@@ -448,14 +439,10 @@ serveOwnedWorkerTasks(
       if (request.kind === "projection-status") {
         const { withOpenClawAgentDatabaseReadOnly } =
           await import("../../state/openclaw-agent-db-readonly.js");
-        const { runSqliteReadSnapshotSync } = await import("../../infra/sqlite-transaction.js");
         const { sessionTranscriptIndexNeedsReconcile } =
           await import("./session-transcript-index.js");
         const result = withOpenClawAgentDatabaseReadOnly(
-          ({ db }) =>
-            runSqliteReadSnapshotSync(db, () =>
-              sessionTranscriptIndexNeedsReconcile(db, request.sessionId),
-            ),
+          ({ db }) => sessionTranscriptIndexNeedsReconcile(db, request.sessionId),
           { ...request.database, env: request.env },
         );
         return result.found && result.value;
@@ -557,8 +544,9 @@ serveOwnedWorkerTasks(
       if (request.kind === "goal-operation-receipt") {
         const { withOpenClawAgentDatabaseReadOnly } =
           await import("../../state/openclaw-agent-db-readonly.js");
-        const { readSessionGoalOperationInDatabase, SessionGoalOperationError } =
-          await import("./goals-operations.js");
+        const { readSessionGoalOperationInDatabase } =
+          await import("./goals-operation-receipts.js");
+        const { SessionGoalOperationError } = await import("./goals-operations.types.js");
         const { assertSessionGoalOperationTime } = await import("./goals-operation-policy.js");
         try {
           assertSessionGoalOperationTime(request.operation, Date.now());
@@ -691,7 +679,10 @@ serveOwnedWorkerTasks(
             ? value.result.response?.body
             : undefined;
       const deflated = value.kind === "rpc" ? value.page.encodedMessagesDeflate : undefined;
-      return [...(body ? [body.buffer] : []), ...(deflated ? [deflated.buffer] : [])];
+      const activity = value.kind === "rpc" ? value.page.encodedResponse?.activity : undefined;
+      return [body?.buffer, deflated?.buffer, activity?.buffer].filter(
+        (buffer) => buffer !== undefined,
+      );
     },
     closeResource: (key) => {
       const request = decodeAgentDatabaseReaderRequest(key);

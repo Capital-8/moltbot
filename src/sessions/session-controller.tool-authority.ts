@@ -54,32 +54,30 @@ export function createReplyTurnParticipants(
       // Accepted input stays ambiguous even if its source was revoked at acceptance.
       retentionFailed = true;
     }
-    participants.set(
-      authority.profileId,
-      Object.freeze({
-        profileId: authority.profileId,
-        senderId,
-        name,
-        operatorAuthority: authority,
-        requesterOrigin: input.requesterOrigin,
-        gatewayUiCommandTarget: input.gatewayUiCommandTarget
-          ? Object.freeze({ ...input.gatewayUiCommandTarget })
-          : undefined,
-        assertCurrent: () => {
-          if (closed) {
-            throw new Error("This turn has ended; ask again in a new turn.");
+    // The map owns this record; resolve() publishes a copy.
+    participants.set(authority.profileId, {
+      profileId: authority.profileId,
+      senderId,
+      name,
+      operatorAuthority: authority,
+      requesterOrigin: input.requesterOrigin,
+      gatewayUiCommandTarget: input.gatewayUiCommandTarget
+        ? Object.freeze({ ...input.gatewayUiCommandTarget })
+        : undefined,
+      assertCurrent: () => {
+        if (closed) {
+          throw new Error("This turn has ended; ask again in a new turn.");
+        }
+        try {
+          if (retentionFailed) {
+            throw new Error("Participant authority could not be retained");
           }
-          try {
-            if (retentionFailed) {
-              throw new Error("Participant authority could not be retained");
-            }
-            authority.assertCurrent();
-          } catch {
-            throw new Error(`${name}'s access changed; ask them again`);
-          }
-        },
-      }),
-    );
+          authority.assertCurrent();
+        } catch {
+          throw new Error(`${name}'s access changed; ask them again`);
+        }
+      },
+    });
   };
   if (owner) {
     add(owner);
@@ -102,7 +100,9 @@ export function createReplyTurnParticipants(
       user === undefined ? people[0] : people.find((candidate) => candidate.profileId === user);
     if (user !== undefined && !person) {
       throw new Error(
-        `User is not a participant of this turn.${choices ? ` Choose ${choices}.` : " Ask again from your signed-in Control UI."}`,
+        choices
+          ? `User is not a participant of this turn. Choose ${choices}.`
+          : "This turn has no person authority. A person must resume this work before selecting a user.",
       );
     }
     person?.assertCurrent();
