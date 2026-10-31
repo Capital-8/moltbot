@@ -350,6 +350,10 @@ a.activity-current-work__row:hover {
   font-size: var(--control-ui-text-sm);
 }
 
+.activity-feed__loading {
+  --skeleton-base: var(--skeleton-base-raised);
+}
+
 .activity-pulse--loading {
   height: 108px;
 }

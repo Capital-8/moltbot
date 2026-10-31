@@ -410,6 +410,8 @@
   --skeleton-easing: ease-in-out;
   --skeleton-highlight-strength: 12%;
   --skeleton-sweep-width: 50%;
+  /* Sits past the surface in both modes, so the sweep never passes through the surface color. */
+  --skeleton-base-raised: color-mix(in srgb, var(--muted) 15%, transparent);
   /* Running label sweep: `.text-shimmer`. */
   --text-shimmer-duration: 2.4s;
   --text-shimmer-easing: ease-in-out;

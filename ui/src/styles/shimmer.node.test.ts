@@ -49,6 +49,19 @@ describe("Control UI shimmer ownership", () => {
     expect(carapace).toContain(".oc-skeleton-line {");
     expect(carapace).not.toMatch(/\.oc-skeleton-line[^{]*\{[^}]*background/u);
   });
+
+  it("keeps raised placeholder surfaces on the raised base", () => {
+    for (const sheet of [
+      "activity.css",
+      "chat/composer.css",
+      "memory-import.css",
+      "panel-loading-skeleton.css",
+      "settings.css",
+    ]) {
+      const css = fs.readFileSync(path.join(uiSource, "styles", sheet), "utf8");
+      expect(css, sheet).toContain("--skeleton-base: var(--skeleton-base-raised);");
+    }
+  });
 });
 
 // Decorative glows named "shimmer" animate opacity or filter on artwork, not a sweep.

@@ -214,6 +214,8 @@
 }
 
 .memory-import__loading {
+  --skeleton-base: var(--skeleton-base-raised);
+
   display: grid;
   gap: 12px;
   padding: 12px;

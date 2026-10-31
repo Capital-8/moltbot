@@ -1,4 +1,6 @@
 openclaw-panel-loading-skeleton {
+  --skeleton-base: var(--skeleton-base-raised);
+
   display: block;
   box-sizing: border-box;
   width: 100%;
