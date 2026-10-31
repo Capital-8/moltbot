@@ -244,6 +244,7 @@ describe(acceptanceTitle(9), () => {
       ok: false,
       code: "conflicting_rotation",
       state: { frozen: true },
+      persist: true,
     });
     expect(conflict.events).toContainEqual({
       type: "notify_owners",

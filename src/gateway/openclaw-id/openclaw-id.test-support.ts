@@ -38,8 +38,8 @@ export function memoryStore() {
 }
 
 /** A linked claw and helpers that sign as owner device D1. */
-export async function linkedClaw() {
-  const authority = createOpenClawIdAuthority(memoryStore());
+export async function linkedClaw(store = memoryStore()) {
+  const authority = createOpenClawIdAuthority(store);
   const kGw = formatEd25519PublicKey((await generateEd25519Signer()).publicKey);
   const prep = await authority.prepareLink({
     kSrv: TEST_K_SRV,
@@ -92,7 +92,7 @@ export async function linkedClaw() {
       signer,
       signer === device ? [cert] : [],
     );
-  return { authority, cert, device, root, w1, prep, sign, clawId: prep.claw_id };
+  return { authority, store, cert, device, root, w1, prep, sign, clawId: prep.claw_id };
 }
 
 export type LinkedClaw = Awaited<ReturnType<typeof linkedClaw>>;

@@ -144,6 +144,14 @@ export function createOpenClawIdService(params: {
     runtime.pushMembership(seq, admitted);
   };
 
+  // Accepted writes, and refusals that carry a security transition, have side effects.
+  const applyResult = async <T extends AuthorityAccepted | AuthorityRefusal>(result: T) => {
+    if (result.ok || (result.events?.length ?? 0) > 0) {
+      await applyEvents(result.events ?? []);
+    }
+    return result;
+  };
+
   const reconcile = async () => {
     const config = params.getConfig();
     if (!config || !isOpenClawIdEnabled(config)) {
@@ -323,7 +331,7 @@ export function createOpenClawIdService(params: {
         redeem: (redemption, sender) => owner.redeem(redemption, sender),
         saveCursor: (cursor) => owner.recordDiscovery({ mailbox_cursor: cursor }),
       },
-      onApplied: (result) => applyEvents(result.events),
+      onEffects: applyEvents,
       log: params.log,
     });
   };
@@ -334,13 +342,7 @@ export function createOpenClawIdService(params: {
     const owner = await getAuthority();
     await handleTunnelApiRequest(req, res, peerKey, {
       membership: (key) => owner.ownerView(key),
-      submit: async (statement) => {
-        const result = await owner.submit(statement, "tunnel");
-        if (result.ok) {
-          await applyEvents(result.events);
-        }
-        return result;
-      },
+      submit: async (statement) => applyResult(await owner.submit(statement, "tunnel")),
       registerInvite: async (input) => {
         const result = await owner.registerInvite(input, "tunnel");
         if (result.ok) {
@@ -531,11 +533,7 @@ export function createOpenClawIdService(params: {
       if (!channel) {
         return refusal("not_direct", "membership changes come from an owner device on this claw");
       }
-      const result = await (await getAuthority()).submit(input, channel);
-      if (result.ok) {
-        await applyEvents(result.events);
-      }
-      return result;
+      return await applyResult(await (await getAuthority()).submit(input, channel));
     },
 
     /**

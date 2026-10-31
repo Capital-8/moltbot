@@ -20,6 +20,7 @@ import {
   isOwnerDeviceActive,
   proofKeyHex,
   refuse,
+  refuseWithTransition,
   type AuthorityEvent,
   type AuthorityResult,
   type AuthorityState,
@@ -383,9 +384,9 @@ async function applyRootRotation(
       return applied(state);
     }
     if (previousRoot === rotation.signer && (await hasValidSignature(rotation))) {
-      const frozen = { ...state, frozen: true };
-      return refuse(
-        frozen,
+      // The rotation is refused, but the freeze and the owner alert must take effect.
+      return refuseWithTransition(
+        { ...state, frozen: true },
         "conflicting_rotation",
         `a different rotation into epoch ${epoch} was already accepted`,
         [{ type: "notify_owners", event: "rotation_conflict", ref: String(epoch) }],

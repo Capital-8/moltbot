@@ -83,7 +83,12 @@ export type AuthorityErrorCode =
   | "target_mismatch"
   | "unsupported";
 
-/** Result of a write. The state is unchanged when `ok` is false (events may still be emitted). */
+/**
+ * Result of a write. A refusal leaves the state unchanged unless `persist` is true:
+ * then the statement is still refused, but `state` carries a security transition
+ * (the conflicting-rotation freeze) that the Gateway must persist, and `events` the
+ * side effects it must perform, before it reports the refusal.
+ */
 export type AuthorityResult =
   | { ok: true; status: "applied" | "pending"; state: AuthorityState; events: AuthorityEvent[] }
   | {
@@ -92,16 +97,29 @@ export type AuthorityResult =
       detail: string;
       state: AuthorityState;
       events: AuthorityEvent[];
+      persist?: true;
     };
 
-/** Builds a refusal. */
+/** Builds a refusal that changes nothing. */
 export function refuse(
   state: AuthorityState,
   code: AuthorityErrorCode,
   detail: string,
-  events: AuthorityEvent[] = [],
 ): AuthorityResult {
-  return { ok: false, code, detail, state, events };
+  return { ok: false, code, detail, state, events: [] };
+}
+
+/**
+ * Builds a refusal that still moves the claw into a safer state (`next`) and asks
+ * for side effects. The Gateway persists `next` and performs `events`.
+ */
+export function refuseWithTransition(
+  next: AuthorityState,
+  code: AuthorityErrorCode,
+  detail: string,
+  events: AuthorityEvent[],
+): AuthorityResult {
+  return { ok: false, code, detail, state: next, events, persist: true };
 }
 
 /**

@@ -5,6 +5,7 @@
 import {
   GATEWAY_MAILBOX_KINDS,
   MAILBOX_MAX_WAIT_SECONDS,
+  type AuthorityEvent,
   type MailboxMessage,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
 import type { AuthorityAccepted, AuthorityRefusal, RedemptionSender } from "./authority.js";
@@ -63,13 +64,17 @@ export async function applyMailboxMessage(
   return [];
 }
 
-/** Long-polls the mailbox until stopped; acknowledges what it applied. */
+/**
+ * Long-polls the mailbox until stopped; acknowledges what it applied. `onEffects`
+ * receives the side effects of accepted writes and of refusals that carry them
+ * (a conflicting rotation's freeze alert).
+ */
 export function startMailboxReader(params: {
   clawId: string;
   client: DiscoveryClient;
   sink: MailboxSink;
   cursor: string | null;
-  onApplied: (result: AuthorityAccepted) => Promise<void>;
+  onEffects: (events: AuthorityEvent[]) => Promise<void>;
   log: ReaderLogger;
 }) {
   const controller = new AbortController();
@@ -85,12 +90,13 @@ export function startMailboxReader(params: {
         );
         for (const message of batch.messages) {
           for (const result of await applyMailboxMessage(message, params.sink)) {
-            if (result.ok) {
-              await params.onApplied(result);
-            } else {
+            if (!result.ok) {
               params.log.warn(
                 `openclaw-id: mailbox ${message.payload.kind} refused (${result.code})`,
               );
+            }
+            if (result.ok || (result.events?.length ?? 0) > 0) {
+              await params.onEffects(result.events ?? []);
             }
           }
         }
