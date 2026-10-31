@@ -5,6 +5,7 @@ require "time"
 require "tempfile"
 require "fastlane"
 require_relative "watch_boot_trace"
+require_relative "watch_runtime_admission"
 
 UI = FastlaneCore::UI unless defined?(UI)
 
@@ -21,6 +22,8 @@ udid = nil
 trace = nil
 begin
   facts["imagesBefore"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
+  WatchRuntimeAdmission.wait!
+  facts["admittedAt"] = Time.now.utc.iso8601
   runtimes = JSON.parse(command("xcrun", "simctl", "list", "runtimes", "--json")).fetch("runtimes")
   runtime = runtimes.select { |entry| entry["isAvailable"] && entry.fetch("identifier").include?(".watchOS-") }
     .max_by { |entry| Gem::Version.new(entry.fetch("version")) }
