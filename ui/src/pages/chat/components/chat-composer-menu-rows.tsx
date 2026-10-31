@@ -25,13 +25,17 @@ export function renderCapabilityMenuState(
     ),
   };
 }
-export function menuSection(id: string, title: string, action?: JSX.Element): MenuEntry {
+export function menuSection(
+  id: string,
+  title: string | (() => string),
+  action?: JSX.Element,
+): MenuEntry {
   return {
     kind: "content",
     id,
     content: (
       <div class="agent-chat__capability-menu-section">
-        <span>{title}</span>
+        <span>{typeof title === "function" ? title() : title}</span>
         {action}
       </div>
     ),

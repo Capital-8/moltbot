@@ -56,11 +56,14 @@ function rootRenderInputs(menu: ChatComposerPlusMenuContentProps) {
   return inputs;
 }
 
-function rootItems(menu: ChatComposerPlusMenuContentProps): MenuEntry[] {
+function rootItems(
+  menu: ChatComposerPlusMenuContentProps,
+  sections: Record<"attach" | "capabilities", MenuEntry>,
+): MenuEntry[] {
   const entries: MenuEntry[] = [];
   const canUpload = uploadsEnabled(menu.attachments.uploadConfig);
   if (canUpload) {
-    entries.push(menuSection("attachment-heading", t("chat.composer.menu.attachSection")));
+    entries.push(sections.attach);
     const sources: MenuEntry[] = [];
     const mediaOption = menu.attachments.imagesOnly
       ? (["photo", "image", t("chat.composer.attachPhoto")] as const)
@@ -96,7 +99,7 @@ function rootItems(menu: ChatComposerPlusMenuContentProps): MenuEntry[] {
     if (canUpload) {
       entries.push(menuDivider("attachment-divider"));
     }
-    entries.push(menuSection("capability-heading", t("chat.composer.menu.capabilitiesSection")));
+    entries.push(sections.capabilities);
     entries.push(...(menu.rootToggles ?? []).map(renderCapabilityToggleRow));
   }
   if (!menu.showCapabilities) {
@@ -260,7 +263,14 @@ export function ChatComposerPlusMenuBody(props: ChatComposerPlusMenuResolvedProp
         previous.values.every((value, index) => Object.is(value, next.values[index])),
     },
   );
-  const items = createMemo(() => rootItems(rootInputs().menu), { lazy: true });
+  // Keep content nodes stable so capability updates do not move focused sibling rows.
+  const sections = {
+    attach: menuSection("attachment-heading", () => t("chat.composer.menu.attachSection")),
+    capabilities: menuSection("capability-heading", () =>
+      t("chat.composer.menu.capabilitiesSection"),
+    ),
+  };
+  const items = createMemo(() => rootItems(rootInputs().menu, sections), { lazy: true });
   onSettled(() => {
     if (props.readMenu().overlay.open) {
       props.menu.onLoadSkills();
