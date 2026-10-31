@@ -6,6 +6,7 @@ import {
   activeOwnerCerts,
   fingerprint,
   isAdmitted,
+  isIrohEndpointKey,
   isOwnerDeviceActive,
   linkClaw,
   randomBytes,
@@ -30,6 +31,7 @@ import {
 } from "./claw-store.js";
 import { expirePendingRedemptions } from "./invite-expiry.js";
 import { listInviteViews } from "./invites-view.js";
+import type { OpenClawIdTunnelPrincipal } from "./tunnel-principal.js";
 
 /** What the local link ceremony signs for: the claw's identity and keys. */
 export type LinkPreparation = {
@@ -446,6 +448,34 @@ export function createOpenClawIdAuthority(
         })),
         invites: listInviteViews(current, nowSeconds()),
       };
+    },
+
+    /**
+     * Who the tunnel device `peerKey` is right now: an active owner device, a
+     * member with their role, or undefined when the protocol would not admit it.
+     * An owner device that is also listed as a member is the owner.
+     */
+    async resolvePeer(peerKey: string): Promise<OpenClawIdTunnelPrincipal | undefined> {
+      const state = (await load())?.authority;
+      if (!state || !isIrohEndpointKey(peerKey)) {
+        return undefined;
+      }
+      if (!isAdmitted(state, peerKey, await fingerprint(peerKey))) {
+        return undefined;
+      }
+      const isOwner = Object.values(state.owner_devices).some(
+        (device) =>
+          isOwnerDeviceActive(state, device) && device.cert.body.peer_keys.includes(peerKey),
+      );
+      if (isOwner) {
+        return { kind: "owner", peerKey };
+      }
+      const member = Object.entries(state.members).find(([, entry]) =>
+        entry.peer_keys.includes(peerKey),
+      );
+      return member
+        ? { kind: "member", peerKey, accountId: member[0], role: member[1].role }
+        : undefined;
     },
 
     /** Peer keys the tunnel child may admit right now (members and active owner devices). */
