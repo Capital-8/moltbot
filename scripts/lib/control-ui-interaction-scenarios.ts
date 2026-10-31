@@ -124,6 +124,8 @@ export type InteractionScenario = {
   expected: string;
   /** Opt-in first-open cells; ordinary scenarios retain full warm preparation. */
   firstOpenPhase?: "ready" | "idle";
+  /** Non-menu outcomes measure content readiness without inventing a focus transition. */
+  firstOpenFocus?: "not-applicable";
   /** Diagnostic only: hold one emitted module until the loading assertions finish. */
   moduleGate?: { source: string; outcome: "release" | "reject" };
   verifyWhileLoading?: (page: Page, gateway: MockGatewayControls) => Promise<void>;
@@ -2063,7 +2065,7 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
       await control.verifyReady?.(page, gateway);
       return evidence;
     },
-    verifyAfter: async (page, gateway) => {
+    verifyAfter: async (page, gateway): Promise<InteractionEvidence> => {
       const trigger = page
         .locator(control.revealOnFocus ? triggerSelector : `${triggerSelector}:visible`)
         .first();

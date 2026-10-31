@@ -1323,10 +1323,16 @@ try {
               if (
                 typeof readyAt !== "number" ||
                 typeof activatedAt !== "number" ||
-                typeof contentAt !== "number" ||
-                typeof focusAt !== "number"
+                typeof contentAt !== "number"
               ) {
                 throw new Error("Cold first-open did not retain its phase boundaries");
+              }
+              let usableAt = contentAt;
+              if (scenario.firstOpenFocus !== "not-applicable") {
+                if (typeof focusAt !== "number") {
+                  throw new Error("Cold first-open did not retain its focus boundary");
+                }
+                usableAt = Math.max(contentAt, focusAt);
               }
               // Read resources and write artifacts after the existing action metric cutoff.
               const observed = await page.evaluate(() => ({
@@ -1359,6 +1365,7 @@ try {
                 JSON.stringify(
                   {
                     phase: scenario.firstOpenPhase,
+                    focus: scenario.firstOpenFocus ?? "required",
                     firstReadyAtMs: readyAt,
                     nativeActivationAtMs: activatedAt,
                     ...(typeof evidence.nativeClickAtMs === "number"
@@ -1390,7 +1397,7 @@ try {
                       requests,
                       before.NavigationStart!,
                       activatedAt,
-                      Math.max(contentAt, focusAt),
+                      usableAt,
                     ),
                     beforeActivation: routeNetworkPhase(
                       requests,
