@@ -664,6 +664,42 @@ class DriverTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 m.denied_cache_error({"type": "error", "error": {**event["error"], field: value}})
 
+    def test_shutdown_cancellation_does_not_hide_nonzero_exit_or_publish_private_diagnostics(self):
+        diagnostic=b"Metal teardown failed /Users/test-owner/state/file https://example.invalid/request?q=private 192.0.2.7 owner@example.invalid\nAuthorization: private-fixture-token\n"
+        script="import sys;sys.stderr.buffer.write("+repr(diagnostic)+");sys.stderr.flush();sys.exit(7)"
+        child=m.Child([sys.executable,"-I","-S","-c",script],self.root,{},framed=True,owner=self.proof.children)
+        child.send=lambda *args: None
+        events=iter([{"type":"error","error":{"id":"shutdown-busy","code":"busy"}},{"type":"canceled","id":"shutdown"}])
+        self.proof.receive=lambda *args: next(events)
+        with self.assertRaisesRegex(RuntimeError,"shutdown did not exit cleanly \\(exit 7\\)"):
+            self.proof.active_cancel(child,"shutdown",shutdown=True)
+        self.assertEqual(self.proof.result["requests"][-1]["events"],["busy","canceled"])
+        receipt=self.proof.result["helperExits"][-1]
+        self.assertEqual(receipt["returnCode"],7)
+        self.assertIsNone(receipt["signal"])
+        self.assertTrue(receipt["joined"] and child.joined())
+        self.assertEqual(receipt["stderrBytes"],len(diagnostic))
+        self.assertEqual(receipt["stderrSHA256"],hashlib.sha256(diagnostic).hexdigest())
+        self.assertIn("Metal teardown failed",receipt["stderrTail"])
+        for private in ["test-owner","example.invalid","192.0.2.7","private-fixture-token"]:
+            self.assertNotIn(private,receipt["stderrTail"])
+        self.assertFalse(self.proof.result["complete"])
+
+    def test_shutdown_signal_and_large_diagnostic_are_retained_without_unbounded_output(self):
+        diagnostic=b"x"*70000+b"\nMetal teardown failed\n"
+        script="import os,signal,sys;sys.stderr.buffer.write("+repr(diagnostic)+");sys.stderr.flush();os.kill(os.getpid(),signal.SIGTERM)"
+        child=m.Child([sys.executable,"-I","-S","-c",script],self.root,{},framed=True,owner=self.proof.children)
+        with self.assertRaisesRegex(RuntimeError,"shutdown did not exit cleanly"):
+            self.proof.join_helper(child,time.monotonic()+5,"signal-shutdown")
+        receipt=self.proof.result["helperExits"][-1]
+        self.assertEqual(receipt["returnCode"],-signal.SIGTERM)
+        self.assertEqual(receipt["signal"],signal.SIGTERM)
+        self.assertEqual(receipt["stderrBytes"],len(diagnostic))
+        self.assertEqual(receipt["stderrSHA256"],hashlib.sha256(diagnostic).hexdigest())
+        self.assertLessEqual(len(receipt["stderrTail"]),2048)
+        self.assertTrue(receipt["stderrTailTruncated"])
+        self.assertIn("Metal teardown failed",receipt["stderrTail"])
+
     def test_model_bytes_and_cache_containment_are_verified(self):
         original = m.FILES
         try:

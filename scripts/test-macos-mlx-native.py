@@ -429,6 +429,8 @@ class Child:
         self.events = []
         self.stdout = bytearray()
         self.stderr = bytearray()
+        self.stderr_bytes = 0
+        self.stderr_hash = hashlib.sha256()
         self.on_tick = None
         self.discard = False
         self.quiet_limit = quiet_limit
@@ -461,6 +463,9 @@ class Child:
                 self.selector.unregister(key.fileobj)
                 key.fileobj.close()
                 continue
+            if key.data == "stderr":
+                self.stderr_bytes += len(data)
+                self.stderr_hash.update(data)
             if self.discard:
                 continue
             if self.quiet_limit is not None:
@@ -1094,11 +1099,29 @@ class Proof:
         require(self.receive(child, deadline) == {"type": "canceled", "id": name}, "active request was not canceled before producing audio")
         self.result["requests"].append({"id": name, "events": ["busy", "canceled"], "kernelInterruptionProven": False})
         if shutdown:
-            require(child.join(deadline) == 0, "shutdown did not exit cleanly")
+            self.join_helper(child, deadline, name)
+
+    def join_helper(self, child, deadline, name):
+        started = time.monotonic()
+        code = child.join(deadline)
+        diagnostics = child.stderr.decode(errors="replace")
+        # Native diagnostics can contain paths and request URLs; publish only a bounded, redacted tail.
+        diagnostics = re.sub(r"(?:https?://|/)[^\s\"'<>]+", "<redacted-path-or-url>", diagnostics)
+        diagnostics = re.sub(r"(?im)^.*(?:authorization|cookie|token|password|secret|api[-_]?key).*$", "<redacted-sensitive-line>", diagnostics)
+        diagnostics = re.sub(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", "<redacted-address>", diagnostics)
+        diagnostics = re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "<redacted-email>", diagnostics)
+        self.result.setdefault("helperExits", []).append({
+            "id": name, "returnCode": code, "signal": -code if code < 0 else None,
+            "joinSeconds": time.monotonic() - started, "joined": True,
+            "stderrBytes": child.stderr_bytes, "stderrSHA256": child.stderr_hash.hexdigest(),
+            "stderrTail": diagnostics[-2048:],
+            "stderrTailTruncated": child.stderr_bytes > len(child.stderr) or len(diagnostics) > 2048,
+        })
+        require(code == 0, f"shutdown did not exit cleanly (exit {code})")
 
     def stop_helper(self, child):
         child.send({"type": "shutdown"}, self.budget.deadline(10))
-        require(child.join(self.budget.deadline(15)) == 0, "helper shutdown failed")
+        self.join_helper(child, self.budget.deadline(15), "idle-shutdown")
 
     def extended(self, fixed):
         self.result["controls"] = {"fixed": self.controls(fixed)}
