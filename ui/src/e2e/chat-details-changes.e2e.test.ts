@@ -138,7 +138,7 @@ suite.define(() => {
     },
   );
 
-  it("separates read-only Uncommitted summary and patch demand and recovers retained counts", async () => {
+  it("loads read-only Environment totals separately from Review patches and recovers retained counts", async () => {
     await suite.withPage({ viewport: { width: 1180, height: 800 } }, async ({ page }) => {
       await page.clock.install();
       const result = (additions: number, deletions: number) => ({
@@ -212,6 +212,7 @@ suite.define(() => {
       await action.click();
       const review = page.locator(".session-diff");
       await readCount().toBe(4);
+      expect((await reads())[3]?.params).not.toHaveProperty("summaryOnly");
       await expect.poll(() => review.getAttribute("aria-busy")).toBe("true");
 
       // The older summary cannot complete Review or replace its retained counts.
@@ -219,15 +220,18 @@ suite.define(() => {
       await expect.poll(() => review.getAttribute("aria-busy")).toBe("true");
       expect(await action.textContent()).toContain("+248");
       expect(await action.textContent()).toContain("−61");
-      expect(await review.textContent()).not.toContain("full patch result");
+      expect(await review.textContent()).not.toContain("recovered navigation");
 
-      const recovered = result(12480, 1030);
+      const recovered = { ...result(12480, 1030), truncated: true };
       await gateway.resolveDeferred(
         "sessions.diff",
         {
           ...recovered,
-          truncated: true,
-          files: [{ ...recovered.files[0], patch: "@@ -1 +1 @@\n-before\n+full patch result" }],
+          files: recovered.files.map((file) =>
+            Object.assign({}, file, {
+              patch: "@@ -1 +1 @@\n-old navigation\n+recovered navigation\n",
+            }),
+          ),
         },
         { match: patchParams, exactParams: true },
       );
@@ -244,9 +248,13 @@ suite.define(() => {
       ).toBe("Uncommitted");
       expect(await review.locator(".session-diff__filename").allTextContents()).toEqual(["app.ts"]);
       await review.locator(".session-diff__file-toggle").click();
-      await expect.poll(() => review.textContent()).toContain("full patch result");
+      await expect.poll(() => review.textContent()).toContain("recovered navigation");
+      await expect
+        .poll(() => review.locator(".chat-diff__row--add").textContent())
+        .toContain("recovered navigation");
       expect(await reads()).toHaveLength(4);
       expect(await gateway.getRequests("sessions.diff", summaryMatch)).toHaveLength(3);
+      expect(await gateway.getRequests("sessions.diff", { summaryOnly: true })).toHaveLength(3);
       expect(
         await gateway.getRequests("sessions.diff", patchParams, { exactParams: true }),
       ).toHaveLength(1);
