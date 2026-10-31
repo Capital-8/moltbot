@@ -270,3 +270,8 @@ export const validateTranscriptsStatusParams = createProtocolValidator(
   S.TranscriptsStatusParamsSchema,
   Checks.isTranscriptsStatusParams,
 );
+
+export const validateUsersChannelIdentityParams = createProtocolValidator(
+  S.UsersChannelIdentityParamsSchema,
+  Checks.isUsersChannelIdentityParams,
+);

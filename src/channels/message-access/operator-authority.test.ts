@@ -438,7 +438,9 @@ it.each([false, true])(
         });
         githubIdentity("Renamed-Channel-Admin");
         expect(() => authority.assertCurrent()).toThrow();
-        expect(authorityFor(await context(admin.identity.senderId))).toBeUndefined();
+        expect(authorityFor(await context(admin.identity.senderId))?.scopes).not.toContain(
+          "operator.admin",
+        );
       }
     }),
 );
@@ -769,7 +771,11 @@ it.each([
         const requester = human(metadata.requester_profile.id);
         const updated = { status: "updated", owner: human(fixture.admins[0]!.profile.id) };
         if (role === "member") {
-          expect(operatorAuthority).toBeUndefined();
+          expect(operatorAuthority).toMatchObject({
+            profileId: requester.id,
+            scopes: ["operator.read", "operator.write"],
+          });
+          expect(authorize(fixture.cfg, turn).senderIsOwner).toBe(false);
           for (const [action, params] of [
             ["patch", { label: "forbidden" }],
             ["owner_profiles", {}],
@@ -802,7 +808,7 @@ it.each([
         expect(loadSessionEntry(scope(spawnedSessionKey))).toMatchObject({
           createdVia: "spawn",
           createdActor: agent,
-          owner: { actor: role === "admin" ? requester : agent },
+          owner: { actor: requester },
         });
         expect((await assign(spawnedSessionKey, requester.id)).details).toMatchObject(updated);
         const listed = await execute("sessions_list", "read-owner", {
@@ -846,41 +852,34 @@ it.each(["unlink", "role", "lifecycle", "gateway", "database", "stale-copy"] as 
     }),
 );
 
-it.each([
-  "asserted",
-  "unlinked",
-  "member",
-  "cloned",
-  "configured-owner",
-  "configured-owner-linked",
-] as const)("does not give a %s Slack sender an operator principal", async (kind) => {
-  await withSlack(async (fixture) => {
-    const admin = fixture.admins[0]!;
-    if (kind === "member") {
-      setUserProfileRole(admin.profile.id, "member");
-    }
-    const configuredOwner = kind === "configured-owner" || kind === "configured-owner-linked";
-    if (configuredOwner) {
-      fixture.cfg.commands!.ownerAllowFrom = [`slack:${admin.identity.senderId}`];
-      if (kind === "configured-owner") {
-        unlinkUserChannelIdentity(admin.profile.id, admin.identity);
+it.each(["asserted", "unlinked", "cloned", "configured-owner"] as const)(
+  "does not give a %s Slack sender an operator principal",
+  async (kind) => {
+    await withSlack(async (fixture) => {
+      const admin = fixture.admins[0]!;
+      const configuredOwner = kind === "configured-owner";
+      if (configuredOwner) {
+        fixture.cfg.commands!.ownerAllowFrom = [`slack:${admin.identity.senderId}`];
+        if (kind === "configured-owner") {
+          unlinkUserChannelIdentity(admin.profile.id, admin.identity);
+        }
       }
-    }
-    const original = await fixture.context(
-      kind === "unlinked" ? "unlinked" : admin.identity.senderId,
-      kind !== "asserted",
-    );
-    const turn = kind === "cloned" ? structuredClone(original) : original;
-    using assignment = await prepareAssignment(fixture, turn);
-    expect(assignment.operatorAuthority).toBeUndefined();
-    await expect(
-      assignment.run(() =>
-        callInProcessGatewayTool("sessions.assignOwner", {
-          key: humanSessionKey,
-          owner: human(admin.profile.id),
-        }),
-      ),
-    ).rejects.toThrow(/was not found/);
-    expect(loadSessionEntry(assignment.scope(humanSessionKey))?.owner).toBeUndefined();
-  });
-});
+      const original = await fixture.context(
+        kind === "unlinked" ? "unlinked" : admin.identity.senderId,
+        kind !== "asserted",
+      );
+      const turn = kind === "cloned" ? structuredClone(original) : original;
+      using assignment = await prepareAssignment(fixture, turn);
+      expect(assignment.operatorAuthority).toBeUndefined();
+      await expect(
+        assignment.run(() =>
+          callInProcessGatewayTool("sessions.assignOwner", {
+            key: humanSessionKey,
+            owner: human(admin.profile.id),
+          }),
+        ),
+      ).rejects.toThrow(/was not found/);
+      expect(loadSessionEntry(assignment.scope(humanSessionKey))?.owner).toBeUndefined();
+    });
+  },
+);

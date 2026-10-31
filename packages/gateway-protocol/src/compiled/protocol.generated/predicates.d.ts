@@ -795,6 +795,11 @@ export function isTranscriptsStatusParams(
 ): value is import("typebox").Static<
   typeof import("../../schema-modules.js").TranscriptsStatusParamsSchema
 >;
+export function isUsersChannelIdentityParams(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").UsersChannelIdentityParamsSchema
+>;
 export function isMessageActionParams(
   value: unknown,
 ): value is import("typebox").Static<
