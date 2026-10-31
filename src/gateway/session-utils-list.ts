@@ -383,7 +383,7 @@ export function prepareSessionRowSelection(
         (runtimeResolution ??= createSessionRuntimeResolution(cfg)),
       );
     },
-    modelSearchMayMatch: (search: string) => projection.modelSearchMayMatch(search),
+    modelSearchMayMatch: (search: string) => projection.modelSearchMayMatch(search, rowContext),
   };
 }
 
