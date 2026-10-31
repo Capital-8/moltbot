@@ -620,7 +620,6 @@ async function readProjectedSessions(params: {
         const { now, presentationForRead, prepared, selection } = page;
         const presentation = measurePreparation(() => presentationForRead(read));
         const resumed = performance.now();
-        const { cfg, getTarget } = prepared;
         diagnostics?.mark("sharing");
         diagnostics?.mark("rows");
         const rowsStarted = performance.now();
@@ -640,8 +639,7 @@ async function readProjectedSessions(params: {
             })),
           );
           for (let index = 0; index < selection.entries.length; index++) {
-            const [key] = selection.entries[index]!;
-            const target = getTarget(key);
+            const target = prepared.getTarget(selection.entries[index]![0]);
             if (!target) {
               continue;
             }
@@ -677,13 +675,13 @@ async function readProjectedSessions(params: {
             prepared,
             { ...selection, now, storePath: prepared.storePath },
             params.acceptsSerializedJson ? presentation.list(sessions, opts) : { sessions },
-            context?.getCommittedRuntimeConfig?.() ?? cfg,
+            context?.getCommittedRuntimeConfig?.() ?? prepared.cfg,
             client,
           );
           if (client !== undefined) {
             result.defaults.modelSelectionTarget = resolveGatewayModelSelectionPolicy({
               callerScopes: client?.connect?.scopes ?? [],
-              cfg,
+              cfg: prepared.cfg,
             }).target;
           }
           diagnostics?.mark("visibilityRepair");
