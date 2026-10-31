@@ -117,12 +117,9 @@ refresh the model catalog and choose an `acp-qoder/<model-id>` entry. Qoder CLI
 uses each advertised ID unchanged, including any slashes;
 it does not supply a static model list or an OpenClaw API credential.
 
-The pinned acpx launcher remains `qodercli --acp`. If your installation exposes
-only the `qoder` executable documented by Qoder, set
-`plugins.entries.acpx.config.agents.qoder` to
-`{ "command": "qoder", "args": ["--acp"] }`. This override applies to both native
-chat and classic ACP sessions. Configure custom providers and billing choices in
-Qoder itself. Qoder CLI is separate from QoderWork.
+The pinned acpx launcher is `qodercli --acp`. Make `qodercli` available on `PATH`
+for the OS account that runs the Gateway. Configure custom providers and billing
+choices in Qoder itself. Qoder CLI is separate from QoderWork.
 
 Set `plugins.entries.acpx.config.nativeAgents.qoder` to `false` to disable new
 native Qoder turns and catalog discovery. Classic `/acp spawn qoder` sessions

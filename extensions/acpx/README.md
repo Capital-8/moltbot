@@ -77,10 +77,9 @@ Classic ACP sessions keep their configured `permissionMode`. The ACP client's
 delegated filesystem remains rooted at its session cwd; this is not a sandbox for
 the native process's own filesystem access.
 
-Qoder uses the existing `qodercli --acp` launcher. If your installation exposes only
-`qoder`, configure `plugins.entries.acpx.config.agents.qoder` with
-`{ "command": "qoder", "args": ["--acp"] }`. Qoder owns its login, account model
-catalog, custom providers, and billing. See the
+Qoder uses the pinned `qodercli --acp` launcher. Make `qodercli` available on `PATH`
+for the Gateway's OS account. Qoder owns its login, account model catalog, custom
+providers, and billing. See the
 [Qoder setup notes](https://docs.openclaw.ai/tools/acp-agents-setup#qoder-cli-in-native-chat).
 
 Catalog refresh closes its local connection. The native agent owns any history it creates.
