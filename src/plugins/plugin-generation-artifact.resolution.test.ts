@@ -50,6 +50,16 @@ it("initializes the package resolver only when capture needs it", async () => {
 
 it.each([
   ["read-only URL", "", false],
+  [
+    "dynamic URL loop",
+    "export function locate(files) { const urls = []; for (const file of files) urls.push(new URL(file, import.meta.url)); return urls; }",
+    false,
+  ],
+  [
+    "metadata URL input",
+    "export const self = () => new URL(import.meta.url, import.meta.url);",
+    true,
+  ],
   ["URL assignment", "import.meta.url = 'https://localhost';", true],
   ["URL destructuring", "({ href: import.meta.url } = new URL('https://localhost'));", true],
   ["dirname", "export const directory = import.meta.dirname;", true],

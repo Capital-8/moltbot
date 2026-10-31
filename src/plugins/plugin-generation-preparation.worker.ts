@@ -335,11 +335,9 @@ function createPreparationSession(context: CaptureCommand) {
                 throw new Error("Plugin source custody digest changed during preparation");
               }
               if (command.retainSourceCustody) {
-                const custody = artifact.retainSourceCustody();
-                // Forks own independent bytes and must never become seed resources.
-                const fork = custody.source.fork.bind(custody.source);
-                forkSourceCustody = () => ({ source: fork(), files: custody.files });
-                ownRecovery(custody.source);
+                // Keep the admitted artifact pristine. Each consumer copies it once,
+                // with independent custody; no extra seed copy is needed.
+                forkSourceCustody = artifact.retainSourceCustody.bind(artifact);
               }
               const captureRecovery = artifact.captureRecoverySource.bind(artifact);
               artifact.captureRecoverySource = markPluginSourceCaptureOperation(() =>
@@ -352,7 +350,6 @@ function createPreparationSession(context: CaptureCommand) {
                 return custody;
               });
               if (command.retainSourceCustody) {
-                await artifact.disposeAsync();
                 result = { sourceDigest: artifact.sourceDigest };
               } else {
                 result = artifact;

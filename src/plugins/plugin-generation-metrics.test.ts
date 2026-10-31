@@ -141,7 +141,7 @@ it("accounts for retained custody copies separately from original bytes", async 
             captures: 2,
             captureReuse: 1,
             originalBytes: bytes,
-            copiedBytes: bytes * 3,
+            copiedBytes: bytes * 2,
             receiptPasses: 2,
             receiptFileReads: files.length * 2,
             receiptReadBytes: bytes * 2,

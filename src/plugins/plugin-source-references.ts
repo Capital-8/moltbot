@@ -349,8 +349,7 @@ function parseNativePluginJavaScript(source: string, sourceText: string): Progra
           grandparent.callee.type === "Identifier" &&
           grandparent.callee.name === "URL" &&
           grandparent.arguments.length === 2 &&
-          grandparent.arguments[1] === parent &&
-          staticString(grandparent.arguments[0]) !== undefined)
+          grandparent.arguments[1] === parent)
       );
     }
     // Jiti moves declarations around resource disposal blocks, changing reference order.
