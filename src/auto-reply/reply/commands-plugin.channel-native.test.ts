@@ -228,6 +228,8 @@ async function withChannelCommandPlugin(
       bindLegacyPluginSdkResourceHost(resolveGatewayContext, sdkHost);
       let registry: PluginRegistry | undefined;
       const blockers: string[] = [];
+      const sdkHost = new LegacyPluginSdkResourceHost();
+      bindLegacyPluginSdkResourceHost(resolveGatewayContext, sdkHost);
       try {
         registry = loadOpenClawPlugins({
           config: cfg,
@@ -349,18 +351,22 @@ async function withChannelCommandPlugin(
           },
         });
       } finally {
-        for (const blocker of blockers.splice(0)) {
-          releaseSwarmRun(blocker);
+        try {
+          for (const blocker of blockers.splice(0)) {
+            releaseSwarmRun(blocker);
+          }
+          Reflect.deleteProperty(globalThis, bridge);
+          resetGlobalHookRunner();
+          resetPluginRuntimeStateForTest();
+          if (registry) {
+            await expect(disposePluginRegistryInstances(registry)).resolves.toMatchObject({
+              failures: [],
+            });
+          }
+          await expect(waitForPluginCacheRetirement()).resolves.toMatchObject({ failures: [] });
+        } finally {
+          await sdkHost.close();
         }
-        Reflect.deleteProperty(globalThis, bridge);
-        resetGlobalHookRunner();
-        resetPluginRuntimeStateForTest();
-        if (registry) {
-          await expect(disposePluginRegistryInstances(registry)).resolves.toMatchObject({
-            failures: [],
-          });
-        }
-        await expect(waitForPluginCacheRetirement()).resolves.toMatchObject({ failures: [] });
       }
     },
     options.authority ?? "role",
