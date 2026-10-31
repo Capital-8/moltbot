@@ -32,7 +32,7 @@ import {
   runtimeManifestSha256,
   type DesktopFixture,
 } from "./crabbox-worker-node-enrollment.test-support.js";
-import { createCrabboxNodeResumeScript } from "./crabbox-worker-node-resume.js";
+import { createCrabboxNodeResumeScript } from "./crabbox-worker-node-process.js";
 import { resolveCrabboxProvisionProfile } from "./crabbox-worker-profile.js";
 import { commandResult } from "./crabbox-worker-provider.test-support.js";
 import { SCRUB_WORKER_STATE } from "./crabbox-worker-warm-image-scrub.js";

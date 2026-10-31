@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
-import { createDeferred } from "../../test/helpers/promise.js";
+import { createDeferred, withinTest } from "../../test/helpers/promise.js";
 import { TEST_TLS_CERT_PEM, TEST_TLS_KEY_PEM } from "../../test/helpers/tls-fixture.js";
 import { registerPreparedModelRuntimeClose } from "../agents/prepared-model-runtime.lifecycle.js";
 import type { OpenClawConfig } from "../config/config.js";
@@ -436,9 +436,9 @@ describe("Gateway startup lifetime", () => {
     },
   );
 
-  it.each(["clean", "failed", "held-process", "held-embedded"] as const)(
+  it.for(["clean", "failed", "held-process", "held-embedded"] as const)(
     "releases post-ready work and joins or bounds startup rollback (%s)",
-    async (mode) => {
+    async (mode, { signal }) => {
       const port = await getFreePort();
       await using state = await createStartupTestState("gateway-post-ready-startup-failure");
       const startupError = new Error("startup failed after post-attach installation");
@@ -539,6 +539,9 @@ describe("Gateway startup lifetime", () => {
             releasePrelude.resolve();
             await lateStopEntered.promise;
             await vi.advanceTimersByTimeAsync(5_000);
+            // Advancing the clock expires cleanup, but does not join startup
+            // rejection propagation. Keep the clock frozen and the sidecar held.
+            await withinTest(startupOutcome, signal);
           }
           expect(settled).toHaveBeenCalledTimes(processOwned ? 1 : 0);
           releaseStop.resolve();
