@@ -1517,6 +1517,7 @@ async function runLane(
   const noOutputTimeoutMs = lane.noOutputTimeoutMs;
   const logFile = path.join(logDir, `${name}.log`);
   const env = laneEnv(lane, baseEnv, logDir);
+  delete env.DOCKER_E2E_CONTAINER_CIDFILE;
   const recoveryIndex = installedRecoveryLaneNames.indexOf(name);
   if (recoveryIndex !== -1) {
     // Candidate-writable evidence stays outside uploads, unique to this attempt.
@@ -1530,6 +1531,9 @@ async function runLane(
     );
     const attempt = await fs.promises.mkdtemp(path.join(privateRoot, `${name}-`));
     await fs.promises.chmod(attempt, 0o700);
+    // Keep Docker's identity outside the candidate mount so host finalization
+    // can settle the producer even when the lane's cleanup is killed.
+    env.DOCKER_E2E_CONTAINER_CIDFILE = path.join(attempt, "producer.cid");
     const evidence = path.join(attempt, "evidence");
     const gid = process.getgid?.();
     assert(gid !== undefined, "Installed recovery requires a POSIX evidence owner");
@@ -1575,14 +1579,15 @@ async function runLane(
   let publicationError: { cause: unknown } | undefined;
   if (recoveryIndex !== -1) {
     // The killed lane cannot publish its own interruption. This independent
-    // bounded host command starts only after runShellCommand joins the group/log.
+    // bounded host command joins the daemon producer after the host group/log,
+    // before the publisher can read candidate-writable evidence.
     try {
       // Normal admission stays closed. Finalization follows successful execution
       // cleanup and retains the same process/log custody and later-signal handling.
       const destination = await fs.promises.mkdtemp(path.join(logDir, `${name}-diagnostics-`));
       await activeChildrenShutdownPromise;
       const publication = await runOwnedShellCommand({
-        command: [
+        command: `source ${shellQuote(path.join(HARNESS_ROOT_DIR, "scripts/lib/docker-e2e-container.sh"))} && docker_e2e_settle_container_cidfile ${shellQuote(env.DOCKER_E2E_CONTAINER_CIDFILE!)} && exec ${[
           process.execPath,
           "--import",
           path.join(HARNESS_ROOT_DIR, "scripts/tsx.mjs"),
@@ -1596,7 +1601,7 @@ async function runLane(
           packageSha256 ?? "",
         ]
           .map(shellQuote)
-          .join(" "),
+          .join(" ")}`,
         env,
         label: `${name}-diagnostics`,
         logFile,

@@ -569,12 +569,10 @@ docker_e2e_build_or_reuse "$IMAGE_NAME" upgrade-survivor "$ROOT_DIR/scripts/e2e/
 if [ "$SCENARIO" = "package-installed-recovery" ]; then
   recovery_image="$IMAGE_NAME"
   recovery_name=""
-  recovery_args=()
   if is_scheduler_installed_recovery && [ "$OPENCLAW_UPGRADE_SURVIVOR_INSTALLED_RECOVERY_CUT" = partial-previous ]; then
     recovery_name="openclaw-recovery-$(basename "$(dirname "$ARTIFACT_DIR")")"
     recovery_image="$(docker_e2e_docker_with_timeout 10s image inspect --format '{{.Id}}' "$IMAGE_NAME")"
     [[ "$recovery_image" =~ ^sha256:[a-f0-9]{64}$ ]]
-    recovery_args=(--name "$recovery_name")
   fi
   docker_e2e_run_with_harness \
     --init \
@@ -588,14 +586,13 @@ if [ "$SCENARIO" = "package-installed-recovery" ]; then
     ${DOCKER_E2E_PACKAGE_ARGS[@]+"${DOCKER_E2E_PACKAGE_ARGS[@]}"} \
     -e OPENCLAW_E2E_COMMAND_TIMEOUT="$COMMAND_TIMEOUT" \
     ${DOCKER_RUN_USER_ARGS[@]+"${DOCKER_RUN_USER_ARGS[@]}"} \
-    ${recovery_args[@]+"${recovery_args[@]}"} "$recovery_image" \
+    "$recovery_image" \
     timeout --kill-after=30s "$DOCKER_RUN_TIMEOUT" \
     bash /tmp/openclaw-release-harness/scripts/e2e/lib/upgrade-survivor/installed-recovery.sh
   if [ -n "$recovery_name" ]; then
     # A joined host CLI alone does not prove container settlement. These two
     # serial, offline readers consume the same image only after that proof.
-    state="$(docker_e2e_docker_with_timeout 10s ps -a --filter "name=^/${recovery_name}$" --format '{{.State}}')"
-    [ -z "$state" ] || [ "$state" = exited ]
+    docker_e2e_settle_container_cidfile "${DOCKER_E2E_CONTAINER_CIDFILE:?missing scheduler producer CID path}"
     read -r producer_uid reader_uid reader_gid < <(node -e '
       const fs = require("node:fs"), path = require("node:path");
       const root = process.argv[1], host = process.getuid(), group = process.getgid();

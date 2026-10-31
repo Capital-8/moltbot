@@ -24,6 +24,8 @@ export function copyDockerSchedulerHarness(root: string) {
   for (const fileName of [
     "docker-e2e-plan.mts",
     "docker-e2e-scenarios.mts",
+    "docker-e2e-container.sh",
+    "docker-e2e-resource-diagnostics.sh",
     "local-check-runtime.mts",
     "managed-child-process.mts",
     "managed-cleanup-handoff.mts",

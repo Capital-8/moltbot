@@ -1938,6 +1938,82 @@ heartbeat_elapsed="\${BASH_REMATCH[1]}"
     await runDockerSnippet(script, signal);
   });
 
+  it("retains externally owned producer identity when wrapper cleanup fails", async ({
+    signal,
+  }) => {
+    const workDir = tempDirs.make("docker-retained-cid-");
+    await runDockerSnippet(
+      repoShell(workDir)`
+source "$ROOT_DIR/scripts/lib/docker-e2e-package.sh"
+export DOCKER_E2E_CONTAINER_CIDFILE="$TMPDIR/attempt/producer.cid"
+mkdir -m 700 "$TMPDIR/attempt"
+docker_e2e_harness_mount_args() { DOCKER_E2E_HARNESS_ARGS=(--init); }
+docker_e2e_docker_run_cmd() {
+  test "$1" = run && test "$2" = --cidfile
+  test "$3" = "$DOCKER_E2E_CONTAINER_CIDFILE"
+  test ! -e "$3"
+  printf '%064d' 0 >"$3"
+  return 7
+}
+docker_e2e_docker_cmd() { return 23; }
+docker_e2e_print_failed_container_state() { :; }
+docker_e2e_run_with_harness image true || status="$?"
+test "$status" = 7
+test -d "$TMPDIR/attempt"
+test "$(wc -c <"$DOCKER_E2E_CONTAINER_CIDFILE")" -eq 64
+`,
+      signal,
+    );
+  });
+
+  it.for([
+    "missing",
+    "empty",
+    "partial",
+    "symlink",
+    "directory",
+    "removed",
+    "query-error",
+    "still-present",
+  ])("requires positive producer settlement for %s CID state", async (mode, { signal }) => {
+    const workDir = tempDirs.make("docker-producer-settlement-");
+    await runDockerSnippet(
+      repoShell(workDir)`
+source "$ROOT_DIR/scripts/lib/docker-e2e-container.sh"
+cidfile="$TMPDIR/producer.cid"
+mode=${mode}
+case "$mode" in
+  missing) ;;
+  empty) : >"$cidfile" ;;
+  partial) printf broken >"$cidfile" ;;
+  symlink) printf '%064d' 0 >"$TMPDIR/foreign.cid"; ln -s "$TMPDIR/foreign.cid" "$cidfile" ;;
+  directory) mkdir "$cidfile" ;;
+  *) printf '%064d' 0 >"$cidfile" ;;
+esac
+docker() {
+  printf '%s\\n' "$1" >>"$TMPDIR/commands"
+  if [ "$1" = rm ]; then
+    test "$2" = -f && test "$3" = "$(printf '%064d' 0)" || return 99
+    return 23
+  fi
+  test "$1" = ps && test "$4" = --filter && test "$5" = "id=$(printf '%064d' 0)" || return 99
+  [ "$mode" != query-error ] || return 23
+  [ "$mode" != still-present ] || printf '%064d\\n' 0
+}
+status=0
+docker_e2e_settle_container_cidfile "$cidfile" || status="$?"
+case "$mode" in
+  missing|empty) test "$status" = 0; test ! -e "$TMPDIR/commands" ;;
+  partial|symlink|directory) test "$status" = 1; test ! -e "$TMPDIR/commands" ;;
+  removed) test "$status" = 0 ;;
+  *) test "$status" = 1 ;;
+esac
+[ ! -e "$TMPDIR/commands" ] || test "$(cat "$TMPDIR/commands")" = $'rm\\nps'
+`,
+      signal,
+    );
+  });
+
   describe.each(process.platform === "darwin" ? ["/bin/bash", "bash"] : ["/bin/bash"])(
     "%s EXIT-trap Docker status",
     (shell) => {
@@ -1989,6 +2065,92 @@ exit ${entryStatus}
           expect(result.stdout).toBe(`${commandStatus}\n`);
         },
       );
+    },
+  );
+
+  it.for(["native", "node-watchdog"])(
+    "joins the retained-CID launcher before a delayed container start with %s timeout",
+    async (mode, { signal }) => {
+      const workDir = tempDirs.make("docker-retained-cid-launcher-");
+      const ready = join(workDir, "ready");
+      const cidfile = join(workDir, "producer.cid");
+      const lateStart = join(workDir, "late-start");
+      const dockerPidFile = join(workDir, "docker.pid");
+      const monitorPidFile = join(workDir, "monitor.pid");
+      const dockerSource = `
+import fs from 'node:fs';
+${fixtureReceiptClientSource(receipts.endpoint)}
+process.on('SIGTERM', () => {});
+process.on('SIGUSR1', () => {
+  fs.writeFileSync(process.env.DOCKER_E2E_CONTAINER_CIDFILE, 'a'.repeat(64));
+  fs.writeFileSync(${JSON.stringify(lateStart)}, 'producer started after host settlement');
+  process.exit(0);
+});
+fs.writeFileSync(${JSON.stringify(dockerPidFile)}, String(process.pid));
+fs.writeFileSync(${JSON.stringify(monitorPidFile)}, String(process.ppid));
+fs.writeFileSync(${JSON.stringify(ready)}, 'ready');
+sendReceipt(${JSON.stringify(ready)}, 'ready');
+setInterval(() => {}, 1000);
+`;
+      writeExecutables(join(workDir, "bin"), {
+        docker: `#!/bin/bash\nexec ${shellQuote(process.execPath)} --input-type=module -e ${shellQuote(dockerSource)} -- "$@"\n`,
+      });
+      const script = repoShell(workDir)`
+export PATH="$TMPDIR/bin:$PATH"
+export DOCKER_E2E_CONTAINER_CIDFILE="$TMPDIR/producer.cid"
+export DOCKER_COMMAND_TIMEOUT=30s
+source "$ROOT_DIR/scripts/lib/docker-e2e-package.sh"
+${mode === "node-watchdog" ? "docker_e2e_timeout_bin() { return 1; }" : "docker_e2e_timeout_bin >/dev/null"}
+docker_e2e_harness_mount_args() { DOCKER_E2E_HARNESS_ARGS=(--init); }
+docker_e2e_run_with_harness image true
+`;
+      const runner = spawn("/bin/bash", ["--noprofile", "--norc", "-c", script], {
+        detached: true,
+        env: { ...process.env, BASH_ENV: "", ENV: "" },
+        stdio: "ignore",
+      });
+      const exited = waitForProcessExit(runner);
+      try {
+        await withinTest(
+          fixtureEventBeforeSettlement(ready, "ready", exited, "launcher did not start"),
+          signal,
+        );
+        expect(existsSync(cidfile)).toBe(false);
+        expect(runner.pid).toBeGreaterThan(1);
+        process.kill(-runner.pid!, "SIGTERM");
+        process.kill(-runner.pid!, "SIGKILL");
+        await withinTest(exited, signal);
+        const dockerPid = Number(readFileSync(dockerPidFile, "utf8"));
+        // A pre-fix detached launcher survives and can still start its producer.
+        // Release that pending start after host settlement to expose the race.
+        try {
+          process.kill(dockerPid, "SIGUSR1");
+        } catch (error) {
+          expect((error as NodeJS.ErrnoException).code).toBe("ESRCH");
+        }
+        await waitForForeignProcessExit(dockerPid, signal);
+        expect(existsSync(cidfile)).toBe(false);
+        expect(existsSync(lateStart)).toBe(false);
+      } finally {
+        if (runner.pid && runner.pid > 1) {
+          try {
+            process.kill(-runner.pid, "SIGKILL");
+          } catch {}
+        }
+        for (const file of [dockerPidFile, monitorPidFile]) {
+          if (!existsSync(file)) {
+            continue;
+          }
+          const pid = Number(readFileSync(file, "utf8"));
+          if (pid > 1 && isPidAlive(pid)) {
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {}
+            await waitForForeignProcessExit(pid, signal);
+          }
+        }
+        await exited;
+      }
     },
   );
 

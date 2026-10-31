@@ -2370,7 +2370,7 @@ function diagnosticSanitizer(redactSensitiveText, outcome) {
 }
 
 // The scheduler survives its lane's process-group kill. Read only that attempt's
-// mounted evidence after the host group joins; do not infer container/child exit.
+// mounted evidence after the scheduler joins the group and settles its producer.
 export function publishInstalledRecoveryDiagnostics(
   artifactRoot,
   destination,

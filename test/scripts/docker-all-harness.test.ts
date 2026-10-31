@@ -1451,6 +1451,216 @@ describe("Docker scheduler trusted harness execution", () => {
     }
   });
 
+  posixIt.for(["wrapper-cleanup-failure", "timeout", "daemon-query-failure"])(
+    "settles the independent evidence producer before publication: %s",
+    { timeout: 30_000 },
+    async (mode, { signal }) => {
+      const fixture = setupFixture("split", false, true);
+      const name = "package-installed-recovery-partial-previous";
+      const cid = "a".repeat(64);
+      const published = path.join(fixture.root, "published");
+      const producer = spawn(
+        process.execPath,
+        [
+          "-e",
+          `
+        const fs = require('node:fs');
+        setInterval(() => fs.writeFileSync(process.argv[1], String(Date.now())), 10);
+        process.send('ready');
+      `,
+          path.join(fixture.root, "producer-write"),
+        ],
+        { stdio: ["ignore", "ignore", "ignore", "ipc"] },
+      );
+      const producerClosed = new Promise<void>((resolve) => {
+        producer.once("close", () => resolve());
+      });
+      try {
+        await withinTest(
+          new Promise<void>((resolve, reject) => {
+            producer.once("message", () => resolve());
+            producer.once("error", reject);
+          }),
+          signal,
+        );
+        const bin = path.join(fixture.root, "bin");
+        mkdirSync(bin);
+        const dockerSource = `
+const assert = require('node:assert/strict');
+const args = process.argv.slice(1), cid = ${JSON.stringify(cid)}, pid = ${producer.pid};
+if (args[0] === 'rm') {
+  assert.deepEqual(args.slice(1), ['-f', cid]);
+  if (process.env.FIXTURE_WRAPPER_CLEANUP || ${JSON.stringify(mode)} === 'daemon-query-failure') process.exit(23);
+  process.kill(pid, 'SIGKILL');
+  // Wait for the real external producer to be reaped, as Docker rm waits for removal.
+  const deadline = setTimeout(() => process.exit(24), 5000);
+  const poll = setInterval(() => {
+    try { process.kill(pid, 0); }
+    catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+      clearInterval(poll); clearTimeout(deadline); process.exit(0);
+    }
+  }, 10);
+} else if (args[0] === 'ps') {
+  assert(args.includes('id=' + cid));
+  if (${JSON.stringify(mode)} === 'daemon-query-failure') process.exit(23);
+  try { process.kill(pid, 0); console.log(cid); }
+  catch (error) { if (error.code !== 'ESRCH') throw error; }
+} else process.exit(99);
+`;
+        writeFileSync(
+          path.join(bin, "docker"),
+          `#!/bin/bash\nexec ${quote(process.execPath)} --input-type=commonjs -e ${quote(dockerSource)} -- "$@"\n`,
+        );
+        chmodSync(path.join(bin, "docker"), 0o755);
+        const catalog = path.join(fixture.harness, "scripts/lib/docker-e2e-scenarios.mts");
+        const marker = path.join(fixture.root, "recovery-producer-owner.cjs");
+        writeFileSync(
+          marker,
+          `
+const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+// Also seed the retained CID on the pre-fix scheduler: its publisher must fail
+// because the producer is alive, not because the fixture lacked an env handoff.
+const cidfile = process.env.DOCKER_E2E_CONTAINER_CIDFILE || path.join(path.dirname(process.env.OPENCLAW_UPGRADE_SURVIVOR_ARTIFACT_DIR), 'producer.cid');
+assert.equal(path.dirname(cidfile), path.dirname(process.env.OPENCLAW_UPGRADE_SURVIVOR_ARTIFACT_DIR));
+assert.equal(fs.statSync(path.dirname(cidfile)).mode & 0o777, 0o700);
+fs.writeFileSync(cidfile, ${JSON.stringify(cid)});
+const cleanup = require('node:child_process').spawnSync('docker', ['rm', '-f', ${JSON.stringify(cid)}], {
+  env: { ...process.env, FIXTURE_WRAPPER_CLEANUP: '1' }, stdio: 'ignore'
+});
+assert.equal(cleanup.status, 23);
+if (${JSON.stringify(mode)} === 'timeout') {
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
+} else process.exit(7);
+`,
+        );
+        writeFileSync(
+          catalog,
+          readFileSync(catalog, "utf8") +
+            `
+const producerLane = mainLanes.find(lane => lane.name === ${JSON.stringify(name)});
+producerLane.command = ${JSON.stringify(`exec ${quote(process.execPath)} ${quote(marker)}`)};
+producerLane.timeoutMs = 1000;
+`,
+        );
+        writeFileSync(
+          path.join(fixture.harness, "scripts/upgrade-survivor-diagnostics.mjs"),
+          `
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+assert.throws(() => process.kill(${producer.pid}, 0), { code: 'ESRCH' });
+fs.writeFileSync(${JSON.stringify(published)}, 'producer settled before evidence read');
+`,
+        );
+        const owner = startOwnedScheduler(
+          fixture,
+          signal,
+          {
+            OPENCLAW_DOCKER_ALL_LANES: name,
+            PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+          },
+          // The regression needs real SIGKILL/group settlement, not a ten-second grace wait.
+          mode === "timeout"
+            ? `
+            const nativeTimeout = globalThis.setTimeout;
+            globalThis.setTimeout = (callback, ms, ...args) => nativeTimeout(callback, ms === 10_000 ? 1 : ms, ...args);
+          `
+            : "",
+        );
+        await withScheduler(
+          owner,
+          async () => {
+            await expectExit(owner, 1);
+            const lane = readJson(path.join(fixture.root, "logs/summary.json")).lanes[0];
+            expect(lane.status).toBe(mode === "timeout" ? 128 : 7);
+            expect(lane.timedOut).toBe(mode === "timeout");
+            expect(
+              lane.publicationStatus,
+              readFileSync(path.join(fixture.root, "logs", `${name}.log`), "utf8"),
+            ).toBe(mode === "daemon-query-failure" ? 1 : 0);
+            expect(existsSync(published)).toBe(mode !== "daemon-query-failure");
+          },
+          () =>
+            runQaGatewayFixture(
+              async () => {
+                if (producer.exitCode === null && producer.signalCode === null) {
+                  producer.kill("SIGKILL");
+                }
+                await producerClosed;
+              },
+              () => owner.cleanup(),
+            ),
+        );
+      } finally {
+        if (producer.exitCode === null && producer.signalCode === null) {
+          producer.kill("SIGKILL");
+        }
+        await producerClosed;
+      }
+    },
+  );
+
+  posixIt(
+    "owns a separate private producer CID for every recovery cut and clears inherited CIDs",
+    () => {
+      const fixture = setupFixture("split", false, true);
+      const names = [
+        "partial-previous",
+        "anchor-before",
+        "anchor-after",
+        "anchor-sync",
+        "helper-before",
+        "helper-after",
+        "helper-sync",
+      ].map((cut) => `package-installed-recovery-${cut}`);
+      const handoffs = path.join(fixture.root, "producer-handoffs.jsonl");
+      const marker = path.join(fixture.root, "producer-handoff.cjs");
+      writeFileSync(
+        marker,
+        `
+const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+const name = process.env.OPENCLAW_DOCKER_ALL_LANE_NAME, cid = process.env.DOCKER_E2E_CONTAINER_CIDFILE;
+if (name === 'gateway-concurrency') assert.equal(cid, undefined);
+else {
+  const evidence = process.env.OPENCLAW_UPGRADE_SURVIVOR_ARTIFACT_DIR;
+  assert.equal(path.dirname(cid), path.dirname(evidence));
+  assert.notEqual(cid, evidence);
+  assert.equal(fs.existsSync(cid), false);
+  assert.equal(fs.statSync(path.dirname(cid)).mode & 0o777, 0o700);
+}
+fs.appendFileSync(${JSON.stringify(handoffs)}, JSON.stringify({ name, cid }) + '\\n');
+`,
+      );
+      const catalog = path.join(fixture.harness, "scripts/lib/docker-e2e-scenarios.mts");
+      writeFileSync(
+        catalog,
+        readFileSync(catalog, "utf8") +
+          `
+for (const lane of mainLanes) if (${JSON.stringify([...names, "gateway-concurrency"])}.includes(lane.name)) {
+  lane.command = ${JSON.stringify(`exec ${quote(process.execPath)} ${quote(marker)}`)};
+}
+`,
+      );
+      writeFileSync(
+        path.join(fixture.harness, "scripts/upgrade-survivor-diagnostics.mjs"),
+        "process.exit(0);\n",
+      );
+      const foreign = path.join(fixture.root, "foreign.cid");
+      writeFileSync(foreign, "foreign producer must stay untouched");
+      const { result } = runFixture(fixture, "split", [...names, "gateway-concurrency"], {
+        env: { DOCKER_E2E_CONTAINER_CIDFILE: foreign },
+      });
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      const rows = readCalls(handoffs);
+      expect(rows.map((row) => row.name).toSorted((a, b) => a.localeCompare(b))).toEqual(
+        [...names, "gateway-concurrency"].toSorted((a, b) => a.localeCompare(b)),
+      );
+      expect(new Set(rows.flatMap((row) => (row.cid ? [row.cid] : []))).size).toBe(7);
+      expect(readFileSync(foreign, "utf8")).toBe("foreign producer must stay untouched");
+    },
+  );
+
   posixIt("retains host-published survivor metadata after cleanup with a one-line tail", () => {
     const fixture = setupFixture("split");
     const catalog = path.join(fixture.harness, "scripts/lib/docker-e2e-scenarios.mts");
