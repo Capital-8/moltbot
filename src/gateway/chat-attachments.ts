@@ -291,6 +291,7 @@ export async function parseMessageWithAttachments(
   opts?: {
     maxBytes?: number;
     maxTotalBytes?: number;
+    maxMediaBytes?: number;
     log?: AttachmentLog;
     supportsImages?: boolean | (() => Promise<boolean>);
     supportsInlineImages?: boolean;
@@ -364,7 +365,13 @@ export async function parseMessageWithAttachments(
         throw new UnsupportedAttachmentError("empty-payload", `attachment ${label}: empty payload`);
       }
       const prepared = await prepareMediaAttachment(
-        { base64: b64, label, mime, imageStorage: opts?.imageStorage },
+        {
+          base64: b64,
+          label,
+          mime,
+          imageStorage: opts?.imageStorage,
+          maxMediaBytes: opts?.maxMediaBytes,
+        },
         maxBytes,
         opts?.signal,
       );

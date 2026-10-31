@@ -57,6 +57,16 @@ Media files still face applicable image-hydration, processing, and provider
 limits in addition to the general attachment budget. Generated-media budgets
 and channel/account `mediaMaxMb` settings retain their existing contracts.
 
+`agents.defaults.mediaMaxMb` stays available and active for incoming **images,
+audio, and video only** (chat default: 20 MiB). It is not replaced by the new
+options. A media file must fit both that media cap and `attachments.maxFileMb`;
+all files together must fit `attachments.maxTotalMb`. PDFs, text, archives, and
+other documents do not use the media cap. The parser applies this distinction
+after sniffing the content, so renaming an image to `.txt` cannot evade it.
+
+For example, `mediaMaxMb: 5`, `maxFileMb: 10`, and `maxTotalMb: 15` allow an
+8 MiB PDF but reject an 8 MiB video. Two 8 MiB PDFs exceed the message total.
+
 This is not yet a claim that `mediaMaxMb` is media-only everywhere in OpenClaw:
 outbound document readers and channel adapters need their own reviewed cutover.
 Terminal transfers, browser uploads, skill archives, and arbitrary file tools
@@ -81,6 +91,9 @@ The optional `hello-ok.policy.attachments.maxTotalBytes` advertises the resolved
 combined ceiling, alongside existing `maxBytes` and `maxImageBytes`. Older
 clients can omit aggregate preflight; the server still rejects excess totals.
 The Control UI uses the lower of the advertised total and its frame budget.
+The optional `maxMediaBytes` advertises the media-only ceiling; `maxImageBytes`
+also includes that ceiling. Client audio/video preflight and compression
+reservations honor it without reducing the document file limit.
 See the [handshake contract](/gateway/protocol/handshake).
 
 Size edits apply to subsequent server requests without a restart. Existing

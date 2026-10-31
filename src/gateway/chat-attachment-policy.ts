@@ -11,10 +11,14 @@ const MAX_ADVERTISED_ATTACHMENT_BYTES = resolveChatAttachmentFrameBudgetBytes(MA
 /** Default decoded-size ceiling when `attachments.maxFileMb` is unset. */
 export const DEFAULT_CHAT_ATTACHMENT_MAX_BYTES = DEFAULT_CHAT_ATTACHMENT_MAX_MB * 1024 * 1024;
 
-export function resolveChatAttachmentMaxBytes(cfg: OpenClawConfig): number {
-  const mb = cfg.attachments?.maxFileMb ?? DEFAULT_CHAT_ATTACHMENT_MAX_MB;
+function decodedBytes(mb: number): number {
   // Keep internal/direct callers representable as well as validated config.
   return Math.min(Number.MAX_SAFE_INTEGER, Math.max(1, Math.floor(mb * 1024 * 1024)));
+}
+
+export function resolveChatAttachmentMaxBytes(cfg: OpenClawConfig): number {
+  const mb = cfg.attachments?.maxFileMb ?? DEFAULT_CHAT_ATTACHMENT_MAX_MB;
+  return decodedBytes(mb);
 }
 
 /** Decoded admission policy, independent of the encoding used by a transport. */
@@ -23,11 +27,11 @@ export function resolveChatAttachmentLimits(cfg: OpenClawConfig) {
   const maxTotalBytes =
     cfg.attachments?.maxTotalMb === undefined
       ? Math.max(DEFAULT_CHAT_ATTACHMENT_MAX_BYTES, maxBytes)
-      : Math.min(
-          Number.MAX_SAFE_INTEGER,
-          Math.max(1, Math.floor(cfg.attachments.maxTotalMb * 1024 * 1024)),
-        );
-  return { maxBytes, maxTotalBytes };
+      : decodedBytes(cfg.attachments.maxTotalMb);
+  const maxMediaBytes = decodedBytes(
+    cfg.agents?.defaults?.mediaMaxMb ?? DEFAULT_CHAT_ATTACHMENT_MAX_MB,
+  );
+  return { maxBytes, maxTotalBytes, maxMediaBytes };
 }
 
 /** Connection-wide ceilings; MIME and count limits depend on the entrypoint/model. */
@@ -35,5 +39,11 @@ export function resolveChatAttachmentPolicy(cfg: OpenClawConfig) {
   const limits = resolveChatAttachmentLimits(cfg);
   const maxTotalBytes = Math.min(limits.maxTotalBytes, MAX_ADVERTISED_ATTACHMENT_BYTES);
   const maxBytes = Math.min(limits.maxBytes, maxTotalBytes);
-  return { maxBytes, maxImageBytes: Math.min(maxBytes, MAX_IMAGE_BYTES), maxTotalBytes };
+  const maxMediaBytes = Math.min(limits.maxMediaBytes, maxBytes);
+  return {
+    maxBytes,
+    maxImageBytes: Math.min(maxMediaBytes, MAX_IMAGE_BYTES),
+    maxMediaBytes,
+    maxTotalBytes,
+  };
 }

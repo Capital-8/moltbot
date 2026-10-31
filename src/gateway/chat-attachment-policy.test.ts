@@ -18,6 +18,13 @@ describe("chat attachment policy", () => {
     expect(resolveChatAttachmentLimits(cfg)).toEqual({
       maxBytes: 10 * MB,
       maxTotalBytes: 15 * MB,
+      maxMediaBytes: MB,
+    });
+    expect(resolveChatAttachmentPolicy(cfg)).toEqual({
+      maxBytes: 10 * MB,
+      maxTotalBytes: 15 * MB,
+      maxMediaBytes: MB,
+      maxImageBytes: MB,
     });
     expect(resolveGeneratedMediaMaxBytes(cfg, "audio")).toBe(MB);
     expect(resolveChatAttachmentMaxBytes({ agents: { defaults: { mediaMaxMb: 1 } } })).toBe(
@@ -29,10 +36,12 @@ describe("chat attachment policy", () => {
     expect(resolveChatAttachmentLimits({})).toEqual({
       maxBytes: 20 * MB,
       maxTotalBytes: 20 * MB,
+      maxMediaBytes: 20 * MB,
     });
     expect(resolveChatAttachmentLimits({ attachments: { maxFileMb: 50 } })).toEqual({
       maxBytes: 50 * MB,
       maxTotalBytes: 50 * MB,
+      maxMediaBytes: 20 * MB,
     });
   });
 
@@ -41,11 +50,13 @@ describe("chat attachment policy", () => {
       maxBytes: FRAME_BUDGET,
       maxImageBytes: 6 * MB,
       maxTotalBytes: FRAME_BUDGET,
+      maxMediaBytes: FRAME_BUDGET,
     });
     expect(resolveChatAttachmentPolicy({ attachments: { maxFileMb: 10, maxTotalMb: 2 } })).toEqual({
       maxBytes: 2 * MB,
       maxImageBytes: 2 * MB,
       maxTotalBytes: 2 * MB,
+      maxMediaBytes: 2 * MB,
     });
   });
 

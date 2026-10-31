@@ -246,5 +246,8 @@ Moved to [Configuration — environment, secrets, and includes](/gateway/config-
 (default: the larger of 20 MiB and the file limit). Media and documents both
 count; encoded transport and model limits still apply. These settings do not
 change channel uploads, outgoing files, terminal transfers, or retention.
+The existing `agents.defaults.mediaMaxMb` remains an additional limit for
+incoming images, audio, and video only; PDFs and other documents use the
+attachment limits instead.
 See [Chat attachment limits](/specs/chat-attachment-limits) for migration, scope,
 and the separate WebSocket ceiling.

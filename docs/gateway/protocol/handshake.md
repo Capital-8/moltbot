@@ -161,7 +161,10 @@ and session-creation initial turns:
 Validating before send:
 
 1. Check each file's decoded size against `maxImageBytes` for images and
-   `maxBytes` for everything else.
+   `maxBytes` for everything else. When `maxMediaBytes` is advertised, images,
+   audio, and video also respect that media-only ceiling from
+   `agents.defaults.mediaMaxMb`. Documents do not. `maxImageBytes` already
+   includes the media cap and the image-hydration cap.
 2. Sum decoded file sizes and check `maxTotalBytes` when advertised. Serialize the whole request and check its encoded size against
    `policy.maxPayload`. Attachment ceilings are never a
    promise the frame fits: attachments travel as base64, so a 20 MB file is about

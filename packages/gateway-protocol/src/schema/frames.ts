@@ -167,6 +167,7 @@ export const HelloOkSchema = closedObject({
       closedObject({
         maxBytes: Type.Integer({ minimum: 1 }),
         maxImageBytes: Type.Integer({ minimum: 1 }),
+        maxMediaBytes: Type.Optional(Type.Integer({ minimum: 1 })),
         maxTotalBytes: Type.Optional(Type.Integer({ minimum: 1 })),
       }),
     ),
