@@ -81,6 +81,7 @@ host. If those controls are noisy, use twenty pairs and thread CPU plus work
 counts. Run localhost and `--network-latency-ms 100 --download-kbps 10000`
 separately; mock RPC delay uses `--latency-ms 100`. These fixtures measure the
 production renderer and synthetic transport, not real provider latency.
+
 ## Low-memory mobile profile
 
 Both `bench-control-ui-cold-load.ts` and `bench-control-ui-interactions.ts` accept

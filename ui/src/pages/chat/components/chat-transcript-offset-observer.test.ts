@@ -62,7 +62,7 @@ it("keeps maintenance and active commands owned until the committed viewport set
 
 it.each([
   {
-    name: "records native end geometry before delivering offsets to the renderer",
+    name: "records native end geometry before rendering and pane policy",
     logicalDrift: false,
   },
   {
@@ -101,6 +101,7 @@ it.each([
   const onReaderScroll = vi.fn();
   const order: string[] = [];
   const recordedEnd: boolean[] = [];
+  const paneRecordedEnd: boolean[] = [];
   const deliver = vi.fn((offset: number) => {
     delivered = true;
     recordedEnd.push(endAnchor.isRecordedEnd(offset));
@@ -109,6 +110,7 @@ it.each([
   const onNativeScroll = vi.fn((event: Event) => {
     expect(event.currentTarget).toBe(element);
     expect(event.target).toBe(element);
+    paneRecordedEnd.push(endAnchor.isRecordedEnd(element.scrollTop));
     order.push("pane");
   });
   onTestFinished(
@@ -138,10 +140,11 @@ it.each([
   recordedEnd.length = 0;
   element.scrollTop = 20;
   element.dispatchEvent(new Event("scroll"));
-  expect(order).toEqual(["composer", "pane", "virtualizer"]);
+  expect(order).toEqual(["composer", "virtualizer", "pane"]);
   expect(deliver).toHaveBeenCalledWith(20, true);
   expect(onOffset).toHaveBeenCalledOnce();
   expect(recordedEnd).toEqual([true]);
+  expect(paneRecordedEnd).toEqual([true]);
   expect(geometryReads).toEqual([false, false]);
   const nested = document.createElement("div");
   element.append(nested);

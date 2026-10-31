@@ -118,6 +118,8 @@ it("follows native midpoint crossings and the final virtual range", async () => 
     await move(70);
     expectCurrent("row-3");
 
+    // Settle a nearby range so fast-jump overscan suppression cannot mask this boundary.
+    await move(4070, 2, true);
     // Native offsets must refresh the owner's precise end before range changes.
     await move(4198.5, 2, true);
     expect(recordViewport.mock.results.at(-1)?.value).toBe(false);

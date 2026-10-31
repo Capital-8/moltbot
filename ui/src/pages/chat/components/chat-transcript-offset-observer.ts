@@ -456,10 +456,11 @@ export function observeTranscriptOffset(
     if (element !== owner.getScrollElement()) {
       return;
     }
+    publishOffset(offset, scrolling);
+    // Pane policy consumes the reconciled maintenance and end-position state.
     if (event?.currentTarget === element) {
       owner.onNativeScroll?.(event);
     }
-    publishOffset(offset, scrolling);
     if (scrolling && owner.state.maintenanceScrollOffset !== null) {
       const revision = maintenanceRevision;
       if (maintenanceFrame !== null) {
