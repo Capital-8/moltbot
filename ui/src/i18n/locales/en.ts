@@ -1210,6 +1210,7 @@ const startupEnglish = {
     toolSearch: {},
 
     hostDesktop: {},
+    openclawId: {},
     workerDesktop: {},
   },
   aboutPage: {

@@ -389,6 +389,9 @@ export async function finishGatewayStartup(params: {
   }
   postAttachRuntimeReturned = true;
   activateScheduledServicesWhenReady();
+  void runtime.openclawIdService
+    .reconcileRuntimePolicy()
+    .catch((error: unknown) => log.warn(`openclaw-id: start failed: ${String(error)}`));
 
   const { startManagedGatewayConfigReloader } = await import("./server-reload-managed.js");
   const assertRuntimeSecurityConfig = (cfg: OpenClawConfig, env?: NodeJS.ProcessEnv) => {
@@ -533,6 +536,7 @@ export async function finishGatewayStartup(params: {
       }
       const reconciled = await Promise.allSettled([
         runtime.hostDesktopService.reconcileRuntimePolicy(),
+        runtime.openclawIdService.reconcileRuntimePolicy(),
         runtime.gatewayComputerService.reconcileRuntimePolicy(),
         workerEnvironmentService?.reconcileDesktopPolicy(),
         runtime.nodeDesktopService.reconcileRuntimePolicy(),

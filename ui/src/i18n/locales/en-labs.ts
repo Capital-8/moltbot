@@ -74,6 +74,11 @@ const enLabs = {
       description:
         "Watch and control this Gateway machine from the Desktop panel through its existing VNC or Screen Sharing server.",
     },
+    openclawId: {
+      title: "OpenClaw ID remote access",
+      description:
+        "Reach this Gateway from your other devices through OpenClaw ID, without opening a port. Off by default; while off the Gateway starts no tunnel and contacts no OpenClaw ID service.",
+    },
     workerDesktop: {
       title: "Cloud Worker Desktop",
       description:

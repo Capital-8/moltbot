@@ -30,6 +30,7 @@ import { publishHooksTokenEnvKey } from "./hooks.js";
 import { STARTUP_UNAVAILABLE_GATEWAY_METHODS } from "./methods/core-method-policy.js";
 import { isLoopbackHost } from "./net.js";
 import { createNodeReapprovalCoordinator } from "./node-reapproval-coordinator.js";
+import { createOpenClawIdService } from "./openclaw-id/service.js";
 import { GatewayOperatorAccessUnavailableError } from "./operator-access-policy.js";
 import { createGatewayConnectionState } from "./server-connection-state.js";
 import { createGatewayControlUiRootLifecycle } from "./server-control-ui-root.js";
@@ -117,6 +118,11 @@ export async function prepareGatewayKernelState(params: {
   ).createHostDesktopService({
     getConfig: () => getRuntimeConfig().desktop?.host,
     registry: desktopSessionRegistry,
+  });
+  // Inert until the Labs switch is on; the switch is reconciled after ready.
+  const openclawIdService = createOpenClawIdService({
+    getConfig: () => getRuntimeConfig().gateway?.openclawId,
+    log: log.child("openclaw-id"),
   });
   const gatewayComputerService = (
     await startupTrace.measure(
@@ -576,6 +582,7 @@ export async function prepareGatewayKernelState(params: {
     desktopSessionRegistry,
     nodeDesktopStreamBroker,
     hostDesktopService,
+    openclawIdService,
     gatewayComputerService,
     channelLogs,
     channelRuntimeEnvs,

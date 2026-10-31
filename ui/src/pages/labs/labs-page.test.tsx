@@ -135,6 +135,7 @@ const advisor = (value: Record<string, unknown>) => ({ plugins: { entries: { adv
 const hostDesktop = (value: Record<string, unknown>) => ({ desktop: { host: value } });
 const workerDesktop = (desktop: boolean) => ({ cloudWorkers: { desktop } });
 const hostEnabled = (enabled: boolean) => hostDesktop({ enabled });
+const openclawId = (value: Record<string, unknown>) => ({ gateway: { openclawId: value } });
 
 async function startSave(title = "Code Mode", config?: Record<string, unknown>) {
   const mounted = await mountPage(config ?? codeMode({ enabled: false }));
@@ -234,6 +235,14 @@ describe("LabsPage", () => {
     ["Templates", "templates", true, {}, experimental({ templates: true })],
     ["Host Desktop", "hostDesktop", true, hostEnabled(false), hostEnabled(true)],
     ["Cloud Worker Desktop", "workerDesktop", true, workerDesktop(false), workerDesktop(true)],
+    ["OpenClaw ID remote access", "openclawId", true, {}, openclawId({ enabled: true })],
+    [
+      "OpenClaw ID remote access",
+      "openclawId",
+      false,
+      openclawId({ enabled: true, relayUrl: "https://relay.example.test/" }),
+      openclawId({ enabled: false }),
+    ],
     ["Advisor", "advisor", true, {}, advisor({ enabled: true })],
     ["Code Mode", "codeMode", false, {}, codeMode({ enabled: false })],
     [

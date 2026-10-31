@@ -30,6 +30,7 @@ available for user-installed browser code.
 | Templates      | `gateway.controlUi.experimental.templates`                              | You want to explore and add official ClawHub agents from the Control UI                                                           | [Templates](/cli/templates)                                                            |
 | Host Desktop   | `desktop.host.enabled`                                                  | You want to watch or control the Gateway host through its VNC or Screen Sharing server                                            | [Desktop](/gateway/configuration-reference#desktop)                                    |
 | Advisor        | `plugins.entries.advisor.enabled`                                       | You want an advisor model to periodically check a conversation's agent work and give the agent one short correction               | [Advisor](#advisor)                                                                    |
+| OpenClaw ID    | `gateway.openclawId.enabled`                                            | You want to reach this Gateway from your other devices through OpenClaw ID and an iroh relay, without opening a port              | [OpenClaw ID remote access](#openclaw-id-remote-access)                                |
 | Speech bubbles | `gateway.controlUi.experimental.chatBubbles`                            | You want to try conversation bubbles and compact activity; Home defaults on while the lab is enabled                              | [Chat](/web/control-ui/chat)                                                           |
 | Tool Search    | `tools.toolSearch.enabled`                                              | You want to control the global Tool Search default, which is enabled                                                              | [Tool Search](/tools/tool-search)                                                      |
 
@@ -40,7 +41,7 @@ Control UI switch. Enabling or disabling a lab patches the saved Gateway
 config immediately without restarting the Gateway.
 
 Labs includes Speech bubbles, Decision assistance, Advisor, Code Mode, Tool Search for all models,
-Templates, Host Desktop, and Cloud Worker Desktop. Under the default reload mode,
+Templates, Host Desktop, OpenClaw ID remote access, and Cloud Worker Desktop. Under the default reload mode,
 desktop availability updates in connected Control UI pages. Code Mode and Tool
 Search changes take effect for future agent runs. The Cloud Worker Desktop lab
 controls access to existing desktop-capable workers; changing a profile’s
@@ -291,6 +292,31 @@ Behavior and limits:
   `plugins.entries.advisor.hooks`, which trusted plugins have by default.
 - Gateway info logs record review token usage and whether a correction steered
   the run.
+
+## OpenClaw ID remote access
+
+OpenClaw ID remote access is off by default. While it is off the Gateway starts
+no tunnel child, opens no tunnel sockets and makes no calls to OpenClaw ID,
+Discovery or relays. Turn it on in **Settings → Labs → OpenClaw ID remote
+access**, or in config:
+
+```json5
+{
+  gateway: {
+    openclawId: {
+      enabled: true,
+      relayUrl: "https://relay.example.com/",
+      // Needed to link a claw ("Make reachable"):
+      issuerUrl: "https://id.example.com/api/auth",
+      discoveryUrl: "https://discovery.example.com",
+      loaderDomain: "claws.example.com",
+    },
+  },
+}
+```
+
+No service URL has a production default yet; the Gateway reports
+`unconfigured` until `relayUrl` is set. Changes apply without a restart.
 
 ## Local model lean mode
 
