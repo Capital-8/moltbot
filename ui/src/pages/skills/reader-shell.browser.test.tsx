@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import "../../styles.css";
+import { finishElementAnimations } from "../../test-helpers/animations.ts";
 import { getRenderedModalDialog } from "../../test-helpers/modal-dialog.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { ConnectMachineDialog } from "../new-session/connect-machine-dialog-view.tsx";
@@ -30,7 +31,7 @@ function showInstalled(skill: Parameters<typeof createSkill>[0], messages = {}) 
 
 async function settledDialog() {
   const result = await getRenderedModalDialog(container!);
-  await Promise.all(result.dialog.getAnimations().map((animation) => animation.finished));
+  finishElementAnimations(result.dialog);
   return result;
 }
 
