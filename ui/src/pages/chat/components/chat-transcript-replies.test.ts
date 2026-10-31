@@ -410,6 +410,7 @@ it.each([
   toggleTranscriptSearch(props.paneId);
   rerender();
   transcript.start();
+  await vi.dynamicImportSettled();
   const input = await waitForSolid(
     () => requireElement(searchContainer, "input") as HTMLInputElement,
   );
