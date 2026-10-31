@@ -1,12 +1,13 @@
 // Removal side effects (spec section 7, decided 2026-10-29): when a member or
-// device key is removed, its relayed Gateway connections are found, its active
-// runs are cancelled through the ordinary Stop path (which keeps the transcript
-// up to the cut), its connections are closed and its device tokens revoked.
+// device key is removed, its relayed Gateway connections are found (open ones and
+// closed ones whose runs are unsettled), its queued and running runs are cancelled
+// through the ordinary Stop path (which keeps the transcript up to the cut), its
+// open connections are closed and its device tokens revoked.
 import { revokeDeviceToken } from "../../infra/device-pairing-tokens.js";
 import {
   getRpcSourceIdentity,
-  isRpcSourceActive,
   listRpcSourceEntries,
+  resolveRpcSourceSessionProgressState,
 } from "../../sessions/session-controller.rpc-sources.js";
 import { dispatchGatewayRequestInProcess } from "../server-in-process-dispatch.js";
 import type { GatewayRequestContext } from "../server-methods/types.js";
@@ -14,8 +15,24 @@ import { createSyntheticPluginRuntimeClient } from "../server-plugin-runtime-cli
 import { invalidateGatewayPolicyClient } from "../server/ws-policy-close.js";
 import type { GatewayWsClient } from "../server/ws-types.js";
 import type { OpenClawIdEffects } from "./service.js";
+import {
+  openclawIdTunnelConnectionsOf,
+  setOpenClawIdRunOwnerConnections,
+} from "./tunnel-connections.js";
 
 type EffectsLogger = { warn: (message: string) => void };
+
+// Connection ids that still own a registered (queued or running) run source.
+function runOwnerConnections(): Set<string> {
+  const owners = new Set<string>();
+  for (const [, ref] of listRpcSourceEntries()) {
+    const owner = ref.adapter.requester?.connectionId;
+    if (owner) {
+      owners.add(owner);
+    }
+  }
+  return owners;
+}
 
 /** Builds the effects over the Gateway's live client registry and request context. */
 export function createOpenClawIdRemovalEffects(params: {
@@ -24,17 +41,22 @@ export function createOpenClawIdRemovalEffects(params: {
   log: EffectsLogger;
 }): OpenClawIdEffects {
   const byConnection = new Map<string, GatewayWsClient>();
+  setOpenClawIdRunOwnerConnections(runOwnerConnections);
   return {
     captureConnections(peerKeys) {
-      const ids: string[] = [];
+      const ids = new Set<string>();
       for (const client of params.clients()) {
         const peerKey = client.internal?.openclawIdPeerKey;
         if (peerKey && peerKeys.includes(peerKey)) {
-          ids.push(client.connId);
+          ids.add(client.connId);
           byConnection.set(client.connId, client);
         }
       }
-      return ids;
+      // Runs outlive their socket: earlier connections of these keys still own runs.
+      for (const id of openclawIdTunnelConnectionsOf(peerKeys)) {
+        ids.add(id);
+      }
+      return [...ids];
     },
 
     async cancelRuns(connectionIds) {
@@ -43,7 +65,12 @@ export function createOpenClawIdRemovalEffects(params: {
       const client = createSyntheticPluginRuntimeClient({ scopes: ["operator.admin"] });
       for (const [runId, ref] of listRpcSourceEntries()) {
         const owner = ref.adapter.requester?.connectionId;
-        if (!owner || !connectionIds.includes(owner) || !isRpcSourceActive(ref)) {
+        // Queued input is withdrawn too, so nothing the member sent starts later.
+        if (
+          !owner ||
+          !connectionIds.includes(owner) ||
+          resolveRpcSourceSessionProgressState(ref) === undefined
+        ) {
           continue;
         }
         const { sessionKey } = getRpcSourceIdentity(ref);

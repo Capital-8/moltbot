@@ -113,6 +113,9 @@ export function createOpenClawIdService(params: {
   // Serializes start/stop so overlapping config reloads apply in order.
   let queue: Promise<void> = Promise.resolve();
 
+  // The removal effects load once; they also start remembering run custody.
+  const getEffects = () => (effectsPromise ??= loadEffects?.());
+
   const getAuthority = async (): Promise<OpenClawIdAuthority> => {
     if (!authority) {
       authority = params.createAuthority
@@ -171,6 +174,8 @@ export function createOpenClawIdService(params: {
         handleApi: handleTunnelApi,
       });
       status = { state: "on", tunnel: runtime.supervisor.status() };
+      // Loaded before any member connects, so removal finds runs of closed connections.
+      await getEffects();
       await publishTokenBindings();
       await startMailbox();
     } catch (error) {
@@ -219,8 +224,7 @@ export function createOpenClawIdService(params: {
   // removed keys' connections, withdraw tunnel access, cancel their runs, close
   // their sessions, revoke their tokens, then publish a new snapshot.
   const applyEvents = async (events: AuthorityEvent[]) => {
-    effectsPromise ??= loadEffects?.();
-    const effects = await effectsPromise;
+    const effects = await getEffects();
     const removed = [
       ...new Set(
         events.flatMap((event) =>
