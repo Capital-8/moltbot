@@ -40,7 +40,7 @@ class WatchBootTrace
   end
 
   def start
-    @facts["before"] = snapshot
+    @facts["before"] = snapshot(inventory: false)
     @raw = Tempfile.new("watch-boot-log")
     @pid = Process.spawn("/usr/bin/log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", self.class.predicate,
       out: @raw.path, err: File::NULL)
@@ -79,18 +79,18 @@ class WatchBootTrace
     @pid = nil
   end
 
-  def snapshot
-    images, = Open3.capture3("xcrun", "simctl", "runtime", "list", "-j")
-    runtimes, = Open3.capture3("xcrun", "simctl", "list", "runtimes", "--json")
+  def snapshot(inventory: true)
+    images, = Open3.capture3("xcrun", "simctl", "runtime", "list", "-j") if inventory
+    runtimes, = Open3.capture3("xcrun", "simctl", "list", "runtimes", "--json") if inventory
     mounts, = Open3.capture3("/sbin/mount")
     memory, = Open3.capture3("vm_stat")
     swap, = Open3.capture3("sysctl", "-n", "vm.swapusage")
     {
       "at" => Time.now.utc.iso8601,
-      "images" => JSON.parse(images).values.map do |entry|
+      "images" => JSON.parse(images || "{}").values.map do |entry|
         entry.slice("identifier", "runtimeIdentifier", "state", "version", "build").merge("mountedPathExists" => !!(entry["runtimeBundlePath"] && File.directory?(entry["runtimeBundlePath"])))
       end,
-      "runtimes" => JSON.parse(runtimes).fetch("runtimes").map { |entry| entry.slice("identifier", "isAvailable", "version", "buildversion") },
+      "runtimes" => JSON.parse(runtimes || '{"runtimes":[]}').fetch("runtimes").map { |entry| entry.slice("identifier", "isAvailable", "version", "buildversion") },
       "mounts" => mounts.lines.grep(/CoreSimulator|cryptex.*(?:iOS|watchOS|tvOS|xrOS)/).map { |line| sanitize(line) },
       "vmStat" => memory, "swap" => swap
     }
