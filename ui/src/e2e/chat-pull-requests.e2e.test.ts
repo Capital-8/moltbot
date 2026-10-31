@@ -434,6 +434,8 @@ suite.define(() => {
           const portBounds = scrollPort.getBoundingClientRect();
           return {
             detailsBottom: detailsBounds.bottom,
+            detailsLeft: detailsBounds.left,
+            detailsRight: detailsBounds.right,
             stackLeft: stackBounds.left,
             stackWidth: stackBounds.width,
             portLeft: portBounds.left + scrollPort.clientLeft,
@@ -441,14 +443,17 @@ suite.define(() => {
             fitsHorizontally: scrollPort.scrollWidth <= scrollPort.clientWidth + 1,
             rows: [...element.children].map((row) => {
               const rect = row.getBoundingClientRect();
+              const style = getComputedStyle(row);
+              const paddingLeft = Number.parseFloat(style.paddingLeft);
+              const paddingRight = Number.parseFloat(style.paddingRight);
               return {
                 top: rect.top,
                 bottom: rect.bottom,
                 left: rect.left,
+                right: rect.right,
                 width: rect.width,
-                contentLeft: isMobile
-                  ? rect.left
-                  : row.querySelector(".chat-pr__link")!.getBoundingClientRect().left,
+                contentLeft: rect.left + paddingLeft,
+                contentWidth: rect.width - paddingLeft - paddingRight,
               };
             }),
           };
@@ -458,20 +463,14 @@ suite.define(() => {
         for (const row of bounds.rows) {
           expect(row.top).toBeGreaterThanOrEqual(previousBottom);
           expect(row.bottom).toBeLessThanOrEqual(bounds.detailsBottom);
-          if (mobile) {
-            expect(row.left).toBeCloseTo(bounds.stackLeft, 1);
-            expect(row.width).toBeCloseTo(bounds.stackWidth, 1);
-          } else {
-            const first = bounds.rows[0]!;
-            expect(row.contentLeft).toBeCloseTo(bounds.stackLeft, 1);
-            expect(row.left).toBeCloseTo(first.left, 1);
-            expect(row.width).toBeCloseTo(first.width, 1);
+          expect(row.left).toBeGreaterThanOrEqual(bounds.detailsLeft);
+          expect(row.right).toBeLessThanOrEqual(bounds.detailsRight);
+          // Desktop hover surfaces extend into padding; their content stays on the heading axis.
+          expect(mobile ? row.left : row.contentLeft).toBeCloseTo(bounds.stackLeft, 1);
+          expect(mobile ? row.width : row.contentWidth).toBeCloseTo(bounds.stackWidth, 1);
+          if (!mobile) {
             expect(row.left).toBeGreaterThanOrEqual(bounds.portLeft);
-            expect(row.left + row.width).toBeLessThanOrEqual(bounds.portRight);
-            expect(row.left).toBeLessThanOrEqual(bounds.stackLeft);
-            expect(row.left + row.width).toBeGreaterThanOrEqual(
-              bounds.stackLeft + bounds.stackWidth,
-            );
+            expect(row.right).toBeLessThanOrEqual(bounds.portRight);
           }
           previousBottom = row.bottom;
         }
