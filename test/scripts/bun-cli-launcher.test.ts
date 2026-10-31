@@ -362,6 +362,30 @@ describe.skipIf(process.platform === "win32")("packaged Bun launcher lifecycle",
     }
   });
 
+  it("creates a missing launcher only for Bun's canonical global package/bin pair", () => {
+    const target = fixture();
+    const bunInstall = join(target.root, "bun-install");
+    target.binDir = join(bunInstall, "bin");
+    target.path = join(target.binDir, "openclaw");
+    target.packageRoot = join(bunInstall, "install/global/node_modules/openclaw");
+    target.entryPath = join(target.packageRoot, "openclaw.mjs");
+    mkdirSync(target.packageRoot, { recursive: true });
+    writeFileSync(target.entryPath, "entry");
+    lifecycle.resolveBinDir.mockReturnValue(target.binDir);
+
+    installPackageBunCliLauncher({
+      packageRoot: target.packageRoot,
+      bunVersion: "1.4.4",
+      env: {
+        BUN_INSTALL: bunInstall,
+        npm_config_user_agent: "bun/1.4.4",
+        OPENCLAW_PACKAGE_BUN_LAUNCHER: target.bunPath,
+      },
+    });
+
+    expect(inspectBunCliLauncher(target).state).toBe("current");
+  });
+
   it.each([
     "Node runtime",
     "npm install",

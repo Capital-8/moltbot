@@ -1308,9 +1308,9 @@ function readMigratedSessionStore(stateDir, targetStorePath) {
   return { source: "file", store: readJson(targetStorePath) };
 }
 
-function readInstalledPluginIndex() {
+function readInstalledPluginIndex(options = {}) {
   const stateDir = requireEnv("OPENCLAW_STATE_DIR");
-  const index = readPluginInstallIndex({ stateDir });
+  const index = readPluginInstallIndex({ stateDir, includePlugins: false, ...options });
   assert(index.installRecords, "installed plugin index missing");
   return index;
 }
@@ -1600,7 +1600,10 @@ function assertConfiguredPluginInstalls() {
   if (stage === "baseline") {
     return;
   }
-  const index = readInstalledPluginIndex();
+  const index = readInstalledPluginIndex({
+    includePlugins: true,
+    pluginIds: ["matrix", "brave"],
+  });
   const records = index.installRecords ?? {};
   assertOptionalConfiguredPluginIndex(records, index.plugins ?? [], {
     bundled: true,

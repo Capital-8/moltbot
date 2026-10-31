@@ -296,6 +296,43 @@ describe("plugin index SQLite E2E helpers", () => {
     });
   });
 
+  it("reads install records without loading a wide current plugin catalog", async () => {
+    const root = tempRoots.make("openclaw-plugin-index-");
+    const value = JSON.parse(currentValueJson({ current: { source: "npm" } }));
+    value.index.plugins = [{ pluginId: "wide", detail: "x".repeat(256) }];
+    writeCurrentSqliteIndex(root, JSON.stringify(value));
+
+    const { readPluginInstallRecords } = await loadPluginIndex({
+      OPENCLAW_PLUGIN_INDEX_JSON_MAX_BYTES: "64",
+    });
+
+    expect(readPluginInstallRecords({ stateDir: root, configPath: configPath(root) })).toEqual({
+      current: { source: "npm" },
+    });
+  });
+
+  it("reads selected plugins without loading unrelated wide catalog entries", async () => {
+    const root = tempRoots.make("openclaw-plugin-index-");
+    const value = JSON.parse(currentValueJson({ current: { source: "npm" } }));
+    value.index.plugins = [{ pluginId: "wide", detail: "x".repeat(256) }, { pluginId: "matrix" }];
+    writeCurrentSqliteIndex(root, JSON.stringify(value));
+
+    const { readPluginInstallIndex } = await loadPluginIndex({
+      OPENCLAW_PLUGIN_INDEX_JSON_MAX_BYTES: "64",
+    });
+
+    expect(
+      readPluginInstallIndex({
+        stateDir: root,
+        configPath: configPath(root),
+        pluginIds: ["matrix"],
+      }),
+    ).toEqual({
+      installRecords: { current: { source: "npm" } },
+      plugins: [{ pluginId: "matrix" }],
+    });
+  });
+
   it.each([
     {
       mode: "current",
