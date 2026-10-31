@@ -30,7 +30,10 @@ sourceSuite.define(() => {
       await waitForControlUiRoute(page, { routeId: "memory" });
       const overview = page.locator(".memory-overview");
       await expect(overview.getByRole("heading", { name: "Memory is awake" })).toBeVisible();
-      await expect(overview.locator(".settings-row", { hasText: "Embeddings" })).toBeVisible();
+      const row = overview.locator(".settings-row", { hasText: "Embeddings" });
+      await expect(row).toBeVisible();
+      await expect(row).toHaveCSS("min-height", "48px");
+      await expect(row).toHaveCSS("padding", "12px 16px");
       await expect(overview.locator(".memory-overview__hero")).toHaveCSS("display", "grid");
       await expect(overview.locator(".memory-overview__lobster")).toHaveCSS(
         "aspect-ratio",

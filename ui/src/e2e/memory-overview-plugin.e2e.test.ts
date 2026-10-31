@@ -56,7 +56,10 @@ suite.define(() => {
       await expect(overview).toContainText("custom-memory");
       await expect(overview.locator(".lob-reading-book")).toBeVisible();
       for (const title of ["Embeddings", "Read the dream diary", "Configure memory"]) {
-        await expect(overview.locator(".settings-row", { hasText: title })).toBeVisible();
+        const row = overview.locator(".settings-row", { hasText: title });
+        await expect(row).toBeVisible();
+        await expect(row).toHaveCSS("min-height", "48px");
+        await expect(row).toHaveCSS("padding", "12px 16px");
       }
       await expect(overview.locator(".memory-overview__hero")).toHaveCSS("display", "grid");
       await expect(overview.locator(".memory-overview__lobster")).toHaveCSS(
