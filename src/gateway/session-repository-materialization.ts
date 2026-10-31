@@ -360,7 +360,7 @@ async function materializeCapturedRepositoryWorkspace(
     }
     await diskExport?.verifyCurrent();
     assertCurrent();
-    const bind = async (assertSourceCurrent: SessionSourceAssertion) =>
+    const bind = async (assertSourceCurrent: SessionSourceAssertion, sourceSignal?: AbortSignal) =>
       await patchSessionEntryCore(
         { agentId: params.agentId, sessionKey: initial.canonicalKey, storePath: initial.storePath },
         (current) => {
@@ -378,6 +378,10 @@ async function materializeCapturedRepositoryWorkspace(
         },
         {
           replaceEntry: true,
+          signal:
+            params.signal && sourceSignal
+              ? AbortSignal.any([params.signal, sourceSignal])
+              : (params.signal ?? sourceSignal),
           ...sessionEntryCommitGuardOptions(
             composeSessionSourceAssertion([assertCurrent, assertSourceCurrent]),
           ),
