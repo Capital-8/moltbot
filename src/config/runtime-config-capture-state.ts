@@ -16,6 +16,16 @@ export function getRuntimeConfigCapture(
   return config ? captures.get(config) : undefined;
 }
 
+/**
+ * Pin the authored source of a published runtime config without cloning it, so later
+ * readers project this generation instead of a newer source snapshot.
+ */
+export function pinRuntimeConfigSource(config: OpenClawConfig, source: OpenClawConfig): void {
+  if (!captures.has(config)) {
+    captures.set(config, { source, origin: config });
+  }
+}
+
 /** Freeze a selected runtime/source pair before its publication owner yields. */
 export function captureRuntimeConfigWithSource(
   config: OpenClawConfig,
