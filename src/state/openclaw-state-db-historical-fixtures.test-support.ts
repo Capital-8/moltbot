@@ -92,7 +92,7 @@ export function markStateDatabaseVersion(database: DatabaseSync, version: number
 }
 
 /** Shared expected tail for historical fixtures; independent of production migration discovery. */
-export function expectedStateMigrationsFromV27(path: string) {
+export function expectedStateMigrationsFromV27(pathname: string) {
   return [
     "state-write-indexes-v27",
     "github-publication-draft-v28",
@@ -102,5 +102,5 @@ export function expectedStateMigrationsFromV27(path: string) {
     "local-workspace-cas-v35",
     "template-names-v36",
     "worker-resource-receipts-v37",
-  ].map((kind) => ({ kind, path }));
+  ].map((kind) => ({ kind, path: pathname }));
 }
