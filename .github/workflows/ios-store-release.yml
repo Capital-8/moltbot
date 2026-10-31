@@ -23,6 +23,10 @@ on:
         description: Collect the temporary resource timeline (screenshots operation only)
         type: boolean
         default: true
+      watch_runtime_probe:
+        description: Observe one Watch across runtime maintenance (temporary, no upload)
+        type: boolean
+        default: false
       startup_probe:
         description: Observe idle host and iPhone simulator before screenshots (temporary, no upload)
         type: boolean
@@ -110,13 +114,21 @@ jobs:
           rustup toolchain install "$watch_toolchain" --profile minimal --component rust-src
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Observe Watch runtime maintenance without building
+        if: inputs.watch_runtime_probe
+        timeout-minutes: 20
+        working-directory: apps/ios
+        run: bundle _4.0.23_ exec ruby fastlane/watch_runtime_probe.rb
+
       - name: Identify diagnostic native cache inputs
+        if: ${{ !inputs.watch_runtime_probe }}
         id: ios-cache-inputs
         run: |
           echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           echo "OPENCLAW_WATCH_RTC_CACHE_DIR=$RUNNER_TEMP/openclaw-watch-rtc-libraries" >> "$GITHUB_ENV"
 
       - name: Restore diagnostic Watch RTC build inputs
+        if: ${{ !inputs.watch_runtime_probe }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         continue-on-error: true
         timeout-minutes: 3
@@ -127,6 +139,7 @@ jobs:
           key: watch-rtc-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ios-cache-inputs.outputs.xcode }}-${{ hashFiles('apps/shared/OpenClawWatchRTC/Cargo.lock', 'apps/shared/OpenClawWatchRTC/Cargo.toml', 'apps/shared/OpenClawWatchRTC/rust-toolchain.toml', 'apps/shared/OpenClawWatchRTC/build.sh', 'apps/shared/OpenClawWatchRTC/src/**', 'apps/ios/project.yml') }}
 
       - name: Restore diagnostic screenshot source packages
+        if: ${{ !inputs.watch_runtime_probe }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         continue-on-error: true
         timeout-minutes: 3
@@ -135,6 +148,7 @@ jobs:
           key: ios-screenshot-packages-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ios-cache-inputs.outputs.xcode }}-${{ hashFiles('apps/ios/**/Package.resolved', 'apps/ios/project.yml', 'apps/shared/**/Package*.swift', 'apps/shared/**/Package.resolved', 'apps/swabble/Package*.swift', 'apps/swabble/Package.resolved') }}
 
       - name: Capture iPhone, iPad, and Watch screenshots
+        if: ${{ !inputs.watch_runtime_probe }}
         env:
           OPENCLAW_WATCH_BOOT_TRACE: "1"
           OPENCLAW_SNAPSHOT_DIAGNOSTICS: "1"
@@ -179,6 +193,7 @@ jobs:
             apps/ios/build/screenshot-diagnostics.json
             apps/ios/build/watch-boot-trace.json
             apps/ios/build/watch-host-lifecycle.json
+            apps/ios/build/watch-runtime-probe.json
             ${{ runner.temp }}/ios-resource-timeline.jsonl
             ${{ runner.temp }}/ios-spotlight-probe.json
           if-no-files-found: error
