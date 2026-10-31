@@ -79,6 +79,8 @@
 }
 
 .sidebar-region--mobile-host > .chat-mobile-host[hidden] {
+  /* Keep its box through picker dismissal: display:none here can spin WebKit's
+     style resolver when a composer's native details closes. */
   display: flex;
   visibility: hidden;
   transform: translateY(100%);
@@ -582,6 +584,13 @@
 
   .shell--mobile-nav .content--chat .chat.chat {
     border-radius: 0;
+  }
+
+  /* Like desktop chat, the session workbench starts at the top edge; the generic
+     mobile content inset would expose the shell canvas as a seam under the
+     system chrome. */
+  .shell--mobile-nav .content--workbench {
+    padding-top: 0;
   }
 }
 

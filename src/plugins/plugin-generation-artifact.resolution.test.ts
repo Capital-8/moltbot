@@ -38,8 +38,7 @@ it("initializes the package resolver only when capture needs it", async () => {
   const artifact = resources.keep(capturePluginGenerationArtifact(root, undefined, (run) => run()));
   const entry = artifact.resolve(path.join(root, "index.js"));
   artifact.prepareModule(entry);
-  // Bun needs eager source inspection; Node can wait for the first import.
-  expect(createResolver).toHaveBeenCalledTimes(process.versions.bun ? 1 : 0);
+  expect(createResolver).not.toHaveBeenCalled();
   for (let repeat = 0; repeat < 2; repeat++) {
     const selected = artifact.captureModule(entry, "./peer.js", ["node", "import"]);
     expect(selected && "target" in selected && fs.readFileSync(selected.target, "utf8")).toBe(
@@ -47,6 +46,31 @@ it("initializes the package resolver only when capture needs it", async () => {
     );
   }
   expect(createResolver).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ["read-only URL", "", false],
+  ["URL assignment", "import.meta.url = 'https://localhost';", true],
+  ["URL destructuring", "({ href: import.meta.url } = new URL('https://localhost'));", true],
+  ["dirname", "export const directory = import.meta.dirname;", true],
+  ["meta object", "export const meta = import.meta;", true],
+] as const)("captures native assets with %s metadata", async (_name, extra, transformed) => {
+  await using resources = captureResources();
+  const root = temp.make("plugin-native-meta-");
+  const entry = path.join(root, "index.mjs");
+  writeTree(root, {
+    "package.json": { name: "fixture", type: "module" },
+    "index.mjs": `${extra}
+      export const read = () => [new URL('./asset.txt', import.meta.url), import.meta.url];`,
+    "asset.txt": "captured",
+    "private.txt": "not selected",
+  });
+  const createResolver = vi.spyOn(jitiFactory, "createJiti");
+  const artifact = resources.keep(capturePluginGenerationArtifact(root, entry, (run) => run()));
+  expect(createResolver.mock.calls.length > 0).toBe(transformed);
+  fs.writeFileSync(path.join(root, "asset.txt"), "changed");
+  expect(fs.readFileSync(artifact.resolve(path.join(root, "asset.txt")), "utf8")).toBe("captured");
+  expect(artifact.hasSource(path.join(root, "private.txt"))).toBe(false);
 });
 
 it.each([false, true])(

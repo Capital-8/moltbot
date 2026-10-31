@@ -581,7 +581,7 @@ export function createPluginGenerationArtifact(
         moduleCapture.staticImports = visitPluginSourceReferences(
           source,
           readPluginCapturedCode(target, capturedDirectories.has(target)),
-          resolution.get(source),
+          () => resolution.get(source),
           entry && !executableEntry
             ? captureObservedReference
             : (reference, kind) => observed.set(`${kind}\0${reference}`, null),
