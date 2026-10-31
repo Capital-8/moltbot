@@ -83,7 +83,7 @@ import {
   withLegacyTemplateStateSchema,
   withLegacyTemplateStateCompatibility,
 } from "./openclaw-state-db-schema-v36-template-names.js";
-import { stateWorkerResourceReceiptMigration } from "./openclaw-state-db-schema-v37-resource-receipts.js";
+import * as v37 from "./openclaw-state-db-schema-v37-resource-receipts.js";
 import {
   assertSupportedStateSchemaVersion,
   readStateSchemaContentVersion,
@@ -294,7 +294,7 @@ function assertOpenClawStateDatabaseVersionForMigration(
   assertSqliteSchemaTablesPresent(
     database,
     options.pathname,
-    withLegacyTemplateStateSchema(OPENCLAW_STATE_SCHEMA_SQL),
+    withLegacyTemplateStateSchema(v37.withLegacyWorkerResourceReceipts(OPENCLAW_STATE_SCHEMA_SQL)),
     {
       allowedMissingTables: [
         ...(options.version === 5
@@ -545,7 +545,7 @@ export const versionedStateMigrations = [
   cronIdentity.stateCronIdentityMigration,
   stateLocalWorkspaceCasMigration,
   stateTemplateNamesMigration,
-  stateWorkerResourceReceiptMigration,
+  v37.stateWorkerResourceReceiptMigration,
 ] as const;
 
 /** Recent version migrations own only their tables; Doctor owns unrelated historical repair. */
@@ -570,7 +570,7 @@ export function migrateBoundedStateSchema(
     cronIdentity.stateCronIdentityMigration,
     stateLocalWorkspaceCasMigration,
     stateTemplateNamesMigration,
-    stateWorkerResourceReceiptMigration,
+    v37.stateWorkerResourceReceiptMigration,
   ];
   const pending = migrations.filter(({ version }) => version > previousVersion);
   // An undeclared destination keeps the legacy full runner and full-backup requirement.
@@ -584,10 +584,9 @@ export function migrateBoundedStateSchema(
   const indexes = getCanonicalSqliteNamedIndexContracts(OPENCLAW_STATE_SCHEMA_SQL).filter((index) =>
     tables.has(index.tableName),
   );
+  const receiptSourceSchema = v37.withLegacyWorkerResourceReceipts(OPENCLAW_STATE_SCHEMA_SQL);
   const predecessorSchema =
-    previousVersion < 36
-      ? withLegacyTemplateStateSchema(OPENCLAW_STATE_SCHEMA_SQL)
-      : OPENCLAW_STATE_SCHEMA_SQL;
+    previousVersion < 36 ? withLegacyTemplateStateSchema(receiptSourceSchema) : receiptSourceSchema;
   const casSourceSchema =
     previousVersion < 35 ? withLegacyLocalWorkspaceCas(predecessorSchema) : predecessorSchema;
   const manifestSourceSchema =

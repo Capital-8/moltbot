@@ -208,7 +208,10 @@ export function createWorkerProviderOwnerLifecycle(
           };
           assertCurrent();
           await provider.destroy({ ...lease, signal, assertCurrent });
-          assertCurrent();
+          // Drain can cancel new effects, not discard an already confirmed deletion.
+          if (requireCurrentOwner(record).state !== record.state) {
+            throw serviceError("invalid_state", "Worker teardown owner changed");
+          }
         } finally {
           clearTimeout(timer);
         }

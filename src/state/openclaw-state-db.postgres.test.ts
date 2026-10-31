@@ -135,7 +135,7 @@ async function restoreEmptyPredecessorTables(client: pg.Client, previousVersion:
   );
   const eager = expectDefined(source.postgres, "Historical PostgreSQL DDL");
   // DROP COLUMN retains an attnum hole, including at the tail. Recreate the empty
-  // worker table with its eager indexes and incoming foreign keys before sealing.
+  // worker table, preserving incoming foreign keys from installed optional fragments too.
   expect((await client.query("SELECT count(*)::int AS n FROM worker_environments")).rows).toEqual([
     { n: 0 },
   ]);
@@ -143,11 +143,16 @@ async function restoreEmptyPredecessorTables(client: pg.Client, previousVersion:
     eager.match(/CREATE TABLE "worker_environments" \([\s\S]*?\n\);/u)?.[0],
     "Historical worker environment declaration",
   );
+  const references = await client.query<{ source: string; definition: string }>(
+    `SELECT conrelid::regclass::text AS source, pg_get_constraintdef(oid) AS definition
+     FROM pg_constraint WHERE contype = 'f' AND confrelid = 'worker_environments'::regclass`,
+  );
   const workerDependents = eager.match(
-    /CREATE (?:UNIQUE )?INDEX [^;]+ ON "worker_environments"[^;]*;|ALTER TABLE "[^"]+" ADD FOREIGN KEY[^;]* REFERENCES "worker_environments"[^;]*;/gu,
+    /CREATE (?:UNIQUE )?INDEX [^;]+ ON "worker_environments"[^;]*;|ALTER TABLE "worker_environments" ADD FOREIGN KEY[^;]*;/gu,
   );
   await client.query(
-    `DROP TABLE worker_environments CASCADE; ${workerTable} ${workerDependents?.join("\n") ?? ""}`,
+    `DROP TABLE worker_environments CASCADE; ${workerTable} ${workerDependents?.join("\n") ?? ""}
+     ${references.rows.map((ref) => `ALTER TABLE ${ref.source} ADD ${ref.definition};`).join("\n")}`,
   );
   for (const [previous, current] of TEMPLATE_STATE_TABLE_RENAMES) {
     const declaration = expectDefined(
