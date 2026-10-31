@@ -53,7 +53,7 @@ const HumanMentionMenuView = lazy(() => import("./chat-composer-mention-menu.tsx
   export: "HumanMentionMenuView",
 });
 const EmojiMenu = lazy(() => import("./chat-composer-emoji.tsx"), { export: "EmojiMenu" });
-warmWhenIdle(SlashMenu.preload, SkillMenu.preload, HumanMentionMenuView.preload, EmojiMenu.preload);
+warmWhenIdle(SlashMenu.preload, SkillMenu.preload);
 const ChatGoal = lazy(() => import("./chat-composer-goal.tsx"), { export: "ChatGoal" });
 const ChatGoalRecoveryNotice = lazy(() => import("./chat-composer-goal.tsx"), {
   export: "ChatGoalRecoveryNotice",
