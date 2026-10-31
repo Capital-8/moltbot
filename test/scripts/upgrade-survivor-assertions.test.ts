@@ -1577,6 +1577,18 @@ process.stdout.write(sessionDir + "\\n");
       const cronStore = join(stateDir, "cron", "jobs.json");
       const baseline = run("assert-state");
       expect(baseline.status, baseline.stderr).toBe(0);
+      rmSync(join(stateDir, "plugin-runtime-deps"), { force: true, recursive: true });
+      const afterDoctor = spawnSync(testNodeExecPath, [ASSERTIONS_PATH, "assert-state"], {
+        env: {
+          ...env,
+          OPENCLAW_UPGRADE_SURVIVOR_BASELINE_DOCTOR_APPLIED: "1",
+        },
+        encoding: "utf8",
+      });
+      expect(afterDoctor.status, afterDoctor.stderr).toBe(0);
+      const withoutDoctorReceipt = run("assert-state");
+      expect(withoutDoctorReceipt.status).not.toBe(0);
+      expect(withoutDoctorReceipt.stderr).toContain("stale-sentinel");
       const store = JSON.parse(readFileSync(cronStore, "utf8"));
       store.jobs.pop();
       writeJson(cronStore, store);

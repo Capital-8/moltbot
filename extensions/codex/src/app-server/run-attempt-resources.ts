@@ -62,6 +62,14 @@ import { isCodexNativeDelegationDisabledForRun } from "./thread-requests.js";
 import { createCodexTrajectoryRecorder } from "./trajectory.js";
 import type { CodexAppServerTurnRouter, CodexThreadRouteReservation } from "./turn-router.js";
 
+const CODEX_ONE_SHOT_CLIENT_CLOSE_OPTIONS = {
+  exitTimeoutMs: 2_000,
+  // A clean Codex shutdown may spend several hundred milliseconds flushing its
+  // state database after stdin closes. Preserve that bounded grace period so a
+  // normal isolated-client exit is not converted into a forced, uncertain receipt.
+  forceKillDelayMs: 1_500,
+} as const;
+
 export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
   const { context } = prompt;
   const { runtime, attemptTools } = context;
@@ -181,7 +189,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     // Retained peers prevent retirement; preserve their client without treating
     // missing close evidence as a completed one-shot cleanup.
     const result = retired.closed
-      ? await state.client.closeAndWait({ exitTimeoutMs: 2_000, forceKillDelayMs: 250 })
+      ? await state.client.closeAndWait(CODEX_ONE_SHOT_CLIENT_CLOSE_OPTIONS)
       : undefined;
     if (params.oneShotCliRun && result?.cleanup !== "closed") {
       throw new Error("Codex one-shot client cleanup could not be confirmed");
@@ -201,10 +209,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
       const ownedClient = state.releaseSharedClientLease ? state.client : undefined;
       releaseSharedClientLeaseOnce();
       if (ownedClient) {
-        const result = await ownedClient.closeAndWait({
-          exitTimeoutMs: 2_000,
-          forceKillDelayMs: 250,
-        });
+        const result = await ownedClient.closeAndWait(CODEX_ONE_SHOT_CLIENT_CLOSE_OPTIONS);
         if (params.oneShotCliRun && result.cleanup !== "closed") {
           throw new Error("Codex isolated client cleanup could not be confirmed");
         }

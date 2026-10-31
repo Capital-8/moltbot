@@ -291,7 +291,7 @@ describe("Codex one-shot cleanup receipts", () => {
 
   it
     .skipIf(process.platform === "win32")
-    .for(["confirmed", "unknown", "forced", "signalled", "retired-command"])(
+    .for(["confirmed", "delayed-confirmed", "unknown", "forced", "signalled", "retired-command"])(
     "records one-shot cleanup accurately after %s app-server shutdown",
     async (shutdown, { signal }) => {
       const rootPath = path.join(tempDir, "cleanup-root.mjs");
@@ -345,7 +345,9 @@ process.stdin.on("end", () => ${
             ? "setInterval(() => {}, 1_000)"
             : shutdown === "signalled"
               ? 'process.kill(process.pid, "SIGKILL")'
-              : "process.exit(0)"
+              : shutdown === "delayed-confirmed"
+                ? "setTimeout(() => process.exit(0), 500)"
+                : "process.exit(0)"
         });
 `,
       );
@@ -401,7 +403,7 @@ process.stdin.on("end", () => ${
         expect(isPidAlive(descendantPid)).toBe(retained);
         // This is the cleanup guard that also records the one-shot recovery
         // receipt; a clean root exit must not bypass its failure path.
-        if (shutdown === "confirmed") {
+        if (shutdown === "confirmed" || shutdown === "delayed-confirmed") {
           expect(warning).not.toHaveBeenCalled();
         } else {
           expect(warning).toHaveBeenCalledWith(

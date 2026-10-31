@@ -811,7 +811,14 @@ function assertStateSurvived() {
   if (scenario === "auth-profile-v2026-7-2-beta-5") {
     assertAuthProfileMigrationSurvived(stateDir, stage);
   }
-  assertRuntimeDependenciesSurvived(stateDir, false);
+  if (
+    !(
+      scenario === "cron-scheduled-authority" &&
+      process.env.OPENCLAW_UPGRADE_SURVIVOR_BASELINE_DOCTOR_APPLIED === "1"
+    )
+  ) {
+    assertRuntimeDependenciesSurvived(stateDir, false);
+  }
   if (scenario === "bootstrap-persona") {
     for (const [fileName, contents] of PERSONA_FILES) {
       const actual = fs.readFileSync(path.join(workspace, fileName), "utf8");

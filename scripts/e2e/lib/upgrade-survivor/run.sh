@@ -2665,6 +2665,7 @@ phase seed-state seed_state
 if [ "$SCENARIO" = "cron-scheduled-authority" ]; then
   phase migrate-baseline-cron-authority openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" \
     openclaw doctor --fix --non-interactive >"$BASELINE_DOCTOR_LOG" 2>&1
+  export OPENCLAW_UPGRADE_SURVIVOR_BASELINE_DOCTOR_APPLIED=1
   phase assert-migrated-baseline-cron-authority assert_baseline_state
 fi
 if [ "$SCENARIO" = "legacy-operator-state" ]; then
