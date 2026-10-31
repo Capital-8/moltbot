@@ -26,6 +26,7 @@ import {
 import { approveDevicePairing } from "../infra/device-pairing-approval.js";
 import { requestDevicePairing } from "../infra/device-pairing.js";
 import { defaultRuntime } from "../runtime.js";
+import { getSessionControllerOperation } from "../sessions/session-controller.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { acquireTestPortBlock } from "../test-utils/port-claims.js";
 import { writeToolCall } from "./gateway-provider-fixture.test-support.js";
@@ -295,10 +296,10 @@ export default { id: "room-proof", register(api) {
             expect(self.profile.id).not.toBe("gateway-owner");
             return { client, profileId: self.profile.id };
           };
-          const send = async (client: typeof admin) => {
+          const send = async (client: typeof admin, key?: string) => {
             const runId = randomUUID();
             await client.request("chat.send", {
-              sessionKey: "agent:main:room-proof-" + runId,
+              sessionKey: key ?? "agent:main:room-proof-" + runId,
               message: "Read the room, then create an unsent draft. Never send it.",
               idempotencyKey: runId,
             });
@@ -337,13 +338,22 @@ export default { id: "room-proof", register(api) {
             path.join(home.workspaceDir, "room-draft.eml"),
             "utf8",
           );
-          for (const reason of ["role", "disconnect"] as const) {
+          for (const reason of ["role", "disconnect", "profile-merge", "steer"] as const) {
             const person = await connectPerson(reason);
             pauseDraft = true;
             entered = createDeferred();
             release = createDeferred();
             refused = createDeferred();
-            const runId = await send(person.client);
+            const sharedKey =
+              reason === "steer"
+                ? (
+                    await person.client.request<{ key: string }>("sessions.create", {
+                      agentId: "main",
+                      visibility: "shared",
+                    })
+                  ).key
+                : undefined;
+            const runId = await send(person.client, sharedKey);
             const completed = wait(runId);
             await withinTest(
               awaitGateBeforeSettlement(
@@ -361,6 +371,33 @@ export default { id: "room-proof", register(api) {
             });
             if (reason === "role") {
               await admin.request("users.setRole", { profileId: person.profileId, role: "member" });
+            } else if (reason === "profile-merge") {
+              const target = await connectPerson("merge-survivor");
+              const merged = await admin.request<{ profile: { id: string } }>("users.merge", {
+                sourceProfileId: person.profileId,
+                targetProfileId: target.profileId,
+              });
+              expect(merged.profile.id).toBe(target.profileId);
+            } else if (reason === "steer") {
+              const other = await connectPerson("steerer");
+              await other.client.request("chat.send", {
+                sessionKey: sharedKey!,
+                message: "Additional human guidance; do not send the draft.",
+                queueMode: "steer",
+                idempotencyKey: randomUUID(),
+              });
+              // Read the actual production owner; input is admitted only through chat.send.
+              await vi.waitFor(() => {
+                const participants = getSessionControllerOperation(
+                  sharedKey!,
+                )?.personalToolParticipants;
+                expect(participants).toBeDefined();
+                expect(participants?.resolve(person.profileId)?.profileId).toBe(person.profileId);
+                expect(participants?.resolve(other.profileId)?.profileId).toBe(other.profileId);
+                expect(() => participants?.resolve()).toThrow(
+                  "Several people have steered this turn",
+                );
+              });
             } else {
               const connected = await admin.request<
                 Array<{ instanceId?: string; reason?: string }>
@@ -395,7 +432,7 @@ export default { id: "room-proof", register(api) {
           expect(effects.filter((effect) => effect.operation === "room_draft")).toHaveLength(1);
           expect(errors).toEqual([]);
           console.log(
-            "REQUESTER_EFFECT_PROOF: authenticated read + persisted X-Unsent draft; non-admin no I/O; role revocation + disconnect after preparation no draft I/O; zero sends",
+            "REQUESTER_EFFECT_PROOF: authenticated read + persisted X-Unsent draft; non-admin no I/O; role revocation + disconnect + profile merge + accepted second-person steer after preparation no draft I/O; zero sends",
           );
         },
         async () => {
