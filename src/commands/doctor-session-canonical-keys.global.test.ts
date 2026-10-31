@@ -4,11 +4,17 @@ import { expect, it } from "vitest";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import {
   assignSessionOwner,
+  listSessionParticipantsReadOnly,
   replaceSessionEntrySync,
 } from "../config/sessions/session-accessor.js";
+import { recordSessionParticipant } from "../config/sessions/session-accessor.sqlite-participants.native.js";
 import { cronRunLogEntryToDetail } from "../cron/run-history-detail.js";
 import { recordCronRunInDatabase } from "../cron/store/run-history.kernel.js";
+import { resolveRepositoryWorkspaceAccess } from "../gateway/server-methods/session-repository-workspace-access.js";
+import { loadGatewaySessionEntryReadOnlyInWorker } from "../gateway/session-utils-store-worker.js";
+import { createWorkerSessionPlacementStore } from "../gateway/worker-environments/placement-store.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
+import { getSessionRepositoryWorkspaceStore } from "../state/session-repository-workspaces.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { createCanonicalRepairFixture } from "./doctor-session-repair-fixture.test-support.js";
 
@@ -37,6 +43,23 @@ function pair(stateDir: string, reviewId = "review-original") {
 it("recovers the overlapping review without replacing the ongoing chat or its retained state", async () => {
   await withOpenClawTestState({ prefix: "doctor-global-review-" }, async (state) => {
     const fixture = pair(state.stateDir);
+    for (const promptedAt of [5, 6]) {
+      recordSessionParticipant(
+        { ...fixture.scope(), sessionKey: literal },
+        { identity: { type: "profile", id: "review-participant" }, promptedAt },
+      );
+    }
+    const participants = (sessionKey: string) =>
+      listSessionParticipantsReadOnly({ ...fixture.scope(), sessionKey }).get(sessionKey);
+    const expectedParticipants = [
+      {
+        identity: { type: "profile", id: "review-participant" },
+        contributionCount: 2,
+        firstPromptedAt: 5,
+        lastPromptedAt: 6,
+      },
+    ];
+    expect(participants(literal)).toEqual(expectedParticipants);
     assignSessionOwner(
       { ...fixture.scope(), sessionKey: literal },
       {
@@ -65,6 +88,7 @@ it("recovers the overlapping review without replacing the ongoing chat or its re
     const recovered = expectDefined(result.globalSessionRepairs?.[0], "recovered chat");
     expect(recovered.to).toMatch(/^agent:main:global-review-/);
     expect(fixture.load(recovered.to)?.entry).toEqual(before[1]?.entry);
+    expect(participants(recovered.to)).toEqual(expectedParticipants);
     expect(
       database
         .prepare("SELECT session_id FROM session_windows WHERE session_key = ? ORDER BY session_id")
@@ -82,6 +106,7 @@ it("recovers the overlapping review without replacing the ongoing chat or its re
     await fixture.repair();
     expect(fixture.load("global")).toEqual(before[0]);
     expect(fixture.load(recovered.to)?.entry).toEqual(before[1]?.entry);
+    expect(participants(recovered.to)).toEqual(expectedParticipants);
     replaceSessionEntrySync(
       { ...fixture.scope(), sessionKey: recovered.to },
       { ...fixture.review, resumeAfterRestart: { queuedInputIds: [] } },
@@ -197,6 +222,89 @@ it.each(["occupied", "linked", "resuming"] as const)(
     });
   },
 );
+
+it.each([literal, "global"])("preserves the repository binding owned by %s", async (boundKey) => {
+  await withOpenClawTestState({ prefix: "doctor-global-repository-" }, async (state) => {
+    const fixture = pair(state.stateDir);
+    const store = getSessionRepositoryWorkspaceStore();
+    const workspace = await store.create({
+      agentId: "main",
+      sessionKey: boundKey,
+      url: "https://github.com/example/review",
+      assertCurrent() {},
+    });
+    replaceSessionEntrySync(
+      { ...fixture.scope(), sessionKey: boundKey },
+      {
+        ...(boundKey === literal ? fixture.review : fixture.ongoing),
+        repositoryWorkspaceId: workspace.workspaceId,
+        permissionMode: "read-only",
+      },
+    );
+    const readFiles = async () => {
+      const loaded = await loadGatewaySessionEntryReadOnlyInWorker({
+        cfg: fixture.cfg,
+        key: boundKey,
+        agentId: "main",
+      });
+      using access = await resolveRepositoryWorkspaceAccess(loaded, undefined, () => {});
+      expect(access?.kind).toBe("stored");
+      return access?.repository;
+    };
+    expect(await readFiles()).toEqual(workspace);
+    const before = [fixture.load("global"), fixture.load(literal)];
+    const planned = expectDefined(
+      (await fixture.repair(false)).globalSessionRepairs?.[0],
+      "preview",
+    );
+    if (boundKey === literal) {
+      await expect(fixture.repair()).rejects.toThrow(/repository workspace binding/);
+      expect([fixture.load("global"), fixture.load(literal)]).toEqual(before);
+      expect(fixture.load(planned.to)).toBeUndefined();
+      await fixture.transcript(literal, fixture.review.sessionId, "review history");
+    } else {
+      const repaired = expectDefined((await fixture.repair()).globalSessionRepairs?.[0], "repair");
+      expect(fixture.load("global")).toEqual(before[0]);
+      expect(fixture.load(repaired.to)?.entry).toEqual(before[1]?.entry);
+      await fixture.transcript(repaired.to, fixture.review.sessionId, "review history");
+    }
+    expect(await store.get(workspace.workspaceId)).toEqual(workspace);
+    expect(await readFiles()).toEqual(workspace);
+    await fixture.transcript("global", fixture.ongoing.sessionId, "ongoing history");
+  });
+});
+
+it.each([literal, "global"])("preserves the worker placement owned by %s", async (boundKey) => {
+  await withOpenClawTestState({ prefix: "doctor-global-placement-" }, async (state) => {
+    const fixture = pair(state.stateDir);
+    const store = createWorkerSessionPlacementStore();
+    const sessionId = (boundKey === literal ? fixture.review : fixture.ongoing).sessionId;
+    const placement = await store.startDispatch({
+      agentId: "main",
+      sessionKey: boundKey,
+      sessionId,
+    });
+    expect(placement.state).toBe("requested");
+    const before = [fixture.load("global"), fixture.load(literal)];
+    const planned = expectDefined(
+      (await fixture.repair(false)).globalSessionRepairs?.[0],
+      "preview",
+    );
+    if (boundKey === literal) {
+      await expect(fixture.repair()).rejects.toThrow(/workspace binding/);
+      expect([fixture.load("global"), fixture.load(literal)]).toEqual(before);
+      expect(fixture.load(planned.to)).toBeUndefined();
+      await fixture.transcript(literal, fixture.review.sessionId, "review history");
+    } else {
+      const repaired = expectDefined((await fixture.repair()).globalSessionRepairs?.[0], "repair");
+      expect(fixture.load("global")).toEqual(before[0]);
+      expect(fixture.load(repaired.to)?.entry).toEqual(before[1]?.entry);
+      await fixture.transcript(repaired.to, fixture.review.sessionId, "review history");
+    }
+    expect(await store.getAsync(sessionId)).toEqual(placement);
+    await fixture.transcript("global", fixture.ongoing.sessionId, "ongoing history");
+  });
+});
 
 it("leaves healthy raw, named and other-agent literal chats unchanged", async () => {
   await withOpenClawTestState({ prefix: "doctor-global-healthy-" }, async (state) => {

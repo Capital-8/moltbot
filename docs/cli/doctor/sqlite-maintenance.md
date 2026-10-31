@@ -59,6 +59,10 @@ The repair keeps the ongoing `global` chat in place and preserves the recovered
 chat's original session ID, title, retained history, owner, members and workspace.
 Files stay in their existing location. Attributable terminal cron history links
 follow the recovered chat; job definitions and enabled states do not change.
+The moved chat must not own a cloud repository workspace or a persisted worker
+placement. Doctor leaves those bindings untouched and refuses the repair; their
+recovery is not supported by this operation. An unrelated binding on the ongoing
+chat does not prevent repair.
 Pending input, linked work, an occupied destination or uncertain history identity
 prevents repair instead of selecting or overwriting another conversation.
 

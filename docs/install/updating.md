@@ -144,7 +144,8 @@ Candidate Doctor can recover overlapping global chat bindings during its existin
 offline maintenance phase. It keeps the ongoing global chat and gives the other
 original conversation an ordinary address, preserving its SID, history and files.
 The installed updater needs no new marker or schema change. Interrupted reference
-repair is repeatable; uncertain ownership or linked work refuses the repair.
+repair is repeatable; uncertain ownership, linked work, or a repository workspace
+or worker placement owned by the moved chat refuses the repair.
 Reopen the recovered chat as described in
 [overlapping global chats](/cli/doctor/sqlite-maintenance#overlapping-global-chats).
 

@@ -6,7 +6,6 @@ import {
   rehomeSessionDeliveryReferencesForCanonicalRepair,
 } from "../config/sessions/session-accessor.js";
 import { rehomeSessionWindows } from "../config/sessions/session-accessor.sqlite-entry-store.js";
-import { copySessionNodeArtifactsForRepair } from "../config/sessions/session-accessor.sqlite-node-artifacts.js";
 import { replaceSessionOwnerInTransaction } from "../config/sessions/session-accessor.sqlite-owner.js";
 import { getSessionKysely } from "../config/sessions/session-accessor.sqlite-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -119,6 +118,9 @@ export async function repairOverlappingGlobalSessionKeys(params: {
       }
     }
     const to = recoveredKey(store.agentId, candidate.entry.sessionId);
+    if (original?.entry.repositoryWorkspaceId) {
+      throw new Error(`Cannot recover ${from}: its repository workspace binding needs resolution.`);
+    }
     if (candidate.entry.resumeAfterRestart) {
       throw new Error(`Cannot recover ${from}: its accepted work must finish first.`);
     }
@@ -173,6 +175,33 @@ export async function repairOverlappingGlobalSessionKeys(params: {
       withExistingOpenClawStateDatabaseReadOnly(
         ({ db: database }) => {
           const db = getNodeSqliteKysely<DB>(database);
+          if (original) {
+            const repository = tableExists(database, "session_repository_workspaces")
+              ? executeSqliteQuerySync(
+                  database,
+                  db
+                    .selectFrom("session_repository_workspaces")
+                    .select("workspace_id")
+                    .where("agent_id", "=", store.agentId)
+                    .where("session_key", "=", from)
+                    .limit(1),
+                ).rows
+              : [];
+            const placements = executeSqliteQuerySync(
+              database,
+              db
+                .selectFrom("worker_session_placements")
+                .select("session_id")
+                .where("agent_id", "=", store.agentId)
+                .where((eb) =>
+                  eb.or([eb("session_key", "=", from), eb("session_id", "in", history.sessionIds)]),
+                )
+                .limit(1),
+            ).rows;
+            if (repository.length || placements.length) {
+              throw new Error(`Cannot recover ${from}: its workspace binding needs resolution.`);
+            }
+          }
           const linked = executeSqliteQuerySync(
             database,
             db
@@ -267,9 +296,6 @@ export async function repairOverlappingGlobalSessionKeys(params: {
             replaceSessionOwnerInTransaction(target, to, original.entry.owner);
             rehomeSessionWindows(target, to, [from]);
             rehomeSessionDeliveryReferencesForCanonicalRepair(target, to, [from]);
-            copySessionNodeArtifactsForRepair(target, target, [from], to, {
-              includeMembers: true,
-            });
           },
           removals: [
             {
