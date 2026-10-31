@@ -13,9 +13,32 @@ const CLAW = "https://studio-k7x2q.claws.example.test";
 afterEach(() => setOpenClawIdClawOriginResolver(undefined));
 
 describe("OpenClaw ID claw origin", () => {
-  it("is the linked claw's https hostname", async () => {
+  it("is the hostname of the linked claw's owner-signed binding", async () => {
     const claw = await linkedClaw();
+    expect(claw.authority.current()?.binding?.body.hostname).toBe(
+      "studio-k7x2q.claws.example.test",
+    );
     expect(clawOriginOfRecord(claw.authority.current())).toBe(CLAW);
+  });
+
+  it("follows a re-link: the new binding's hostname replaces the old one", async () => {
+    const claw = await linkedClaw();
+    const record = claw.authority.current()!;
+    const relinked = {
+      ...record,
+      binding: {
+        ...record.binding!,
+        body: { ...record.binding!.body, hostname: "lab-k7x2q.claws.example.test" },
+      },
+    };
+    setOpenClawIdClawOriginResolver(() => clawOriginOfRecord(relinked));
+    expect(isOpenClawIdClawOrigin("https://lab-k7x2q.claws.example.test")).toBe(true);
+    expect(isOpenClawIdClawOrigin(CLAW)).toBe(false);
+  });
+
+  it("does not exist after an unlink (no authority)", async () => {
+    const claw = await linkedClaw();
+    expect(clawOriginOfRecord({ ...claw.authority.current()!, authority: null })).toBeUndefined();
   });
 
   it("does not exist for a hostname that is only prepared", async () => {
@@ -73,6 +96,18 @@ describe("WebSocket origin policy for a linked claw", () => {
     setOpenClawIdClawOriginResolver(() => CLAW);
     const other = { ...tunnel, origin: "https://team-k7x2q.claws.example.test" };
     expect(checkGatewayWsBrowserOrigin(other, {}).ok).toBe(false);
+  });
+
+  it("leaves direct loopback unchanged: local rules still decide, the claw origin is not special", () => {
+    setOpenClawIdClawOriginResolver(() => CLAW);
+    const local = {
+      origin: "http://localhost:18790",
+      requestHost: "localhost:18790",
+      isLocalClient: true,
+    };
+    expect(checkGatewayWsBrowserOrigin(local, {}).ok).toBe(true);
+    const claw = { origin: CLAW, requestHost: "localhost:18790", isLocalClient: true };
+    expect(checkGatewayWsBrowserOrigin(claw, {}).ok).toBe(false);
   });
 
   it("keeps the configured allowlist working over the tunnel", () => {
