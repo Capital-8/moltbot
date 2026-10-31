@@ -85,9 +85,10 @@ function onlyStringUniqueItems(value: unknown): boolean {
 
 // TypeBox's emitted and bundled counting reducers return `++result` from the callback.
 // Writing the callback parameter is a dead store; the equivalent sum keeps each count.
+// esbuild renames nested accumulators (`result2`), so match the name it assigned.
 function countWithoutReducerParameterWrites(runtime: string): string {
-  const rewritten = runtime.replace(/\?\+\+result:result,0\)/g, "?result+1:result,0)");
-  if (rewritten.includes("++result")) {
+  const rewritten = runtime.replace(/\?\+\+(result\d*):\1,0\)/g, "?$1+1:$1,0)");
+  if (/\+\+result\d*\b/.test(rewritten)) {
     throw new Error("Unsupported TypeBox counting reducer shape");
   }
   return rewritten;
