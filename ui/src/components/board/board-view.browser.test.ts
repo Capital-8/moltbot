@@ -472,6 +472,29 @@ describe.skipIf(!hasBrowserLayout)("openclaw-board-view browser layout", () => {
     expect(getComputedStyle(second).borderTopColor).not.toBe("rgba(0, 0, 0, 0)");
   });
 
+  it("keeps a focused page filling its board viewport", async () => {
+    const host = document.createElement("div");
+    host.className = "sidebar-region sidebar-region--open sidebar-region--expanded";
+    host.style.width = "1200px";
+    const parent = document.createElement("div");
+    parent.className = "board-session-surface__board";
+    parent.style.height = "500px";
+    host.append(parent);
+    document.body.append(host);
+    const view = await mount(undefined, parent);
+    view.pageWidgetName = source.widgets[0]!.name;
+    await updateSnapshot(view, {
+      tabs: [source.tabs[0]!],
+      widgets: [{ ...source.widgets[0]!, sizeW: 12 }],
+    });
+    const content = view.querySelector<HTMLElement>(".board-view")!;
+    const grid = view.querySelector<HTMLElement>(".board-grid")!;
+    expect(getComputedStyle(view).overflow).toBe("hidden");
+    expect(getComputedStyle(content).display).toBe("flex");
+    expect(view.getBoundingClientRect().height).toBeCloseTo(500, 0);
+    expect(grid.getBoundingClientRect().height).toBeCloseTo(500, 0);
+  });
+
   it.each(
     (["card", "full-bleed", "frameless"] as const).flatMap((presentation) => [
       { presentation, surface: "grid" },

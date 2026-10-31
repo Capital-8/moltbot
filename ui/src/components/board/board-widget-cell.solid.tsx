@@ -196,8 +196,9 @@ function BoardWidgetCellContent(
   // Fixed reports reserve their full height. Keep their shells ready for scroll,
   // but admit heavy report content only nearby and retain it across tab switches.
   // Observe the card because the display:contents host has no intersection box.
+  // Hidden retained or prepared cards need no observation until activation.
   createIntersectionObserver(
-    () => (fixedReport() && !reportEntered() && widgetRoot() ? [widgetRoot()!] : []),
+    () => (active() && fixedReport() && !reportEntered() && widgetRoot() ? [widgetRoot()!] : []),
     (entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         setReportEntered(true);

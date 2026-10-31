@@ -700,60 +700,63 @@ openclaw-board-widget-cell {
 /* A lone full-width widget stays a page when its main region shares space with
    Chat. Side dashboards keep their regular grid sizing and widget chrome. */
 :is(
-    .sidebar-region--expanded,
-    .sidebar-region:not(.sidebar-region--open),
-    .sidebar-region [data-region="main"],
-    .board-document__content
-  )
+  .sidebar-region--expanded,
+  .sidebar-region:not(.sidebar-region--open),
+  .sidebar-region [data-region="main"],
+  .board-document__content
+) {
   openclaw-board-view:has(> .board-view--single-full-width) {
-  padding: 0;
-
-  > .board-view {
     padding: 0;
   }
 
-  .board-tabs {
-    padding-left: 16px;
-  }
+  /* Match each card through the existing page class, not an ancestor :has()
+   check repeated for every card during style invalidation. */
+  openclaw-board-view > .board-view--single-full-width {
+    padding: 0;
 
-  .board-widget:not(.board-widget--dragging) {
-    --board-widget-height-trim: 2px;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-
-    &:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: -2px;
+    .board-tabs {
+      padding-left: 16px;
     }
 
-    .board-widget__body {
+    .board-widget:not(.board-widget--dragging) {
+      --board-widget-height-trim: 2px;
+      background: transparent;
+      border: 0;
       border-radius: 0;
+      box-shadow: none;
+
+      &:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+
+      .board-widget__body {
+        border-radius: 0;
+      }
     }
-  }
 
-  &:has(> .board-view--page) {
-    height: 100%;
-    overflow: hidden;
-
-    > .board-view {
+    &.board-view--page {
       display: flex;
       flex-direction: column;
       height: 100%;
       min-height: 0;
-    }
 
-    .board-grid {
-      flex: 1 1 0;
-      min-height: 0;
-      grid-auto-rows: minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr);
-    }
+      .board-grid {
+        flex: 1 1 0;
+        min-height: 0;
+        grid-auto-rows: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+      }
 
-    .board-widget:not(.board-widget--dragging) {
-      grid-area: 1 / 1 / -1 / -1 !important;
+      .board-widget:not(.board-widget--dragging) {
+        grid-area: 1 / 1 / -1 / -1 !important;
+      }
     }
+  }
+
+  openclaw-board-view:has(> .board-view--page) {
+    height: 100%;
+    overflow: hidden;
   }
 }
 

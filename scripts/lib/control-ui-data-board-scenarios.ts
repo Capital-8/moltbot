@@ -914,21 +914,43 @@ export const dataBoardScenarios: readonly InteractionScenario[] = [
     },
   },
   {
+    id: "data-board-preparation-idle",
+    explicitOnly: true,
+    dataPage: "board",
+    route: controlUiSessionPath(sessionKey),
+    expected: "Idle preparation leaves the current tab visible and admits only adjacent shells.",
+    fixtureOverrides: () => createDataBoardFixture(),
+    prepare: prepareBoard,
+    run: async (page) => {
+      await page.waitForTimeout(3000);
+      await waitForBoard(page);
+      const counts = await boardReportCounts(page);
+      if (counts.widgetCells > widgetsPerTab * 2) {
+        throw new Error("Board prepared more than one adjacent tab");
+      }
+      return counts;
+    },
+  },
+  {
     id: "data-board-preparing-input",
     explicitOnly: true,
     dataPage: "board",
     route: controlUiSessionPath(sessionKey),
     expected: "Typing, opening a card menu and scrolling interrupt adjacent-tab preparation.",
     fixtureOverrides: () => createDataBoardFixture(),
-    prepare: prepareBoard,
-    run: async (page, gateway) => {
+    prepare: async (page) => {
+      await prepareBoard(page);
       await page.locator(`${boardHost} [data-board-tab-id="data-1"]`).click();
       await waitForBoard(page, 1);
+      // Let preparation begin, then interrupt it with actual user input.
+      await page.waitForTimeout(650);
+    },
+    run: async (page, gateway) => {
       const input = page.locator(
         ".chat-pane-cache__pane--active .agent-chat__composer-combobox textarea",
       );
       const sends = (await gateway.getRequests("chat.send")).length;
-      await input.focus();
+      await input.click();
       const before = await boardReportCounts(page);
       await installChatActionObservation(page);
       await input.pressSequentially("Synthetic typing 0123456789", { delay: 30 });
