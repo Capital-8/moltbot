@@ -3,6 +3,7 @@ import "../../styles.css";
 import { finishElementAnimations } from "../../test-helpers/animations.ts";
 import { getRenderedModalDialog } from "../../test-helpers/modal-dialog.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
+import { resolveRenderedColors } from "../../test-helpers/rendered-colors.ts";
 import { ConnectMachineDialog } from "../new-session/connect-machine-dialog-view.tsx";
 import { ConnectMachineSetupState } from "../new-session/connect-machine-dialog.ts";
 import { cleanupSkillsViews, renderSkills } from "./view.solid.test-support.tsx";
@@ -61,12 +62,16 @@ describe.runIf(browserMode)("skill reader shell", () => {
       const style = getComputedStyle(panel);
       const button = getComputedStyle(close);
       const icon = getComputedStyle(close.querySelector("svg")!);
-      return {
+      const colors = resolveRenderedColors({
         surface: style.backgroundColor,
+        button: button.backgroundColor,
+      });
+      return {
+        surface: colors.surface,
         image: style.backgroundImage,
         border: style.border,
         radius: style.borderRadius,
-        button: [button.background, button.border, button.boxShadow],
+        button: [colors.button, button.backgroundImage, button.border, button.boxShadow],
         icon: [icon.width, icon.height, icon.strokeWidth],
       };
     };
