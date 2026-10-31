@@ -219,6 +219,7 @@ it("reobserves retained Markdown DOM while fencing scans queued before hide or d
 });
 
 it("suspends parked transcript Markdown measurements and resumes the same DOM", async () => {
+  vi.useFakeTimers();
   const observers: Array<{ targets: Set<Element>; deliver: (target: Element) => void }> = [];
   vi.stubGlobal(
     "ResizeObserver",
@@ -311,6 +312,7 @@ it("suspends parked transcript Markdown measurements and resumes the same DOM", 
       expect(recipients.length).toBeGreaterThan(0);
       recipients.forEach((observer) => observer.deliver(target));
     }
+    vi.advanceTimersToNextFrame();
     if (state === "parked") {
       expect(codeWidth).not.toHaveBeenCalled();
       expect(tableWidth).not.toHaveBeenCalled();
