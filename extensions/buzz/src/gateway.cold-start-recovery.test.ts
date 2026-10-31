@@ -234,7 +234,9 @@ function startGatewayProcess(channelIds: string[] = [CHANNEL_ID]): {
 }
 
 async function waitForSettled(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  // This file shares a saturated database-worker shard in release qualification;
+  // keep the product assertion strict while allowing loaded worker progress.
+  for (let attempt = 0; attempt < 3_000; attempt += 1) {
     if (await predicate()) {
       return;
     }
