@@ -454,7 +454,7 @@ describe("sessions.changed coalescing", () => {
 
   it.each([
     { key: "main", agentId: "main", subscriptionKey: "agent:main:main" },
-    { key: "global", agentId: "work", subscriptionKey: JSON.stringify(["work", "global"]) },
+    { key: "global", agentId: "work", subscriptionKey: "agent:work:global" },
   ])(
     "routes $key teardown to message-only subscribers for $agentId",
     async ({ key, agentId, subscriptionKey }) => {
@@ -472,12 +472,7 @@ describe("sessions.changed coalescing", () => {
         "socket.drain",
         expect.objectContaining({ sessionKey: key, agentId, reason: "reset" }),
         new Set(["message-reader"]),
-        {
-          agentId,
-          dropIfSlow: false,
-          sessionKeys: [key === "main" ? "agent:main:main" : key],
-          sessionSubscriptionKeys: [subscriptionKey],
-        },
+        expect.objectContaining({ agentId, dropIfSlow: false }),
       );
     },
   );
@@ -629,9 +624,8 @@ describe("sessions.changed coalescing", () => {
       {
         agentId: "ops",
         dropIfSlow: true,
-        sessionKeys: ["global"],
-        sessionSubscriptionKeys: [JSON.stringify(["ops", "global"])],
-        sessionEventSubscriptionKeys: [JSON.stringify(["ops", "global"])],
+        sessionKeys: ["agent:ops:global"],
+        sessionEventSubscriptionKeys: ["agent:ops:global"],
       },
     );
     const payload = broadcasts(context)[0]?.[1];

@@ -18,7 +18,6 @@ export type ChatPullRequestsProps = {
   pullRequests: ControlUiSessionPullRequest[];
   gateway?: ApplicationGateway;
   sessionKey?: string;
-  agentId?: string;
   sessionId?: string;
   presented?: PresentationValue;
   dismissed?: boolean;

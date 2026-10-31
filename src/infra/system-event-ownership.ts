@@ -1,6 +1,5 @@
 import {
   normalizeAgentId,
-  parseAgentSessionKey,
   resolveAgentIdFromSessionKey,
   toAgentStoreSessionKey,
 } from "../routing/session-key.js";
@@ -23,8 +22,7 @@ const stores = resolveGlobalSingleton<{
 
 export function getSystemEventStorePath(sessionKey: string, agentId?: string): string | undefined {
   try {
-    const target = readSystemEventQueueIdentity(sessionKey);
-    return stores.resolve?.(target?.sessionKey ?? sessionKey, target?.agentId ?? agentId);
+    return stores.resolve?.(sessionKey, agentId);
   } catch {
     return undefined;
   }
@@ -39,12 +37,9 @@ export function prepareSystemEventStorePath(
   if (!resolve) {
     return undefined;
   }
-  const target = readSystemEventQueueIdentity(sessionKey);
-  const key = target?.sessionKey ?? sessionKey;
-  const owner = target?.agentId ?? agentId;
   const preparing = stores.prepare
-    ? stores.prepare(key, owner)
-    : Promise.resolve(resolve(key, owner));
+    ? stores.prepare(sessionKey, agentId)
+    : Promise.resolve(resolve(sessionKey, agentId));
   return preparing.then((pathname) => {
     if (stores.resolve !== resolve) {
       throw new Error("System-event store owner changed during path preparation");
@@ -106,34 +101,7 @@ export function resolveSystemEventQueueKey(sessionKey: string, agentId?: string)
   if (agentId && owner !== normalizeAgentId(agentId)) {
     throw new Error("System event owner does not match its session key.");
   }
-  return sessionKey.trim().toLowerCase() === "global"
-    ? JSON.stringify([owner, "global"])
-    : toAgentStoreSessionKey({ agentId: owner, requestKey: sessionKey });
-}
-
-/** Recover real owner facts from the ephemeral queue index before any store operation. */
-export function readSystemEventQueueIdentity(key: string) {
-  if (key.startsWith("[")) {
-    try {
-      const tuple: unknown = JSON.parse(key);
-      if (
-        Array.isArray(tuple) &&
-        tuple.length === 2 &&
-        typeof tuple[0] === "string" &&
-        tuple[0] === normalizeAgentId(tuple[0]) &&
-        tuple[1] === "global"
-      ) {
-        return { agentId: tuple[0], sessionKey: "global" };
-      }
-    } catch {
-      /* Invalid queue keys are rejected by their admission owner. */
-    }
-    return undefined;
-  }
-  const parsed = parseAgentSessionKey(key);
-  return parsed
-    ? { agentId: parsed.agentId, sessionKey: `agent:${parsed.agentId}:${parsed.rest}` }
-    : undefined;
+  return toAgentStoreSessionKey({ agentId: owner, requestKey: sessionKey });
 }
 
 export function withSystemEventOwner<T extends { sessionKey: string }>(

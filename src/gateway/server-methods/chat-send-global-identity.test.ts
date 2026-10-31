@@ -13,7 +13,6 @@ import {
 } from "../../config/sessions/session-accessor.js";
 import * as sessionAccessor from "../../config/sessions/session-accessor.js";
 import { readSessionPendingInputByKey } from "../../config/sessions/session-accessor.sqlite-pending-inputs.js";
-import { SessionCanonicalKeyMigrationRequiredError } from "../../config/sessions/session-canonical-key-error.js";
 import { SessionPendingInputCustodyError } from "../../config/sessions/session-pending-input-custody-error.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { loadOrCreateProcessDeviceIdentityAsync } from "../../infra/device-identity-async.js";
@@ -73,7 +72,6 @@ type IdentityScenario = {
   key: string;
   allowed: boolean;
   separateStore?: boolean;
-  lookupRejected?: boolean;
   replaceDatabase?: "copy" | "symlink";
   replayAfterCollision?: boolean;
   writeDuringAdmission?: boolean;
@@ -100,17 +98,12 @@ function identityScenario(
 it.each<IdentityScenario>([
   ...Object.entries<Partial<IdentityScenario>>({
     "raw global only": {},
-    "selected raw request beside literal": { literal: true },
-    "selected literal request beside raw": { literal: true, key: "agent:research:global" },
+    "colliding raw request": { literal: true, allowed: false },
+    "colliding literal request": { literal: true, key: "agent:research:global", allowed: false },
     "missing raw with literal present": { raw: false, literal: true, allowed: false },
     "distinct owner in shared store": { literal: true, shared: true, key: "agent:research:global" },
     "empty counterpart store preserves raw source": { separateStore: true },
-    "duplicate raw key across discovered stores": {
-      lookupRejected: true,
-      literal: true,
-      allowed: false,
-      separateStore: true,
-    },
+    "collision across discovered stores": { literal: true, allowed: false, separateStore: true },
     "missing raw with literal in another store": {
       raw: false,
       literal: true,
@@ -173,7 +166,7 @@ it.each<IdentityScenario>([
       storePath: scenario.separateStore
         ? state.statePath("agents", "research", "sessions", "sessions.json")
         : storePath,
-      sessionKey: scenario.separateStore && scenario.raw ? "global" : "agent:research:global",
+      sessionKey: "agent:research:global",
       sessionId: "literal-session",
     };
     const rows = [
@@ -342,24 +335,16 @@ it.each<IdentityScenario>([
           resumeAdmission.resolve();
         }
       }
-      if (scenario.lookupRejected) {
-        await expect(sending).rejects.toBeInstanceOf(SessionCanonicalKeyMigrationRequiredError);
-      } else {
-        await sending;
-      }
+      await sending;
       if (scenario.configDuringAdmission) {
         expect(configReloaded).toBe(true);
       }
       if (!scenario.allowed) {
-        if (scenario.lookupRejected) {
-          expect(respond).not.toHaveBeenCalled();
-        } else {
-          expect(respond).toHaveBeenCalledWith(
-            false,
-            undefined,
-            expect.objectContaining({ code: "INVALID_REQUEST" }),
-          );
-        }
+        expect(respond).toHaveBeenCalledWith(
+          false,
+          undefined,
+          expect.objectContaining({ code: "INVALID_REQUEST" }),
+        );
         expect(observeDispatch).not.toHaveBeenCalled();
         expect(context.addChatRun).not.toHaveBeenCalled();
         expect(rpcSourceTesting.size).toBe(0);
@@ -404,7 +389,7 @@ it.each<IdentityScenario>([
         });
       expect(session).toMatchObject({
         agentId: "research",
-        activeRunScopeKey: scenario.key,
+        activeRunScopeKey: "agent:research:global",
       });
       if (scenario.replaceDuringPersistence) {
         const source = session.readSource;

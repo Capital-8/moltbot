@@ -9,7 +9,6 @@ import {
   areUiSessionKeysEquivalent,
   isUiGlobalSessionKey,
   isUiSelectedGlobalSessionKey,
-  parseAgentSessionKey,
   resolveUiSelectedSessionAgentId,
   resolveUiGlobalAliasAgentId,
   resolveUiSelectedGlobalAgentId,
@@ -50,10 +49,6 @@ function resolveSelectedSessionMessageSubscriptionAgentId(
 ): string | null {
   if (isUiGlobalSessionKey(key)) {
     return resolveUiSelectedGlobalAgentId(state);
-  }
-  const parsed = parseAgentSessionKey(key);
-  if (parsed?.rest === "global") {
-    return parsed.agentId;
   }
   return resolveUiGlobalAliasAgentId(state, key);
 }
@@ -107,21 +102,9 @@ export function disposeSelectedSessionMessageSubscription(state: ChatState): voi
 
 export function syncSelectedSessionMessageSubscription(
   state: ChatSessionMessageSubscriptionState,
-  options?: {
-    force?: boolean;
-    initialHistory?: boolean;
-    beforeHello?: boolean;
-    refreshApprovals?: true;
-  },
+  opts?: { force?: boolean; initialHistory?: boolean; beforeHello?: boolean },
 ): Promise<boolean> {
   const requests = chatHistoryRequests(state);
-  const opts: typeof options = requests.subscriptionError
-    ? { ...options, refreshApprovals: true }
-    : options;
-  if (opts?.refreshApprovals && requests.pendingApprovalReplay?.isCurrent()) {
-    requests.pendingApprovalReplay.refresh = true;
-    return requests.subscriptionReady ?? Promise.resolve(false);
-  }
   if (requests.openingSubscription?.isCurrent()) {
     requests.openingSubscription.admit();
     return requests.subscriptionReady!;
@@ -166,12 +149,7 @@ export function syncSelectedSessionMessageSubscription(
 async function synchronizeSelectedSessionMessageSubscription(
   state: ChatSessionMessageSubscriptionState,
   signal: AbortSignal,
-  opts?: {
-    force?: boolean;
-    initialHistory?: boolean;
-    beforeHello?: boolean;
-    refreshApprovals?: true;
-  },
+  opts?: { force?: boolean; initialHistory?: boolean; beforeHello?: boolean },
 ): Promise<boolean> {
   if (!state.client || (!state.connected && !opts?.beforeHello)) {
     return false;
@@ -206,10 +184,7 @@ async function synchronizeSelectedSessionMessageSubscription(
   const replaceSubscription = opts?.force === true || selectedKeyChanged || selectedAgentChanged;
   const shouldUnsubscribePrevious = previousSubscription !== null && replaceSubscription;
   const shouldSubscribe =
-    replaceSubscription ||
-    opts?.refreshApprovals ||
-    previousCanonicalKey === null ||
-    previousRequestedKey === null;
+    replaceSubscription || previousCanonicalKey === null || previousRequestedKey === null;
   const isCurrent = () =>
     !signal.aborted &&
     state.sessions === sessions &&
@@ -355,26 +330,9 @@ async function synchronizeSelectedSessionMessageSubscription(
   const approvalReplayOwner: NonNullable<typeof paneRequests.pendingApprovalReplay> = {
     generation,
     events: new Map(),
-    isCurrent,
   };
   paneRequests.pendingApprovalReplay = approvalReplayOwner;
-  if (!opts?.refreshApprovals || previousSelectedKey !== nextKey || selectedAgentChanged) {
-    state.chatSessionApprovalQueue = [];
-  }
-  const finishApprovalReplay = () => {
-    if (paneRequests.pendingApprovalReplay !== approvalReplayOwner) {
-      return;
-    }
-    paneRequests.pendingApprovalReplay = undefined;
-    if (approvalReplayOwner.refresh) {
-      // Settle admission before a trailing read advances its generation.
-      void paneRequests.subscriptionReady?.then(() => {
-        if (isCurrent()) {
-          void syncSelectedSessionMessageSubscription(state, { refreshApprovals: true });
-        }
-      });
-    }
-  };
+  state.chatSessionApprovalQueue = [];
   let upgradingApprovals = false;
   try {
     if (shouldUnsubscribePrevious && previousSubscription) {
@@ -419,10 +377,7 @@ async function synchronizeSelectedSessionMessageSubscription(
         );
         // Events received during acquisition supersede its pending snapshot.
         for (const event of approvalReplayOwner.events.values()) {
-          const reconciled = reconcileSessionApprovalEvent(queue, event, state.sessionKey, agentId);
-          if (reconciled && reconciled !== "refresh") {
-            queue = reconciled;
-          }
+          queue = reconcileSessionApprovalEvent(queue, event, state.sessionKey, agentId) ?? queue;
         }
         state.chatSessionApprovalQueue = queue;
       } else {
@@ -431,11 +386,6 @@ async function synchronizeSelectedSessionMessageSubscription(
       }
     };
     adoptSubscription(subscribed);
-    if (opts?.refreshApprovals && !shouldUnsubscribePrevious && previousSubscription) {
-      void sessions.unsubscribeMessages(previousSubscription).catch((error: unknown) => {
-        console.warn("[chat] Failed to release message subscription:", formatUiError(error));
-      });
-    }
     if (initialHistoryReceipt) {
       paneRequests.initialHistory = initialHistoryReceipt;
     }
@@ -464,7 +414,11 @@ async function synchronizeSelectedSessionMessageSubscription(
             publishError(error);
           }
         })
-        .finally(finishApprovalReplay);
+        .finally(() => {
+          if (paneRequests.pendingApprovalReplay === approvalReplayOwner) {
+            paneRequests.pendingApprovalReplay = undefined;
+          }
+        });
     }
     clearRecoveredError();
     return true;
@@ -477,8 +431,8 @@ async function synchronizeSelectedSessionMessageSubscription(
     if (paneRequests.openingSubscription?.isCurrent === isCurrent) {
       delete paneRequests.openingSubscription;
     }
-    if (!upgradingApprovals) {
-      finishApprovalReplay();
+    if (!upgradingApprovals && paneRequests.pendingApprovalReplay === approvalReplayOwner) {
+      paneRequests.pendingApprovalReplay = undefined;
     }
   }
 }

@@ -38,7 +38,7 @@ export function createGatewayNodeSessionRuntime(params: {
   sessionEventSubscribers: SessionEventSubscriberRegistry;
   sessionMessageSubscribers: SessionMessageSubscriberRegistry;
 }) {
-  type Subscription = { pairingGeneration: string; requestKeys?: Set<string> };
+  type Subscription = { pairingGeneration: string };
   type Recipient = { pairingGeneration: string; subscriptions: Map<string, Subscription> };
   type Publication = {
     sourceEpoch?: object;
@@ -102,12 +102,7 @@ export function createGatewayNodeSessionRuntime(params: {
     );
   };
 
-  const subscribe = (
-    nodeId: string,
-    pairingGeneration: string,
-    sessionKey: string,
-    requestKey?: string,
-  ) => {
+  const subscribe = (nodeId: string, pairingGeneration: string, sessionKey: string) => {
     const normalizedNodeId = nodeId.trim();
     const normalizedPairingGeneration = pairingGeneration.trim();
     const normalizedSessionKey = sessionKey.trim();
@@ -127,25 +122,10 @@ export function createGatewayNodeSessionRuntime(params: {
       };
       nodeSubscriptionIndex.set(normalizedNodeId, nodeEntry);
     }
-    if (requestKey) {
-      // A repeated selector stays on its admitted row even if a literal sibling appears.
-      for (const subscription of nodeEntry.sessionKeys.values()) {
-        if (subscription.requestKeys?.has(requestKey)) {
-          return;
-        }
-      }
-    }
-    const existing = nodeEntry.sessionKeys.get(normalizedSessionKey);
-    if (existing) {
-      if (requestKey) {
-        (existing.requestKeys ??= new Set()).add(requestKey);
-      }
+    if (nodeEntry.sessionKeys.has(normalizedSessionKey)) {
       return;
     }
-    const subscription = {
-      pairingGeneration: normalizedPairingGeneration,
-      ...(requestKey ? { requestKeys: new Set([requestKey]) } : {}),
-    };
+    const subscription = { pairingGeneration: normalizedPairingGeneration };
     nodeEntry.sessionKeys.set(normalizedSessionKey, subscription);
 
     let sessionMap = sessionSubscribers.get(normalizedSessionKey);
@@ -156,15 +136,10 @@ export function createGatewayNodeSessionRuntime(params: {
     sessionMap.set(normalizedNodeId, subscription);
   };
 
-  const unsubscribe = (
-    nodeId: string,
-    pairingGeneration: string,
-    sessionKey: string,
-    requestKey?: string,
-  ) => {
+  const unsubscribe = (nodeId: string, pairingGeneration: string, sessionKey: string) => {
     const normalizedNodeId = nodeId.trim();
     const normalizedPairingGeneration = pairingGeneration.trim();
-    let normalizedSessionKey = sessionKey.trim();
+    const normalizedSessionKey = sessionKey.trim();
     if (!normalizedNodeId || !normalizedPairingGeneration || !normalizedSessionKey) {
       return;
     }
@@ -172,15 +147,6 @@ export function createGatewayNodeSessionRuntime(params: {
     const nodeEntry = nodeSubscriptionIndex.get(normalizedNodeId);
     if (nodeEntry?.pairingGeneration !== normalizedPairingGeneration) {
       return;
-    }
-    if (requestKey) {
-      // Removal uses the captured selector, without reopening a deleted or reset row.
-      for (const [key, subscription] of nodeEntry.sessionKeys) {
-        if (subscription.requestKeys?.has(requestKey)) {
-          normalizedSessionKey = key;
-          break;
-        }
-      }
     }
     nodeEntry.sessionKeys.delete(normalizedSessionKey);
     if (nodeEntry.sessionKeys.size === 0) {
@@ -258,9 +224,7 @@ export function createGatewayNodeSessionRuntime(params: {
     }
     const sessionKeys = [
       ...new Set(
-        (opts?.sessionSubscriptionKeys ?? opts?.sessionKeys ?? [normalizedSessionKey])
-          .map((key) => key.trim())
-          .filter(Boolean),
+        (opts?.sessionKeys ?? [normalizedSessionKey]).map((key) => key.trim()).filter(Boolean),
       ),
     ];
     const subscribers = new Map<string, Recipient>();
@@ -477,26 +441,16 @@ export function createGatewayNodeSessionRuntime(params: {
     const node = nodeRegistry.get(nodeId);
     return connId && node?.connId === connId ? node.pairingGeneration : undefined;
   };
-  const nodeSubscribe = (
-    nodeId: string,
-    sessionKey: string,
-    connId?: string,
-    requestKey?: string,
-  ) => {
+  const nodeSubscribe = (nodeId: string, sessionKey: string, connId?: string) => {
     const pairingGeneration = resolveSubscriptionGeneration(nodeId, connId);
     if (pairingGeneration) {
-      subscribe(nodeId, pairingGeneration, sessionKey, requestKey);
+      subscribe(nodeId, pairingGeneration, sessionKey);
     }
   };
-  const nodeUnsubscribe = (
-    nodeId: string,
-    sessionKey: string,
-    connId?: string,
-    requestKey?: string,
-  ) => {
+  const nodeUnsubscribe = (nodeId: string, sessionKey: string, connId?: string) => {
     const pairingGeneration = resolveSubscriptionGeneration(nodeId, connId);
     if (pairingGeneration) {
-      unsubscribe(nodeId, pairingGeneration, sessionKey, requestKey);
+      unsubscribe(nodeId, pairingGeneration, sessionKey);
     }
   };
   const sendVoiceWakeEventToCurrentNodes = (event: string, payload: unknown) => {

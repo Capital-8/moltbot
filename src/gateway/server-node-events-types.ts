@@ -19,18 +19,8 @@ export type NodeEventContext = Pick<
 > & {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
   nodeSendToSession: (sessionKey: string, event: string, payload: unknown) => void;
-  nodeSubscribe: (
-    nodeId: string,
-    sessionKey: string,
-    connId?: string,
-    requestKey?: string,
-  ) => void | Promise<void>;
-  nodeUnsubscribe: (
-    nodeId: string,
-    sessionKey: string,
-    connId?: string,
-    requestKey?: string,
-  ) => void | Promise<void>;
+  nodeSubscribe: (nodeId: string, sessionKey: string, connId?: string) => void | Promise<void>;
+  nodeUnsubscribe: (nodeId: string, sessionKey: string, connId?: string) => void | Promise<void>;
   loadGatewayModelCatalogSnapshot?: GatewayRequestContext["loadGatewayModelCatalogSnapshot"];
   authorizeNodeSystemRunEvent: (
     params: Omit<Parameters<NodeRegistry["authorizeSystemRunEventWithState"]>[0], "terminal"> & {

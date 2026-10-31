@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { copyFileSync, renameSync } from "node:fs";
 import { DatabaseSync, StatementSync } from "node:sqlite";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
 import { observeSqliteReadSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
@@ -29,8 +30,6 @@ import type {
 import {
   branch,
   createFixture,
-  expectedFrame,
-  frames,
   readerChanges,
   sessionKey,
   snapshot,
@@ -51,8 +50,11 @@ import { githubJson, pullListItem, requestUrl } from "./control-ui-session-prs.t
 import type { OperatorScope } from "./operator-scopes.js";
 import { handleGatewayRequest } from "./server-methods.js";
 import { controlUiHandlers } from "./server-methods/control-ui.js";
+import { createGatewayWsTestSocket } from "./server/ws-connection.test-helpers.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
 import { loadGatewaySessionEntryReadOnlyAsync } from "./session-utils-store.js";
+
+const EVENT = "controlUi.sessionPullRequests.changed";
 
 let sharedState: OpenClawTestState | undefined;
 afterAll(async () => {
@@ -144,6 +146,21 @@ async function withDefaultLoader(provider: typeof fetch, run: (f: Fixture) => Pr
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   }
+}
+
+function frames(socket: ReturnType<typeof createGatewayWsTestSocket>) {
+  return socket.send.mock.calls.flatMap(([data]) => {
+    const frame: unknown = JSON.parse(data.toString());
+    return isRecord(frame) && frame.event === EVENT ? [frame] : [];
+  });
+}
+
+function expectedFrame(key: string, value: ControlUiSessionPullRequests = snapshot) {
+  return expect.objectContaining({
+    type: "event",
+    event: EVENT,
+    payload: { sessions: { [key]: { ...value, status: "ready" } } },
+  });
 }
 
 describe.skipIf(process.platform === "win32" || Boolean(process.versions.bun))(
@@ -580,8 +597,6 @@ it.each([
   "selection",
   "literal-global",
   "literal-global-visibility",
-  "raw-global",
-  "raw-global-visibility",
   "store closure",
 ] as const)("keeps pending details bound to the original reader (%s)", async (change) => {
   await withFixture(
@@ -589,15 +604,11 @@ it.each([
     async (f) => {
       const key = change.startsWith("literal-global")
         ? "agent:main:global"
-        : change.startsWith("raw-global")
-          ? "global"
-          : change === "archived"
-            ? sessionKey
-            : "agent:main:shared-checks";
+        : change === "archived"
+          ? sessionKey
+          : "agent:main:shared-checks";
       if (change === "literal-global-visibility") {
         await f.seed("global", f.profile.id, { sessionId: "separate-global-row" });
-      } else if (change.startsWith("raw-global")) {
-        await f.seed("agent:main:global", f.profile.id, { sessionId: "separate-literal-row" });
       }
       const projection = getSessionRowProjection(f.context);
       if (change === "archived") {
@@ -610,9 +621,9 @@ it.each([
         expect(projection.capture({ agentId: "main", key })?.materialized).toBeUndefined();
       }
       const mutation =
-        change === "literal-global" || change === "raw-global" || change === "archived"
+        change === "literal-global" || change === "archived"
           ? "unchanged"
-          : change === "literal-global-visibility" || change === "raw-global-visibility"
+          : change === "literal-global-visibility"
             ? "visibility"
             : change;
       if (change !== "archived") {
@@ -624,11 +635,7 @@ it.each([
         number: 1,
         headSha: "a".repeat(40),
       };
-      const params = {
-        sessionKey: key,
-        ...target,
-        ...(change.startsWith("raw-global") ? { agentId: "main" } : {}),
-      };
+      const params = { sessionKey: key, ...target };
       const result: ControlUiSessionPullRequestCheckDetails = {
         ...target,
         status: "ready",

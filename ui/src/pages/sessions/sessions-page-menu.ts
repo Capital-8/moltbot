@@ -7,10 +7,8 @@ import { fetchSessionMenuWork } from "../../components/session-menu-work.ts";
 import { moveSessionFromMenu } from "../../components/session-placement-action.ts";
 import { t } from "../../i18n/index.ts";
 import { canCallGatewayMethod } from "../../lib/gateway-methods.ts";
-import {
-  sessionPullRequestsForGateway,
-  sessionPullRequestSelection,
-} from "../../lib/session-pull-requests.ts";
+import { sessionPullRequestsForGateway } from "../../lib/session-pull-requests.ts";
+import { scopedSessionArtifactKey } from "../../lib/sessions/session-key.ts";
 import { requestSessionInvolvement } from "../../lib/sessions/session-requests.ts";
 import { sessionAgentId, sessionPathAgentId } from "./agent-scope.ts";
 import type { createSessionsArchive } from "./archive-actions.ts";
@@ -93,7 +91,7 @@ export function createSessionsPageMenu(host: {
       return;
     }
     const store = sessionPullRequestsForGateway(scope.context.gateway);
-    const pullRequestKey = sessionPullRequestSelection(
+    const pullRequestKey = scopedSessionArtifactKey(
       row.key,
       sessionAgentId(row.key, scope.context),
     );

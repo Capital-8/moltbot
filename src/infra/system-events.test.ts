@@ -250,15 +250,13 @@ describe("system events (session routing)", () => {
       const suffix = alias === "main" ? "work" : alias;
       const alpha = `agent:alpha:${suffix}`;
       const beta = `agent:beta:${suffix}`;
-      const alphaQueue = alias === "global" ? '["alpha","global"]' : alpha;
-      const betaQueue = alias === "global" ? '["beta","global"]' : beta;
-      expect(peekSystemEvents(alphaQueue)).toEqual(["Legacy caller"]);
-      expect(peekSystemEvents(betaQueue)).toEqual([]);
+      expect(peekSystemEvents(alpha)).toEqual(["Legacy caller"]);
+      expect(peekSystemEvents(beta)).toEqual([]);
       enqueueRoutedSystemEvent("Owned caller", { agentId: " BETA ", sessionKey: alias });
       expect(texts(peekSdk(alias, " BETA "))).toEqual(["Owned caller"]);
       expect(texts(peekSdk(alias, "alpha"))).toEqual(["Legacy caller"]);
       expect(enqueueSdk("Runtime owner", { sessionKey: alias, agentId: " BETA " })).toBe(true);
-      expect(peekSystemEvents(betaQueue)).toEqual(["Owned caller", "Runtime owner"]);
+      expect(peekSystemEvents(beta)).toEqual(["Owned caller", "Runtime owner"]);
       expect(() => enqueueSdk("Mismatched owner", { sessionKey: alpha, agentId: "beta" })).toThrow(
         "owner does not match",
       );
@@ -267,11 +265,7 @@ describe("system events (session routing)", () => {
         agents: { ownership: "explicit", entries: { alpha: {}, beta: {} } },
       });
       expect(() => enqueueSdk("Ambiguous", { sessionKey: alias })).toThrow();
-      if (alias === "global") {
-        enqueueSdk("Literal caller", { sessionKey: alpha });
-        expect(peekSystemEvents(alpha)).toEqual(["Literal caller"]);
-      }
-      expect(peekSystemEvents(alphaQueue)).toEqual(["Legacy caller"]);
+      expect(peekSystemEvents(alpha)).toEqual(["Legacy caller"]);
     },
   );
 
@@ -393,7 +387,7 @@ describe("system events (session routing)", () => {
     for (let index = 0; index < 25; index += 1) {
       notify(`Alpha progress ${index}`, "alpha");
     }
-    expect(texts(peekSdk("global", "alpha"))).toEqual(
+    expect(peekSystemEvents("agent:alpha:global")).toEqual(
       Array.from({ length: 20 }, (_, index) => "Alpha progress " + index),
     );
     expect(await drainFormattedEvents(mainKey, { isMainSession: true })).toBeUndefined();
@@ -569,7 +563,7 @@ describe("system events (session routing)", () => {
     enqueueRoutedSystemEvent("Alpha pending", { agentId: "alpha", sessionKey: "global" }, options);
     enqueueRoutedSystemEvent("Beta pending", { agentId: "beta", sessionKey: "global" }, options);
     enqueueRoutedSystemEvent("Alpha finished", { agentId: "ALPHA", sessionKey: "global" }, options);
-    expect(texts(peekSdk("global", "alpha"))).toEqual(["Alpha finished"]);
-    expect(texts(peekSdk("global", "beta"))).toEqual(["Beta pending"]);
+    expect(peekSystemEvents("agent:alpha:global")).toEqual(["Alpha finished"]);
+    expect(peekSystemEvents("agent:beta:global")).toEqual(["Beta pending"]);
   });
 });

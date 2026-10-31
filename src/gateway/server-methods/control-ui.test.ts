@@ -675,9 +675,6 @@ describe("controlUi.sessionPullRequests.checks", () => {
     { ...params, number: -1 },
     { ...params, url: "https://github.com/other/repo" },
     { ...params, sessionKey: "" },
-    { ...params, agentId: "" },
-    { ...params, agentId: "///" },
-    { ...params, agentId: 42 },
   ])("rejects malformed check params: %j", async (input) => {
     const load = vi
       .spyOn(checkDetails, "loadControlUiSessionPullRequestChecks")
@@ -804,86 +801,6 @@ describe("controlUi.sessionPullRequests.checks", () => {
         runtime(() => cfg),
       );
       expect(load).toHaveBeenCalledTimes(when === "before" ? 0 : 1);
-      expectUnavailable(respond);
-    });
-  });
-
-  it.each([
-    ["global", "main", "main-raw"],
-    ["global", "work", "work-raw"],
-    ["agent:main:global", "main", "main-literal"],
-    ["global", "missing", null],
-    ["agent:main:global", "work", null],
-  ] as const)(
-    "binds checks to %s/%s or refuses a contradictory owner",
-    async (sessionKey, agentId, expectedSessionId) => {
-      await withOpenClawTestState({ label: "ci-details-exact-selection" }, async () => {
-        const cfg: OpenClawConfig = {
-          session: { scope: "global" },
-          agents: { entries: { main: {}, work: {} } },
-        };
-        setRuntimeConfigSnapshot(cfg);
-        for (const [key, owner, sessionId] of [
-          ["global", "main", "main-raw"],
-          ["global", "work", "work-raw"],
-          ["agent:main:global", "main", "main-literal"],
-        ] as const) {
-          await replaceSessionEntry(
-            { agentId: owner, sessionKey: key },
-            { sessionId, updatedAt: 1 },
-          );
-        }
-        const load = vi
-          .spyOn(checkDetails, "loadControlUiSessionPullRequestChecks")
-          .mockResolvedValue(result);
-        const { respond, send } = fixture("sessionPullRequests.checks");
-        await send(
-          { ...params, sessionKey, agentId },
-          runtime(() => cfg),
-        );
-        if (expectedSessionId === null) {
-          expect(load).not.toHaveBeenCalled();
-          expectUnavailable(respond);
-        } else {
-          expect(load).toHaveBeenCalledExactlyOnceWith(
-            expect.objectContaining({ ...params, sessionKey, agentId }),
-            expect.objectContaining({ sessionScope: expect.stringContaining(expectedSessionId) }),
-          );
-          expectReply(respond, result);
-        }
-      });
-    },
-  );
-
-  it("reads retained qualified CI details without admitting an explicit retired owner", async () => {
-    await withOpenClawTestState({ label: "ci-details-retired-owner" }, async () => {
-      const cfg: OpenClawConfig = { agents: { entries: { main: {} } } };
-      setRuntimeConfigSnapshot(cfg);
-      const sessionKey = "agent:retired:ci-details";
-      await replaceSessionEntry(
-        { agentId: "retired", sessionKey },
-        { sessionId: "retained-ci", updatedAt: 1 },
-      );
-      const load = vi
-        .spyOn(checkDetails, "loadControlUiSessionPullRequestChecks")
-        .mockResolvedValue(result);
-      const { respond, send } = fixture("sessionPullRequests.checks");
-      await send(
-        { ...params, sessionKey },
-        runtime(() => cfg),
-      );
-      expect(load).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ ...params, sessionKey, agentId: "retired" }),
-        expect.objectContaining({ sessionScope: expect.stringContaining("retained-ci") }),
-      );
-      expectReply(respond, result);
-      respond.mockClear();
-      load.mockClear();
-      await send(
-        { ...params, sessionKey, agentId: "retired" },
-        runtime(() => cfg),
-      );
-      expect(load).not.toHaveBeenCalled();
       expectUnavailable(respond);
     });
   });

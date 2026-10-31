@@ -167,49 +167,23 @@ describe("next-turn injection identity", () => {
     expect(readEntry({ ...physical("agent:work:global"), agentId: "work" })).toBeUndefined();
   });
 
-  it.each([
-    { collision: false, first: "global" },
-    { collision: true, first: "global" },
-    { collision: true, first: "agent:qa:global" },
-  ])(
-    "drains only the selected owner when collision=$collision, first=$first",
-    async ({ collision, first }) => {
-      const cfg: OpenClawConfig = {
-        session: { store: state.path("{agentId}", "sessions.json"), scope: "global" },
-        agents: { entries: { qa: {}, beta: {} } },
-      };
-      const scope = (agentId: string) => sessionScope(cfg, agentId, "global");
-      for (const agentId of ["qa", "beta"]) {
-        await seed(cfg, scope(agentId), agentId, agentId);
-      }
-      const betaBefore = readEntry(scope("beta"));
-      const literal = { ...scope("qa"), sessionKey: "agent:qa:global" };
-      if (collision) {
-        await seed(cfg, literal, "separate-literal", "literal queue");
-      }
-      const order = collision
-        ? [first, first === "global" ? literal.sessionKey : "global"]
-        : ["global"];
-      for (const sessionKey of order) {
-        const selected = sessionScope(cfg, "qa", sessionKey);
-        const sibling = sessionKey === "global" ? literal : scope("qa");
-        const siblingBefore = readEntry(sibling);
-        await expect(
-          resolvePromptBuildHookResult({
-            config: cfg,
-            prompt: "Hello",
-            messages: [],
-            hookCtx: { agentId: "qa", sessionKey },
-          }),
-        ).resolves.toMatchObject({
-          prependContext: sessionKey === "global" ? "qa" : "literal queue",
-          appendContext: undefined,
-        });
-        expect(readEntry(selected)?.pluginNextTurnInjections).toBeUndefined();
-        expect(readEntry(sibling)).toEqual(siblingBefore);
-      }
-      expect(readEntry(literal)?.sessionId).toBe(collision ? "separate-literal" : undefined);
-      expect(readEntry(scope("beta"))).toEqual(betaBefore);
-    },
-  );
+  it.each([false, true])("drains only the raw owner when collision=%s", async (collision) => {
+    const cfg: OpenClawConfig = {
+      session: { store: state.path("{agentId}", "sessions.json"), scope: "global" },
+      agents: { entries: { qa: {}, beta: {} } },
+    };
+    const scope = (agentId: string) => sessionScope(cfg, agentId, "global");
+    for (const agentId of ["qa", "beta"]) {
+      await seed(cfg, scope(agentId), agentId, agentId);
+    }
+    const betaBefore = readEntry(scope("beta"));
+    const literal = { ...scope("qa"), sessionKey: "agent:qa:global" };
+    if (collision) {
+      await writeEntry(literal, { sessionId: "separate-literal", updatedAt: 1 });
+    }
+    await expectContext({ cfg, agentId: "qa", sessionKey: "global" }, "qa");
+    expect(readEntry(scope("qa"))?.pluginNextTurnInjections).toBeUndefined();
+    expect(readEntry(literal)?.sessionId).toBe(collision ? "separate-literal" : undefined);
+    expect(readEntry(scope("beta"))).toEqual(betaBefore);
+  });
 });

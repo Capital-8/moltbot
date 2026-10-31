@@ -72,7 +72,7 @@ describe("session approval projection", () => {
 
     expect(pending).toMatchObject([ancestorProjection]);
     expect(
-      reconcile(Array.isArray(pending) ? pending : [], {
+      reconcile(pending ?? [], {
         ...event(),
         sourceSessionKey,
         phase: "terminal",
@@ -88,13 +88,11 @@ describe("session approval projection", () => {
     ).toEqual([]);
   });
 
-  it("projects correlated global replay but refreshes ambiguous live approval streams", () => {
+  it("projects only the selected agent's qualified global approval stream", () => {
     const stream = "agent:research:global";
     expect(project(replay(stream), "global", "research")).toMatchObject([projected("global")]);
     expect(project(replay(stream), "global", "main")).toEqual([]);
-    expect(reconcile([], event(stream), "global", "research")).toBe("refresh");
-    expect(reconcile([], event(stream), stream, "research")).toBe("refresh");
-    expect(reconcile([], event("global"), stream, "research")).toBe("refresh");
+    expect(reconcile([], event(stream), "global", "research")).toMatchObject([projected("global")]);
     expect(reconcile([], event(stream), "global", "main")).toBeNull();
   });
 });

@@ -273,7 +273,7 @@ export function registerAgentGlobalGoalEventTest(): void {
             agentId: "work",
             dropIfSlow: true,
             sessionKeys: ["global"],
-            sessionEventSubscriptionKeys: ['["work","global"]'],
+            sessionEventSubscriptionKeys: ["agent:work:global"],
             prepareSessionProjection: expect.any(Function),
           },
         );

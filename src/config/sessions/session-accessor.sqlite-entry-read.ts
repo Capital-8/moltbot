@@ -551,7 +551,7 @@ export function readSessionEntryTargetRow(
   });
 }
 
-/** Unresolved sentinel aliases retain ambiguity checks; pinned global rows stay exact. */
+/** Only sentinel aliases share a logical identity with a different physical key. */
 export function readQualifiedSessionEntryRow(
   database: OpenClawAgentDatabaseReader,
   agentId: string,
@@ -567,8 +567,7 @@ export function readQualifiedSessionEntryRow(
   if (
     agentId !== database.agentId ||
     (parsed && parsed.agentId !== agentId) ||
-    (sentinel !== "global" && sentinel !== "unknown") ||
-    (sentinel === "global" && !options.allowCanonicalMove)
+    (sentinel !== "global" && sentinel !== "unknown")
   ) {
     return readSessionEntryRow(
       database,

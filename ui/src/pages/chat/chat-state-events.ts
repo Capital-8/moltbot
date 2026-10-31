@@ -9,13 +9,11 @@ import {
   isUiGlobalSessionKey,
   resolveUiGlobalAliasAgentId,
   resolveUiSelectedGlobalAgentId,
-  uiSessionEventMatches,
 } from "../../lib/sessions/session-key.ts";
 import type { SessionChangedRowResult } from "../../lib/sessions/session-row-reconcile.ts";
 import { selectedGlobalEventAgentId } from "./chat-agent-id.ts";
 import { invalidateChatBranches, loadChatBranches } from "./chat-history-branches.ts";
 import { getChatHistoryLoadState } from "./chat-history-state.ts";
-import { syncSelectedSessionMessageSubscription } from "./chat-history-subscription.ts";
 import { loadChatHistory } from "./chat-history.ts";
 import {
   dispatchChatLiveEvent,
@@ -321,27 +319,8 @@ export function handlePageGatewayEvent(
         applyChatModelCatalogSnapshot(state);
         return;
       }
-      if (event.event === "sessions.changed") {
-        const payload = asNullableRecord(event.payload);
-        if (payload?.reason === "approval") {
-          if (
-            typeof payload.sessionKey === "string" &&
-            uiSessionEventMatches(
-              state,
-              payload.sessionKey,
-              typeof payload.agentId === "string" ? payload.agentId : undefined,
-            )
-          ) {
-            void syncSelectedSessionMessageSubscription(state, { refreshApprovals: true });
-          }
-          return;
-        }
-      }
       if (event.event === "session.approval") {
-        const applied = applySessionApprovalEvent(state, event.payload, resolveChatAgentId(state));
-        if (applied === "refresh") {
-          void syncSelectedSessionMessageSubscription(state, { refreshApprovals: true });
-        } else if (applied) {
+        if (applySessionApprovalEvent(state, event.payload, resolveChatAgentId(state))) {
           chatRunPresentation(state).publish();
         }
         return;

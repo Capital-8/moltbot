@@ -51,18 +51,9 @@ export async function ensureSessionRuntimeCleanup(params: {
     assertCurrent();
     await cleanupBrowserSessionsForLifecycleEnd({
       cfg: params.cfg,
-      sessionTarget: {
-        agentId: params.target.agentId,
-        sessionKey: params.target.canonicalKey,
-        storePath: params.target.storePath,
-      },
       sessionKeys: [...queueKeys, params.key].map((requestKey) =>
         toAgentStoreSessionKey({ agentId: params.target.agentId, requestKey }),
       ),
-      isCurrent: () => {
-        assertCurrent();
-        return true;
-      },
       onWarn: (message) => logVerbose(message),
     });
     assertCurrent();

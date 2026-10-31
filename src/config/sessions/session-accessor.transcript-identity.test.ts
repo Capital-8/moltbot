@@ -1,12 +1,8 @@
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
-import {
-  onSessionTranscriptUpdate,
-  type SessionTranscriptUpdate,
-} from "../../sessions/transcript-events.js";
 import {
   readOpenClawAgentDatabaseRegistryToken,
   registerOpenClawAgentDatabase,
@@ -361,45 +357,29 @@ describe("transcript turn physical identity", () => {
   );
 
   it.each([
-    { stored: "global", requested: "agent:main:global", published: "global" },
-    { stored: "agent:main:global", requested: "global", published: "agent:main:global" },
-    { stored: "unknown", requested: "agent:main:unknown", published: "agent:main:unknown" },
-    {
-      stored: "agent:main:main",
-      requested: "agent:main:main",
-      published: "agent:main:main",
-      mainKey: "custom",
-    },
+    { stored: "unknown", requested: "agent:main:unknown", mainKey: undefined },
+    { stored: "agent:main:main", requested: "agent:main:main", mainKey: "custom" },
   ])(
-    "preserves the physical row $stored and publication route when writing $requested",
-    async ({ stored, requested, published, mainKey }) => {
+    "preserves the physical row $stored when writing $requested",
+    async ({ stored, requested, mainKey }) => {
       setRuntimeConfigSnapshot(mainKey ? { session: { mainKey } } : {});
       replaceSessionEntrySync(scope(stored), { sessionId, updatedAt: 1 });
       if (mainKey) {
         setCanonicalSqliteSessionMainKey(database(), mainKey);
       }
-      const updates: SessionTranscriptUpdate[] = [];
-      onTestFinished(onSessionTranscriptUpdate((update) => updates.push(update)));
       await expect(
         persistSessionTranscriptTurn(scope(requested), {
           ...(mainKey ? { config: { session: { mainKey } } } : {}),
           expectedSessionId: sessionId,
           messages: [{ message }],
-          updateMode: "inline",
+          updateMode: "none",
         }),
       ).resolves.toMatchObject({ messages: [{ appended: true }] });
-      expect(updates).toEqual([
-        expect.objectContaining({
-          sessionKey: published,
-          target: expect.objectContaining({ agentId: "main", sessionId, sessionKey: published }),
-          message,
-        }),
-      ]);
       expect(keys()).toEqual([{ session_key: stored }]);
       expect(loadTranscriptEventsSync(scope(stored))).toContainEqual(
         expect.objectContaining({ type: "message", message }),
       );
-      if (stored === "unknown") {
+      if (!mainKey) {
         expect(loadSessionEntryReadOnly(scope(stored))?.sessionId).toBe(sessionId);
         expect(loadSessionEntryReadOnly(scope(requested))).toBeUndefined();
       }
@@ -407,7 +387,7 @@ describe("transcript turn physical identity", () => {
   );
 
   it.each(["entry", "retained window"])(
-    "appends through the selected SID beside a qualified %s",
+    "refuses a competing qualified %s before appending through the selected SID",
     async (kind) => {
       replaceSessionEntrySync(scope(), { sessionId, updatedAt: 1 });
       replaceSessionEntrySync(scope("agent:main:global"), {
@@ -423,18 +403,10 @@ describe("transcript turn physical identity", () => {
           .run("agent:main:global");
       }
       expect(loadSessionEntryReadOnly(scope())?.sessionId).toBe(sessionId);
-      await expect(persist("agent:main:global")).rejects.toThrow(
-        "Session key and session ID select different stored conversations",
-      );
-      await expect(persist("global")).resolves.toMatchObject({
-        messages: [{ appended: true }],
+      await expect(persist("agent:main:global")).rejects.toMatchObject({
+        code: "SESSION_CANONICAL_KEY_MIGRATION_REQUIRED",
       });
-      expect(loadTranscriptEventsSync(scope())).toContainEqual(
-        expect.objectContaining({ type: "message", message }),
-      );
-      expect(
-        loadTranscriptEventsSync({ ...scope("agent:main:global"), sessionId: "competing-window" }),
-      ).toEqual([]);
+      expect(loadTranscriptEventsSync(scope())).toEqual([]);
       expect(keys()).toEqual([{ session_key: "agent:main:global" }, { session_key: "global" }]);
     },
   );
@@ -532,7 +504,9 @@ describe("transcript turn physical identity", () => {
       selection.resume();
       await outcome;
     }
-    expect(await outcome).toMatchObject({ result: { rejectedReason: "session-rebound" } });
+    expect(await outcome).toMatchObject({
+      error: { code: "SESSION_CANONICAL_KEY_MIGRATION_REQUIRED" },
+    });
     expect(keys()).toEqual([{ session_key: "agent:main:global" }]);
     expect(loadTranscriptEventsSync(scope("agent:main:global"))).toEqual([]);
   });

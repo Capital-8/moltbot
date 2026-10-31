@@ -2,25 +2,21 @@ import { clearPreparedEmbeddedAgentSettings } from "../../agents/agent-project-s
 import { clearPromptCacheObservations } from "../../agents/embedded-agent-runner/prompt-cache-observability.js";
 import { clearEmbeddedSessionPromptStates } from "../../agents/embedded-agent-runner/session-prompt-state.js";
 import { killSessionSubagentRuns } from "../../agents/subagents/registry/subagent-control-kill.js";
-import { cleanupBrowserSessionsForLifecycleEnd } from "../../browser-lifecycle-cleanup.js";
 import { retainPreparedSessionGenerationFacts } from "../../config/sessions/session-accessor.sqlite-entry-cache-publication-state.js";
 import { projectSessionSharingEntry } from "../../config/sessions/session-accessor.sqlite-entry-cache.types.js";
 import { withSessionEntriesFromStoreInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { captureSessionEntryMetadataRead } from "../../config/sessions/session-entry-source-authority.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveSystemEventQueueKey } from "../../infra/system-event-ownership.js";
 import {
   consumeSelectedSystemEventEntries,
   peekSystemEventEntries,
 } from "../../infra/system-events.js";
-import { runWithGatewayIndependentRootWorkContinuation } from "../../process/gateway-work-admission.js";
 import {
   agentSessionKeysMatchByRequestKey,
   normalizeAgentId,
   normalizeOptionalAgentId,
   parseAgentSessionKey,
-  toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
 import {
   getSessionControllerOperation,
@@ -32,48 +28,8 @@ import {
 } from "../../sessions/session-controller.lifecycle.js";
 import { isReplyOperationPreBackendPhase } from "../../sessions/session-controller.state.js";
 import { clearSessionQueues } from "./queue/cleanup.js";
-import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 
 export class SessionResetCleanupError extends Error {}
-
-/** Retain the committed successor while independently retiring its predecessor's browser tabs. */
-export function scheduleSessionRolloverBrowserCleanup(params: {
-  cfg: OpenClawConfig;
-  target: { agentId: string; storePath: string; sessionKey: string };
-  expectedSession: Pick<SessionEntry, "sessionId" | "lifecycleRevision">;
-  previousSessionId: string;
-  ctx: Parameters<typeof resolveRuntimePolicySessionKey>[0]["ctx"];
-  onWarn: (message: string) => void;
-}): void {
-  const { agentId, sessionKey } = params.target;
-  // Direct-message browser tabs use a peer-scoped runtime identity even when
-  // their transcript aliases main; cleanup must carry both exact keys.
-  const runtimePolicySessionKey =
-    resolveRuntimePolicySessionKey({ agentId, cfg: params.cfg, ctx: params.ctx, sessionKey }) ??
-    sessionKey;
-  void runWithGatewayIndependentRootWorkContinuation(async () => {
-    const cleanup = await prepareSessionResetCleanupGuard({
-      ...params.target,
-      expectedSession: params.expectedSession,
-    });
-    using _ = { [Symbol.dispose]: cleanup.release };
-    await cleanupBrowserSessionsForLifecycleEnd({
-      cfg: params.cfg,
-      sessionTarget: params.target,
-      isCurrent: () => {
-        cleanup.assertCurrent();
-        return true;
-      },
-      sessionKeys: [params.previousSessionId, sessionKey, runtimePolicySessionKey].map(
-        (requestKey) => toAgentStoreSessionKey({ agentId, requestKey }),
-      ),
-      onWarn: params.onWarn,
-      onError: (error) => params.onWarn(`browser tab cleanup failed: ${String(error)}`),
-    });
-  }, "session:browser-cleanup").catch((error: unknown) => {
-    params.onWarn(`browser tab cleanup admission failed: ${String(error)}`);
-  });
-}
 
 /** Prepare parent facts once; cleanup observes the entry writer's in-process receipts. */
 export async function prepareSessionResetCleanupGuard(params: {

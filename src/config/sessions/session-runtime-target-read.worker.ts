@@ -1,7 +1,6 @@
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
 import {
   readSessionEntrySelectionInDatabase,
-  readSessionEntryTargetRow,
   readSessionKeyBySessionIdInDatabase,
 } from "./session-accessor.sqlite-entry-read.js";
 import { resolveSqliteScope } from "./session-accessor.sqlite-read-scope.js";
@@ -21,23 +20,10 @@ export function readSessionRuntimeTargetWorkerRequest(
     (database) => {
       const { agentId, sessionId, storePath } = request.scope;
       const persistedSessionKey = readSessionKeyBySessionIdInDatabase(database, sessionId);
-      const requestedKey = resolveSqliteSessionKey(request.scope.sessionKey, agentId);
-      const globalKey = `agent:${agentId}:global`;
       const selected =
         persistedSessionKey && !request.keyFormat
           ? undefined
           : readWithCanonicalSessionReaderContinuation(database, request.continuation, () => {
-              if (
-                ((persistedSessionKey === "global" && requestedKey === globalKey) ||
-                  (persistedSessionKey === globalKey && requestedKey === "global")) &&
-                readSessionEntryTargetRow(
-                  database,
-                  { canonicalKey: requestedKey, storeKeys: [requestedKey] },
-                  { guardRetainedWindows: true },
-                )
-              ) {
-                throw new Error("Session key and session ID select different stored conversations");
-              }
               const resolved = resolveSqliteScope({
                 ...request.scope,
                 sessionKey: persistedSessionKey ?? request.scope.sessionKey,

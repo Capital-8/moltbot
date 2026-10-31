@@ -159,9 +159,9 @@ describe("clearSessionResetRuntimeState", () => {
       assertCurrent: () => {},
     });
 
-    expect(peekSystemEvents('["alpha","global"]')).toEqual([]);
-    expect(peekSystemEvents('["main","global"]')).toEqual(["main"]);
-    expect(peekSystemEvents('["beta","global"]')).toEqual(["beta"]);
+    expect(peekSystemEvents("agent:alpha:global")).toEqual([]);
+    expect(peekSystemEvents("agent:main:global")).toEqual(["main"]);
+    expect(peekSystemEvents("agent:beta:global")).toEqual(["beta"]);
   });
 
   it("retains archived reply custody until its actual producer returns", async () => {

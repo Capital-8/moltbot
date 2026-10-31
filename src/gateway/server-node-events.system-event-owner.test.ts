@@ -2,8 +2,11 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { setRuntimeConfigSnapshot } from "../config/config.js";
 import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
-import { resetSystemEventsForTest } from "../infra/system-events.js";
-import { enqueueSystemEvent, peekSystemEventEntries } from "../plugin-sdk/system-event-runtime.js";
+import {
+  enqueueSystemEventEntry,
+  peekSystemEvents,
+  resetSystemEventsForTest,
+} from "../infra/system-events.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import type { NodeEventContext } from "./server-node-events-types.js";
 
@@ -80,9 +83,8 @@ it.each([
       };
       const runId = `node-owner-${name}`;
       if (rejected) {
-        enqueueSystemEvent("Unrelated pending occurrence", {
-          sessionKey: "global",
-          agentId: "research",
+        enqueueSystemEventEntry("Unrelated pending occurrence", {
+          sessionKey: "agent:research:global",
         });
         enqueueSessionEvent.mockImplementationOnce(() => {
           throw new Error("Session event admission rejected");
@@ -112,14 +114,14 @@ it.each([
         result = await request;
       }
 
-      expect(peekSystemEventEntries("global", "main")).toEqual([]);
+      expect(peekSystemEvents("agent:main:global")).toEqual([]);
       expect(result).toEqual(
         denied
           ? expect.objectContaining({ handled: false, reason: "unmatched_exec_event" })
           : undefined,
       );
       const text = event === "exec.finished" ? "owned exec result" : "Owned notification";
-      expect(peekSystemEventEntries("global", "research").map((entry) => entry.text)).toEqual(
+      expect(peekSystemEvents("agent:research:global")).toEqual(
         rejected ? ["Unrelated pending occurrence"] : denied ? [] : [expect.stringContaining(text)],
       );
       const handoff = {

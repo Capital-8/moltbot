@@ -112,7 +112,6 @@ export function PullRequestActions(props: {
             pullRequest={pullRequest()}
             gateway={props.owner.gateway}
             sessionKey={props.owner.sessionKey ?? ""}
-            agentId={props.owner.agentId}
             presented={presented() && menuOpen() && page() === "checks"}
             inline
             menuControls
@@ -135,7 +134,6 @@ export function PullRequestActions(props: {
             pullRequest={pullRequest()}
             gateway={props.owner.gateway}
             sessionKey={props.owner.sessionKey ?? ""}
-            agentId={props.owner.agentId}
             sessionId={props.owner.sessionId ?? ""}
             presented={presented() && menuOpen() && page() === "monitoring"}
             inline

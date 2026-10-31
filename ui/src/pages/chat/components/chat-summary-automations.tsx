@@ -51,7 +51,6 @@ class AutomationReadError extends Error {
 export type SessionAutomationInventoryProps = {
   gateway: ApplicationGateway | undefined;
   sessionKey: string;
-  agentId?: string;
   presented: boolean;
 };
 
@@ -63,13 +62,8 @@ export function createSessionAutomationInventory(
   // Unrelated parent prop replacements must not reset inventory or presentation.
   const gateway = createMemo(() => props.gateway);
   const sessionKey = createMemo(() => props.sessionKey);
-  const selectedAgentId = createMemo(() => props.agentId);
   const presented = createMemo(() => props.presented);
-  const binding = createMemo(() => ({
-    source: gateway(),
-    key: sessionKey(),
-    agentId: selectedAgentId(),
-  }));
+  const binding = createMemo(() => ({ source: gateway(), key: sessionKey() }));
   let loadedBinding: ReturnType<typeof binding> | undefined;
   const [revision, setRevision] = createSignal(0);
   const publish = () => setRevision((value) => value + 1);
@@ -118,12 +112,7 @@ export function createSessionAutomationInventory(
     return readAccess;
   };
 
-  function reset(
-    source: ApplicationGateway | undefined,
-    key: string,
-    agentId: string | undefined,
-    retain = false,
-  ) {
+  function reset(source: ApplicationGateway | undefined, key: string, retain = false) {
     loadedBinding = binding();
     retry.reset();
     retryPending = false;
@@ -135,7 +124,7 @@ export function createSessionAutomationInventory(
       client: source?.snapshot.client ?? null,
       connected: source?.snapshot.phase === "connected",
     });
-    const identity = resolveUiConversationIdentity(source?.snapshot ?? {}, key, agentId);
+    const identity = resolveUiConversationIdentity(source?.snapshot ?? {}, key);
     next.cronSessionFilter =
       identity.sessionKey && identity.agentId
         ? { sessionKey: identity.sessionKey, sessionAgentId: identity.agentId }
@@ -222,38 +211,28 @@ export function createSessionAutomationInventory(
   // Mount this outlet once in the session owner; consumers share its retained inventory.
   const lifecycle = (
     <Show when={binding()} keyed>
-      {({ source, key, agentId }) => {
+      {({ source, key }) => {
         onSettled(() => {
-          reset(source, key, agentId);
+          reset(source, key);
           if (!source) {
             return undefined;
           }
           const connection = createGatewayConnectionLifecycle(source.snapshot);
-          let identity = JSON.stringify(
-            resolveUiConversationIdentity(source.snapshot, key, agentId),
-          );
+          let identity = JSON.stringify(resolveUiConversationIdentity(source.snapshot, key));
           // Reject obsolete event delivery before queued binding cleanup runs.
-          const current = () =>
-            props.gateway === source && props.sessionKey === key && props.agentId === agentId;
+          const current = () => props.gateway === source && props.sessionKey === key;
           // Connection publications retire request scopes before the next cron event is delivered.
           const unsubscribe = source.subscribe((snapshot) => {
             if (!current()) {
               return;
             }
-            const nextIdentity = JSON.stringify(
-              resolveUiConversationIdentity(snapshot, key, agentId),
-            );
+            const nextIdentity = JSON.stringify(resolveUiConversationIdentity(snapshot, key));
             const changed = connection.transition(snapshot);
             const nextReadAccess = canPresentGatewayMethod(snapshot, "cron.list", "operator.read", {
               requireAdvertisement: false,
             });
             if (changed || identity !== nextIdentity || readAccess !== nextReadAccess) {
-              reset(
-                source,
-                key,
-                agentId,
-                identity === nextIdentity && readAccess === nextReadAccess,
-              );
+              reset(source, key, identity === nextIdentity && readAccess === nextReadAccess);
               identity = nextIdentity;
             }
             if (dirty && !retryPending && !cron.cronJobsReadDenied) {
@@ -393,14 +372,12 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
   const inventory = createSessionAutomationInventory(props, () => host);
   const presented = createMemo(() => props.presented);
   const sessionKey = createMemo(() => props.sessionKey);
-  const selectedAgentId = createMemo(() => props.agentId);
   const presentation = createMemo(() => props.presentationIdentity);
   // Reopening or replacing the presentation resets only the local reveal count.
   const [shown, setShown] = createSignal(() => {
     presentation();
     presented();
     sessionKey();
-    selectedAgentId();
     return 10;
   });
   const formatSchedule = createSessionAutomationSchedule();
@@ -450,7 +427,6 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
 
   async function reveal(button: HTMLButtonElement) {
     const key = props.sessionKey;
-    const agentId = props.agentId;
     const presentationIdentity = props.presentationIdentity;
     const source = props.gateway;
     const first = jobs().length;
@@ -469,7 +445,6 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
     if (
       latest(() => props.presentationIdentity) !== presentationIdentity ||
       props.sessionKey !== key ||
-      props.agentId !== agentId ||
       props.gateway !== source ||
       !props.presented ||
       !host.isConnected
@@ -485,7 +460,6 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
         if (
           latest(() => props.presentationIdentity) === presentationIdentity &&
           props.sessionKey === key &&
-          props.agentId === agentId &&
           props.gateway === source &&
           props.presented &&
           host.isConnected &&
@@ -500,7 +474,6 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
 
   async function retry(button: HTMLButtonElement) {
     const key = props.sessionKey;
-    const agentId = props.agentId;
     const presentationIdentity = props.presentationIdentity;
     const source = props.gateway;
     const focused = host.ownerDocument.activeElement === button;
@@ -508,7 +481,6 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
     if (
       latest(() => props.presentationIdentity) !== presentationIdentity ||
       props.sessionKey !== key ||
-      props.agentId !== agentId ||
       props.gateway !== source ||
       inventory.error() ||
       !props.presented ||
@@ -523,7 +495,6 @@ export function ChatSummaryAutomations(props: ChatSummaryAutomationsProps) {
         if (
           latest(() => props.presentationIdentity) === presentationIdentity &&
           props.sessionKey === key &&
-          props.agentId === agentId &&
           props.gateway === source &&
           props.presented &&
           host.isConnected &&

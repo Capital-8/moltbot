@@ -10,8 +10,7 @@ import { createDashboardTool } from "../../agents/tools/dashboard-tool.js";
 import * as inProcessGateway from "../../agents/tools/in-process-gateway.js";
 import type { InProcessGatewayCaller } from "../../agents/tools/in-process-gateway.js";
 import { readBoardHtml } from "../../boards/board-store.test-support.js";
-import { resetSystemEventsForTest } from "../../infra/system-events.js";
-import { peekSystemEventEntries } from "../../plugin-sdk/system-event-runtime.js";
+import { peekSystemEventEntries, resetSystemEventsForTest } from "../../infra/system-events.js";
 import { resetPluginRuntimeStateForTest } from "../../plugins/runtime.js";
 import {
   closeOpenClawAgentDatabasesAsync,
@@ -454,7 +453,7 @@ describe("board gateway methods", () => {
       expect(duplicate.mock.calls[0]?.[1]).toEqual({ ok: true, appended: false });
     }
     for (const agentId of ["main", "work"]) {
-      expect(peekSystemEventEntries("global", agentId).map((event) => event.text)).toEqual([
+      expect(peekSystemEventEntries(`agent:${agentId}:global`).map((event) => event.text)).toEqual([
         `[dashboard] {"count":1} on widget ${widget}`,
       ]);
     }

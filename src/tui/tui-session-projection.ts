@@ -8,8 +8,8 @@ import {
   type SessionProjectionScope,
   type SessionProjectionState,
 } from "../../packages/gateway-client/src/session-projection.js";
+import { agentSessionKeysMatchByRequestKey } from "../routing/session-key.js";
 import { extractTextFromMessage, isTuiAssistantAttachmentBlock } from "./tui-formatters.js";
-import { matchesTuiSessionSelection } from "./tui-session-events.js";
 import type {
   ChatEvent,
   SessionChangedEvent,
@@ -68,11 +68,8 @@ export function getTuiSessionProjection(state: TuiStateAccess): SessionProjectio
   const current = state.sessionProjection;
   if (
     current &&
-    current.scope.sessionKey !== undefined &&
-    matchesTuiSessionSelection(state, {
-      sessionKey: current.scope.sessionKey,
-      agentId: current.scope.agentId ?? "",
-    }) &&
+    agentSessionKeysMatchByRequestKey(current.scope.sessionKey, scope.sessionKey) &&
+    current.scope.agentId === scope.agentId &&
     (current.scope.sessionId === scope.sessionId ||
       (current.scope.sessionId === undefined && scope.sessionId !== undefined))
   ) {

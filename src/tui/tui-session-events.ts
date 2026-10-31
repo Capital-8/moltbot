@@ -134,7 +134,6 @@ export function matchesOwnedTuiSession(
     eventOwner === selected &&
     (!owner || owner === selected) &&
     Boolean(event.sessionKey?.trim() && session.trim()) &&
-    (event.sessionKey?.trim() === "global") === (session.trim() === "global") &&
     toAgentStoreSessionKey({ requestKey: event.sessionKey, agentId: selected }) ===
       toAgentStoreSessionKey({ requestKey: session, agentId: selected })
   );

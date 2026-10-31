@@ -42,7 +42,6 @@ import {
 import { normalizeRpcAttachmentsToChatAttachments } from "./server-methods/attachment-normalize.js";
 import {
   pruneBoundedTimestampMap,
-  handleNodeChatSubscription,
   withNodeEventSessionSource,
   isNodeEventConnectionCurrent,
   pairingChangedResult,
@@ -58,6 +57,7 @@ import type {
   NodeEventHandlerOptions,
   NodeEventHandleResult,
 } from "./server-node-events-types.js";
+import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "./session-utils-store-worker.js";
 import { resolveGatewayModelSupportsImages, resolveSessionModelRef } from "./session-utils.js";
 import { formatForLog } from "./ws-log.js";
@@ -668,8 +668,22 @@ async function handlePreparedNodeEvent(
     case "notifications.changed":
       return handleNodeNotificationEvent(ctx, nodeId, evt, opts, source);
     case "chat.subscribe":
-    case "chat.unsubscribe":
-      return handleNodeChatSubscription(ctx, nodeId, evt, opts);
+    case "chat.unsubscribe": {
+      const sessionKey = normalizeOptionalString(
+        parseNodeEventPayload(evt.payloadJSON)?.sessionKey,
+      );
+      if (!sessionKey) {
+        return undefined;
+      }
+      const { canonicalKey } = resolveSessionStoreIdentity({ cfg: getRuntimeConfig(), sessionKey });
+      // Fanout is keyed by the canonical session; retain the connection owner for safe reconnect.
+      if (evt.event === "chat.subscribe") {
+        await ctx.nodeSubscribe(nodeId, canonicalKey, opts?.connId);
+      } else {
+        await ctx.nodeUnsubscribe(nodeId, canonicalKey, opts?.connId);
+      }
+      return undefined;
+    }
     case "exec.started":
     case "exec.finished":
     case "exec.denied":

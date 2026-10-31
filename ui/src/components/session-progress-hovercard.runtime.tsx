@@ -17,7 +17,6 @@ import {
 } from "../lib/session-progress-cards.ts";
 import {
   sessionPullRequestsForGateway,
-  sessionPullRequestSelection,
   type SessionPullRequestSnapshotStore,
 } from "../lib/session-pull-requests.ts";
 import { parseAgentSessionKey, scopedSessionArtifactKey } from "../lib/sessions/session-key.ts";
@@ -255,11 +254,7 @@ function createSessionProgressHovercard(
     if (gateway) {
       pullRequestStore = sessionPullRequestsForGateway(gateway);
       projection.replaceSource(readSources());
-      pullRequestStore.watch(
-        watchOwner,
-        [sessionPullRequestSelection(session.sessionKey, session.agentId)],
-        { foreground: true },
-      );
+      pullRequestStore.watch(watchOwner, [artifactKey], { foreground: true });
     }
     showCurrent();
     // The projection receives both successful loads and failures; keep the last useful card.
@@ -277,9 +272,7 @@ function createSessionProgressHovercard(
       return current;
     }
     const sidebarRow = host.lookupSidebarRow?.(sessionKey);
-    const pullRequests = pullRequestStore?.get(
-      sessionPullRequestSelection(sessionKey, session.agentId),
-    );
+    const pullRequests = pullRequestStore?.get(artifactKey);
     const currentProgressCard = progressCards?.get(session);
     if (currentProgressCard !== undefined) {
       lastProgressCard = currentProgressCard;

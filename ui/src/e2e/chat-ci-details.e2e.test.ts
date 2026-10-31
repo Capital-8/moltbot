@@ -1,4 +1,3 @@
-import { buildControlUiSessionPath } from "@openclaw/session-url-contract";
 import type { Locator, Page } from "playwright";
 import { expect, it } from "vitest";
 import {
@@ -10,8 +9,6 @@ import {
 } from "../../../src/gateway/control-ui-contract.js";
 import type { CronJob } from "../api/types.ts";
 import { ciAutomationJobSpec, type CiAutomationOption } from "../lib/session-pr-automation-spec.ts";
-import type { ChatPageHost } from "../pages/chat/chat-state-host.ts";
-import { nativePane } from "../test-helpers/chat-layout-menu.ts";
 import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { cronListResponseFixture } from "../test-helpers/cron.ts";
 import {
@@ -27,7 +24,6 @@ const DETAILS_METHOD = "controlUi.sessionPullRequests.checks";
 const headSha = "a".repeat(40);
 const automationSessionKey = "agent:main:dashboard:ci-proof";
 const automationSessionId = "ci-proof-incarnation";
-const historyText = "The implementation is ready for CI review.";
 const prTarget = { owner: "openclaw", repo: "openclaw", number: 123456 };
 const automationTarget = {
   ...prTarget,
@@ -176,8 +172,6 @@ async function setup(
     defer?: boolean;
     automationJobs?: CronJob[];
     readOnly?: boolean;
-    namedSessionKey?: string;
-    exactSelection?: { sessionKey: string; agentId: string; sessionId: string };
   } = {},
 ) {
   const context = await suite.newBrowserContext({
@@ -187,36 +181,17 @@ async function setup(
     serviceWorkers: "block",
   });
   const page = await context.newPage();
-  const selected = options.exactSelection;
-  const namedSessionKey = options.namedSessionKey ?? automationSessionKey;
-  const pairedKeys = selected ? ["global", `agent:${selected.agentId}:global`] : [];
-  const literal = selected && {
-    ok: true,
-    key: `agent:${selected.agentId}:global`,
-    agentId: selected.agentId,
-  };
   const gateway = await installMockGateway(page, {
-    sessionKey: selected?.sessionKey ?? namedSessionKey,
-    defaultAgentId: selected?.agentId,
-    sessionScope: selected ? "global" : undefined,
-    sessions: selected
-      ? pairedKeys.map((key) => ({
-          key,
-          agentId: selected.agentId,
-          sessionId: key === selected.sessionKey ? selected.sessionId : "sibling-ci-incarnation",
-          label: key === selected.sessionKey ? "CI review" : "Sibling CI review",
-          kind: key === "global" ? "global" : "direct",
-          updatedAt: 1,
-        }))
-      : [
-          {
-            key: namedSessionKey,
-            sessionId: automationSessionId,
-            label: "CI review",
-            kind: "direct",
-            updatedAt: 1,
-          },
-        ],
+    sessionKey: automationSessionKey,
+    sessions: [
+      {
+        key: automationSessionKey,
+        sessionId: automationSessionId,
+        label: "CI review",
+        kind: "direct",
+        updatedAt: 1,
+      },
+    ],
     operatorScopes: options.readOnly ? ["operator.read"] : undefined,
     featureMethods: [
       "chat.metadata",
@@ -224,20 +199,10 @@ async function setup(
       SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
       DETAILS_METHOD,
     ],
-    historyMessages: [{ role: "assistant", content: historyText, timestamp: 1 }],
+    historyMessages: [
+      { role: "assistant", content: "The implementation is ready for CI review.", timestamp: 1 },
+    ],
     methodResponses: {
-      // The fixture's generic global resolver treats qualified global as a legacy alias.
-      // This scenario has an explicitly seeded literal row, so return that exact identity.
-      ...(literal
-        ? {
-            "sessions.resolve": {
-              cases: [
-                { match: { reference: { key: literal.key } }, response: literal },
-                { match: { key: literal.key }, response: literal },
-              ],
-            },
-          }
-        : {}),
       [SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD]: { subscribed: true },
       [DETAILS_METHOD]: detailFixture(options.mode),
       "cron.list": automationInventory(options.automationJobs ?? []),
@@ -248,97 +213,16 @@ async function setup(
       },
     },
   });
-  if (selected) {
-    const pathname = buildControlUiSessionPath({
-      namespace: "chat",
-      sessionKey: selected.sessionKey,
-      fallbackAgentId: selected.agentId,
-      exactKey: true,
-    });
-    if (!pathname) {
-      throw new Error("Expected an exact CI fixture route");
-    }
-    await page.goto(new URL(pathname, suite.server.baseUrl).toString());
-  } else {
-    await page.goto(controlUiSessionUrl(suite.server.baseUrl, namedSessionKey));
-  }
-  if (selected) {
-    const pane = nativePane(page);
-    await expect
-      .poll(() =>
-        pane.evaluate((element, target) => {
-          const current = element as HTMLElement & {
-            state?: Pick<ChatPageHost, "sessionKey" | "currentSessionId" | "assistantAgentId">;
-            transcriptReady?: boolean;
-          };
-          return {
-            sessionMatches: current.state?.sessionKey === target.sessionKey,
-            incarnationMatches: current.state?.currentSessionId === target.sessionId,
-            agentMatches: current.state?.assistantAgentId === target.agentId,
-            transcriptReady: current.transcriptReady === true,
-          };
-        }, selected),
-      )
-      .toEqual({
-        sessionMatches: true,
-        incarnationMatches: true,
-        agentMatches: true,
-        transcriptReady: true,
-      });
-    await pane.locator(".chat-group.assistant").getByText(historyText, { exact: true }).waitFor();
-  }
+  await page.goto(controlUiSessionUrl(suite.server.baseUrl, automationSessionKey));
   await openChatDetails(page);
   if (options.defer) {
     await gateway.deferNext(DETAILS_METHOD);
   }
-  const sessionKey =
-    selected?.sessionKey ?? (await waitForWatchedSessionKey(gateway, options.namedSessionKey));
-  if (selected) {
-    await expect
-      .poll(
-        async () =>
-          (await gateway.getRequests(SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD)).at(-1)?.params,
-      )
-      .toMatchObject({
-        sessionKeys: expect.arrayContaining([
-          { sessionKey: selected.sessionKey, agentId: selected.agentId },
-        ]),
-      });
-  }
+  const sessionKey = await waitForWatchedSessionKey(gateway);
   async function publish(next: ControlUiSessionPullRequest = pullRequest) {
     await gateway.emitGatewayEvent(CONTROL_UI_SESSION_PULL_REQUESTS_CHANGED_EVENT, {
-      sessions: selected
-        ? {}
-        : {
-            [sessionKey]: { pullRequests: [next], rateLimited: false, status: "ready" },
-          },
-      ...(selected
-        ? {
-            exactSessions: pairedKeys.map((key) => ({
-              sessionKey: key,
-              agentId: selected.agentId,
-              snapshot: {
-                pullRequests:
-                  key === selected.sessionKey
-                    ? [next]
-                    : [
-                        {
-                          ...next,
-                          number: 123457,
-                          title: "Sibling session pull request",
-                          url: "https://github.com/openclaw/openclaw/pull/123457",
-                        },
-                      ],
-                rateLimited: false,
-                status: "ready",
-              },
-            })),
-          }
-        : {}),
+      sessions: { [sessionKey]: { pullRequests: [next], rateLimited: false, status: "ready" } },
     });
-    if (selected || options.namedSessionKey) {
-      await openDetailsPullRequests(page);
-    }
     await page.locator(".chat-pr__actions-trigger, .chat-pr-mobile__row").first().waitFor();
   }
   await publish(
@@ -368,86 +252,6 @@ async function expandLinuxJob(page: Page) {
 }
 
 suite.define(() => {
-  it.each([
-    { name: "desktop raw main", sessionKey: "global", agentId: "main", width: 1180 },
-    { name: "mobile raw work", sessionKey: "global", agentId: "work", width: 393 },
-    { name: "desktop literal main", sessionKey: "agent:main:global", agentId: "main", width: 1180 },
-  ])("keeps $name PR actions on the selected session", async ({ sessionKey, agentId, width }) => {
-    const { page, gateway } = await setup({
-      width,
-      exactSelection: { sessionKey, agentId, sessionId: "selected-ci-incarnation" },
-    });
-    const mobile = width < 900;
-    if (mobile) {
-      const collection = await openDetailsPullRequests(page);
-      await collection.locator(".chat-pr-mobile__row").click();
-      await page.locator(".chat-pr-mobile__metadata").waitFor();
-      await page.getByRole("button", { name: "Checks", exact: true }).click();
-    } else {
-      await openDesktopPullRequestPage(page.locator(".chat-pr").first(), "checks");
-    }
-    const checks = await gateway.waitForRequest(DETAILS_METHOD);
-    expect.soft(checks.params).toEqual({
-      sessionKey,
-      ...(sessionKey === "global" ? { agentId } : {}),
-      owner: "openclaw",
-      repo: "openclaw",
-      number: 123456,
-      headSha,
-    });
-    if (mobile) {
-      await page
-        .locator(".chat-mobile-host__header")
-        .getByRole("button", { name: "Back", exact: true })
-        .click();
-      await page.locator(".chat-pr-mobile__metadata").waitFor();
-      await page.getByRole("button", { name: "CI monitoring", exact: true }).click();
-    } else {
-      await openDesktopPullRequestPage(page.locator(".chat-pr").first(), "monitoring");
-    }
-    const toggle = page.getByRole("switch", { name: "Auto-merge when ready" });
-    await expect.poll(() => toggle.isEnabled()).toBe(true);
-    await gateway.deferNext("cron.add");
-    await toggle.click();
-    const add = await gateway.waitForRequest("cron.add");
-    expect.soft(add.params).toMatchObject({
-      agentId,
-      sessionKey,
-      owner: { agentId, sessionKey },
-      sessionTarget: `session:${sessionKey}`,
-    });
-    await gateway.rejectDeferred("cron.add", {
-      code: "UNAVAILABLE",
-      message: "Synthetic automation request captured",
-    });
-    await page.getByText("Synthetic automation request captured", { exact: false }).waitFor();
-  });
-
-  it("keeps CI details readable for a retained named session whose agent left the roster", async () => {
-    const sessionKey = "agent:retired:dashboard:ci-proof";
-    const { page, gateway } = await setup({ namedSessionKey: sessionKey });
-    const pane = nativePane(page);
-    await expect
-      .poll(() =>
-        pane.evaluate((element) => {
-          const current = element as HTMLElement & {
-            state?: Pick<ChatPageHost, "sessionKey" | "currentSessionId" | "agentsList">;
-          };
-          return {
-            sessionKey: current.state?.sessionKey,
-            sessionId: current.state?.currentSessionId,
-            agents: current.state?.agentsList?.agents.map((agent) => agent.id),
-          };
-        }),
-      )
-      .toEqual({ sessionKey, sessionId: automationSessionId, agents: ["main"] });
-    await pane.locator(".chat-group.assistant").getByText(historyText, { exact: true }).waitFor();
-    await openDesktopPullRequestPage(page.locator(".chat-pr").first(), "checks");
-    const checks = await gateway.waitForRequest(DETAILS_METHOD);
-    expect(checks.params).toEqual({ sessionKey, ...prTarget, headSha });
-    await expandLinuxJob(page);
-  });
-
   it("saves selected-PR automation toggles and reconciles an uncertain write", async () => {
     const fix = automationJob("autoFix");
     const merge = automationJob("autoMerge", false);

@@ -17,12 +17,10 @@ import {
   type ChatCanvasBlock,
 } from "./chat-display-projection.canvas.js";
 import { projectPluginInlineView } from "./chat-display-projection.inline-view.js";
-import { shouldSuppressAssistantEventForLiveChat } from "./live-chat-projector.js";
 import type { GatewayBroadcastOpts } from "./server-broadcast-types.js";
 import type { ChatRunState } from "./server-chat-state.js";
 
 type ChatRunRecord = ReturnType<ChatRunState["getOrCreate"]>;
-type AgentTextThrottleStream = keyof NonNullable<ChatRunRecord["agentText"]>;
 type LiveTextStream = "chat" | "agent";
 
 type LiveTextDelivery = NonNullable<GatewayBroadcastOpts["liveText"]>;
@@ -260,34 +258,6 @@ export function prepareAgentWirePayload(
   }
   return payload;
 }
-
-export function resolveAgentTextThrottleStream(
-  evt: AgentEventPayload,
-): AgentTextThrottleStream | null {
-  if (evt.stream === "assistant" || evt.stream === "thinking") {
-    const stream = evt.stream === "assistant" ? "assistant" : "thinking";
-    return typeof evt.data.delta === "string" || evt.data.replace === true ? stream : null;
-  }
-  const { kind, phase, status, itemId, progressText } = evt.data;
-  // Growing previews share text pacing; completion and selection remain ordering barriers.
-  return evt.stream === "item" &&
-    phase === "update" &&
-    (kind === "preamble" || (kind === "answer_candidate" && status === "candidate")) &&
-    typeof itemId === "string" &&
-    typeof progressText === "string"
-    ? kind
-    : null;
-}
-
-export const shouldCoalesceAgentTextEvent = (evt: AgentEventPayload) =>
-  !(Array.isArray(evt.data.mediaUrls) && evt.data.mediaUrls.length > 0) &&
-  typeof evt.data.mediaUrl !== "string" &&
-  evt.data.replace !== true &&
-  (evt.stream === "item" ||
-    (typeof evt.data.text === "string" &&
-      typeof evt.data.delta === "string" &&
-      evt.data.delta.length > 0 &&
-      (evt.stream !== "assistant" || !shouldSuppressAssistantEventForLiveChat(evt.data))));
 
 export function mergeAgentTextPayload(previous: unknown, next: unknown): AgentEventPayload {
   // SAFETY: this callback only merges the same typed agent producer and stream/item key.

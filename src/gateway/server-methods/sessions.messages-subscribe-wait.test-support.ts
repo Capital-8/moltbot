@@ -6,7 +6,6 @@ import {
   replaceSessionEntrySync,
 } from "../../config/sessions/session-accessor.js";
 import { clearAgentRunContext, registerAgentRunContext } from "../../infra/agent-run-registry.js";
-import { trackAsyncWork } from "../../shared/async-work-scope.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import {
   withOpenClawTestState,
@@ -40,7 +39,6 @@ export async function prepareSubscriptionFixture(
   client.connect.device = sharingPolicyClient({ deviceId: `${name}-device` }).connect.device;
   const subscribers = createSessionMessageSubscriberRegistry();
   const runtime = createOperatorApprovalSessionEventRuntime({
-    track: trackAsyncWork,
     clients: [client],
     sessionMessageSubscribers: subscribers,
     broadcastToConnIds: () => {},

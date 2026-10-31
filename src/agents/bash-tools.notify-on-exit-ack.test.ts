@@ -12,7 +12,6 @@ import {
   peekSystemEventEntries,
   resetSystemEventsForTest,
 } from "../infra/system-events.js";
-import { peekSystemEventEntries as peekOwnedSystemEventEntries } from "../plugin-sdk/system-event-runtime.js";
 import * as gatewayWork from "../process/gateway-work-admission.js";
 import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
@@ -115,8 +114,8 @@ it("keeps selected-agent global completions scoped to their owner", async () => 
   expect(vi.mocked(enqueueSessionEvent).mock.lastCall?.[1]).toMatchObject({
     expectedTarget: { agentId: "research" },
   });
-  expect(peekOwnedSystemEventEntries("global", "research")).toHaveLength(1);
-  expect(peekOwnedSystemEventEntries("global", "main")).toEqual([]);
+  expect(peekSystemEventEntries("agent:research:global")).toHaveLength(1);
+  expect(peekSystemEventEntries("agent:main:global")).toEqual([]);
 });
 
 it("isolates identical completions across exact full-slug reuse", async () => {

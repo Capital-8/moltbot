@@ -179,8 +179,7 @@ export function createGatewayNarrationDelivery(params: {
     // Re-enter the normal broadcaster so delayed delivery rechecks scopes,
     // sharing, subscription mode, socket liveness, and slow-consumer policy.
     params.send("session.narration", digest, new Set([client.connId]), {
-      sessionKeys: [digest.sessionKey],
-      sessionSubscriptionKeys: sessionKeys,
+      sessionKeys,
       agentId: projection.agentId,
       dropIfSlow: true,
       sessionSubscriptionVerified: true,

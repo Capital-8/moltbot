@@ -123,13 +123,12 @@ function component(
   presented = true,
   offline = false,
   scopes = ["operator.read"],
-  selection: { sessionKey: string; agentId?: string } = { sessionKey: "agent:ops:task" },
 ) {
   const current = source(request, offline, scopes);
   type Props = Parameters<typeof ChatSummaryAutomations>[0];
   const [props, setProps] = createSignal<Props>({
     gateway: current.gateway,
-    ...selection,
+    sessionKey: "agent:ops:task",
     presented,
   });
   const view = mountSolid(() => <ChatSummaryAutomations {...props()} />);
@@ -544,43 +543,30 @@ it.each([false, true])("restores retry focus: moved=%s", async (moved) => {
   expect(sibling.open).toBe(false);
 });
 
-it.each(["session", "agent"] as const)(
-  "fences late pages on %s and same-client reconnect boundaries",
-  async (change) => {
-    const retired = createDeferred<Page>();
-    const reconnectRetired = createDeferred<Page>();
-    const latest = createDeferred<Page>();
-    const current = component(
-      sequence(retired.promise, reconnectRetired.promise, latest.promise),
-      true,
-      false,
-      ["operator.read"],
-      change === "agent" ? { sessionKey: "global", agentId: "main" } : undefined,
-    );
-    const { element } = current;
-    flush();
-    current.update(change === "agent" ? { agentId: "work" } : { sessionKey: "agent:ops:second" });
-    const snapshot = current.gateway.snapshot;
-    current.publish({ ...snapshot, phase: "reconnecting" });
-    current.publish(snapshot);
-    flush();
-    expect(current.request).toHaveBeenCalledTimes(3);
-    expect(current.request.mock.calls[2]?.[1]).toMatchObject(
-      change === "agent"
-        ? { sessionKey: "global", sessionAgentId: "work" }
-        : { sessionKey: "agent:ops:second" },
-    );
-    latest.resolve(page([job({ name: "Current session" })]));
-    await current.ready("Current session");
-    retired.resolve(page([job({ name: "Wrong session" })]));
-    reconnectRetired.resolve(page([job({ name: "Retired connection" })]));
-    await retired.promise;
-    await reconnectRetired.promise;
-    flush();
-    expect(element.textContent).toContain("Current session");
-    expect(element.textContent).not.toMatch(/Wrong session|Retired connection/);
-  },
-);
+it("fences late pages on session and same-client reconnect boundaries", async () => {
+  const retired = createDeferred<Page>();
+  const reconnectRetired = createDeferred<Page>();
+  const latest = createDeferred<Page>();
+  const current = component(sequence(retired.promise, reconnectRetired.promise, latest.promise));
+  const { element } = current;
+  flush();
+  current.update({ sessionKey: "agent:ops:second" });
+  const snapshot = current.gateway.snapshot;
+  current.publish({ ...snapshot, phase: "reconnecting" });
+  current.publish(snapshot);
+  flush();
+  expect(current.request).toHaveBeenCalledTimes(3);
+  expect(current.request.mock.calls[2]?.[1]).toMatchObject({ sessionKey: "agent:ops:second" });
+  latest.resolve(page([job({ name: "Current session" })]));
+  await current.ready("Current session");
+  retired.resolve(page([job({ name: "Wrong session" })]));
+  reconnectRetired.resolve(page([job({ name: "Retired connection" })]));
+  await retired.promise;
+  await reconnectRetired.promise;
+  flush();
+  expect(element.textContent).toContain("Current session");
+  expect(element.textContent).not.toMatch(/Wrong session|Retired connection/);
+});
 
 it.each([false, true])("preserves offline inventory: loaded=%s", async (loaded) => {
   const current = component(undefined, true, !loaded);

@@ -96,17 +96,6 @@ describe("sessions.viewers.set", () => {
 
     const selected = await declare({ sessionKeys: ["global"], agentId: "work" });
     expectReply(selected, true, { sessionKeys: ["agent:work:global"] }, undefined);
-    expect(replace).toHaveBeenLastCalledWith(
-      "conn-viewer",
-      ["agent:work:global"],
-      ['["work","global"]'],
-    );
-    await declare({ sessionKeys: ["agent:work:global"] });
-    expect(replace).toHaveBeenLastCalledWith(
-      "conn-viewer",
-      ["agent:work:global"],
-      ["agent:work:global"],
-    );
 
     replace.mockClear();
     const ambiguous = await declare({ sessionKeys: ["global"] });

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { afterEach, expect, it, vi } from "vitest";
 import type { PendingApprovalSnapshot } from "../../../packages/gateway-protocol/src/schema/approvals.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
-import { trackAsyncWork } from "../../shared/async-work-scope.js";
 import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db.js";
 import { createOperatorApprovalSessionEventRuntime } from "../operator-approval-session-events.js";
 import * as store from "../operator-approval-store.js";
@@ -81,7 +80,6 @@ it("shares approval replay across 64 subscribers during unrelated approval activ
   const subscribers = createSessionMessageSubscriberRegistry();
   vi.spyOn(Date, "now").mockReturnValue(5000);
   const runtime = createOperatorApprovalSessionEventRuntime({
-    track: trackAsyncWork,
     clients,
     sessionMessageSubscribers: subscribers,
     broadcastToConnIds: () => {},

@@ -15,15 +15,19 @@ import { setUserProfileRole } from "../state/user-profile-writes.worker.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import type { HumanMentionWebPush } from "./event-web-push.js";
-import { createViewers, researchContext, type Viewers } from "./event-web-push.test-support.js";
 import { invalidateOperatorRolePolicy } from "./operator-role-policy.js";
 import type { GatewayBroadcastOpts } from "./server-broadcast-types.js";
+import { GatewayClientRegistry } from "./server/client-registry.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 import {
   createTestProjection,
   holdForeground,
   seedRow,
 } from "./session-row-projection.read-fixture.test-support.js";
+import {
+  createSessionViewerPresenceDeclarations,
+  type SessionViewerPresenceDeclarations,
+} from "./session-viewer-presence.js";
 
 const mocks = vi.hoisted(() => ({
   pairing: vi.fn(),
@@ -197,6 +201,43 @@ const setPaired = (...paired: ReturnType<typeof pairedOperator>[]) =>
 function setRecipients(...subscriptions: BoundWebPushSubscription[]) {
   setSubscriptions(...subscriptions);
   setPaired(...subscriptions.map(({ deviceId }) => pairedOperator(deviceId)));
+}
+
+const researchContext = { agentId: "research", sessionKeys: ["agent:research:thread.1"] };
+
+type Viewers = {
+  declarations: SessionViewerPresenceDeclarations;
+  view: (deviceId: string | undefined, sessionKeys?: readonly string[]) => GatewayWsClient;
+};
+
+function createViewers(): Viewers {
+  const clients = new GatewayClientRegistry();
+  const declarations = createSessionViewerPresenceDeclarations({
+    clients,
+    publishPresence: () => {},
+  });
+  const view: Viewers["view"] = (deviceId, sessionKeys = researchContext.sessionKeys) => {
+    const client: GatewayWsClient = {
+      connId: `conn-${deviceId ?? "anonymous"}`,
+      usesSharedGatewayAuth: false,
+      socket: { readyState: 1 } as GatewayWsClient["socket"],
+      connect: {
+        minProtocol: 1,
+        maxProtocol: 1,
+        role: "operator",
+        client: { id: "openclaw-control-ui", version: "test", platform: "test", mode: "webchat" },
+        ...(deviceId
+          ? {
+              device: { id: deviceId, publicKey: "key", signature: "sig", signedAt: 1, nonce: "n" },
+            }
+          : {}),
+      },
+    };
+    clients.add(client);
+    declarations.replace(client.connId, sessionKeys);
+    return client;
+  };
+  return { declarations, view };
 }
 
 function prepareSender() {
@@ -550,43 +591,8 @@ describe("event Web Push classification", () => {
     });
   });
 
-  it.each<[string, string, (viewers: Viewers) => unknown, string[], GatewayBroadcastOpts?]>([
+  it.each<[string, string, (viewers: Viewers) => unknown, string[]]>([
     ["the viewing device", "chat", ({ view }) => view("phone"), ["desktop"]],
-    [
-      "the selected raw global",
-      "chat",
-      ({ view }) => view("phone", ["agent:research:global"], ['["research","global"]']),
-      ["desktop"],
-      { agentId: "research", sessionKeys: ["global"] },
-    ],
-    [
-      "a literal global sibling",
-      "chat",
-      ({ view }) => view("phone", ["agent:research:global"]),
-      ["phone", "desktop"],
-      { agentId: "research", sessionKeys: ["global"] },
-    ],
-    [
-      "a raw global sibling",
-      "chat",
-      ({ view }) => view("phone", ["agent:research:global"], ['["research","global"]']),
-      ["phone", "desktop"],
-      { agentId: "research", sessionKeys: ["agent:research:global"] },
-    ],
-    [
-      "the selected literal global",
-      "chat",
-      ({ view }) => view("phone", ["agent:research:global"]),
-      ["desktop"],
-      { agentId: "research", sessionKeys: ["agent:research:global"] },
-    ],
-    [
-      "another agent's raw global",
-      "chat",
-      ({ view }) => view("phone", ["agent:work:global"], ['["work","global"]']),
-      ["phone", "desktop"],
-      { agentId: "research", sessionKeys: ["global"] },
-    ],
     ["no declaration", "chat", () => {}, ["phone", "desktop"]],
     [
       "a hidden document",
@@ -622,7 +628,7 @@ describe("event Web Push classification", () => {
     ["a question", "question.requested", ({ view }) => view("phone"), ["phone", "desktop"]],
   ])(
     "suppresses only the device viewing a finished session (%s)",
-    async (_case, event, arrange, expected, context = researchContext) => {
+    async (_case, event, arrange, expected) => {
       const scopes = ["operator.read", "operator.questions"];
       setSubscriptions(makeSubscription("phone"), makeSubscription("desktop"));
       setPaired(pairedOperator("phone", scopes), pairedOperator("desktop", scopes));
@@ -632,7 +638,7 @@ describe("event Web Push classification", () => {
       createEventWebPushDelivery(() => ({}), viewers.declarations).handleEvent(
         event,
         { state: "final", runId: "viewed-run", id: "question-1" },
-        context,
+        researchContext,
       );
 
       await authorityCompleted.promise;

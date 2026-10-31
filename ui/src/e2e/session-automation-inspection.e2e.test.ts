@@ -45,12 +45,8 @@ function job(id = "ci", overrides: Partial<CronJob> = {}): CronJob {
     ...overrides,
   };
 }
-function inventory(
-  jobs: CronJob[],
-  overrides: Partial<CronJobsListResult> = {},
-  selected?: { sessionKey: string; agentId: string },
-) {
-  const response: CronJobsListResult = {
+function inventory(jobs: CronJob[], overrides: Partial<CronJobsListResult> = {}) {
+  return cronListResponseFixture({
     jobs,
     snapshotRevision: "inspection-1",
     total: jobs.length,
@@ -59,33 +55,21 @@ function inventory(
     nextOffset: null,
     hasMore: false,
     ...overrides,
-  };
-  return cronListResponseFixture(
-    selected
-      ? [{ match: { sessionKey: selected.sessionKey, sessionAgentId: selected.agentId }, response }]
-      : response,
-  );
+  });
 }
-async function installSessionFixture(
-  page: Page,
-  jobs: CronJob[],
-  selected?: { sessionKey: string; agentId: string },
-) {
+async function installSessionFixture(page: Page, jobs: CronJob[]) {
   await page.clock.setFixedTime(NOW);
   const gateway = await installMockGateway(page, {
-    sessionKey: selected?.sessionKey ?? key,
-    defaultAgentId: selected?.agentId,
-    sessionScope: selected ? "global" : undefined,
+    sessionKey: key,
     featureMethods: ["progressCard.get", "cron.list"],
     methodResponses: {
       "progressCard.get": { card: null },
-      "cron.list": inventory(jobs, {}, selected),
+      "cron.list": inventory(jobs),
       "cron.get": { cases: jobs.map((value) => ({ match: { id: value.id }, response: value })) },
       "sessions.list": chatSessionListResponse([
         {
-          key: selected?.sessionKey ?? key,
-          agentId: selected?.agentId,
-          kind: selected ? "global" : "direct",
+          key,
+          kind: "direct",
           label: "Refresh versus retry distinction",
           hasAutomation: true,
           updatedAt: 1,
@@ -93,9 +77,7 @@ async function installSessionFixture(
       ]),
     },
   });
-  await page.goto(
-    selected ? `${suite.server.baseUrl}chat` : controlUiSessionUrl(suite.server.baseUrl, key),
-  );
+  await page.goto(controlUiSessionUrl(suite.server.baseUrl, key));
   return gateway;
 }
 async function fixture(page: Page, jobs: CronJob[], width = 1440) {
@@ -119,36 +101,6 @@ async function fixture(page: Page, jobs: CronJob[], width = 1440) {
   };
 }
 suite.define(() => {
-  it.each([
-    { width: 1440, agentId: "main" },
-    { width: 390, agentId: "work" },
-  ])(
-    "reads raw global automation inventory for $agentId at $width pixels",
-    async ({ width, agentId }) => {
-      await withPage(async ({ page }) => {
-        const selected = { sessionKey: "global", agentId };
-        const saved = job("raw-global-ci", {
-          name: "Saved global CI job",
-          agentId,
-          sessionKey: "global",
-          owner: selected,
-          sessionTarget: "session:global",
-        });
-        const gateway = await installSessionFixture(page, [saved], selected);
-        const details = await openChatDetails(page);
-        const request = await gateway.waitForRequest("cron.list", {
-          match: { sessionAgentId: agentId },
-        });
-        expect(request.params).toMatchObject({ sessionKey: "global", sessionAgentId: agentId });
-        await details.locator('[data-details-group="automations"]').getByText(saved.name).waitFor();
-        expect(
-          (await gateway.getRequests()).filter(({ method }) =>
-            ["cron.add", "cron.update", "cron.remove", "cron.run"].includes(method),
-          ),
-        ).toEqual([]);
-      }, width);
-    },
-  );
   it.each([
     { width: 1440, entry: "desktop" },
     { width: 390, entry: "single" },

@@ -3,11 +3,6 @@ import { page } from "vitest/browser";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationContext } from "../../app/context.ts";
-import { createContext, createGateway, createSessions } from "../../test-helpers/app-sidebar.ts";
-import {
-  createTestGatewayClient,
-  type GatewayRequestHandler,
-} from "../../test-helpers/gateway-client.ts";
 import { createSolidApplicationContextProvider } from "../../test-helpers/solid-application-context.tsx";
 import { createSessionActivity } from "./session-activity-owner.ts";
 import "../../styles/base.css";
@@ -15,12 +10,7 @@ import "../../styles/components.css";
 import "../../styles/settings.css";
 import "../../styles/settings-controls.css";
 import "../../styles/activity.css";
-import {
-  mountSolid,
-  props as activityProps,
-  row,
-  type SessionActivityTestProps,
-} from "./session-activity-view.test-harness.ts";
+import { mountSolid, type SessionActivityTestProps } from "./session-activity-view.test-harness.ts";
 import { renderSessionActivityView } from "./session-activity-view.tsx";
 
 const renderSessionActivityViewSolid = mountSolid<SessionActivityTestProps>(
@@ -38,47 +28,6 @@ beforeEach(() => {
 
 afterEach(() => {
   container.remove();
-});
-
-it("requests images for each exact stored global conversation from the Activity parent view", async () => {
-  await page.viewport(900, 1000);
-  const request = vi.fn<GatewayRequestHandler>((method) =>
-    method === "artifacts.list" ? { artifacts: [] } : {},
-  );
-  const context = createContext(
-    createGateway(createTestGatewayClient(request)),
-    createSessions("main", []),
-    { defaultId: "main", mainKey: "main", scope: "global", agents: [{ id: "main" }] },
-  );
-  const now = Date.now();
-  renderSessionActivityViewSolid(
-    activityProps({
-      context,
-      rows: [
-        row("global", { id: "owner" }, now, {
-          kind: "global",
-          agentId: "main",
-          sessionId: "raw-session",
-        }),
-        row("agent:main:global", { id: "owner" }, now - 1, {
-          agentId: "main",
-          sessionId: "literal-session",
-        }),
-      ],
-    }),
-    container,
-  );
-  const queries = () => request.mock.calls.filter(([method]) => method === "artifacts.list");
-  await expect.poll(queries).toHaveLength(2);
-  expect(queries()).toEqual(
-    expect.arrayContaining([
-      ["artifacts.list", { sessionKey: "global", agentId: "main", type: "image", limit: 4 }],
-      [
-        "artifacts.list",
-        { sessionKey: "agent:main:global", agentId: "main", type: "image", limit: 4 },
-      ],
-    ]),
-  );
 });
 
 it.each([

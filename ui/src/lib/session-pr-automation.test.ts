@@ -152,45 +152,6 @@ it.each(["autoFix", "autoMerge"] as const)(
   },
 );
 
-it.each([
-  { agentId: "main", sessionKey: "global" },
-  { agentId: "work", sessionKey: "global" },
-  { agentId: "main", sessionKey: "agent:main:global" },
-])(
-  "updates the saved exact CI job for $agentId/$sessionKey without creating another",
-  async (selection) => {
-    const selected = { ...target, ...selection };
-    const saved = job("autoMerge", { ...jobSpec(selected, "autoMerge"), id: "saved-exact-job" });
-    const siblings = [
-      { agentId: "main", sessionKey: "global" },
-      { agentId: "work", sessionKey: "global" },
-      { agentId: "main", sessionKey: "agent:main:global" },
-    ]
-      .filter(
-        (other) => other.agentId !== selection.agentId || other.sessionKey !== selection.sessionKey,
-      )
-      .map((other, index) =>
-        job("autoMerge", {
-          ...jobSpec({ ...target, ...other }, "autoMerge"),
-          id: `sibling-${index}`,
-        }),
-      );
-    request.mockResolvedValueOnce(page([saved, ...siblings]));
-    const loaded = await load(selected);
-    expect(loaded).toEqual({ autoMerge: saved });
-    expectList(1, { sessionKey: selection.sessionKey, sessionAgentId: selection.agentId });
-    const updated = { ...saved, enabled: false, configRevision: "revision-2" };
-    request.mockResolvedValueOnce(updated);
-    expect(await set("autoMerge", false, loaded.autoMerge, selected)).toEqual(updated);
-    expect(request).toHaveBeenNthCalledWith(2, "cron.update", {
-      id: "saved-exact-job",
-      expectedConfigRevision: "revision-1",
-      patch: { enabled: false },
-    });
-    expect(request).toHaveBeenCalledTimes(2);
-  },
-);
-
 it("never creates a disabled row or retries an uncertain mutation", async () => {
   expect(await set("autoMerge", false)).toBeUndefined();
   expect(request).not.toHaveBeenCalled();

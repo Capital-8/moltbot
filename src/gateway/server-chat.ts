@@ -61,9 +61,7 @@ import {
   prepareAgentWirePayload,
   projectChatStatusEvent,
   projectChatTerminalMessage,
-  resolveAgentTextThrottleStream,
   scheduleLiveTextFlush,
-  shouldCoalesceAgentTextEvent,
 } from "./server-chat-live-text.js";
 import { isChatAbortMarkerCurrent } from "./server-chat-state.js";
 import type {
@@ -205,6 +203,8 @@ type AgentEventHandler = ((event: AgentEventPayload) => void | Promise<void>) & 
   dispose: () => Promise<void>;
 };
 
+type ChatRunRecord = ReturnType<ChatRunState["getOrCreate"]>;
+type AgentTextThrottleStream = keyof NonNullable<ChatRunRecord["agentText"]>;
 type LivePayloadOptions = {
   agentId?: string;
   controlUiVisible?: boolean;
@@ -812,9 +812,7 @@ export function createAgentEventHandler({
         (typeof payload.data.text === "string" || typeof payload.data.delta === "string")
           ? GATEWAY_CLIENT_CAPS.CHAT_ONLY_ASSISTANT_TEXT
           : undefined,
-      sessionKeys: sessionKey ? [sessionKey] : undefined,
-      agentId: opts?.agentId,
-      sessionSubscriptionKeys: deliverySessionKeys,
+      sessionKeys: deliverySessionKeys,
       liveText:
         liveText &&
         event === "chat" &&
@@ -902,6 +900,34 @@ export function createAgentEventHandler({
       });
     }
   };
+
+  const resolveAgentTextThrottleStream = (
+    evt: AgentEventPayload,
+  ): AgentTextThrottleStream | null => {
+    if (evt.stream === "assistant" || evt.stream === "thinking") {
+      const stream = evt.stream === "assistant" ? "assistant" : "thinking";
+      return typeof evt.data.delta === "string" || evt.data.replace === true ? stream : null;
+    }
+    const { kind, phase, status, itemId, progressText } = evt.data;
+    // Growing previews share text pacing; completion and selection remain ordering barriers.
+    return evt.stream === "item" &&
+      phase === "update" &&
+      (kind === "preamble" || (kind === "answer_candidate" && status === "candidate")) &&
+      typeof itemId === "string" &&
+      typeof progressText === "string"
+      ? kind
+      : null;
+  };
+
+  const shouldCoalesceAgentTextEvent = (evt: AgentEventPayload) =>
+    !(Array.isArray(evt.data.mediaUrls) && evt.data.mediaUrls.length > 0) &&
+    typeof evt.data.mediaUrl !== "string" &&
+    evt.data.replace !== true &&
+    (evt.stream === "item" ||
+      (typeof evt.data.text === "string" &&
+        typeof evt.data.delta === "string" &&
+        evt.data.delta.length > 0 &&
+        (evt.stream !== "assistant" || !shouldSuppressAssistantEventForLiveChat(evt.data))));
 
   const sendOrBufferAgentTextEvent = (
     clientRunId: string,
@@ -1015,11 +1041,7 @@ export function createAgentEventHandler({
       ...buildSessionEventSnapshot(sessionKey, undefined, agentId),
     };
     // Registration is demand only; each send still validates its pairing generation.
-    nodeSendToSession(firstDeliveryKey, "agent", nodePayload, {
-      sessionKeys: [sessionKey],
-      agentId,
-      sessionSubscriptionKeys: deliveryKeys,
-    });
+    nodeSendToSession(firstDeliveryKey, "agent", nodePayload, { sessionKeys: deliveryKeys });
   };
 
   const handleEvent = (event: AgentEventPayload) => {
@@ -1120,9 +1142,7 @@ export function createAgentEventHandler({
             },
           },
           {
-            sessionKeys: sessionKey ? [sessionKey] : undefined,
-            agentId: sessionAgentId,
-            sessionSubscriptionKeys: sessionKey
+            sessionKeys: sessionKey
               ? resolveSessionDeliveryKeys(sessionKey, sessionAgentId)
               : undefined,
             liveText: liveTextDelivery(chatRunState, clientRunId),
@@ -1245,9 +1265,7 @@ export function createAgentEventHandler({
             : agentPayload,
           runToolRecipients,
           {
-            sessionKeys: sessionKey ? [sessionKey] : undefined,
-            agentId: sessionAgentId,
-            sessionSubscriptionKeys: sessionKey
+            sessionKeys: sessionKey
               ? resolveSessionDeliveryKeys(sessionKey, sessionAgentId)
               : undefined,
             liveText: liveTextDelivery(chatRunState, clientRunId),

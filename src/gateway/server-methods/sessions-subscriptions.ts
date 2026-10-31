@@ -64,7 +64,6 @@ export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
       }
       const cfg = context.getRuntimeConfig();
       const canonicalKeys: string[] = [];
-      const exactKeys: string[] = [];
       for (const rawKey of params.sessionKeys) {
         const trimmed = rawKey.trim();
         if (!trimmed) {
@@ -83,11 +82,8 @@ export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
         canonicalKeys.push(
           sessionObserverScopeKey(requested.value.sessionKey, requested.value.agentId),
         );
-        exactKeys.push(
-          resolveSessionSubscriptionKey(requested.value.sessionKey, requested.value.agentId),
-        );
       }
-      const sessionKeys = declarations.replace(connId, canonicalKeys, exactKeys);
+      const sessionKeys = declarations.replace(connId, canonicalKeys);
       respond(true, { sessionKeys }, undefined);
     },
   ),
@@ -161,11 +157,7 @@ export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
             read?.assertCurrent();
             sessionMutationAuthorization?.assertCurrent();
             mark?.("replayPreparation");
-            prepared = await context.listSessionPendingApprovals?.(
-              canonicalKey === "global" ? `agent:${requestedAgentId}:global` : canonicalKey,
-              client,
-              { sessionKey: canonicalKey, agentId: requestedAgentId },
-            );
+            prepared = await context.listSessionPendingApprovals?.(subscriptionKey, client);
             if (prepared && !prepared.isCurrent()) {
               throw new Error("session approval replay changed during preparation");
             }

@@ -240,13 +240,11 @@ export async function startGatewayCoreRuntime(input: {
     string,
     Pick<
       ExecApprovalManager<unknown>,
-      "reconcileDurableTerminal" | "getLiveSnapshot" | "runtimeEpoch" | "isPending"
+      "reconcileDurableTerminal" | "getLiveSnapshot" | "runtimeEpoch"
     >
   >();
   const approvalSessionEvents = createOperatorApprovalSessionEventRuntime({
     clients,
-    track: (run) => runtime.connectionWork.track(run),
-    onError: (error) => log.warn(`approval event delivery failed: ${String(error)}`),
     sessionMessageSubscribers,
     broadcastToConnIds,
     controlUiBasePath,

@@ -80,7 +80,6 @@ import {
 import {
   captureChatResponse,
   captureChatResult,
-  waitForFast,
   type CapturedChatResponse,
 } from "./server.chat-response.test-support.js";
 import {
@@ -126,6 +125,13 @@ vi.mock("../plugins/provider-thinking.js", async (importOriginal) => ({
 
 installGatewayTestHooks({ scope: "suite" });
 const FAST_WAIT_OPTS = { timeout: 2_000, interval: 1 } as const;
+function waitForFast<T>(
+  callback: () => T | Promise<T>,
+  options: { timeout?: number; interval?: number } = {},
+) {
+  return vi.waitFor(callback, { interval: 1, ...options });
+}
+
 type GatewayHarness = Awaited<ReturnType<typeof createGatewaySuiteHarness>>;
 type GatewaySocket = Awaited<ReturnType<GatewayHarness["openWs"]>>;
 let harness: GatewayHarness;
@@ -2205,11 +2211,7 @@ describe("gateway server chat", () => {
               content: expect.arrayContaining([expect.objectContaining({ text: "direct reply" })]),
             }),
           }),
-          {
-            agentId: undefined,
-            sessionKeys: ["agent:main:main"],
-            sessionSubscriptionKeys: ["agent:main:main"],
-          },
+          { sessionKeys: ["agent:main:main"] },
         );
         const firstAssistantIndex = timingPayloads().findIndex(
           (payload) => payload.phase === "first-assistant-event",

@@ -312,16 +312,12 @@ export async function prepareQualifiedSessionEntryTarget(
   if (target.entry && !target.readSource) {
     throw new Error("Qualified session projection requires its captured physical source");
   }
-  const canonicalKey =
-    target.entry && target.storeKey === "global"
-      ? target.storeKey
-      : toAgentStoreSessionKey({ agentId: target.agentId, requestKey: target.storeKey });
+  const canonicalKey = toAgentStoreSessionKey({
+    agentId: target.agentId,
+    requestKey: target.storeKey,
+  });
   const parsed = parseAgentSessionKey(canonicalKey);
   const physicalKeys = (physicalAgentId: string) => {
-    // An admitted global row is a physical identity, not the other global spelling.
-    if (target.entry && (canonicalKey === "global" || parsed?.rest === "global")) {
-      return canonicalKey === "global" && physicalAgentId !== target.agentId ? [] : [canonicalKey];
-    }
     if (parsed?.rest !== "global" && parsed?.rest !== "unknown") {
       return [canonicalKey];
     }

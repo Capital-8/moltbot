@@ -177,9 +177,7 @@ export async function injectGatewayAssistantMessage(
     message,
   };
   context.broadcast("chat", chatPayload, {
-    sessionKeys: [sessionKey],
-    agentId,
-    sessionSubscriptionKeys: resolveGlobalAwareNodeChatDeliveryKeys({ cfg, sessionKey, agentId }),
+    sessionKeys: resolveGlobalAwareNodeChatDeliveryKeys({ cfg, sessionKey, agentId }),
   });
   sendGlobalAwareNodeChatPayload({
     context,

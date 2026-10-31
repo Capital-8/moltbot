@@ -575,7 +575,7 @@ test("sessions.create applies configured fixed-store ownership to bare keys", as
         dropIfSlow: true,
         agentId: "ops",
         sessionKeys: ["global"],
-        sessionEventSubscriptionKeys: [JSON.stringify(["ops", "global"]), "global"],
+        sessionEventSubscriptionKeys: ["agent:ops:global", "global"],
         prepareSessionProjection: expect.any(Function),
       },
     );
@@ -715,7 +715,7 @@ test("sessions.create checks selected global initialization in the requested age
         dropIfSlow: true,
         agentId: "work",
         sessionKeys: ["global"],
-        sessionEventSubscriptionKeys: [JSON.stringify(["work", "global"])],
+        sessionEventSubscriptionKeys: ["agent:work:global"],
         prepareSessionProjection: expect.any(Function),
       },
     );

@@ -16,6 +16,7 @@ import { connectedElementRef, elementRef } from "../../lib/reactive/element-ref.
 import { t, registerEnglishCatalog } from "../../lib/reactive/i18n.ts";
 import { projectPresentation } from "../../lib/reactive/presentation.ts";
 import { orderSessionPullRequests } from "../../lib/session-pull-request-presentation.ts";
+import { scopedSessionArtifactKey } from "../../lib/sessions/session-key.ts";
 import { PluginSurface } from "../../plugins/control-ui-view.solid.tsx";
 import { getChatHistoryLoadState } from "./chat-history-state.ts";
 import { loadChatPendingInputs } from "./chat-pending-inputs.ts";
@@ -179,8 +180,10 @@ function ChatFooterContent(
           pullRequests={input.activities?.pullRequests ? [] : (input.props.pullRequests ?? [])}
           gateway={input.props.pullRequestsGateway}
           sessionId={input.props.pullRequestsSessionId}
-          sessionKey={input.props.sessionKey}
-          agentId={input.props.currentAgentId ?? undefined}
+          sessionKey={scopedSessionArtifactKey(
+            input.props.sessionKey,
+            input.props.currentAgentId ?? undefined,
+          )}
           presented={input.props.presented ?? true}
           branch={input.activities?.publication ? undefined : input.props.pullRequestsBranch}
           branchDismissed={input.props.pullRequestsBranchDismissed}

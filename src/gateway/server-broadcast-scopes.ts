@@ -105,19 +105,6 @@ const EVENT_SCOPE_GUARDS: Record<string, string[]> = {
   "portal.changed": [READ_SCOPE],
 };
 
-export const SESSION_SUBSCRIPTION_EVENTS = new Set([
-  "agent",
-  "chat",
-  "chat.side_result",
-  "session.observer",
-  "session.narration",
-  // Mirrors the raw agent tool event (full args/result snapshots) onto
-  // session subscribers; omitting it here would hand scoped clients the
-  // exact payload the registry gate suppresses on the `agent` event.
-  "session.tool",
-  "socket.drain",
-]);
-
 const SESSION_CATALOG_INVALIDATIONS = new Set(["delete", "groups", "sharing", "profile-identity"]);
 
 /** Classify source envelopes without invoking getters, toJSON, or Proxy traps. */

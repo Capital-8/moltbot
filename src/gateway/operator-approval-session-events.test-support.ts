@@ -1,11 +1,5 @@
-import { vi } from "vitest";
 import { buildApprovalResolutionRef } from "../infra/approval-resolution-ref.js";
-import { trackAsyncWork } from "../shared/async-work-scope.js";
-import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
-import { createOperatorApprovalSessionEventRuntime } from "./operator-approval-session-events.js";
-import { insertOperatorApproval, type OperatorApprovalRecord } from "./operator-approval-store.js";
-import type { GatewayBroadcastToConnIdsFn } from "./server-broadcast-types.js";
-import { createSessionMessageSubscriberRegistry } from "./server-chat-state.js";
+import type { OperatorApprovalRecord } from "./operator-approval-store.js";
 import type { GatewayClient } from "./server-methods/types.js";
 
 export const SOURCE_SESSION_KEY = "agent:main:child";
@@ -96,82 +90,4 @@ export function createTerminalRecord(
     resolvedAtMs,
     resolver: { kind: "device", id: "reviewer-device" },
   };
-}
-
-export function createRuntimeFactory(subscriptions: Array<() => void>) {
-  function createRuntime(
-    params: Omit<
-      Parameters<typeof createOperatorApprovalSessionEventRuntime>[0],
-      "sessionMessageSubscribers" | "broadcastToConnIds" | "track"
-    > & { now?: () => number },
-  ) {
-    const { now = Date.now, ...runtimeParams } = params;
-    vi.spyOn(Date, "now").mockImplementation(now);
-    const subscribers = createSessionMessageSubscriberRegistry();
-    const publications: Promise<void>[] = [];
-    const broadcastToConnIds = vi.fn<GatewayBroadcastToConnIdsFn>();
-    const runtime = createOperatorApprovalSessionEventRuntime({
-      track: (run) => {
-        const publication = trackAsyncWork(run);
-        publications.push(publication);
-        return publication;
-      },
-      ...runtimeParams,
-      sessionMessageSubscribers: subscribers,
-      broadcastToConnIds,
-    });
-    return {
-      broadcastToConnIds,
-      drainPublications: () => Promise.all(publications),
-      runtime: {
-        ...runtime,
-        replay: async (...args: Parameters<typeof runtime.replay>) => {
-          const prepared = await runtime.replay(...args);
-          subscriptions.push(prepared.release);
-          return prepared;
-        },
-      },
-      subscribers,
-    };
-  }
-  return createRuntime;
-}
-
-type NewOperatorApproval = Parameters<typeof insertOperatorApproval>[0]["approval"];
-
-export async function insertPendingApproval(params: {
-  databaseOptions: OpenClawStateDatabaseOptions;
-  id: string;
-  audienceSessionKeys?: string[];
-  sourceSessionKey?: string;
-  createdAtMs?: number;
-  expiresAtMs?: number;
-  reviewerDeviceIds?: string[];
-}): Promise<OperatorApprovalRecord> {
-  const record = createPendingRecord({
-    audienceSessionKeys: [SOURCE_SESSION_KEY],
-    createdAtMs: 1_000,
-    expiresAtMs: 10_000,
-    ...params,
-  });
-  const approval: NewOperatorApproval = {
-    id: record.id,
-    kind: record.kind,
-    presentation: record.presentation,
-    requester: record.requester,
-    reviewerDeviceIds: params.reviewerDeviceIds ?? record.reviewerDeviceIds,
-    source: record.source,
-    audienceSessionKeys: record.audienceSessionKeys,
-    runtimeEpoch: record.runtimeEpoch,
-    createdAtMs: record.createdAtMs,
-    expiresAtMs: record.expiresAtMs,
-  };
-  const inserted = await insertOperatorApproval({
-    approval,
-    databaseOptions: params.databaseOptions,
-  });
-  if (inserted.outcome !== "inserted") {
-    throw new Error(`expected approval '${params.id}' to be inserted`);
-  }
-  return inserted.record;
 }

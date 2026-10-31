@@ -17,7 +17,6 @@ import {
   createInitializationContext,
 } from "./chat-application-context.test-support.ts";
 import { ChatComposerCapabilityHost } from "./chat-composer-capability-host.tsx";
-import { chatHistoryRequests } from "./chat-history-state.ts";
 import { syncSelectedSessionMessageSubscription } from "./chat-history-subscription.ts";
 import { createMountedPanes } from "./chat-pane-mounted.test-support.ts";
 import {
@@ -31,92 +30,6 @@ import { chatRunPresentation } from "./chat-run-presentation.ts";
 import { handlePageGatewayEvent } from "./chat-state-events.test-support.ts";
 
 describe("chat pane approval replay subscriptions", () => {
-  it.each(["global", "agent:main:global"])(
-    "refreshes exact approvals for %s without inserting ambiguous events or stale replies",
-    async (key) => {
-      const reads: ReturnType<typeof createDeferred<unknown>>[] = [];
-      const request = vi.fn((method: string) => {
-        if (method !== "sessions.messages.subscribe") {
-          return {};
-        }
-        const read = createDeferred<unknown>();
-        reads.push(read);
-        return read.promise;
-      });
-      const { state } = createTestChatPane({ client: createTestGatewayClient(request) });
-      state.sessionKey = key;
-      state.assistantAgentId = "main";
-      const pending = {
-        id: "exec:selected",
-        status: "pending" as const,
-        presentation: {
-          kind: "exec" as const,
-          commandText: "echo selected",
-          allowedDecisions: ["deny"],
-        },
-        urlPath: "/approve/exec%3Aselected",
-        createdAtMs: 1,
-        expiresAtMs: 10_000,
-      };
-      const reply = (index: number, approvals: (typeof pending)[]) =>
-        reads[index]!.resolve({
-          key,
-          agentId: "main",
-          approvalReplay: {
-            sessionKey: "agent:main:global",
-            updatedAtMs: 1,
-            approvals,
-            truncated: false,
-          },
-        });
-      const hint = () =>
-        handlePageGatewayEvent(state, {
-          type: "event",
-          event: "sessions.changed",
-          payload: { sessionKey: key, agentId: "main", reason: "approval" },
-        });
-      const sync = syncSelectedSessionMessageSubscription(state);
-      await vi.waitFor(() => expect(reads).toHaveLength(1));
-      hint();
-      reply(0, [pending]);
-      expect(await sync).toBe(true);
-      await vi.waitFor(() => expect(reads).toHaveLength(2));
-      const failed = chatHistoryRequests(state).subscriptionReady;
-      reads[1]!.reject(new Error("Approval refresh failed"));
-      expect(await failed).toBe(false);
-      const retry = syncSelectedSessionMessageSubscription(state);
-      await vi.waitFor(() => expect(reads).toHaveLength(3));
-      hint();
-      hint();
-      handlePageGatewayEvent(state, {
-        type: "event",
-        event: "session.approval",
-        payload: {
-          sessionKey: "agent:main:global",
-          phase: "pending",
-          updatedAtMs: 2,
-          approval: { ...pending, id: "exec:sibling" },
-        },
-      });
-      expect(state.chatSessionApprovalQueue?.map((entry) => entry.id)).toEqual([pending.id]);
-      expect(reads).toHaveLength(3);
-      reply(2, []);
-      expect(await retry).toBe(true);
-      await vi.waitFor(() => expect(reads).toHaveLength(4));
-      expect(state.chatSessionApprovalQueue).toEqual([]);
-      expect(request).toHaveBeenCalledWith(
-        "sessions.messages.subscribe",
-        expect.objectContaining({ key, agentId: "main", includeApprovals: true }),
-        expect.anything(),
-      );
-      const trailing = chatHistoryRequests(state).subscriptionReady;
-      state.sessionKey = key === "global" ? "agent:main:global" : "global";
-      reply(3, [pending]);
-      expect(await trailing).toBe(false);
-      expect(state.chatSessionApprovalQueue).toEqual([]);
-    },
-  );
-
   it("preserves live approval transitions received while session replay is awaiting publication", async () => {
     const { state } = createTestChatPane({ client: createTestGatewayClient(vi.fn()) });
     const started = createDeferred();

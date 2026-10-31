@@ -64,7 +64,8 @@ const makeEntry = (sessionId: string, fields: Partial<SessionEntry> = {}): Sessi
   ...fields,
 });
 
-async function captureSession(entry: SessionEntry, sessionKey = "global") {
+async function captureSession(entry: SessionEntry) {
+  const sessionKey = "global";
   const physical = address(sessionKey);
   await replaceEntry(physical, entry);
   const scope = { cfg: config(), sessionKey, agentId: "main" };
@@ -73,7 +74,7 @@ async function captureSession(entry: SessionEntry, sessionKey = "global") {
 }
 
 it.each([
-  ["global", "global", "global"],
+  ["global", "global", "agent:research:global"],
   ["main", "agent:research:primary", "agent:research:primary"],
   [
     "agent:research:signal:group:AbC",
@@ -130,7 +131,7 @@ it.each([
   },
 );
 
-it("updates each selected global row without changing its sibling", async () => {
+it("refuses a qualified projection collision without changing legacy reads", async () => {
   const scope = researchScope();
   const physical = { agentId: "research", storePath: path.join(tempDir, "research.json") };
   for (const { key, sessionId } of [
@@ -140,12 +141,7 @@ it("updates each selected global row without changing its sibling", async () => 
     await replaceEntry({ ...physical, sessionKey: key }, makeEntry(sessionId));
   }
   expect(resolveTarget(scope).entry?.sessionId).toBe("raw");
-  for (const sessionKey of ["global", "agent:research:global"]) {
-    const selected = { ...scope, sessionKey };
-    const target = await project(selected);
-    await updateEntry(selected, setLabel(sessionKey), { target });
-    expect(readEntry({ ...physical, sessionKey })?.label).toBe(sessionKey);
-  }
+  await expect(project(scope)).rejects.toThrow("ambiguous stored identity");
   expect(
     listEntries(physical)
       .map((row) => row.entry.sessionId)
@@ -291,7 +287,7 @@ it("accepts reopening the same physical file while preserving raw list, ID and l
   await closeDatabase(target.storePath);
   await updateEntry(scope, setLabel("same physical record"), { target });
   const reopened = await project(scope);
-  expect(reopened.canonicalKey).toBe("global");
+  expect(reopened.canonicalKey).toBe("agent:main:global");
   expect(reopened.readSource).toEqual(target.readSource);
   expect(readById({ ...physical, sessionId: "parent" })?.sessionKey).toBe("global");
   const entries = listEntries({ agentId: "main", storePath });
@@ -303,8 +299,8 @@ it("accepts reopening the same physical file while preserving raw list, ID and l
   expect(readEntry(physical)?.label).toBe("same physical record");
 });
 
-it("rechecks unknown counterpart absence after an awaited captured update", async () => {
-  const { physical, scope, target } = await captureSession(makeEntry("original"), "unknown");
+it("rechecks counterpart absence after an awaited captured update", async () => {
+  const { physical, scope, target } = await captureSession(makeEntry("original"));
   const entered = createDeferredCore();
   const resume = createDeferredCore();
   const pending = updateEntry(
@@ -320,7 +316,7 @@ it("rechecks unknown counterpart absence after an awaited captured update", asyn
   try {
     await Promise.race([entered.promise, pending]);
     replaceEntrySync(
-      { ...physical, sessionKey: "agent:main:unknown" },
+      { ...physical, sessionKey: "agent:main:global" },
       makeEntry("new-literal", { updatedAt: 2 }),
     );
   } finally {
@@ -328,7 +324,7 @@ it("rechecks unknown counterpart absence after an awaited captured update", asyn
     await rejected;
   }
   expect(readEntry(physical)?.label).toBeUndefined();
-  expect(readEntry({ ...physical, sessionKey: "agent:main:unknown" })?.sessionId).toBe(
+  expect(readEntry({ ...physical, sessionKey: "agent:main:global" })?.sessionId).toBe(
     "new-literal",
   );
 });

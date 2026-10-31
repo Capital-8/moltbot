@@ -8,7 +8,6 @@ export type ChatCiDisclosureProps = {
   gateway?: ApplicationGateway;
   pullRequest?: ControlUiSessionPullRequest;
   sessionKey: string;
-  agentId?: string;
   presented: boolean;
   /** An enclosing page owns visibility instead of a details disclosure. */
   inline?: boolean;

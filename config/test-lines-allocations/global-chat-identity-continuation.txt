@@ -1,2 +1,0 @@
-# Exact chat identity, lifecycle and consumer regressions; existing fixture helpers are reused.
-1426

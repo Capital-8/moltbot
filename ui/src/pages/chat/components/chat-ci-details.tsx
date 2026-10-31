@@ -24,10 +24,6 @@ import { formatUiError } from "../../../lib/format-error.ts";
 import { createGatewayConnectionLifecycle } from "../../../lib/gateway-connection-lifecycle.ts";
 import { resolveSafeExternalUrl } from "../../../lib/open-external-url.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
-import {
-  isUiGlobalSessionKey,
-  scopedSessionArtifactKey,
-} from "../../../lib/sessions/session-key.ts";
 import { defineSolidBridge, type SolidBridgeElement } from "../../../lib/solid-bridge.ts";
 import { createCiDisclosure, type ChatCiDisclosureProps } from "./chat-ci-disclosure.ts";
 import { subscribeCiGatewayUpdates } from "./chat-ci-gateway-updates.ts";
@@ -133,7 +129,6 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
   let accepted: ControlUiSessionPullRequestCheckDetails | undefined;
   let target = "";
   let sessionKey = "";
-  let agentId: string | undefined;
   let stopGateway: (() => void) | undefined;
   let requestController: AbortController | undefined;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -171,7 +166,6 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
   function syncTarget() {
     const next = JSON.stringify([
       host.sessionKey,
-      host.agentId,
       host.pullRequest?.owner,
       host.pullRequest?.repo,
       host.pullRequest?.number,
@@ -181,12 +175,11 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
       return false;
     }
     // Head changes refresh the same open monitor; session changes dismiss it.
-    if (sessionKey && (sessionKey !== host.sessionKey || agentId !== host.agentId)) {
+    if (sessionKey && sessionKey !== host.sessionKey) {
       disclosure.close();
     }
     target = next;
     sessionKey = host.sessionKey;
-    agentId = host.agentId;
     reset();
     return true;
   }
@@ -250,13 +243,8 @@ function ChatCiDetailsContent(props: ChatCiDetailsProps, host: ChatCiDetailsElem
     clearTimeout(refreshTimer);
     const controller = new AbortController();
     const client = scope.client;
-    // Qualified reads remain key-only when their agent is no longer configured.
-    const rawGlobal = isUiGlobalSessionKey(host.sessionKey);
     const params = {
-      sessionKey: rawGlobal
-        ? host.sessionKey.trim()
-        : scopedSessionArtifactKey(host.sessionKey, host.agentId),
-      ...(rawGlobal && host.agentId !== undefined ? { agentId: host.agentId } : {}),
+      sessionKey: host.sessionKey,
       owner: pr.owner,
       repo: pr.repo,
       number: pr.number,
@@ -571,7 +559,6 @@ export const ChatCiDetails = defineSolidBridge<ChatCiDetailsProps>(
       gateway: { default: undefined, attribute: false },
       pullRequest: { default: undefined, attribute: false },
       sessionKey: { default: "", attribute: false },
-      agentId: { default: undefined, attribute: false },
       presented: { default: true, type: Boolean },
       inline: { default: false, attribute: false },
       menuControls: { default: false, attribute: false },

@@ -255,7 +255,6 @@ type GatewayKernelContext = {
   listSessionPendingApprovals?: (
     sessionKey: string,
     client: GatewayClient | null,
-    selection?: { sessionKey: string; agentId: string },
   ) => Promise<PreparedSessionApprovalReplay>;
   loadGatewayModelCatalog: (params?: {
     agentId?: string;
@@ -347,13 +346,8 @@ type GatewayTransportContext = {
     opts?: GatewayBroadcastOpts,
   ) => void;
   nodeSendToAllSubscribed: (event: string, payload: unknown) => void;
-  nodeSubscribe: (nodeId: string, sessionKey: string, connId?: string, requestKey?: string) => void;
-  nodeUnsubscribe: (
-    nodeId: string,
-    sessionKey: string,
-    connId?: string,
-    requestKey?: string,
-  ) => void;
+  nodeSubscribe: (nodeId: string, sessionKey: string, connId?: string) => void;
+  nodeUnsubscribe: (nodeId: string, sessionKey: string, connId?: string) => void;
   nodeUnsubscribeAll: (nodeId: string) => void;
   hasConnectedTalkNode: () => Promise<boolean>;
   isConnectionActive?: (connId: string) => boolean;
@@ -658,10 +652,8 @@ export type GatewayBroadcastOpts = {
   dropIfSlow?: boolean;
   /** Omit a redundant projection for clients that advertise this capability. */
   excludeClientCapability?: GatewayClientCap;
-  /** Real session keys used for authorization and row projection. */
+  /** Canonical subscription keys for session-scoped delivery. */
   sessionKeys?: readonly string[];
-  /** Private recipient indexes; never selectors for storage or authorization. */
-  sessionSubscriptionKeys?: readonly string[];
   /** Producer-resolved exact subscription keys for traffic attribution; never changes recipients. */
   sessionEventSubscriptionKeys?: readonly string[];
   /** Prepared facts remain valid only during this synchronous publication. */

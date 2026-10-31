@@ -265,10 +265,6 @@ describe("control UI session PR subscriptions", () => {
     expect(parse({ sessionKeys: ["x".repeat(512)] })).not.toBeNull();
     expect(parse(params)).toEqual({ sessionKeys: ["watched"], refreshSessionKeys: ["watched"] });
     expect(parse({ ...params, refreshSessionKeys: ["other"] })).toBeNull();
-    const exact = { sessionKey: "global", agentId: "work" };
-    expect(parse({ sessionKeys: [exact], refreshSessionKeys: [{ ...exact }] })).not.toBeNull();
-    expect(parse({ sessionKeys: [exact], refreshSessionKeys: ["agent:work:global"] })).toBeNull();
-    expect(parse({ sessionKeys: [{ sessionKey: "global" }] })).toBeNull();
   });
 
   it("polls the watched union once per wake, including after sleep", async () => {
@@ -425,34 +421,13 @@ describe("control UI session PR subscriptions", () => {
     expectPublication("new");
   });
 
-  it("keeps exact global selections separate from legacy aliases on one connection", async () => {
-    const targets = [
-      { sessionKey: "global", agentId: "main" },
-      { sessionKey: "agent:main:global", agentId: "main" },
-      { sessionKey: "global", agentId: "work" },
-    ];
-    const snapshot = (taskPullRequestCount: number) => ({
-      ...READY,
-      status: "ready" as const,
-      taskPullRequestCount,
-    });
-    load.mockImplementation(async ({ sessionKey, agentId }) =>
-      snapshot(agentId === "work" ? 3 : sessionKey === "global" ? 1 : 2),
-    );
-    await start().replace("conn-a", ["agent:work:global", ...targets]);
-    expect(load.mock.calls.map(([target]) => target)).toEqual(expect.arrayContaining(targets));
-    expect(load).toHaveBeenCalledTimes(3);
-    const payloads = broadcastToConnIds.mock.calls.map(([, payload]) => payload);
-    expect(payloads).toEqual(
-      expect.arrayContaining([
-        { sessions: { "agent:work:global": snapshot(3) } },
-        ...targets.map((target, index) => ({
-          sessions: {},
-          exactSessions: [{ ...target, snapshot: snapshot(index + 1) }],
-        })),
-      ]),
-    );
-    expect(broadcastToConnIds).toHaveBeenCalledTimes(4);
+  it("loads agent-scoped global watch keys from the owning agent store", async () => {
+    vi.useFakeTimers();
+    const active = start();
+
+    await active.replace("conn-a", ["agent:work:global"]);
+
+    expectSessions(["global"], undefined, "work");
   });
 
   it("coalesces forced refresh bursts per session and acknowledges each requester once", async () => {

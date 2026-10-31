@@ -9,10 +9,9 @@ import { projectSource } from "../lib/reactive/projection.ts";
 import {
   summarizeSessionPullRequests,
   sessionPullRequestsForGateway,
-  sessionPullRequestSelection,
 } from "../lib/session-pull-requests.ts";
 import type { SessionCapability } from "../lib/sessions/index.ts";
-import { parseAgentSessionKey } from "../lib/sessions/session-key.ts";
+import { parseAgentSessionKey, scopedSessionArtifactKey } from "../lib/sessions/session-key.ts";
 import type { SidebarRecentSession } from "./app-sidebar-session-types.ts";
 
 type IndicatorEntry = {
@@ -83,7 +82,7 @@ export function createSessionPullRequestIndicators(options: {
     const store = sessionPullRequestsForGateway(current.gateway);
     const watchOwner = {};
     const scopedKey = (key: string) =>
-      sessionPullRequestSelection(key, parseAgentSessionKey(key)?.agentId ?? current.agentId);
+      scopedSessionArtifactKey(key, parseAgentSessionKey(key)?.agentId ?? current.agentId);
     let visible: readonly SidebarRecentSession[] = [];
     // These receipts preserve synchronous canonical invalidation, not presentation state.
     const seen = new Set<string>();

@@ -3,7 +3,6 @@ import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import {
   SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
   CONTROL_UI_SESSION_PULL_REQUESTS_MAX_KEYS,
-  type ControlUiSessionPullRequestSelection,
 } from "../../../src/gateway/control-ui-contract.js";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
 import type { ApplicationGateway } from "../app/gateway.ts";
@@ -130,13 +129,10 @@ function createGatewayHarness(scopes = ["operator.read"]) {
   harness.gateway.snapshot.hello = createHello(scopes);
   return {
     ...harness,
-    publish(selection: ControlUiSessionPullRequestSelection, fields: Record<string, unknown> = {}) {
-      const snapshot = { pullRequests: [], rateLimited: false, status: "ready", ...fields };
-      harness.emit(
-        typeof selection === "string"
-          ? { sessions: { [selection]: snapshot } }
-          : { sessions: {}, exactSessions: [{ ...selection, snapshot }] },
-      );
+    publish(key: string, fields: Record<string, unknown> = {}) {
+      harness.emit({
+        sessions: { [key]: { pullRequests: [], rateLimited: false, status: "ready", ...fields } },
+      });
     },
   };
 }
@@ -326,14 +322,13 @@ it("preserves catalog branch facts only while receipt-only hydration leaves the 
   }
 });
 
-it("clears global indicators when the selected agent changes", async () => {
+it("clears alias indicators when the selected agent changes", async () => {
   vi.useFakeTimers();
   const { harness, row, host } = mountRow(sessionRow("global", "wt-global"));
   await settle(host);
-  harness.publish(
-    { sessionKey: "global", agentId: "main" },
-    { pullRequests: [{ number: 1, url: "https://example.test/pr/1", state: "open" }] },
-  );
+  harness.publish("agent:main:global", {
+    pullRequests: [{ number: 1, url: "https://example.test/pr/1", state: "open" }],
+  });
   await host.updateComplete;
   expect(summary(host, row)).toEqual({ numbers: [1], state: "open" });
 
@@ -375,10 +370,7 @@ it.each(["agent", "client", "permissions", "sessions"] as const)(
     const row = sessionRow("global", "wt-global");
     const host = mountLifecycleHost(harness.gateway, [row], sessions);
     await host.updateComplete;
-    harness.publish(
-      { sessionKey: "global", agentId: "main" },
-      { pullRequests: [{ number: 7, state: "open" }] },
-    );
+    harness.publish("agent:main:global", { pullRequests: [{ number: 7, state: "open" }] });
     await host.updateComplete;
     expect(host.textContent).toBe("7");
     host.setInputs({ presented: false });
@@ -407,7 +399,7 @@ it.each(["agent", "client", "permissions", "sessions"] as const)(
     host.setInputs({ gateway: harness.gateway });
     await host.updateComplete;
     const store = sessionPullRequestsForGateway(harness.gateway);
-    expect(store.get({ sessionKey: "global", agentId: "main" })).toBeUndefined();
+    expect(store.get("agent:main:global")).toBeUndefined();
     harness.emit({ sessionKey: "global", agentId: "main", reason: "rewind" }, "sessions.changed");
     await host.updateComplete;
     expect(clearSummary).not.toHaveBeenCalled();

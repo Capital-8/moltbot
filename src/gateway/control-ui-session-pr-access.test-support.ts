@@ -1,4 +1,3 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect, vi } from "vitest";
 import { getRuntimeConfig } from "../config/io.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
@@ -38,7 +37,6 @@ import { createOperatorWsClient } from "./server/ws-connection/authenticated-req
 import { getSessionRowProjection } from "./session-row-projection-access.js";
 import { loadGatewaySessionEntryReadOnlyAsync } from "./session-utils-store.js";
 
-const EVENT = "controlUi.sessionPullRequests.changed";
 const METHOD = "controlUi.sessionPullRequests.subscribe";
 export const sessionKey = "agent:main:guest-publication";
 export const branch = { owner: "synthetic", repo: "publication", branch: "guest-change" };
@@ -257,19 +255,4 @@ export async function createFixture(
       }
     },
   };
-}
-
-export function frames(socket: ReturnType<typeof createGatewayWsTestSocket>) {
-  return socket.send.mock.calls.flatMap(([data]) => {
-    const frame: unknown = JSON.parse(data.toString());
-    return isRecord(frame) && frame.event === EVENT ? [frame] : [];
-  });
-}
-
-export function expectedFrame(key: string, value: ControlUiSessionPullRequests = snapshot) {
-  return expect.objectContaining({
-    type: "event",
-    event: EVENT,
-    payload: { sessions: { [key]: { ...value, status: "ready" } } },
-  });
 }

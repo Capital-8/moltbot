@@ -15,7 +15,6 @@ import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js
 
 const mocks = vi.hoisted(() => ({
   presence: [] as Array<Pick<PresenceEntry, "user" | "watchedSessions">>,
-  viewerIdentities: vi.fn<(key: string) => Set<string>>(),
 }));
 
 vi.mock("../../infra/system-presence.js", () => ({
@@ -39,7 +38,6 @@ function context(broadcast = vi.fn(), cfg: OpenClawConfig = {}): GatewayRequestC
     getRuntimeConfig: () => cfg,
     broadcast,
     broadcastToConnIds: vi.fn(),
-    sessionViewerPresence: { liveViewerIdentities: mocks.viewerIdentities },
     logGateway: { warn: vi.fn() },
   } as unknown as GatewayRequestContext;
 }
@@ -80,7 +78,6 @@ async function callTyping(params: {
 beforeEach(() => {
   clearSessionTypingState();
   mocks.presence = [];
-  mocks.viewerIdentities.mockReset();
 });
 
 afterEach(() => {
@@ -318,8 +315,8 @@ describe("session typing handler", () => {
   );
 
   it.each([
-    { agentId: "main", expected: ['["main","global"]'] },
-    { agentId: "work", expected: ['["work","global"]'] },
+    { agentId: "main", expected: ["agent:main:global"] },
+    { agentId: "work", expected: ["agent:work:global"] },
   ])("uses the canonical global subscription keys for $agentId", async ({ agentId, expected }) => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const cfg = {
@@ -340,7 +337,6 @@ describe("session typing handler", () => {
         { user: profileUser("owner"), watchedSessions: ["global"] },
       ];
       const broadcast = vi.fn();
-      mocks.viewerIdentities.mockReturnValue(new Set(["profile:alice", "profile:owner"]));
 
       expect(
         await callTyping({
@@ -355,13 +351,8 @@ describe("session typing handler", () => {
       expect(broadcast).toHaveBeenCalledWith(
         "session.typing",
         expect.objectContaining({ agentId, sessionKey: "global" }),
-        expect.objectContaining({
-          agentId,
-          sessionKeys: ["global"],
-          sessionSubscriptionKeys: expected,
-        }),
+        expect.objectContaining({ agentId, sessionKeys: expected }),
       );
-      expect(mocks.viewerIdentities).toHaveBeenCalledWith(expected[0]);
     });
   });
 

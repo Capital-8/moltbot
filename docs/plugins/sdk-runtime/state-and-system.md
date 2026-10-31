@@ -112,10 +112,7 @@ keep the existing synchronous fallback.
     lifecycle checks. Standalone callers can use
     `enqueueRoutedSystemEvent(text, { agentId, sessionKey })`. Read the same owner's
     events with `peekSystemEventEntries(sessionKey, agentId)`; this keeps `global`
-    queues separate for each agent and distinct from an existing literal
-    `agent:<agentId>:global` chat. Keep the selected key when reading or consuming
-    its events; qualifying `global` selects a different stored chat.
-    Calls without an explicit owner retain
+    queues separate for each agent. Calls without an explicit owner retain
     configured-owner alias resolution and reject ambiguous agent selection.
     Explicit owners that cannot normalize to an agent ID are rejected.
 

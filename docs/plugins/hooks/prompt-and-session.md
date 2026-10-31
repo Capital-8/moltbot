@@ -386,10 +386,10 @@ Pass `agentId` with an unscoped `sessionKey`, such as `global`, when multiple
 agents are configured. Enqueueing, consumption, and plugin session state stay in
 that agent's store; the owner selector is not part of the persisted injection.
 
-Consumption stays bound to the selected stored session. Existing raw `global`
-and literal `agent:<agentId>:global` chats retain separate queues. A reset or
-replacement prevents the drain from consuming the successor's queue. Reading or
-consuming a legacy alias does not rename its stored session key.
+Consumption stays bound to the selected stored session. A reset or a conflicting
+legacy and qualified identity prevents the drain from consuming another
+conversation's queue. Reading or consuming a legacy alias does not rename its
+stored session key.
 
 Use `api.session.workflow.steerActiveRun({ sessionKey, text, displayText?, idempotencyKey? })`
 to deliver guidance to the session's active run without starting a new turn.

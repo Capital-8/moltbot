@@ -82,7 +82,6 @@ function createCiAutomation(props: Props, host: SolidBridgeElement<Props>) {
   let stopEvents: (() => void) | undefined;
   let targetKey = "";
   let sessionKey = "";
-  let agentId: string | undefined;
   let sessionId = "";
   // Revision admission reads this synchronous snapshot; the store only presents it.
   let accepted: Inventory | undefined;
@@ -129,20 +128,18 @@ function createCiAutomation(props: Props, host: SolidBridgeElement<Props>) {
   }
 
   function syncTarget() {
-    const nextTarget = automationTarget();
-    const next = JSON.stringify([host.sessionKey, host.sessionId, nextTarget]);
+    const next = JSON.stringify([host.sessionKey, host.sessionId, automationTarget()]);
     if (targetKey === next) {
       return false;
     }
     if (
-      (sessionKey && (sessionKey !== host.sessionKey || agentId !== nextTarget?.agentId)) ||
+      (sessionKey && sessionKey !== host.sessionKey) ||
       (sessionId && sessionId !== host.sessionId)
     ) {
       disclosure.close();
     }
     targetKey = next;
     sessionKey = host.sessionKey;
-    agentId = nextTarget?.agentId;
     sessionId = host.sessionId;
     reset();
     return true;
@@ -165,14 +162,14 @@ function createCiAutomation(props: Props, host: SolidBridgeElement<Props>) {
 
   function automationTarget(source: Props = host): CiAutomationTarget | null {
     const pr = source.pullRequest;
-    const targetAgentId = source.agentId ?? parseAgentSessionKeyParts(source.sessionKey)?.agentId;
-    if (!pr || !targetAgentId || !source.sessionId.trim()) {
+    const agentId = parseAgentSessionKeyParts(source.sessionKey)?.agentId;
+    if (!pr || !agentId || !source.sessionId.trim()) {
       return null;
     }
     return {
       sessionKey: source.sessionKey,
       sessionId: source.sessionId,
-      agentId: targetAgentId,
+      agentId,
       owner: pr.owner.toLowerCase(),
       repo: pr.repo.toLowerCase(),
       number: pr.number,
@@ -519,7 +516,6 @@ export const ChatCiAutomationControl = defineSolidBridge<Props>(
       gateway: { default: undefined, attribute: false },
       pullRequest: { default: undefined, attribute: false },
       sessionKey: { default: "", attribute: false },
-      agentId: { default: undefined, attribute: false },
       sessionId: { default: "", attribute: false },
       presented: { default: true, type: Boolean },
       inline: { default: false, attribute: false },

@@ -66,12 +66,6 @@ With `session.scope: "global"`, the selected agent still owns its session.
 The shared key `global` does not merge different agents' conversations:
 commands, skills, replies, and background task notifications retain the
 agent selected by the route or explicit request.
-If an older store contains both `global` and the literal `agent:<agentId>:global`
-row for the same agent, select the original key and agent explicitly. Each chat
-continues with its own session ID, history, pending work, and files; neither row
-is merged or renamed. A supplied session ID must match the selected stored chat.
-General browser profiles remain shared. One-chat lifecycle cleanup preserves
-legacy tabs whose ownership is ambiguous between those two chats.
 Session lists, model filters, previews, and sharing controls also retain the
 stored conversation's agent, rather than the aggregate view's default agent.
 In the Sessions page, enabling **Unknown** includes authorized unknown sessions

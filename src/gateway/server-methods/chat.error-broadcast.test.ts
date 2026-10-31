@@ -211,11 +211,7 @@ describe("chat.send error broadcast", () => {
           sessionKey: "agent:main:main",
           state: "error",
         }),
-        {
-          agentId: undefined,
-          sessionKeys: ["agent:main:main"],
-          sessionSubscriptionKeys: ["agent:main:main"],
-        },
+        { sessionKeys: ["agent:main:main"] },
       );
       const canonicalPayload = expectDefined(
         ctx.nodeSendToSession.mock.calls.find(([sessionKey]) => sessionKey === "agent:main:main"),

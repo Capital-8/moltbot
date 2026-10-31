@@ -17,11 +17,11 @@ function createContext(seq = 0, cfg: OpenClawConfig = { agents: { entries: { mai
 
 it.each([
   ["agent:main:main", "main", ["agent:main:main"], undefined],
-  ["global", "work", [JSON.stringify(["work", "global"])], undefined],
+  ["global", "work", ["agent:work:global"], undefined],
   [
     "global",
     "ops",
-    [JSON.stringify(["ops", "global"]), "global"],
+    ["agent:ops:global", "global"],
     fixedStoreOwnershipConfig("/stores/shared.sqlite"),
   ],
 ] as const)(
@@ -39,8 +39,7 @@ it.each([
       replace: true,
       seq: 1,
     });
-    expect(first?.[2]?.sessionKeys).toEqual([sessionKey]);
-    expect(first?.[2]?.sessionSubscriptionKeys).toEqual(keys);
+    expect(first?.[2]?.sessionKeys).toEqual(keys);
     expect(context.chatRunState.resolveBuffer("run-1").text).toHaveLength(500_000);
 
     broadcastChatDelta({ ...request, text: "first\n\nsecond" });
@@ -94,11 +93,7 @@ it("emits canonical error payloads without message or agentId", () => {
     state: "error",
     errorMessage: "provider unavailable",
   });
-  const opts = {
-    sessionKeys: ["agent:main:main"],
-    agentId: undefined,
-    sessionSubscriptionKeys: ["agent:main:main"],
-  };
+  const opts = { sessionKeys: ["agent:main:main"] };
   expect(context.broadcast).toHaveBeenCalledWith("chat", payload, opts);
   expect(context.nodeSendToSession).toHaveBeenCalledWith("agent:main:main", "chat", payload, opts);
 });

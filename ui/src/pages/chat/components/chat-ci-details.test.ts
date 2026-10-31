@@ -39,40 +39,20 @@ function details(
   };
 }
 
-function mount(
-  pending: Promise<ControlUiSessionPullRequestCheckDetails>,
-  target: { sessionKey: string; agentId?: string } = {
-    sessionKey: "agent:main:dashboard:ci-details",
-  },
-) {
+function mount(pending: Promise<ControlUiSessionPullRequestCheckDetails>) {
   const harness = createGatewayHarness();
   harness.request.mockReturnValue(pending);
   const element = document.createElement("openclaw-chat-ci-details") as ChatCiDetailsElement;
   Object.assign(element, {
     gateway: harness.gateway,
     pullRequest,
-    ...target,
+    sessionKey: "agent:main:dashboard:ci-details",
     inline: true,
   });
   document.body.append(element);
   onTestFinished(() => element.remove());
   return { element, request: harness.request };
 }
-
-it("keeps the existing owner-qualified request for a bare named chat", async () => {
-  const { element, request } = mount(Promise.resolve(details("Bare named check")), {
-    sessionKey: "notes",
-    agentId: "work",
-  });
-  await waitForSolid(() => expect(element.textContent).toContain("Bare named check"));
-  expect(request.mock.calls[0]?.[1]).toEqual({
-    sessionKey: "agent:work:notes",
-    owner: pullRequest.owner,
-    repo: pullRequest.repo,
-    number: pullRequest.number,
-    headSha: pullRequest.headSha,
-  });
-});
 
 it("shows a delayed read, its failure, and a successful explicit retry", async () => {
   const read = createDeferred<ControlUiSessionPullRequestCheckDetails>();
@@ -97,40 +77,24 @@ it("shows a delayed read, its failure, and a successful explicit retry", async (
   expect(request).toHaveBeenCalledTimes(2);
 });
 
-it.each(["head", "agent"] as const)(
-  "aborts a retired %s read and ignores its late answer",
-  async (change) => {
-    const oldRead = createDeferred<ControlUiSessionPullRequestCheckDetails>();
-    const { element, request } = mount(
-      oldRead.promise,
-      change === "agent" ? { sessionKey: "global", agentId: "main" } : undefined,
-    );
-    await waitForSolid(() => expect(request).toHaveBeenCalledTimes(1));
-    const signal = request.mock.calls[0]?.[2]?.signal;
-    const nextHead = change === "head" ? "b".repeat(40) : pullRequest.headSha;
-    request.mockResolvedValueOnce(details("Current head", nextHead));
-    if (change === "head") {
-      element.pullRequest = { ...pullRequest, headSha: nextHead };
-    } else {
-      element.agentId = "work";
-    }
-    expect(signal?.aborted).toBe(true);
-    await waitForSolid(() => expect(element.textContent).toContain("Current head"));
-    oldRead.resolve(details("Retired head"));
-    await element.updateComplete;
-    await waitForSolid(() => {
-      expect(element.textContent).toContain("Current head");
-      expect(element.textContent).not.toContain("Retired head");
-    });
-    expect(request).toHaveBeenCalledTimes(2);
-    if (change === "agent") {
-      expect(request.mock.calls.map(([, params]) => params)).toEqual([
-        expect.objectContaining({ sessionKey: "global", agentId: "main" }),
-        expect.objectContaining({ sessionKey: "global", agentId: "work" }),
-      ]);
-    }
-  },
-);
+it("aborts a retired head read and ignores its late answer", async () => {
+  const oldRead = createDeferred<ControlUiSessionPullRequestCheckDetails>();
+  const { element, request } = mount(oldRead.promise);
+  await waitForSolid(() => expect(request).toHaveBeenCalledTimes(1));
+  const signal = request.mock.calls[0]?.[2]?.signal;
+  const nextHead = "b".repeat(40);
+  request.mockResolvedValueOnce(details("Current head", nextHead));
+  element.pullRequest = { ...pullRequest, headSha: nextHead };
+  expect(signal?.aborted).toBe(true);
+  await waitForSolid(() => expect(element.textContent).toContain("Current head"));
+  oldRead.resolve(details("Retired head"));
+  await element.updateComplete;
+  await waitForSolid(() => {
+    expect(element.textContent).toContain("Current head");
+    expect(element.textContent).not.toContain("Retired head");
+  });
+  expect(request).toHaveBeenCalledTimes(2);
+});
 
 it("moves mounted CI controls to the current menu owner and releases them on removal", async () => {
   const first = createMenuControls();
