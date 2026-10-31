@@ -1,6 +1,6 @@
 .shell--mobile-nav .sidebar-shell {
   --sidebar-session-row-floor: 44px;
-  --sidebar-session-menu-size: 44px;
+  --sidebar-session-menu-size: 36px;
 }
 
 /* Keep metadata, but do not charge a title for an empty endcap or a hidden draft badge. */
