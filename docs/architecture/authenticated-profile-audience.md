@@ -8,7 +8,7 @@ read_when:
 
 # Authenticated profile audience proposal
 
-**Status: partial bootstrap implementation and proposed wider contract.** The
+**Status: partial bootstrap/tool implementation and proposed wider contract.** The
 review slice below is implemented in this draft; the remaining behavior and
 interfaces require owner decisions. This does not establish full person-level
 privacy or complete
@@ -20,13 +20,20 @@ The code in this draft omits automatically selected personal USER.md overlays
 from group, channel, cron, and subagent bootstrap contexts before opening those
 files. The final common bootstrap filter also removes personal-marked sources
 added by hooks. Shared defaults and existing subagent/cron file allowlists stay
-in place. Session profile selection and authenticated self-service editing are
+in place. Session profile selection and authenticated Settings self-editing are
 unchanged. Authoritative chat type still overrides session-key classification.
 
+The canonical personal-file handler also refuses agent-tool reads and saves for
+known group/channel origins or destinations before accessing the file. It uses
+the existing host-captured requester origin and execution session key, not new
+model arguments. Group-origin delegation cannot evade the check by moving into a
+direct-looking execution session. Both get and set return content, so both are
+restricted; users retain the private Settings editor.
+
 This is deliberately smaller than the contract below. It does not implement
-private-audience admission for shared web tasks, gate personal-tool responses,
-confine raw files, or change Knowledge/LCM grants or retained history. A direct or
-unknown bootstrap classification is not evidence of a person-private audience.
+private-audience admission for shared web tasks, confine raw files, or change
+Knowledge/LCM grants or retained history. Direct or unknown classifications retain
+their existing behavior and are not evidence of a person-private audience.
 
 ## Existing foundation
 
@@ -144,7 +151,7 @@ is not sufficient proof. All enabled mutation paths must satisfy this boundary.
 
 ## Proposed implementation
 
-Except for the implemented bootstrap slice above, this remains a proposed code
+Except for the implemented bootstrap/tool slice above, this remains a proposed code
 design, not runtime code shipped by this PR. The owner map was
 checked against main at
 [7861f59337f9](https://github.com/openclaw/openclaw/commit/7861f59337f9163040c9ccfb1c1f682ede689e27).
