@@ -56,11 +56,13 @@ suite.define(() => {
       await expect(overview).toContainText("custom-memory");
       await expect(overview.locator(".lob-reading-book")).toBeVisible();
       for (const title of ["Embeddings", "Read the dream diary", "Configure memory"]) {
-        await expect(overview.locator(".settings-row", { hasText: title })).toHaveCSS(
-          "border-top-width",
-          "1px",
-        );
+        await expect(overview.locator(".settings-row", { hasText: title })).toBeVisible();
       }
+      await expect(overview.locator(".memory-overview__hero")).toHaveCSS("display", "grid");
+      await expect(overview.locator(".memory-overview__lobster")).toHaveCSS(
+        "aspect-ratio",
+        "120 / 105",
+      );
       for (const ext of [".js", ".css"]) {
         expect(assets.some((asset) => asset.url.endsWith(ext) && asset.status === 200)).toBe(true);
       }
