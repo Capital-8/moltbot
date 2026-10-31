@@ -18,7 +18,7 @@ export const stateWorkerResourceReceiptMigration = {
 /** Exact predecessor DDL for PostgreSQL migration admission and backups. */
 export function withLegacyWorkerResourceReceipts(schema: string): string {
   return schema.replace(
-    /\n {2}(?:resource_receipt_json TEXT|"resource_receipt_json" text COLLATE "C"),/gu,
+    /,\n {2}resource_receipt_json TEXT(?=\n\))|\n {2}"resource_receipt_json" text COLLATE "C",/gu,
     "",
   );
 }

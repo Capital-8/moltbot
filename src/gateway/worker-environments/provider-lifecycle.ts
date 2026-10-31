@@ -305,8 +305,10 @@ export function createWorkerProviderLifecycle(
       // Join that write, without joining provider work that may still be blocked.
       if (provisioningTransition) {
         try {
-          await provisioningTransition;
-          record = requireCurrentOwner(record);
+          const transitioned = await provisioningTransition;
+          // A later receipt write belongs to this attempt; do not replace it with
+          // the earlier transition snapshot when the provider eventually fails.
+          record = record.resourceReceipt ? record : transitioned;
         } catch (transitionError) {
           if (transitionError !== closedAttempt) {
             throw transitionError;

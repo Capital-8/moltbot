@@ -127,13 +127,28 @@ async function restorePublicationSchemaV27(client: pg.Client) {
 }
 // These fixtures start at the successor; restore only empty feature tables from
 // the registered predecessor, including CHECK/PK declarations, before old seals.
-async function restoreTemplatePredecessor(client: pg.Client, previousVersion: number) {
+async function restoreEmptyPredecessorTables(client: pg.Client, previousVersion: number) {
   const source = expectDefined(
     stateEngineSchema.postgresMigrations?.find((step) => step.version === previousVersion + 1)
       ?.fromSchema,
     "Registered historical shared-state schema",
   );
   const eager = expectDefined(source.postgres, "Historical PostgreSQL DDL");
+  // DROP COLUMN retains an attnum hole, including at the tail. Recreate the empty
+  // worker table with its eager indexes and incoming foreign keys before sealing.
+  expect((await client.query("SELECT count(*)::int AS n FROM worker_environments")).rows).toEqual([
+    { n: 0 },
+  ]);
+  const workerTable = expectDefined(
+    eager.match(/CREATE TABLE "worker_environments" \([\s\S]*?\n\);/u)?.[0],
+    "Historical worker environment declaration",
+  );
+  const workerDependents = eager.match(
+    /CREATE (?:UNIQUE )?INDEX [^;]+ ON "worker_environments"[^;]*;|ALTER TABLE "[^"]+" ADD FOREIGN KEY[^;]* REFERENCES "worker_environments"[^;]*;/gu,
+  );
+  await client.query(
+    `DROP TABLE worker_environments CASCADE; ${workerTable} ${workerDependents?.join("\n") ?? ""}`,
+  );
   for (const [previous, current] of TEMPLATE_STATE_TABLE_RENAMES) {
     const declaration = expectDefined(
       eager.match(new RegExp(`CREATE TABLE "${previous}" \\([\\s\\S]*?\\n\\);`))?.[0],
@@ -629,7 +644,7 @@ describe.skipIf(!connection)("PostgreSQL shared-state owner", () => {
         retireSqliteDatabaseAdmissionForPath(pathname);
         // Restore the actual historical catalog before relabeling metadata.
         await client.query(`BEGIN; SET LOCAL search_path TO "${namespace}";`);
-        await restoreTemplatePredecessor(client, previousVersion);
+        await restoreEmptyPredecessorTables(client, previousVersion);
         if (previousVersion < 28) {
           await restorePublicationSchemaV27(client);
         }
@@ -826,7 +841,7 @@ describe.skipIf(!connection)("PostgreSQL shared-state owner", () => {
       expect(cold.threadId).not.toBe(0);
       await client.query(`SET search_path = "${namespace}"`);
       await client.query("BEGIN");
-      await restoreTemplatePredecessor(client, 24);
+      await restoreEmptyPredecessorTables(client, 24);
       await restorePublicationSchemaV27(client);
       await client.query(`
         ${statePostgresRuntime.clientCredentialSource.sql}
