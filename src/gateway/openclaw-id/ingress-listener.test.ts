@@ -142,6 +142,49 @@ describe("OpenClaw ID ingress listener", () => {
     expect(seen[0]!.attribution.kind).toBe("openclaw-id-tunnel");
   });
 
+  it("hands tunnel API requests to the API handler with the authenticated peer key", async () => {
+    const { seen, listener } = await setup();
+    await started!.close();
+    const calls: string[] = [];
+    started = await startOpenClawIdIngressListener({
+      socketPath: listener.socketPath,
+      gatewayServer: () => gateway,
+      log: { warn: vi.fn() },
+      handleApi: async (req, res, peerKey) => {
+        calls.push(`${req.url} ${peerKey}`);
+        res.end("api");
+      },
+    });
+    const api = (headers: Record<string, string>) =>
+      new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          { socketPath: started!.socketPath, path: "/_openclaw-id/v1/membership", headers },
+          (res) => {
+            let body = "";
+            res.on("data", (chunk) => (body += chunk));
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    expect(
+      await api({
+        "x-openclaw-id-proxy-token": "x".repeat(43),
+        "x-openclaw-id-peer-key": PEER_KEY,
+      }),
+    ).toMatchObject({ status: 403 });
+    expect(calls).toEqual([]);
+    expect(
+      await api({
+        "x-openclaw-id-proxy-token": started.proxyToken,
+        "x-openclaw-id-peer-key": PEER_KEY,
+      }),
+    ).toEqual({ status: 200, body: "api" });
+    expect(calls).toEqual([`/_openclaw-id/v1/membership ${PEER_KEY}`]);
+    expect(seen).toHaveLength(0);
+  });
+
   it("issues a new proxy token each time it starts", async () => {
     const first = (await setup()).listener.proxyToken;
     await started!.close();

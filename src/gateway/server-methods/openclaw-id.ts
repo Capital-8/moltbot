@@ -4,11 +4,9 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import type { Ed25519PublicKey } from "../../../packages/openclaw-id-protocol/src/index.js";
-import {
-  base64urlToBytes,
-  isEd25519PublicKey,
-} from "../../../packages/openclaw-id-protocol/src/index.js";
+import { isEd25519PublicKey } from "../../../packages/openclaw-id-protocol/src/index.js";
 import { resolveOpenClawIdClientChannel } from "../openclaw-id/channel.js";
+import { decodeInviteProofKey } from "../openclaw-id/tunnel-api.js";
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 
 // Responds with the service, or an unavailable error when this Gateway has none.
@@ -35,19 +33,6 @@ function refuse(opts: GatewayRequestHandlerOptions, result: { code: string; deta
 
 function optionalCode(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-// Decodes a 32-byte base64url invite proof key, or undefined when malformed.
-function decodeInviteProofKey(value: unknown): Uint8Array | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  try {
-    const bytes = base64urlToBytes(value);
-    return bytes.length === 32 ? bytes : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export const openclawIdHandlers: GatewayRequestHandlers = {

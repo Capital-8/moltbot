@@ -3,8 +3,10 @@
 // reference rules, writes through to SQLite and reports the side effects the
 // Gateway must perform. Discovery is never consulted for any decision here.
 import {
+  activeOwnerCerts,
   fingerprint,
   isAdmitted,
+  isOwnerDeviceActive,
   linkClaw,
   randomBytes,
   bytesToHex,
@@ -27,6 +29,7 @@ import {
   type StoredClaw,
 } from "./claw-store.js";
 import { expirePendingRedemptions } from "./invite-expiry.js";
+import { listInviteViews } from "./invites-view.js";
 
 /** What the local link ceremony signs for: the claw's identity and keys. */
 export type LinkPreparation = {
@@ -407,6 +410,42 @@ export function createOpenClawIdAuthority(
         }
         return removed.map((binding) => ({ deviceId: binding.device_id, role: binding.role }));
       });
+    },
+
+    /**
+     * What an owner device reaching the claw over the tunnel may read: the seq to
+     * sign the next change at, the binding, every active owner certificate (for
+     * chain compaction after kit use), members and invites. Undefined unless
+     * `peerKey` belongs to an active, unrevoked owner device.
+     */
+    async ownerView(peerKey: string) {
+      const current = await load();
+      const state = current?.authority;
+      if (!state || state.revoked.includes(await fingerprint(peerKey as IrohEndpointKey))) {
+        return undefined;
+      }
+      const isOwner = Object.values(state.owner_devices).some(
+        (device) =>
+          isOwnerDeviceActive(state, device) &&
+          device.cert.body.peer_keys.includes(peerKey as IrohEndpointKey),
+      );
+      if (!isOwner) {
+        return undefined;
+      }
+      return {
+        claw_id: state.claw_id,
+        seq: state.seq,
+        root_pub: state.anchor.root_pub,
+        root_epoch: state.anchor.root_epoch,
+        binding: current.binding,
+        owner_devices: activeOwnerCerts(state),
+        members: Object.entries(state.members).map(([account_id, member]) => ({
+          account_id,
+          role: member.role,
+          peer_keys: member.peer_keys,
+        })),
+        invites: listInviteViews(current, nowSeconds()),
+      };
     },
 
     /** Peer keys the tunnel child may admit right now (members and active owner devices). */

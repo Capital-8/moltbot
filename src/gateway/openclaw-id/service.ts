@@ -18,6 +18,7 @@ import type {
   OpenClawIdAuthority,
 } from "./authority.js";
 import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
+import type { TunnelApiHandler } from "./ingress-listener.js";
 import { listInviteViews } from "./invites-view.js";
 import type { PublishOutcome } from "./publisher.js";
 import type { TunnelRuntime, TunnelRuntimeSettings } from "./tunnel-runtime.js";
@@ -152,6 +153,7 @@ export function createOpenClawIdService(params: {
         onStatus: (tunnel) => {
           status = { state: "on", tunnel };
         },
+        handleApi: handleTunnelApi,
       });
       status = { state: "on", tunnel: runtime.supervisor.status() };
       await publishTokenBindings();
@@ -282,6 +284,30 @@ export function createOpenClawIdService(params: {
     });
   };
 
+  // Serves the tunnel API (owner devices behind the loader) over the authority.
+  const handleTunnelApi: TunnelApiHandler = async (req, res, peerKey) => {
+    const { handleTunnelApiRequest } = await import("./tunnel-api.js");
+    const owner = await getAuthority();
+    await handleTunnelApiRequest(req, res, peerKey, {
+      membership: (key) => owner.ownerView(key),
+      submit: async (statement) => {
+        const result = await owner.submit(statement, "tunnel");
+        if (result.ok) {
+          await applyEvents(result.events);
+        }
+        return result;
+      },
+      registerInvite: async (input) => {
+        const result = await owner.registerInvite(input, "tunnel");
+        if (result.ok) {
+          await applyEvents(result.events);
+        }
+        return result;
+      },
+      seq: async () => (await owner.load())?.authority?.seq ?? 0,
+    });
+  };
+
   // K_srv of the running tunnel child, needed for the binding.
   const runningServerKey = (): IrohEndpointKey | undefined =>
     status.state === "on" && status.tunnel.state === "running"
@@ -293,6 +319,8 @@ export function createOpenClawIdService(params: {
     bindEffects(load: () => Promise<OpenClawIdEffects>): void {
       loadEffects = load;
     },
+    /** Serves one tunnel API request from an admitted device (the ingress listener's handler). */
+    serveTunnelApi: handleTunnelApi,
     /** Applies the current config: start, reconfigure or stop. */
     reconcileRuntimePolicy(): Promise<void> {
       queue = queue.then(reconcile, reconcile);

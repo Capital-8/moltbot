@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveRuntimeProcessEntrypointUrl } from "../../infra/runtime-process-url.js";
 import { resolveRuntimeWorkerArgv } from "../../infra/runtime-worker-url.js";
-import { startOpenClawIdIngressListener } from "./ingress-listener.js";
+import { startOpenClawIdIngressListener, type TunnelApiHandler } from "./ingress-listener.js";
 import { createTunnelSupervisor, type TunnelSupervisorStatus } from "./tunnel-supervisor.js";
 
 // Unix socket paths are limited to ~104 bytes on macOS (108 on Linux).
@@ -50,12 +50,15 @@ export async function startTunnelRuntime(params: {
   membership: { seq: number; admitted: string[] };
   log: RuntimeLogger;
   onStatus?: (status: TunnelSupervisorStatus) => void;
+  /** Serves the OpenClaw ID tunnel API for admitted devices. */
+  handleApi?: TunnelApiHandler;
 }) {
   const { keyPath, socketPath } = resolveTunnelPaths(params.settings.stateDir);
   const listener = await startOpenClawIdIngressListener({
     socketPath,
     gatewayServer: params.gatewayServer,
     log: params.log,
+    ...(params.handleApi ? { handleApi: params.handleApi } : {}),
   });
   const entry = resolveRuntimeProcessEntrypointUrl("openclawIdTunnel");
   const supervisor = createTunnelSupervisor({

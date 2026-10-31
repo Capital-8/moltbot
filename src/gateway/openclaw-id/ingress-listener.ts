@@ -6,7 +6,8 @@
 // - the authenticated peer key passed out of band from client headers: the
 //   child sets it from the QUIC handshake after stripping client copies.
 // Requests that pass are marked as relayed (`openclaw-id-tunnel`) before the
-// Gateway sees them, so they can never count as direct loopback.
+// Gateway sees them, so they can never count as direct loopback. Requests for
+// the OpenClaw ID tunnel API (`/_openclaw-id/v1/`) go to `handleApi` instead.
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http, { type IncomingMessage, type Server as HttpServer } from "node:http";
@@ -17,6 +18,7 @@ import {
   syntheticPeerAddress,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
 import { markGatewayIngressTransport } from "../ingress-attribution.js";
+import { isTunnelApiRequest } from "./tunnel-api.js";
 
 /** A running ingress listener. */
 export type OpenClawIdIngressListener = {
@@ -28,6 +30,13 @@ export type OpenClawIdIngressListener = {
 
 type IngressLogger = { warn: (message: string) => void };
 
+/** Serves an OpenClaw ID tunnel API request from the authenticated device `peerKey`. */
+export type TunnelApiHandler = (
+  req: IncomingMessage,
+  res: http.ServerResponse,
+  peerKey: string,
+) => Promise<void>;
+
 /**
  * Listens on `socketPath` and hands every authenticated request or upgrade to
  * `gatewayServer` (the Gateway's primary listener) after marking it relayed.
@@ -36,12 +45,14 @@ export async function startOpenClawIdIngressListener(params: {
   socketPath: string;
   gatewayServer: () => HttpServer | undefined;
   log: IngressLogger;
+  handleApi?: TunnelApiHandler;
 }): Promise<OpenClawIdIngressListener> {
   const proxyToken = randomBytes(32).toString("base64url");
   const expected = Buffer.from(proxyToken);
 
   // Checks the token, then strips the contract headers and marks the request.
-  const admit = async (req: IncomingMessage): Promise<boolean> => {
+  // Returns the authenticated peer key, or undefined when refused.
+  const admit = async (req: IncomingMessage): Promise<string | undefined> => {
     const token = req.headers[INGRESS_HEADERS.proxyToken];
     const peerKey = req.headers[INGRESS_HEADERS.peerKey];
     if (
@@ -51,7 +62,7 @@ export async function startOpenClawIdIngressListener(params: {
       !isIrohEndpointKey(peerKey)
     ) {
       params.log.warn("openclaw-id: refused an ingress request without a valid proxy token");
-      return false;
+      return undefined;
     }
     stripContractHeaders(req);
     markGatewayIngressTransport(req, {
@@ -59,12 +70,23 @@ export async function startOpenClawIdIngressListener(params: {
       peerKey,
       clientIp: await syntheticPeerAddress(peerKey),
     });
-    return true;
+    return peerKey;
   };
 
   const server = http.createServer();
   server.on("request", (req, res) => {
-    void admit(req).then((ok) => {
+    void admit(req).then((peerKey) => {
+      const ok = peerKey !== undefined;
+      if (ok && params.handleApi && isTunnelApiRequest(req)) {
+        params.handleApi(req, res, peerKey).catch((error: unknown) => {
+          params.log.warn(`openclaw-id: tunnel API request failed: ${String(error)}`);
+          if (!res.headersSent) {
+            res.writeHead(500, { connection: "close" });
+          }
+          res.end();
+        });
+        return;
+      }
       const gateway = params.gatewayServer();
       if (!ok || !gateway) {
         res.writeHead(ok ? 503 : 403, { connection: "close" }).end();
@@ -75,7 +97,8 @@ export async function startOpenClawIdIngressListener(params: {
   });
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.once("error", () => socket.destroy());
-    void admit(req).then((ok) => {
+    void admit(req).then((peerKey) => {
+      const ok = peerKey !== undefined;
       const gateway = params.gatewayServer();
       if (!ok || !gateway) {
         socket.end(
