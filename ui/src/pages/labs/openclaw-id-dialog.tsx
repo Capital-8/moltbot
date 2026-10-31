@@ -76,7 +76,7 @@ export function showMakeReachableDialog(params: {
           // R is no longer needed once the statements are signed.
           ceremony.discard();
           const result = await params.client.request<{ publication: OpenClawIdPublication | null }>(
-            "openclawId.link",
+            "openclawId.authority",
             {
               action: "commit",
               ...statements,

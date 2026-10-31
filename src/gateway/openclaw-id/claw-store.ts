@@ -6,6 +6,7 @@ import type {
   SignedStatement,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
 import { createCorePluginStateKeyedStore } from "../../plugin-state/plugin-state-store.js";
+import type { DeviceTokenBinding } from "./device-token-binding.js";
 
 /** Everything the Gateway keeps about its claw. */
 export type StoredClaw = {
@@ -18,6 +19,8 @@ export type StoredClaw = {
   authority: AuthorityState | null;
   /** The current ServerBinding, signed by R or an owner device. */
   binding: SignedStatement<"ServerBinding"> | null;
+  /** Device tokens issued over the tunnel and the device key W each belongs to. */
+  token_bindings?: DeviceTokenBinding[];
   /** Discovery publication state (a mirror; never authority). */
   discovery: {
     owner_account_id: string | null;

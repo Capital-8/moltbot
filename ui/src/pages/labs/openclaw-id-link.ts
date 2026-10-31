@@ -16,7 +16,7 @@ import {
   type StatementSigner,
 } from "../../../../packages/openclaw-id-protocol/src/index.ts";
 
-/** What the Gateway asks the owner root to sign (`openclawId.link` prepare). */
+/** What the Gateway asks the owner root to sign (`openclawId.authority` prepare). */
 export type OpenClawIdLinkPreparation = {
   claw_id: string;
   hostname: string;
@@ -35,7 +35,7 @@ export type OpenClawIdKit = {
   rootPub: Ed25519PublicKey;
 };
 
-/** The signed result sent to `openclawId.link` commit. */
+/** The signed result sent to `openclawId.authority` commit. */
 export type OpenClawIdLinkStatements = {
   rootPub: Ed25519PublicKey;
   ownerDevice: SignedStatement<"MembershipChange">;

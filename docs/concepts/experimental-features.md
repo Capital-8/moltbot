@@ -338,6 +338,38 @@ No service URL has a production default yet; the Gateway reports
   as direct loopback, even though they arrive on the local host. Linking a claw
   and other root ceremonies are allowed only on direct loopback.
 
+### Make a claw reachable
+
+With the lab on, **Settings → Labs → OpenClaw ID remote access** shows the
+tunnel status and a **Make reachable** button. The button works only in a
+Control UI opened on the Gateway machine itself (direct loopback):
+
+1. The Gateway creates the claw id and its signing key, and reports the tunnel's
+   endpoint key.
+2. The browser creates a recovery kit (`OCK1-…`) and derives the owner root key
+   from it. You must confirm that you saved the kit before you can continue.
+3. The browser creates an owner device key for this origin, and the owner root
+   signs that device's certificate and the server binding (claw id, hostname
+   `<claw_id>.<loaderDomain>`, endpoint key, Gateway key).
+4. The Gateway pins the owner root's fingerprint and admits the owner device.
+   The kit secret and root key never leave the browser and are dropped as soon
+   as the statements are signed.
+5. With an OpenClaw ID enrollment code, the Gateway registers the claw with
+   Discovery and publishes its descriptor and membership snapshot. Without one,
+   the claw is linked locally and can be published later.
+
+### Membership
+
+The Gateway is the membership authority. It stores the pinned owner root, owner
+device certificates, members, invites, revocations and a sequence number in its
+state database. Owner devices send membership changes directly to the Gateway
+(over the tunnel or loopback); Discovery only mirrors signed snapshots and
+carries invite redemption requests, root-signed statements and revocations.
+When a member or device is removed, the tunnel child closes its connections,
+the Gateway closes its sessions and invalidates device tokens bound to its key,
+cancels its active runs (transcripts are kept up to the cut), and publishes a
+new snapshot.
+
 ## Local model lean mode
 
 Lean mode is an advanced troubleshooting override, configured outside Labs.

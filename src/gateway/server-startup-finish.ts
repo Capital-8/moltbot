@@ -389,6 +389,12 @@ export async function finishGatewayStartup(params: {
   }
   postAttachRuntimeReturned = true;
   activateScheduledServicesWhenReady();
+  runtime.openclawIdService.bindEffects(async () =>
+    (await import("./openclaw-id/removal-effects.js")).createOpenClawIdRemovalEffects({
+      clients: () => clients.authorityClients,
+      log,
+    }),
+  );
   void runtime.openclawIdService
     .reconcileRuntimePolicy()
     .catch((error: unknown) => log.warn(`openclaw-id: start failed: ${String(error)}`));

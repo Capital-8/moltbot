@@ -755,5 +755,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["sessions.files.preview", "sessions-files", "operator.read", "2026.10"],
   ["sessions.files.preview.release", "sessions-files", "operator.read", "2026.10"],
   ["openclawId.status", "openclaw-id", "operator.read", "2026.10"],
-  ["openclawId.link", "openclaw-id", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
+  ["openclawId.authority", "openclaw-id", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

@@ -17,6 +17,7 @@ import type {
   LinkPreparation,
   OpenClawIdAuthority,
 } from "./authority.js";
+import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
 import type { PublishOutcome } from "./publisher.js";
 import type { TunnelRuntime, TunnelRuntimeSettings } from "./tunnel-runtime.js";
 import type { TunnelSupervisorStatus } from "./tunnel-supervisor.js";
@@ -30,12 +31,17 @@ export type OpenClawIdStatus =
 
 /** Side effects of membership changes that other Gateway owners perform. */
 export type OpenClawIdEffects = {
-  /** Close Gateway connections relayed for these device keys. */
-  disconnectPeers?: (peerKeys: IrohEndpointKey[]) => void;
-  /** Invalidate device tokens bound to these device keys. */
-  invalidateTokens?: (peerKeys: IrohEndpointKey[]) => Promise<void> | void;
-  /** Cancel a removed member's active runs, keeping transcripts up to the cut. */
-  cancelRuns?: (accountId: string) => Promise<void> | void;
+  /**
+   * Captures the Gateway connections relayed for these device keys. Called before
+   * access is withdrawn, so their runs can still be found by connection.
+   */
+  captureConnections: (peerKeys: readonly string[]) => string[];
+  /** Cancels the active runs started over these connections; transcripts keep the cut. */
+  cancelRuns?: (connectionIds: readonly string[]) => Promise<void>;
+  /** Closes these Gateway connections. */
+  closeConnections: (connectionIds: readonly string[]) => void;
+  /** Revokes device tokens (device id and role) that were bound to removed keys. */
+  revokeDeviceTokens: (tokens: ReadonlyArray<{ deviceId: string; role: string }>) => Promise<void>;
 };
 
 type OpenClawIdLogger = {
@@ -79,7 +85,6 @@ export function createOpenClawIdService(params: {
   /** The Gateway's primary HTTP listener; relayed requests are handed to it. */
   getGatewayServer: () => HttpServer | undefined;
   log: OpenClawIdLogger;
-  effects?: OpenClawIdEffects;
   /** Test seam for the persisted authority. */
   createAuthority?: () => Promise<OpenClawIdAuthority>;
 }) {
@@ -87,6 +92,9 @@ export function createOpenClawIdService(params: {
   let runtime: TunnelRuntime | undefined;
   let authority: OpenClawIdAuthority | undefined;
   let lastPublish: PublishOutcome | undefined;
+  let loadEffects: (() => Promise<OpenClawIdEffects>) | undefined;
+  let effectsPromise: Promise<OpenClawIdEffects> | undefined;
+  let mailbox: { stop(): void } | undefined;
   // Serializes start/stop so overlapping config reloads apply in order.
   let queue: Promise<void> = Promise.resolve();
 
@@ -102,6 +110,9 @@ export function createOpenClawIdService(params: {
   const stopRuntime = async () => {
     const current = runtime;
     runtime = undefined;
+    mailbox?.stop();
+    mailbox = undefined;
+    setDeviceTokenBindingOwner(undefined);
     await current?.stop();
   };
 
@@ -142,6 +153,8 @@ export function createOpenClawIdService(params: {
         },
       });
       status = { state: "on", tunnel: runtime.supervisor.status() };
+      await publishTokenBindings();
+      await startMailbox();
     } catch (error) {
       status = { state: "failed", reason: String((error as Error)?.message ?? error) };
       params.log.warn(`openclaw-id: could not start remote access: ${status.reason}`);
@@ -177,23 +190,38 @@ export function createOpenClawIdService(params: {
         published_binding_seq: record.binding?.body.binding_seq ?? 0,
         published_snapshot_seq: outcome.snapshotSeq,
       });
+      await startMailbox();
     } else if (outcome.state === "failed") {
       params.log.warn(`openclaw-id: Discovery publication failed (${outcome.code})`);
     }
     return outcome;
   };
 
-  // Performs the side effects of an accepted write in a fixed order: access first.
+  // Performs the side effects of an accepted write in a fixed order: find the
+  // removed keys' connections, withdraw tunnel access, cancel their runs, close
+  // their sessions, revoke their tokens, then publish a new snapshot.
   const applyEvents = async (events: AuthorityEvent[]) => {
+    effectsPromise ??= loadEffects?.();
+    const effects = await effectsPromise;
+    const removed = [
+      ...new Set(
+        events.flatMap((event) =>
+          event.type === "disconnect" || event.type === "invalidate_tokens" ? event.peer_keys : [],
+        ),
+      ),
+    ];
+    const connections = removed.length > 0 ? (effects?.captureConnections(removed) ?? []) : [];
     await pushMembership();
+    if (removed.length > 0) {
+      if (events.some((event) => event.type === "cancel_runs")) {
+        await effects?.cancelRuns?.(connections);
+      }
+      effects?.closeConnections(connections);
+      const tokens = await (await getAuthority()).unbindPeers(removed);
+      await effects?.revokeDeviceTokens(tokens);
+    }
     for (const event of events) {
-      if (event.type === "disconnect") {
-        params.effects?.disconnectPeers?.(event.peer_keys);
-      } else if (event.type === "invalidate_tokens") {
-        await params.effects?.invalidateTokens?.(event.peer_keys);
-      } else if (event.type === "cancel_runs") {
-        await params.effects?.cancelRuns?.(event.account_id);
-      } else if (event.type === "notify_owners") {
+      if (event.type === "notify_owners") {
         params.log.info(`openclaw-id: owner notice ${event.event}`);
       }
     }
@@ -204,6 +232,55 @@ export function createOpenClawIdService(params: {
     }
   };
 
+  // Publishes the device-token binding owner while remote access runs.
+  const publishTokenBindings = async () => {
+    const owner = await getAuthority();
+    await owner.load();
+    setDeviceTokenBindingOwner({
+      lookup: (deviceId, role) => owner.tokenBinding(deviceId, role),
+      record: (deviceId, role, peerKey) => owner.bindToken(deviceId, role, peerKey),
+      reportMismatch: (event) =>
+        params.log.warn(
+          `openclaw-id: security: refused device token for ${event.deviceId} (${event.role}) presented from ${event.presentedFrom ?? "a non-tunnel connection"}; bound to ${event.boundTo ?? "no tunnel key"}`,
+        ),
+    });
+  };
+
+  // Reads the Discovery mailbox once the claw is registered there.
+  const startMailbox = async () => {
+    const config = params.getConfig();
+    const record = await (await getAuthority()).load();
+    if (
+      mailbox ||
+      !runtime ||
+      !config?.discoveryUrl ||
+      !record?.authority ||
+      !record.discovery.owner_account_id
+    ) {
+      return;
+    }
+    const [{ startMailboxReader }, { createDiscoveryClient }, { loadGatewaySigner }] =
+      await Promise.all([
+        import("./mailbox-reader.js"),
+        import("./discovery-client.js"),
+        import("./gateway-key.js"),
+      ]);
+    const owner = await getAuthority();
+    const { signer } = await loadGatewaySigner(params.getStateDir());
+    mailbox = startMailboxReader({
+      clawId: record.claw_id,
+      client: createDiscoveryClient({ baseUrl: config.discoveryUrl, signer }),
+      cursor: record.discovery.mailbox_cursor,
+      sink: {
+        submit: (statement) => owner.submit(statement, "mailbox"),
+        redeem: (redemption, identity) => owner.redeem(redemption, identity),
+        saveCursor: (cursor) => owner.recordDiscovery({ mailbox_cursor: cursor }),
+      },
+      onApplied: (result) => applyEvents(result.events),
+      log: params.log,
+    });
+  };
+
   // K_srv of the running tunnel child, needed for the binding.
   const runningServerKey = (): IrohEndpointKey | undefined =>
     status.state === "on" && status.tunnel.state === "running"
@@ -211,6 +288,10 @@ export function createOpenClawIdService(params: {
       : undefined;
 
   return {
+    /** Connects removal side effects owned by the Gateway's connection and run owners (loaded on first use). */
+    bindEffects(load: () => Promise<OpenClawIdEffects>): void {
+      loadEffects = load;
+    },
     /** Applies the current config: start, reconfigure or stop. */
     reconcileRuntimePolicy(): Promise<void> {
       queue = queue.then(reconcile, reconcile);

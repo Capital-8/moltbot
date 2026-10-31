@@ -92,7 +92,7 @@ export function OpenClawIdPanel() {
     }
     setActionError(null);
     try {
-      const preparation = await client.request<OpenClawIdLinkPreparation>("openclawId.link", {
+      const preparation = await client.request<OpenClawIdLinkPreparation>("openclawId.authority", {
         action: "prepare",
       });
       await showMakeReachableDialog({ client, preparation });

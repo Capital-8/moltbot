@@ -8,6 +8,7 @@ import {
   linkClaw,
   randomBytes,
   bytesToHex,
+  submitRedemption,
   submitStatement,
   verifyOwnerStatement,
   type AuthorityEvent,
@@ -195,6 +196,71 @@ export function createOpenClawIdAuthority(
         }
         await commit({ ...current, authority: result.state });
         return { ok: true, status: result.status, events: result.events };
+      });
+    },
+
+    /** Records an invite redemption from the mailbox as pending (it admits nothing). */
+    redeem(
+      input: unknown,
+      identity: { account_id: string; email: string | null },
+    ): Promise<AuthorityAccepted | AuthorityRefusal> {
+      return serialize(async () => {
+        const current = await load();
+        if (!current?.authority) {
+          return { ok: false, code: "not_linked", detail: "this claw is not linked" };
+        }
+        const result = await submitRedemption(current.authority, input, identity, nowSeconds());
+        if (!result.ok) {
+          return { ok: false, code: result.code, detail: result.detail };
+        }
+        await commit({ ...current, authority: result.state });
+        return { ok: true, status: result.status, events: result.events };
+      });
+    },
+
+    /** The device key a tunnel-issued token belongs to (from memory; load first). */
+    tokenBinding(deviceId: string, role: string): string | undefined {
+      return record?.token_bindings?.find(
+        (binding) => binding.device_id === deviceId && binding.role === role,
+      )?.peer_key;
+    },
+
+    /** Records (or replaces) the device key a token was issued to. */
+    bindToken(deviceId: string, role: string, peerKey: string): Promise<void> {
+      return serialize(async () => {
+        const current = await load();
+        if (!current) {
+          return;
+        }
+        const others = (current.token_bindings ?? []).filter(
+          (binding) => binding.device_id !== deviceId || binding.role !== role,
+        );
+        await commit({
+          ...current,
+          token_bindings: [
+            ...others,
+            { device_id: deviceId, role, peer_key: peerKey, bound_at: nowSeconds() },
+          ],
+        });
+      });
+    },
+
+    /** Drops the bindings of removed device keys; returns the (device, role) tokens to revoke. */
+    unbindPeers(peerKeys: readonly string[]): Promise<Array<{ deviceId: string; role: string }>> {
+      return serialize(async () => {
+        const current = await load();
+        const removed = (current?.token_bindings ?? []).filter((binding) =>
+          peerKeys.includes(binding.peer_key),
+        );
+        if (current && removed.length > 0) {
+          await commit({
+            ...current,
+            token_bindings: (current.token_bindings ?? []).filter(
+              (binding) => !peerKeys.includes(binding.peer_key),
+            ),
+          });
+        }
+        return removed.map((binding) => ({ deviceId: binding.device_id, role: binding.role }));
       });
     },
 

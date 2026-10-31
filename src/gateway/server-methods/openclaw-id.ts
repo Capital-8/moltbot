@@ -53,8 +53,13 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
     });
   },
 
-  // One method for the link ceremony: prepare, commit, then publish (or republish).
-  "openclawId.link": async (opts) => {
+  // Writes to the membership authority, by action:
+  // - prepare / commit: the local link ceremony ("Make reachable"), direct loopback only;
+  // - publish: (re)publish to Discovery, optionally with an enrollment code;
+  // - submit: an owner-signed statement (MembershipChange, Revocation, root
+  //   re-certification) sent directly over the tunnel or loopback. The authority
+  //   verifies signature, chain, capability and seq; the mailbox never reaches here.
+  "openclawId.authority": async (opts) => {
     const service = requireService(opts);
     if (!service) {
       return;
@@ -76,8 +81,20 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
       });
       return;
     }
+    if (params.action === "submit") {
+      const result = await service.submitStatement(channel, params.statement);
+      if (!result.ok) {
+        refuse(opts, result);
+        return;
+      }
+      opts.respond(true, { status: result.status, link: await service.linkStatus() });
+      return;
+    }
     if (params.action !== "commit") {
-      refuse(opts, { code: "malformed", detail: "action must be prepare, commit or publish" });
+      refuse(opts, {
+        code: "malformed",
+        detail: "action must be prepare, commit, publish or submit",
+      });
       return;
     }
     if (!isEd25519PublicKey(params.rootPub) || !params.ownerDevice || !params.binding) {
