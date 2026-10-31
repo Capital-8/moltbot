@@ -13,6 +13,7 @@ import { listen } from "../../lib/reactive/listener.ts";
 import { defineSolidBridge, type SolidBridgeElement } from "../../lib/solid-bridge.ts";
 import { PanelLoadingSkeleton } from "../solid/panel-loading-skeleton.tsx";
 import "../../styles/board.css";
+import { scheduleBoardIdlePreparation } from "./board-idle-preparation.ts";
 import { BoardTabs } from "./board-tabs.tsx";
 import {
   createBoardViewState,
@@ -32,6 +33,7 @@ const views = new WeakMap<HTMLElement, ReturnType<typeof createBoardViewState>>(
 type CellEntry = {
   key: string;
   present: boolean;
+  speculative?: boolean;
   retiring?: boolean;
   element?: SolidBridgeElement<BoardWidgetCellProps, BoardWidgetCellMethods>;
   options: BoardWidgetCellProps;
@@ -42,6 +44,8 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
   const invalidateLayout = () => setLayoutRevision((value) => value + 1);
   // Grid coordinates change; map insertion order keeps iframe nodes in place.
   const entries = new Map<string, CellEntry>();
+  const [admissionRevision, setAdmissionRevision] = createSignal(0);
+  let preparation: (() => void) | undefined;
   const owner = createBoardViewState(props, host, () =>
     [...entries.values()].flatMap(({ element }) => (element ? [element] : [])),
   );
@@ -65,9 +69,31 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
     if (activeTab) {
       owner.visitedTabs.add(activeTabId);
     }
+    // Bound speculation to the next unvisited tab. Visited documents retain their
+    // existing lifetime; external HTML/MCP documents still require navigation.
+    const activeIndex = tabs.findIndex((tab) => tab.tabId === activeTabId);
+    const nextTab = tabs[activeIndex + 1] ?? tabs[activeIndex - 1];
+    const speculativeNames = new Set(
+      props.active && nextTab && !owner.visitedTabs.has(nextTab.tabId)
+        ? (snapshot ? orderedWidgets(snapshot, nextTab.tabId) : [])
+            .filter(
+              (widget) =>
+                widget.tabId === nextTab.tabId &&
+                widget.contentKind === "plugin" &&
+                widget.pluginKind === "session:report" &&
+                !widget.frameUrl &&
+                !widget.viewTicket,
+            )
+            .slice(0, 250)
+            .map((widget) => widget.name)
+        : [],
+    );
     // A widget moved to an unvisited tab keeps its already mounted document.
     const widgets = (snapshot?.widgets ?? []).filter(
-      (widget) => owner.visitedTabs.has(widget.tabId) || entries.has(cellKey(widget.name)),
+      (widget) =>
+        owner.visitedTabs.has(widget.tabId) ||
+        entries.get(cellKey(widget.name))?.speculative === false ||
+        speculativeNames.has(widget.name),
     );
     const positions = new Map<string, number>();
     const rects = tabs.flatMap((tab) => {
@@ -100,6 +126,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
     for (const entry of entries.values()) {
       entry.present = false;
     }
+    const pending: CellEntry[] = [];
     for (const rect of rects) {
       const key = cellKey(rect.name);
       const visible = activeNames.has(rect.name);
@@ -114,10 +141,13 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
         previousRect.h === rect.h
           ? previousRect
           : rect;
-      entries.set(key, {
+      const entry: CellEntry = {
         ...previous,
         key,
         present: true,
+        speculative:
+          previous?.speculative !== false &&
+          !owner.visitedTabs.has(widgetsByName.get(rect.name)!.tabId),
         options: {
           widget: widgetsByName.get(rect.name),
           boardRevision: snapshot?.revision ?? 0,
@@ -141,7 +171,12 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
           canGrant: props.canGrant,
           loadingCovered: loading,
         },
-      });
+      };
+      if (entry.speculative && !previous) {
+        pending.push(entry);
+      } else {
+        entries.set(key, entry);
+      }
     }
     for (const [key, entry] of entries) {
       if (entry.present) {
@@ -174,6 +209,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
       }
     }
     return {
+      active: props.active,
       tabs,
       activeTabId,
       activeNames,
@@ -181,15 +217,42 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
       fullWidth,
       page,
       loading,
-      cells: [...entries.values()],
+      pending,
       state,
     };
   });
+  const cells = createMemo(() => {
+    view();
+    admissionRevision();
+    return [...entries.values()];
+  });
+  const prepare = (current: ReturnType<typeof view>) => {
+    preparation?.();
+    preparation = undefined;
+    if (!current.active || current.loading || !current.pending.length) {
+      return;
+    }
+    let offset = 0;
+    preparation = scheduleBoardIdlePreparation(() => {
+      // Four shells per task; their Solid flush finishes before the next
+      // yielded slice. Do not invalidate layout or the current card props.
+      for (const entry of current.pending.slice(offset, offset + 4)) {
+        entries.set(entry.key, entry);
+      }
+      offset += 4;
+      setAdmissionRevision((value) => value + 1);
+      if (offset < current.pending.length) {
+        return true;
+      }
+      return false;
+    });
+  };
   createEffect(
     () => view(),
     (current) => {
       host.toggleAttribute("data-initial-loading", current.loading);
       owner.reconcileInitialPresentation();
+      prepare(current);
     },
   );
   onSettled(() => {
@@ -201,6 +264,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
       disposed = true;
       views.delete(host);
       stop?.();
+      preparation?.();
     };
   });
 
@@ -233,7 +297,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
           hoverTabId={view().state.hoverTabId}
           onSelect={owner.selectTab}
         />
-        <Show when={Boolean(props.snapshot) || view().cells.length > 0}>
+        <Show when={Boolean(props.snapshot) || cells().length > 0}>
           <div
             ref={owner.gridRef}
             class="board-grid"
@@ -241,7 +305,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
             aria-label={t("board.gridLabel")}
             hidden={view().empty}
           >
-            <For each={view().cells} keyed={(entry) => entry.key}>
+            <For each={cells()} keyed={(entry) => entry.key}>
               {(entry) => {
                 const cellRef = (element: NonNullable<CellEntry["element"]>) => {
                   const current = entries.get(entry().key);

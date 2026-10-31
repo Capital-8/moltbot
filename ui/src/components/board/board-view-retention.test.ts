@@ -18,6 +18,48 @@ afterEach(() => {
 });
 
 describe("openclaw-board-view retention", () => {
+  it("prepares only the adjacent report tab and adopts its hidden cards on selection", async () => {
+    const report = (name: string, tabId: string) =>
+      boardWidget({ name, tabId, contentKind: "plugin", pluginKind: "session:report" });
+    const view = await mount({
+      snapshot: snapshot({
+        tabs: [
+          ...snapshot().tabs,
+          { tabId: "later", title: "Later", position: 2, chatDock: "right" },
+        ],
+        widgets: [boardWidget(), report("next-report", "ops"), report("later-report", "later")],
+      }),
+    });
+    expect(view.querySelectorAll("openclaw-board-widget-cell")).toHaveLength(1);
+    await vi.waitFor(
+      () => expect(view.querySelectorAll("openclaw-board-widget-cell")).toHaveLength(2),
+      { timeout: 2000 },
+    );
+    const prepared = [...view.querySelectorAll("openclaw-board-widget-cell")].find(
+      (cell) => cell.widget?.name === "next-report",
+    )!;
+    expect(prepared.hidden).toBe(true);
+    expect(prepared.active).toBe(false);
+    expect(prepared.querySelector("openclaw-report-widget")).toBeNull();
+    view.activeTabId = "ops";
+    await settleCells(view);
+    expect(prepared.hidden).toBe(false);
+    expect(prepared.active).toBe(true);
+    expect(prepared.isConnected).toBe(true);
+    // A visited card moved to an unvisited tab still has its original lifetime.
+    view.snapshot = {
+      ...view.snapshot!,
+      widgets: view.snapshot!.widgets.map((widget) =>
+        widget.name === "next-report" ? { ...widget, tabId: "later" } : widget,
+      ),
+    };
+    await settleCells(view);
+    view.snapshot = { ...view.snapshot!, revision: 2 };
+    await settleCells(view);
+    expect(prepared.isConnected).toBe(true);
+    view.remove();
+  });
+
   it("keeps active and retained frames quiet for unrelated Gateway publications", async () => {
     const context = gatewayContext(null);
     const listeners = new Set<Parameters<typeof context.gateway.subscribe>[0]>();

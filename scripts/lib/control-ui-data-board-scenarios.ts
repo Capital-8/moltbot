@@ -10,6 +10,10 @@ import {
   controlUiSessionPath,
   type MockGatewayControls,
 } from "../../ui/src/test-helpers/control-ui-e2e.ts";
+import {
+  installChatActionObservation,
+  readChatActionObservation,
+} from "./control-ui-chat-composer-scenarios.ts";
 import { navigation, openInteractionPanel } from "./control-ui-interaction-navigation.ts";
 import type {
   InteractionEvidence,
@@ -866,6 +870,73 @@ export const dataBoardScenarios: readonly InteractionScenario[] = [
       await page.locator(`${boardHost} [data-board-tab-id="data-1"]`).click();
       await waitForBoard(page, 1);
       return boardReportCounts(page);
+    },
+  },
+  {
+    id: "data-board-tab-switch-idle",
+    explicitOnly: true,
+    dataPage: "board",
+    route: controlUiSessionPath(sessionKey),
+    expected: "After a three-second reading pause, switching adopts prepared adjacent cards.",
+    fixtureOverrides: () => createDataBoardFixture(),
+    rowSelector: "openclaw-board-widget-cell",
+    prepare: async (page) => {
+      await prepareBoard(page);
+      // Equal reading time on base and head, including a base without speculation.
+      await page.waitForTimeout(3000);
+    },
+    run: async (page) => {
+      const before = await boardReportCounts(page);
+      await page.locator(`${boardHost} [data-board-tab-id="data-1"]`).click();
+      await waitForBoard(page, 1);
+      return { preparedCells: before.widgetCells, ...(await boardReportCounts(page)) };
+    },
+  },
+  {
+    id: "data-board-preparing-input",
+    explicitOnly: true,
+    dataPage: "board",
+    route: controlUiSessionPath(sessionKey),
+    expected: "Typing, opening a card menu and scrolling interrupt adjacent-tab preparation.",
+    fixtureOverrides: () => createDataBoardFixture(),
+    prepare: prepareBoard,
+    run: async (page, gateway) => {
+      await page.locator(`${boardHost} [data-board-tab-id="data-1"]`).click();
+      await waitForBoard(page, 1);
+      const input = page.locator(
+        ".chat-pane-cache__pane--active .agent-chat__composer-combobox textarea",
+      );
+      const sends = (await gateway.getRequests("chat.send")).length;
+      await input.focus();
+      const before = await boardReportCounts(page);
+      await installChatActionObservation(page);
+      await input.pressSequentially("Synthetic typing 0123456789", { delay: 30 });
+      const observed = await readChatActionObservation(page);
+      if ((await input.inputValue()) !== "Synthetic typing 0123456789") {
+        throw new Error("Board preparation lost the composer draft");
+      }
+      if ((await gateway.getRequests("chat.send")).length !== sends) {
+        throw new Error("Typing must not send a chat request");
+      }
+      const afterTyping = await boardReportCounts(page);
+      if (afterTyping.widgetCells !== before.widgetCells) {
+        throw new Error("Board preparation continued during typing");
+      }
+      const trigger = page.locator(
+        `${boardHost} [data-widget-name="data-widget-250"] .board-widget__menu-trigger`,
+      );
+      await trigger.click();
+      await page.locator(".board-widget__menu-panel:visible").waitFor();
+      await page.keyboard.press("Escape");
+      const scroll = await scrollSurface(page, boardHost);
+      return {
+        ...scroll,
+        ...afterTyping,
+        nativeInputs: observed.nativeInputs,
+        inputFrameP95Ms: observed.inputFrameP95Ms ?? 0,
+        inputFrameMaxMs: observed.inputFrameMaxMs ?? 0,
+        draftPreserved: true,
+      };
     },
   },
   boardLiveUpdateScenario("data-board-live-update", tabCount * widgetsPerTab),
