@@ -33,6 +33,7 @@ extension GatewayProcessManagerTests {
             try invalid.write(to: configURL, options: .atomic)
             manager.desiredActive = wasActive
 
+            @MainActor
             func retireFixture() async {
                 let startup = manager.gatewayStartTask
                 manager._testResetGatewayStartTask()
@@ -85,24 +86,37 @@ extension GatewayProcessManagerTests {
 
     @Test(.testWaitLimit)
     func `companion port conflict still blocks background recovery`() async throws {
+        // Enabling config sync on the app singleton is process-lifetime. Keep
+        // that fixture state and queued endpoint publications out of the parent runner.
+        await #expect(processExitsWith: .success) {
+            try await GatewayProcessManagerTests.checkCompanionPortConflict()
+        }
+    }
+
+    @MainActor
+    private static func checkCompanionPortConflict() async throws {
+        let fixture = GatewayProcessManagerTests()
         let port = AppProfile.current.defaultGatewayPort
-        try await self.withLaunchAgentEnvironment(mode: "remote", port: port) {
+        try await fixture.withLaunchAgentEnvironment(mode: "remote", port: port) {
             let manager = GatewayProcessManager()
             let app = AppStateStore.shared
-            let previousCompanion = app.hostsLocalGatewayWithRemotePrimary
-            let previousMode = app.connectionMode
-            app.hostsLocalGatewayWithRemotePrimary = true
-            defer {
-                app.hostsLocalGatewayWithRemotePrimary = previousCompanion
-                app.connectionMode = previousMode
-            }
+            app._testEnableGatewayConfigSync()
+            let remoteURL = try #require(URL(string: "ws://127.0.0.1:\(port + 1)"))
+            try app.setPrimaryGateway(.direct(url: remoteURL, token: nil, password: nil, tlsFingerprint: nil))
+            try app.setHostsLocalGatewayWithRemotePrimary(true)
+            await app._testAwaitGatewayConfigSync()
+            try #require(app.hostsLocalGatewayWithRemotePrimary)
+
+            // Enable hosting through its owner with distinct ports, then model
+            // an external file edit that makes the primary collide with the companion.
             let configURL = OpenClawPaths.configURL
-            let config = try JSONSerialization.data(withJSONObject: [
-                "gateway": [
-                    "mode": "remote", "port": port,
-                    "remote": ["transport": "direct", "url": "ws://127.0.0.1:\(port)"],
-                ],
-            ])
+            var root = OpenClawConfigFile.loadDict()
+            var gateway = try #require(root["gateway"] as? [String: Any])
+            var remote = try #require(gateway["remote"] as? [String: Any])
+            remote["url"] = "ws://127.0.0.1:\(port)"
+            gateway["remote"] = remote
+            root["gateway"] = gateway
+            let config = try JSONSerialization.data(withJSONObject: root)
             try config.write(to: configURL, options: .atomic)
             manager.setActive(true)
             #expect(!manager.desiredActive)
@@ -113,25 +127,6 @@ extension GatewayProcessManagerTests {
             #expect(manager.status == failure)
             #expect(manager.gatewayStartTask == nil)
             try #expect(Data(contentsOf: configURL) == config)
-
-            // A remote primary does not project local unavailability. Observe the
-            // queued conflict on a local fixture before clearing it, so it cannot
-            // publish into another test after this scope releases its environment.
-            let local = try JSONSerialization.data(withJSONObject: [
-                "gateway": ["mode": "local", "port": port],
-            ])
-            try local.write(to: configURL, options: .atomic)
-            app.connectionMode = .local
-            let store = GatewayEndpointStore.shared
-            var published = false
-            for await state in await store.subscribe() {
-                if case let .unavailable(.local, reason, _) = state, reason == manager.lastFailureReason {
-                    published = true
-                    break
-                }
-            }
-            #expect(published)
-            await store.setLocalUnavailableReason(nil)
         }
     }
 }
