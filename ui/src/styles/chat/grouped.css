@@ -532,13 +532,10 @@
   justify-content: center;
 }
 
-/* Each action row consumes only its own message's disclosure state. */
-.chat-group {
+/* Footer disclosure must not invalidate the whole message subtree on hover. */
+.chat-group > .chat-group-footer {
   --chat-final-disclosure-opacity: 0;
   --chat-final-disclosure-pointer-events: none;
-}
-
-.chat-group > .chat-group-footer {
   --chat-footer-disclosure-opacity: var(--chat-final-disclosure-opacity);
   --chat-footer-disclosure-pointer-events: var(--chat-final-disclosure-pointer-events);
   --chat-message-action-opacity: calc(var(--chat-final-disclosure-opacity) * 0.6);
@@ -601,33 +598,37 @@
 }
 
 /* A frame with only its closing toolbar is one message hit target; grouped
-   frames disclose each earlier row separately. Keep :has() on its subject to
-   bound invalidation, and hover separate from focus/touch for the build guard. */
+   frames disclose each earlier row separately. Change only the footer's
+   inherited properties, keeping hover separate from focus/touch. */
 .chat-group:not(
     :has(> .chat-group-messages > :is(.chat-message-actions-row, .chat-message-footer))
-  ):hover,
+  ):hover
+  > .chat-group-footer,
 .chat-group:has(
-  > .chat-group-messages > .chat-bubble:last-child:hover,
-  > .chat-group-messages > .chat-message--reply:last-child > .chat-bubble:hover,
-  > .chat-group-messages > .chat-agent-run-body:hover
-) {
+    > .chat-group-messages > .chat-bubble:last-child:hover,
+    > .chat-group-messages > .chat-message--reply:last-child > .chat-bubble:hover,
+    > .chat-group-messages > .chat-agent-run-body:hover
+  )
+  > .chat-group-footer {
   --chat-final-disclosure-opacity: 1;
   --chat-final-disclosure-pointer-events: auto;
   --chat-footer-detail-position: static;
 }
 
-.chat-group:not(.chat-group--peer).chat-group--meta-revealed,
+.chat-group:not(.chat-group--peer).chat-group--meta-revealed > .chat-group-footer,
 .chat-group:not(
     :has(> .chat-group-messages > :is(.chat-message-actions-row, .chat-message-footer))
-  ):focus-within,
+  ):focus-within
+  > .chat-group-footer,
 .chat-group:has(
-  > .chat-group-messages
-    > .chat-bubble:last-child:is(:focus-within, .chat-bubble--actions-revealed),
-  > .chat-group-messages
-    > .chat-message--reply:last-child
-    > .chat-bubble:is(:focus-within, .chat-bubble--actions-revealed),
-  > .chat-group-messages > .chat-agent-run-body:focus-within
-) {
+    > .chat-group-messages
+      > .chat-bubble:last-child:is(:focus-within, .chat-bubble--actions-revealed),
+    > .chat-group-messages
+      > .chat-message--reply:last-child
+      > .chat-bubble:is(:focus-within, .chat-bubble--actions-revealed),
+    > .chat-group-messages > .chat-agent-run-body:focus-within
+  )
+  > .chat-group-footer {
   --chat-final-disclosure-opacity: 1;
   --chat-final-disclosure-pointer-events: auto;
   --chat-footer-detail-position: static;
