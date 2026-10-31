@@ -44,6 +44,7 @@ import {
   createChatSendDispatchErrorLifecycle,
   resolveChatSendReturnedOutcome,
 } from "./chat-send-dispatch-errors.js";
+import { runChatSendExternalDispatch } from "./chat-send-external-dispatch.js";
 import {
   createChatSendInjectionDisposition,
   finalizeAcceptedChatSendMessageInjection,
@@ -76,7 +77,6 @@ export function startChatDispatch(params: StartChatDispatchParams): Promise<void
     skillLibrary,
     cronCreatorAuthority,
     assertDashboardReadCurrent,
-    externalAuthorityAdmission,
     injection,
     request,
     session,
@@ -450,6 +450,8 @@ export function startChatDispatch(params: StartChatDispatchParams): Promise<void
                   ...getRpcSourceIdentity(admission.sourceRef),
                   ownerConnId: admission.sourceRef.adapter.requester?.connectionId,
                   ownerDeviceId: admission.sourceRef.adapter.requester?.deviceId,
+                  initiatingPersonalOperator:
+                    admission.sourceRef.adapter.initiatingPersonalOperator,
                   controlUiVisible: admission.sourceRef.adapter.controlUiVisible,
                   turnKind: admission.sourceRef.adapter.turnKind,
                 },
@@ -462,14 +464,7 @@ export function startChatDispatch(params: StartChatDispatchParams): Promise<void
                   ),
                 ),
             );
-          const runDispatch = () =>
-            cronCreatorAuthority && externalAuthorityAdmission
-              ? externalAuthorityAdmission.run(
-                  cronCreatorAuthority,
-                  dispatchWithRetry,
-                  activeRunAbort.controller.signal,
-                )
-              : dispatchWithRetry();
+          const runDispatch = () => runChatSendExternalDispatch(params, dispatchWithRetry);
           // A ready workspace still needs a fresh scope: internal continuations may retain
           // the previous chat run's preparation even after its ownership has ended.
           const dispatchResult = await runWithAgentWorkspaceReadiness(
