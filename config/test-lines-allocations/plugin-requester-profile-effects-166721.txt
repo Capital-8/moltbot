@@ -1,0 +1,2 @@
+# Issue 166721: real TLS/WebSocket ingress, model transport, plugin loading, HTTP read/draft artifact effects, and public role/disconnect rejection.
+419
