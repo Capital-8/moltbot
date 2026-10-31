@@ -1,4 +1,4 @@
-import { decisionBatchV2ToV1, decisionResultV1ToV2 } from "openclaw/plugin-sdk/decisions";
+import { decisionBatchV2ToV1, validateDecisionResultV2 } from "openclaw/plugin-sdk/decisions";
 import type {
   DecisionAnswer,
   DecisionBatch,
@@ -233,8 +233,9 @@ export function createPreparedOnnxProvider(
       if (outcome.status !== "ok") {
         return outcome;
       }
-      const result = decisionResultV1ToV2(v1, outcome.result);
-      return result
+      // Softmax produces nonzero estimates; retain route checks on the original V2 batch.
+      const result = outcome.result;
+      return validateDecisionResultV2(batch, result, context.model.inference?.decision)
         ? { status: "ok", result }
         : { status: "unavailable", reason: "invalid-response" };
     },

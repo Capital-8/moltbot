@@ -20,7 +20,23 @@ beforeEach(() => vi.resetAllMocks());
 
 const preparedContext = (): DecisionProviderContextV2 => ({
   ...context(),
-  model: { id: model, provider: "onnx", name: "GLiClass Edge" },
+  model: {
+    id: model,
+    provider: "onnx",
+    name: "GLiClass Edge",
+    inference: {
+      chat: false,
+      decision: {
+        protocol: "onnx-classifier",
+        input: ["text"],
+        questions: {
+          boolean: { probabilities: "boolean", abstention: false, requiresCriteria: true },
+          choice: { probabilities: "categorical", abstention: false },
+          score: { probabilities: "categorical", abstention: false },
+        },
+      },
+    },
+  },
   config: {},
   auth: { apiKey: "onnx-local", mode: "api-key" },
   isAdmissible: () => true,
@@ -109,6 +125,50 @@ const batch: DecisionBatch = {
     mentioned: { type: "boolean", criteria: { true: "holiday", false: "no holiday" } },
   },
 };
+
+it.each([
+  { name: "uniform", logits: [0, 0], probabilities: { trip: 0.5, cash: 0.5 } },
+  { name: "underflow", logits: [1000, -1000], probabilities: { trip: 1, cash: 0 } },
+])("retains a nonzero $name classifier distribution and measured zero usage", async (fixture) => {
+  classify.mockResolvedValue([{ logits: fixture.logits, inputTokens: 0 }]);
+  const input = decisionBatchV1ToV2({
+    state: "Synthetic topic",
+    questions: { topic: batch.questions.topic },
+  })!;
+  expect(await prepared.evaluate(input, preparedContext())).toEqual({
+    status: "ok",
+    result: {
+      model,
+      answers: { topic: { type: "choice", choice: "trip", probabilities: fixture.probabilities } },
+      usage: { inputTokens: 0 },
+    },
+  });
+});
+
+it.each([
+  { name: "empty logits", logits: [], inputTokens: 1 },
+  { name: "short logits", logits: [0], inputTokens: 1 },
+  { name: "NaN logits", logits: [Number.NaN, 0], inputTokens: 1 },
+  { name: "infinite logits", logits: [Number.POSITIVE_INFINITY, 0], inputTokens: 1 },
+  {
+    name: "negative infinite logits",
+    logits: [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY],
+    inputTokens: 1,
+  },
+  { name: "negative usage", logits: [0, 0], inputTokens: -1 },
+  { name: "NaN usage", logits: [0, 0], inputTokens: Number.NaN },
+  { name: "infinite usage", logits: [0, 0], inputTokens: Number.POSITIVE_INFINITY },
+])("rejects $name from the worker before returning a prepared result", async (fixture) => {
+  classify.mockResolvedValue([fixture]);
+  const input = decisionBatchV1ToV2({
+    state: "Synthetic topic",
+    questions: { topic: batch.questions.topic },
+  })!;
+  expect(await prepared.evaluate(input, preparedContext())).toEqual({
+    status: "unavailable",
+    reason: "invalid-response",
+  });
+});
 
 it.each(["list", "reasoning", "bare"] as const)("rejects %s before dispatch", async (kind) => {
   if (kind === "bare") {
