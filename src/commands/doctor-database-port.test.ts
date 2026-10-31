@@ -37,7 +37,9 @@ describe("native Windows database port", () => {
         }
         expect(await fs.readFile(database, "utf8")).toBe("retained state bytes");
         expect(await fs.readFile(state.configPath)).toEqual(configBefore);
-        expect((await fs.readdir(state.stateDir, { recursive: true })).toSorted()).toEqual(filesBefore);
+        expect((await fs.readdir(state.stateDir, { recursive: true })).toSorted()).toEqual(
+          filesBefore,
+        );
       });
     },
   );

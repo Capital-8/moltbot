@@ -550,10 +550,6 @@ describeLive("gateway live trajectory export", () => {
       });
       logLiveStep("agent-turn:done", { firstReply });
       expect(firstReply.trim()).toBe(replyToken);
-      // The native harness retires its runtime-config owner when the first turn
-      // settles. Republish this fixture before the follow-up gateway command.
-      useLiveTestRuntimeConfig(config);
-
       const { entry, storePath } = await loadSessionEntryAsync(sessionKey);
       if (!entry?.sessionId) {
         throw new Error(`live trajectory session was not persisted: ${sessionKey}`);
@@ -574,6 +570,9 @@ describeLive("gateway live trajectory export", () => {
       const exportRunId = `chat-export-${randomUUID()}`;
       const exportEventStartIndex = gatewayEvents.length;
       logLiveStep("export:start", { bundleDir, exportRunId });
+      // The native harness retires its runtime-config owner when the first turn
+      // settles. Republish at the follow-up boundary after post-turn reads.
+      useLiveTestRuntimeConfig(config);
       const exportResponse = (await client.request(
         "chat.send",
         {
