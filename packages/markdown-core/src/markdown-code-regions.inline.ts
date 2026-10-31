@@ -1,7 +1,11 @@
 import { expectDefined } from "@openclaw/normalization-core";
 // Range-only CommonMark scanner. HTML is text; GFM tables retain cell ownership.
 type InlineSpan = { start: number; end: number };
-type InlineFacts = { referenceCandidate?: boolean; unresolvedImageCodeStart?: number };
+type InlineFacts = {
+  referenceCandidate?: boolean;
+  literalReferenceCandidate?: number;
+  unresolvedImageCodeStart?: number;
+};
 const normalizeReference = (value: string): string =>
   value
     .replace(/\0/gu, "\uFFFD")
@@ -227,7 +231,7 @@ export function scanInlineCode(
     next.set(run[0].length, run.index + run[0].length);
   }
   const regions: InlineSpan[] = [];
-  const brackets: Array<{ alive: boolean }> | undefined = facts ? [] : undefined;
+  const brackets: Array<{ alive: boolean; at?: number }> | undefined = facts ? [] : undefined;
   const unresolved: InlineSpan[] = [];
   const starts: Array<{
     at: number;
@@ -269,7 +273,7 @@ export function scanInlineCode(
     const char = text.charAt(at);
     if (char === "\\" && punctuation(text[at + 1])) {
       if (text[at + 1] === "[") {
-        brackets?.push({ alive: true });
+        brackets?.push({ alive: true, at: at + 1 });
       }
       at += 2;
       continue;
@@ -311,13 +315,17 @@ export function scanInlineCode(
             body,
           )
         ) {
+          const bracket = body.lastIndexOf("[");
+          if (bracket >= 0) {
+            brackets?.push({ alive: true, at: at + 1 + bracket });
+          }
           at = end + 1;
           continue;
         }
       }
     }
     if (char === "[" || (char === "!" && text[at + 1] === "[")) {
-      const literal = brackets ? { alive: true } : undefined;
+      const literal = brackets ? { alive: true, at: char === "!" ? at + 1 : at } : undefined;
       const opener = {
         at: char === "!" ? at + 1 : at,
         image: char === "!",
@@ -388,6 +396,9 @@ export function scanInlineCode(
       }
     }
     facts.referenceCandidate = brackets?.some((bracket) => bracket.alive);
+    facts.literalReferenceCandidate = brackets?.findLast(
+      (bracket) => bracket.alive && bracket.at !== undefined,
+    )?.at;
     const live = new Set(regions);
     for (const region of unresolved) {
       if (

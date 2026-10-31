@@ -13,7 +13,7 @@ export type Root = {
 export type MarkdownCodeOwnership = {
   regions: Region[];
   codeSpans: Array<[number, number]>;
-  textSpans: Array<[number, number]>;
+  hasReferenceCandidate: boolean;
   retainStart: number;
   unsettledParagraph?: true;
   completedParagraphs: Array<{ start: number; end: number; hasReferenceCandidate: boolean }>;
@@ -30,7 +30,7 @@ export function collectMarkdownOwnership(
   candidates: Set<Root>,
   unresolvedImageCodeStart: number | undefined,
   openFence: { char: string; size: number } | undefined,
-  includeText: boolean | undefined,
+  lastReferenceCandidate: number | undefined,
 ): MarkdownCodeOwnership {
   const metadataRoots: Root[] = [];
   for (const root of roots) {
@@ -53,7 +53,7 @@ export function collectMarkdownOwnership(
     const previous = metadataRoots.at(-2);
     if (
       previous?.kind === "paragraph" &&
-      !/[\r\n][ \t]*[\r\n]/u.test(text.slice(previous.end, last.start))
+      !/(?:\r\n|\r(?!\n)|\n)[ \t]*[\r\n]/u.test(text.slice(previous.end, last.start))
     ) {
       retainStart = Math.min(retainStart, previous.start);
     }
@@ -90,7 +90,7 @@ export function collectMarkdownOwnership(
       next = expectDefined(metadataRoots[i + 1], "Markdown scan position");
     if (
       root.kind === "paragraph" &&
-      /(?:\r\n|\r|\n)[ \t]*(?:\r\n|\r|\n)/u.test(text.slice(root.end, next.start))
+      /(?:\r\n|\r(?!\n)|\n)[ \t]*[\r\n]/u.test(text.slice(root.end, next.start))
     ) {
       completedParagraphs.push({
         start: root.start,
@@ -121,23 +121,11 @@ export function collectMarkdownOwnership(
       }
     }
   }
-  const textSpans: Array<[number, number]> = [];
-  if (includeText) {
-    let start = 0;
-    for (const region of regions) {
-      if (region.start > start) {
-        textSpans.push([start, region.start]);
-      }
-      start = region.end;
-    }
-    if (start < text.length) {
-      textSpans.push([start, text.length]);
-    }
-  }
   return {
     regions,
     codeSpans: regions.map(({ start, end }): [number, number] => [start, end]),
-    textSpans,
+    hasReferenceCandidate:
+      lastReferenceCandidate !== undefined && lastReferenceCandidate >= retainStart,
     retainStart,
     ...(last?.kind === "paragraph" && retainStart <= last.start
       ? { unsettledParagraph: true as const }

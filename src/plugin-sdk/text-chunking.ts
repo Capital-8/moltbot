@@ -1,6 +1,6 @@
-// Text chunking helpers split long outbound text while preserving readable line boundaries.
-import { findMarkdownCodeRegions } from "../../packages/markdown-core/src/markdown-code-regions.js";
 import { findMarkdownCodeRegions as findCodeSourceRegions } from "../../packages/markdown-core/src/reasoning-tag-parser.js";
+// Text chunking helpers split long outbound text while preserving readable line boundaries.
+import { findMarkdownCodeRegions } from "../../packages/markdown-core/src/reasoning-tags.js";
 import { chunkTextByBreakResolver, splitLongTextLine } from "../shared/text-chunking.js";
 
 /** Offset-preserving text ranges for transports with native style metadata. */

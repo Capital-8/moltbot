@@ -6,10 +6,10 @@ const { markdownParserPath, markdownTokenizerPath } = await vi.hoisted(async () 
   const require = createRequire(
     new URL("../../packages/markdown-core/package.json", import.meta.url),
   );
-  const markdownParserPath = require.resolve("mdast-util-from-markdown");
+  const parserPath = require.resolve("mdast-util-from-markdown");
   return {
-    markdownParserPath,
-    markdownTokenizerPath: createRequire(markdownParserPath).resolve("micromark"),
+    markdownParserPath: parserPath,
+    markdownTokenizerPath: createRequire(parserPath).resolve("micromark"),
   };
 });
 

@@ -34,6 +34,9 @@ describe("range-only Markdown ownership", () => {
   });
 
   it.each([
+    "\uFEFF`x`",
+    "\uFEFF```js\nx\n```",
+    "\uFEFF![`alt`][id]\n\n[id]: /image",
     "> ```xml\n> <internal>literal</internal>\n> ",
     "- item\n\n      <parameter>literal</parameter>\n\n      ",
     "| a | b |\n| - | - |\n| `a\\|b` | y |",

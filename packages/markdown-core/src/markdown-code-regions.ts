@@ -74,19 +74,19 @@ const spaces = (text: string, at: number) => {
 function fenceAt(text: string, at: number) {
   const prefix = spaces(text, at);
   if (prefix > 3) {
-    return;
+    return undefined;
   }
   const start = at + prefix;
   const char = text[start];
   if (char !== "`" && char !== "~") {
-    return;
+    return undefined;
   }
   let end = start;
   while (text[end] === char) {
     end++;
   }
   if (end - start < 3 || (char === "`" && text.slice(end).includes("`"))) {
-    return;
+    return undefined;
   }
   return { start, end, char, size: end - start };
 }
@@ -100,11 +100,11 @@ function listAt(line: Line, at: number, interrupt: boolean) {
   const text = line.body;
   const prefix = spaces(text, at);
   if (prefix > 3) {
-    return;
+    return undefined;
   }
   const match = /^(?:([-+*])|(\d{1,9})([.)]))( +|$)/u.exec(text.slice(at + prefix));
   if (!match || thematic(line, at)) {
-    return;
+    return undefined;
   }
   const marker = match[1]?.length ?? expectDefined(match[2], "Markdown scan position").length + 1;
   const after = at + prefix + marker;
@@ -115,7 +115,7 @@ function listAt(line: Line, at: number, interrupt: boolean) {
     interrupt &&
     ((match[2] !== undefined && match[2] !== "1") || after + padding === text.length)
   ) {
-    return;
+    return undefined;
   }
   return { content, indent: content - at, empty: after + padding === text.length };
 }
@@ -193,7 +193,7 @@ function translated(parts: Part[], spans: Array<{ start: number; end: number }>)
   };
   return spans.map((span) => ({ start: point(span.start), end: point(span.end), block: false }));
 }
-type ScanOptions = { syntax?: "commonmark" | "gfm"; includeText?: boolean };
+type ScanOptions = { syntax?: "commonmark" | "gfm" };
 function scanMarkdown(
   text: string,
   options: ScanOptions | undefined,
@@ -201,10 +201,12 @@ function scanMarkdown(
 ): MarkdownCodeOwnership;
 function scanMarkdown(text: string, options: ScanOptions | undefined, ownership: false): Region[];
 function scanMarkdown(
-  text: string,
+  rawText: string,
   options: ScanOptions | undefined,
   ownership: boolean,
 ): MarkdownCodeOwnership | Region[] {
+  // Micromark drops an initial BOM before positions, but retention uses the original input.
+  const text = rawText.startsWith("\uFEFF") ? rawText.slice(1) : rawText;
   const roots: Root[] | undefined = ownership ? [] : undefined;
   const owners = ownership ? new Map<Block, Root>() : undefined;
   let activeRoot: Root | undefined;
@@ -617,13 +619,18 @@ function scanMarkdown(
   const regions: Region[] = [];
   const candidates = new Set<Root>();
   let unresolvedImageCodeStart: number | undefined;
+  let lastReferenceCandidate: number | undefined;
   for (const entry of prepared) {
     if (!("value" in entry)) {
       regions.push(entry);
       continue;
     }
     const { block, value, definitionEnd } = entry;
-    const facts: { referenceCandidate?: boolean; unresolvedImageCodeStart?: number } = {};
+    const facts: {
+      referenceCandidate?: boolean;
+      unresolvedImageCodeStart?: number;
+      literalReferenceCandidate?: number;
+    } = {};
     const inline = scanInlineCode(
       value.slice(definitionEnd),
       defined,
@@ -637,6 +644,13 @@ function scanMarkdown(
       continue;
     }
     const root = expectDefined(owners?.get(block), "Markdown scan position");
+    if (facts.literalReferenceCandidate !== undefined) {
+      const position = facts.literalReferenceCandidate + definitionEnd;
+      lastReferenceCandidate = expectDefined(
+        translated(block.parts, [{ start: position, end: position }])[0],
+        "Markdown reference position",
+      ).start;
+    }
     if (facts.referenceCandidate) {
       candidates.add(root);
     }
@@ -648,14 +662,14 @@ function scanMarkdown(
     return regions;
   }
   return collectMarkdownOwnership(
-    text,
+    rawText,
     expectDefined(roots, "Markdown ownership roots"),
     definitions,
     regions,
     candidates,
     unresolvedImageCodeStart,
     openFence,
-    options?.includeText,
+    lastReferenceCandidate,
   );
 }
 
@@ -667,7 +681,7 @@ export function findMarkdownCodeRegions(
 }
 export function findMarkdownCodeOwnership(
   text: string,
-  options?: { syntax?: "commonmark" | "gfm"; includeText?: boolean },
+  options?: { syntax?: "commonmark" | "gfm" },
 ) {
   return scanMarkdown(text, options, true);
 }

@@ -164,9 +164,8 @@ function captureIndentedSources(
 
 /** Parse semantic source maps and text nodes for renderers that need a Markdown tree. */
 export function parseMarkdownOwnership(text: string, options?: MarkdownOwnershipOptions) {
-  const paragraphs = options?.includeIndentedSource
-    ? ([] as Array<{ start: number; end: number }>)
-    : undefined;
+  const paragraphs: Array<{ start: number; end: number }> | undefined =
+    options?.includeIndentedSource ? [] : undefined;
   const regions: MarkdownCodeRegion[] = [];
   const textSpans: Array<[number, number]> = [];
   const sources = new Map<number, MarkdownInlineSource>();

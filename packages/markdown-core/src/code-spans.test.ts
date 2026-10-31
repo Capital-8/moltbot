@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildCodeSpanIndex } from "./code-spans.js";
+import { findMarkdownCodeRegions } from "./markdown-code-regions.js";
 import { findMarkdownCodeRegions as findCodeSourceRegions } from "./reasoning-tag-parser.js";
-import { findMarkdownCodeRegions } from "./reasoning-tags.js";
 
 describe("buildCodeSpanIndex", () => {
   it("supports backward queries over inline code that encloses a fence", () => {

@@ -4,7 +4,7 @@ import {
   advanceProtectionScanState,
   createProtectionScanState,
 } from "../../../packages/tool-call-repair/src/protection-fast-path.js";
-import { findCodeRegions, isInsideCode } from "./code-ranges.js";
+import { findCodeRegions } from "./code-ranges.js";
 
 export { findCodeOwnership, findCodeRegions };
 export type { CodeRegion } from "./code-ranges.js";

@@ -57,8 +57,13 @@ function createCodeRegionCursor(text: string) {
     regions ??= findCodeRegions(text);
     let cursor = blockOnly ? blockIndex : index;
     let region = regions[cursor];
-    while (region && (region.end <= offset || (blockOnly && !region.block))) {
+    while (region && region.end <= offset) {
       region = regions[++cursor];
+    }
+    if (blockOnly) {
+      while (region && !region.block) {
+        region = regions[++cursor];
+      }
     }
     if (blockOnly) {
       blockIndex = cursor;
