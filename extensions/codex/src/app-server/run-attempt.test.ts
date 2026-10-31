@@ -2337,8 +2337,8 @@ describe("runCodexAppServerAttempt", () => {
     expect(retireSpy).toHaveBeenCalledWith(state.client);
     expect(closeAndWait).toHaveBeenCalledOnce();
     expect(closeAndWait).toHaveBeenCalledWith({
-      exitTimeoutMs: 2_000,
-      forceKillDelayMs: 1_500,
+      exitTimeoutMs: 6_000,
+      forceKillDelayMs: 5_000,
     });
     expect(removeAbortListener).toHaveBeenCalledWith("abort", expect.any(Function));
   });

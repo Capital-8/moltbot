@@ -63,11 +63,11 @@ import { createCodexTrajectoryRecorder } from "./trajectory.js";
 import type { CodexAppServerTurnRouter, CodexThreadRouteReservation } from "./turn-router.js";
 
 const CODEX_ONE_SHOT_CLIENT_CLOSE_OPTIONS = {
-  exitTimeoutMs: 2_000,
-  // A clean Codex shutdown may spend several hundred milliseconds flushing its
-  // state database after stdin closes. Preserve that bounded grace period so a
-  // normal isolated-client exit is not converted into a forced, uncertain receipt.
-  forceKillDelayMs: 1_500,
+  exitTimeoutMs: 6_000,
+  // A clean Codex shutdown can spend several seconds flushing its state database
+  // after stdin closes under release-path load. Preserve a bounded grace period
+  // so that work is not converted into a forced, uncertain cleanup receipt.
+  forceKillDelayMs: 5_000,
 } as const;
 
 export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
