@@ -983,6 +983,16 @@ try {
             );
             await waitForControlUiInitialRoster(page, 15_000 * cpuThrottle);
             await scenario.prepare(page, gateway);
+            if (scenario.idleModule) {
+              const pattern = await builtModuleRequest(slot.directory, scenario.idleModule);
+              await page.waitForFunction(
+                ({ source, flags }) =>
+                  performance
+                    .getEntriesByType("resource")
+                    .some((entry) => new RegExp(source, flags).test(entry.name)),
+                { source: pattern.source, flags: pattern.flags },
+              );
+            }
             if (
               nativeVisibility &&
               (scenario.fixture?.boardFrameResources ||

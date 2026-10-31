@@ -124,6 +124,8 @@ export type InteractionScenario = {
   expected: string;
   /** Opt-in first-open cells; ordinary scenarios retain full warm preparation. */
   firstOpenPhase?: "ready" | "idle";
+  /** Post-idle proof waits for this emitted module's resource receipt before opening. */
+  idleModule?: string;
   /** Non-menu outcomes measure content readiness without inventing a focus transition. */
   firstOpenFocus?: "not-applicable";
   /** Diagnostic only: hold one emitted module until the loading assertions finish. */
@@ -1739,10 +1741,13 @@ type ColdRouteControl = {
   id: string;
   newSession?: boolean;
   phase?: "ready" | "idle";
+  activation?: "pointer" | "keyboard";
+  idleModule?: string;
   assertNoPaintedFallback?: boolean;
   trigger: string;
   content: string;
   keepsTriggerFocus?: boolean;
+  focusSelector?: string;
   revealOnFocus?: boolean;
   dashboard?: boolean;
   syntheticMicrophone?: boolean;
@@ -1768,7 +1773,9 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
   const fallbackSelector = [
     '[data-value="header-session-loading"]',
     '[data-value="plus-menu-loading"]',
+    '[data-value="microphone-menu-loading"]',
     '[data-value="loading"]',
+    '.chat-controls__model-catalog-state[role="status"]',
     '[role="option"][aria-busy="true"]',
     '[aria-busy="true"] [role="option"]',
   ].join(", ");
@@ -1779,6 +1786,7 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
       "The unopened control exposes real content and its expected focus on first activation.",
     explicitOnly: true,
     firstOpenPhase: control.phase ?? "ready",
+    idleModule: control.phase === "idle" ? control.idleModule : undefined,
     ...(control.moduleGate
       ? {
           diagnostic: "Held/rejected module; never a timing comparison",
@@ -1795,6 +1803,8 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
           fallbackSelector,
           content,
           keepsTriggerFocus,
+          focusSelector,
+          pointer,
           syntheticMicrophone,
           input,
           activationValue,
@@ -1834,7 +1844,7 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
             }
           };
           requestAnimationFrame(recordReady);
-          const eventName = input ? "input" : "keydown";
+          const eventName = input ? "input" : pointer ? "click" : "keydown";
           const recordActivation = (event: Event) => {
             if (
               !(event.target instanceof Element) ||
@@ -1843,7 +1853,9 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
                 ? !(event instanceof InputEvent) ||
                   !(event.target instanceof HTMLTextAreaElement) ||
                   event.target.value !== activationValue
-                : !(event instanceof KeyboardEvent) || event.key !== "Enter" || event.repeat)
+                : pointer
+                  ? !(event instanceof MouseEvent) || event.detail === 0
+                  : !(event instanceof KeyboardEvent) || event.key !== "Enter" || event.repeat)
             ) {
               return;
             }
@@ -1915,7 +1927,8 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
                   : focused instanceof HTMLElement &&
                     focused !== surface &&
                     surface.contains(focused) &&
-                    focused.checkVisibility();
+                    focused.checkVisibility() &&
+                    (!focusSelector || focused.matches(focusSelector));
                 if (!focusRecorded && focusSatisfied) {
                   performance.mark("route-control:raf-observed-focus");
                   focusRecorded = true;
@@ -1937,6 +1950,8 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
           fallbackSelector,
           content: control.content,
           keepsTriggerFocus: control.keepsTriggerFocus ?? false,
+          focusSelector: control.focusSelector,
+          pointer: control.activation === "pointer",
           syntheticMicrophone: control.syntheticMicrophone ?? false,
           input: control.input,
           activationValue: control.seed ? control.input : control.input?.[0],
@@ -1986,8 +2001,14 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
       const trigger = page
         .locator(control.revealOnFocus ? triggerSelector : `${triggerSelector}:visible`)
         .first();
-      // Focus reveals the microphone affordance; it remains inside the action CPU interval.
-      await trigger.focus();
+      if (control.activation === "pointer") {
+        if (control.revealOnFocus) {
+          // Exercise the actual hover reveal, including its native delay.
+          await page.locator(`${scope} .chat-talk-control`).hover();
+        }
+      } else {
+        await trigger.focus();
+      }
       await trigger.waitFor({ state: "visible" });
       const surfaceId = await trigger.getAttribute("aria-controls");
       if (!surfaceId && !control.surface) {
@@ -2011,6 +2032,8 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
           }, control.seed);
         }
         await trigger.pressSequentially(control.input.slice(control.seed?.length ?? 0));
+      } else if (control.activation === "pointer") {
+        await trigger.click();
       } else {
         await trigger.press("Enter");
       }
@@ -2118,6 +2141,8 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
           }, control.seed);
         }
         await trigger.pressSequentially(control.input.slice(control.seed?.length ?? 0));
+      } else if (control.activation === "pointer") {
+        await trigger.click();
       } else {
         await trigger.focus();
         await trigger.press("Enter");
@@ -2389,6 +2414,62 @@ async function searchProviderModels(page: Page) {
     { selector: providerModelPickerSelector, value: providerModelValue },
   );
 }
+
+const chatIdleMenuControls: (ColdRouteControl & { pointerKeepsTriggerFocus?: boolean })[] = [
+  {
+    id: "chat-attach-first-ready-open",
+    requiredRequest: "skills.status",
+    trigger: ".agent-chat__input-btn--attach",
+    content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+    idleModule: "pages/chat/components/chat-composer-plus-menu-content.tsx",
+    pointerKeepsTriggerFocus: true,
+    verifyReopened: verifyPlusSubview,
+  },
+  {
+    id: "chat-microphone-first-ready-open",
+    trigger: ".chat-talk-input-picker__trigger",
+    content: ".chat-talk-input-picker__heading",
+    idleModule: "pages/chat/components/chat-composer-microphone-menu.tsx",
+    pointerKeepsTriggerFocus: true,
+    revealOnFocus: true,
+    syntheticMicrophone: true,
+  },
+  {
+    id: "chat-effort-first-ready-open",
+    trigger: "[data-chat-thinking-select]",
+    surface: ".chat-controls__effort-picker .chat-picker-overlay",
+    content: "[data-chat-thinking-slider]",
+    keepsTriggerFocus: true,
+    idleModule: "pages/chat/components/chat-effort-picker-panel.tsx",
+  },
+  {
+    id: "chat-model-first-ready-open",
+    trigger: '[data-chat-model-select][aria-disabled="false"][aria-busy="false"]',
+    surface: ".chat-controls__model-picker .chat-picker-overlay",
+    content: "[data-chat-model-option]",
+    focusSelector: "[data-chat-model-search]",
+    idleModule: "pages/chat/components/chat-model-picker-panel.tsx",
+  },
+  {
+    id: "chat-dashboard-menu-first-ready-open",
+    trigger: ".chat-dashboard-menu__trigger",
+    content: '[data-value="dashboard-expand"]',
+    idleModule: "pages/chat/components/chat-header-panel-menu-content.tsx",
+    dashboard: true,
+  },
+  {
+    id: "chat-session-menu-first-ready-open",
+    trigger: ".chat-header-session-menu__trigger",
+    content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
+    idleModule: "pages/chat/components/chat-header-session-menu-content.tsx",
+  },
+  {
+    id: "chat-layout-menu-first-ready-open",
+    trigger: ".chat-pane__layout-trigger",
+    content: '[data-value="side-panel"]',
+    idleModule: "pages/chat/components/chat-header-panel-menu-content.tsx",
+  },
+];
 
 export const interactionScenarios: readonly InteractionScenario[] = [
   ...dataActivityLiveScenarios,
@@ -3342,37 +3423,27 @@ export const interactionScenarios: readonly InteractionScenario[] = [
       }
     },
   },
-  coldRouteControlScenario({
-    id: "chat-attach-first-ready-open",
-    requiredRequest: "skills.status",
-    trigger: ".agent-chat__input-btn--attach",
-    content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
-    verifyReopened: verifyPlusSubview,
-  }),
-  coldRouteControlScenario({
-    id: "chat-microphone-first-ready-open",
-    trigger: ".chat-talk-input-picker__trigger",
-    content: ".chat-talk-input-picker__heading",
-    revealOnFocus: true,
-    syntheticMicrophone: true,
-  }),
-  coldRouteControlScenario({
-    id: "chat-effort-first-ready-open",
-    trigger: "[data-chat-thinking-select]",
-    surface: ".chat-controls__effort-picker .chat-picker-overlay",
-    content: "[data-chat-thinking-slider]",
-  }),
-  coldRouteControlScenario({
-    id: "chat-dashboard-menu-first-ready-open",
-    trigger: ".chat-dashboard-menu__trigger",
-    content: '[data-value="dashboard-expand"]',
-    dashboard: true,
-  }),
-  coldRouteControlScenario({
-    id: "chat-session-menu-first-ready-open",
-    trigger: ".chat-header-session-menu__trigger",
-    content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
-  }),
+  ...chatIdleMenuControls.flatMap(({ pointerKeepsTriggerFocus, ...control }) =>
+    (["ready", "idle"] as const).flatMap((phase) =>
+      (["keyboard", "pointer"] as const).map((activation) =>
+        coldRouteControlScenario({
+          ...control,
+          id:
+            (phase === "ready"
+              ? control.id
+              : control.id.replace("first-ready-open", "idle-first-open")) +
+            (activation === "pointer" ? "-pointer" : ""),
+          phase,
+          activation,
+          // Post-idle is already served; retain the visible no-loading-row contract.
+          assertNoPaintedFallback: phase === "idle",
+          keepsTriggerFocus:
+            control.keepsTriggerFocus || (activation === "pointer" && pointerKeepsTriggerFocus),
+          requiredRequest: phase === "ready" ? control.requiredRequest : undefined,
+        }),
+      ),
+    ),
+  ),
   ...firstInputRoutes.map((route) =>
     coldRouteControlScenario({
       id: `${route.id}-slash-first-ready-open`,
@@ -3562,35 +3633,13 @@ export const interactionScenarios: readonly InteractionScenario[] = [
     verifyReopened: verifyPlusSubview,
   }),
   coldRouteControlScenario({
-    id: "chat-layout-menu-first-ready-open",
-    trigger: ".chat-pane__layout-trigger",
-    content: '[data-value="side-panel"]',
+    id: "new-attach-idle-first-open",
+    newSession: true,
+    trigger: ".agent-chat__input-btn--attach",
+    content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+    phase: "idle",
+    assertNoPaintedFallback: true,
   }),
-  ...[
-    {
-      id: "chat-attach-idle-first-open",
-      newSession: false,
-      trigger: ".agent-chat__input-btn--attach",
-      content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
-    },
-    {
-      id: "new-attach-idle-first-open",
-      newSession: true,
-      trigger: ".agent-chat__input-btn--attach",
-      content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
-    },
-    {
-      id: "chat-session-menu-idle-first-open",
-      trigger: ".chat-header-session-menu__trigger",
-      content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
-    },
-  ].map((control) =>
-    coldRouteControlScenario({
-      ...control,
-      phase: "idle",
-      assertNoPaintedFallback: true,
-    }),
-  ),
   {
     id: "model-picker-first-open-search",
     route: controlUiSessionPath(sessionKeys[0]),
