@@ -926,25 +926,27 @@ const transcriptWitness = values["transcript-witness"]
         const witness = witnesses[source];
         witness.rowKey = `group:assistant:msg:id:${witness.messageId}:0`;
         let replacements = 0;
-        const content = message.content.map((value) => {
+        const content = message.content.slice();
+        content.forEach((value, position) => {
           if (
             value.type !== "text" ||
             typeof value.text !== "string" ||
             !value.text.includes(originalText)
           ) {
-            return value;
+            return;
           }
           replacements++;
-          return { ...value, text: value.text.replace(originalText, witness.text) };
+          content[position] = { ...value, text: value.text.replace(originalText, witness.text) };
         });
         if (replacements !== 1) {
           throw new Error("Transcript witness requires exactly one existing fixture paragraph");
         }
-        variants[source] = messages.map((value, position) =>
-          position === index
-            ? { ...message, __openclaw: { ...metadata, id: witness.messageId }, content }
-            : value,
-        );
+        const replacement = { ...message };
+        replacement["__openclaw"] = { ...metadata, id: witness.messageId };
+        replacement.content = content;
+        const variant = messages.slice();
+        variant[index] = replacement;
+        variants[source] = variant;
       }
       // Preserve the visible reaction across both IDs; one unused lookup alias remains per phase.
       const reactions = fixture.scenario.sessionReactions?.[fixture.selectedSessionKey];
