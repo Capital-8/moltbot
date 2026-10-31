@@ -32,6 +32,7 @@ import {
 } from "./run-attempt-test-harness.js";
 import { testCodexAppServerBindingStore } from "./session-binding.test-helpers.js";
 import {
+  getLeasedSharedCodexAppServerClient,
   retainSharedCodexAppServerClientIfCurrent,
   retireSharedCodexAppServerClientIfCurrent,
 } from "./shared-client.js";
@@ -71,6 +72,7 @@ function runOneShot(
   client: CodexAppServerClient,
   abortSignal?: AbortSignal,
   onExecutionPhase?: ReturnType<typeof createParams>["onExecutionPhase"],
+  forceSharedClient = false,
 ) {
   vi.spyOn(CodexAppServerClient, "start").mockResolvedValueOnce(client);
   const params = createParams(path.join(tempDir, "session.jsonl"), path.join(tempDir, "workspace"));
@@ -81,7 +83,10 @@ function runOneShot(
   if (abortSignal) {
     params.abortSignal = abortSignal;
   }
-  return runCodexAppServerAttempt(params, { bindingStore: testCodexAppServerBindingStore });
+  return runCodexAppServerAttempt(params, {
+    bindingStore: testCodexAppServerBindingStore,
+    ...(forceSharedClient ? { clientFactory: getLeasedSharedCodexAppServerClient } : {}),
+  });
 }
 
 setupRunAttemptTestHooks();
@@ -235,7 +240,7 @@ describe("Codex one-shot cleanup receipts", () => {
       const harness = createInferenceReadyClientHarness();
       const warning = vi.spyOn(embeddedAgentLog, "warn");
       let releasePeer: (() => void) | undefined;
-      const run = runOneShot(harness.client);
+      const run = runOneShot(harness.client, undefined, undefined, true);
       try {
         const initialize = await waitForHarnessRequest(harness, "initialize");
         harness.send({

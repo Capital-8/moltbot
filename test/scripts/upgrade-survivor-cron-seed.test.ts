@@ -43,6 +43,20 @@ const live = path.join(process.env.FIXTURE_ROOT, "live");
 const updated = path.join(process.env.FIXTURE_ROOT, "updated");
 const ready = path.join(process.env.FIXTURE_ROOT, "repaired-ready");
 const authenticated = path.join(process.env.FIXTURE_ROOT, "repaired-authenticated");
+const migrateCron = () => {
+  const legacyPath = path.join(state, "cron", "jobs.json");
+  if (!fs.existsSync(legacyPath)) return;
+  const jobs = read(legacyPath).jobs;
+  const databasePath = path.join(state, "state", "openclaw.sqlite");
+  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(databasePath);
+  db.exec("CREATE TABLE cron_jobs (job_id TEXT PRIMARY KEY, job_json TEXT NOT NULL)");
+  const insert = db.prepare("INSERT INTO cron_jobs (job_id, job_json) VALUES (?, ?)");
+  for (const job of jobs) insert.run(job.id, JSON.stringify(job));
+  db.close();
+  fs.rmSync(legacyPath);
+};
 if (args[0] === "fixture-systemctl") {
   assert.equal(args[1], "--user");
   assert.equal(args.at(-1), "openclaw-gateway.service");
@@ -73,17 +87,7 @@ if (args[0] === "fixture-ready") {
 }
 if (args[0] === "doctor") {
   assert.deepEqual(args, ["doctor", "--fix", "--non-interactive"]);
-  const legacyPath = path.join(state, "cron", "jobs.json");
-  const jobs = read(legacyPath).jobs;
-  const databasePath = path.join(state, "state", "openclaw.sqlite");
-  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  const { DatabaseSync } = require("node:sqlite");
-  const db = new DatabaseSync(databasePath);
-  db.exec("CREATE TABLE cron_jobs (job_id TEXT PRIMARY KEY, job_json TEXT NOT NULL)");
-  const insert = db.prepare("INSERT INTO cron_jobs (job_id, job_json) VALUES (?, ?)");
-  for (const job of jobs) insert.run(job.id, JSON.stringify(job));
-  db.close();
-  fs.rmSync(legacyPath);
+  migrateCron();
 } else if (args[0] === "config") {
   assert.deepEqual(args, ["config", "validate"]);
   assert.equal(config, original);
@@ -167,6 +171,7 @@ if (args[0] === "doctor") {
     assert.equal(read(path.join(state, "plugin-runtime-deps", plugin, ".openclaw-runtime-deps-stamp.json")).stale, true);
   }
   if (process.env.OPENCLAW_UPGRADE_SURVIVOR_SCENARIO === "cron-scheduled-authority") {
+    migrateCron();
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(path.join(state, "state", "openclaw.sqlite"), { readOnly: true });
     const jobs = db.prepare("SELECT job_json FROM cron_jobs ORDER BY rowid").all()

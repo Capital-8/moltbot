@@ -58,6 +58,7 @@ function runFirstHop(scenario: string, automatic: boolean) {
         printf 'update\\n' >>"$HOME/events"
         if [ "$FIXTURE_AUTOMATIC" = 1 ]; then touch "$HOME/migrated"; fi
         ;;
+      migrate-baseline-cron-authority) printf 'baseline-cron-doctor\\n' >>"$HOME/events" ;;
       repair-workshop-baseline|repair-workshop-candidate) printf 'explicit-doctor\\n' >>"$HOME/events" ;;
       assert-workshop-published-refusal)
         printf 'refusal\\n' >>"$HOME/events"
@@ -113,7 +114,7 @@ trap 'case "$BASH_COMMAND" in "phase "*) install_fixture_phases ;; esac' DEBUG
 }
 
 describe.skipIf(process.platform === "win32")("survivor first-hop observation", () => {
-  it.each(["base"])(
+  it.each(["base", "cron-scheduled-authority"])(
     "rejects missing automatic migration before manual Doctor can repair %s",
     (scenario) => {
       const { result, events, migrated, summary } = runFirstHop(scenario, false);
@@ -127,12 +128,15 @@ describe.skipIf(process.platform === "win32")("survivor first-hop observation", 
     },
   );
 
-  it("observes automatic migration before allowing manual Doctor and explicit consent", () => {
-    const { result, events, summary } = runFirstHop("base", true);
-    expect(result.status, result.stderr).toBe(0);
-    expect(events).toEqual(["update", "observe", "doctor", "observe", "consent"]);
-    expect(summary.status).toBe("passed");
-  });
+  it.each(["base", "cron-scheduled-authority"])(
+    "observes automatic migration before allowing manual Doctor and explicit consent: %s",
+    (scenario) => {
+      const { result, events, summary } = runFirstHop(scenario, true);
+      expect(result.status, result.stderr).toBe(0);
+      expect(events).toEqual(["update", "observe", "doctor", "observe", "consent"]);
+      expect(summary.status).toBe("passed");
+    },
+  );
 
   it.each([false, true])(
     "keeps published refusal before explicit Workshop recovery (unexpected success=%s)",
