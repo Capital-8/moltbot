@@ -568,19 +568,19 @@ try {
         const coverage = captureCoverage ? await page.coverage.stopJSCoverage() : undefined;
         if (
           variant === "head" &&
-          fixture === "mixed-history" &&
+          (fixture === "mixed-history" || fixture === "initial-rich") &&
           coverage?.some((entry) => new URL(entry.url, baseUrl).pathname === `/${richAsset}`)
         ) {
-          throw new Error("Offscreen rich history entered V8 during plain boot");
+          throw new Error("Image-only history evaluated the optional rich family");
         }
         if (
           variant === "head" &&
-          (fixture === "initial-rich" ||
-            (fixture === "first-rich-arrival" && values.admission !== "fail")) &&
+          fixture === "first-rich-arrival" &&
+          values.admission !== "fail" &&
           coverage &&
           !coverage.some((entry) => new URL(entry.url, baseUrl).pathname === `/${richAsset}`)
         ) {
-          throw new Error("Visible rich image did not evaluate the candidate rich family");
+          throw new Error("The first rich tool did not evaluate the candidate rich family");
         }
         if (coverage) {
           await writeFile(
