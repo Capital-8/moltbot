@@ -211,9 +211,12 @@ describe("createGatewayControlUiRootLifecycle", () => {
     }
   });
 
-  test.each(["control-ui-file", "identity-avatar-file"])(
-    "reuses both %s workers across sparse reads, then releases them after inactivity",
-    async (script) => {
+  test.each([
+    { script: "control-ui-file", workers: 1 },
+    { script: "identity-avatar-file", workers: 2 },
+  ])(
+    "reuses $script workers across sparse reads, then releases them after inactivity",
+    async ({ script, workers }) => {
       const root = tempDirs.make("sparse-file-reads-");
       const files = ["first.png", "second.png"];
       const source = { kind: "resolved" as const, path: root };
@@ -245,19 +248,19 @@ describe("createGatewayControlUiRootLifecycle", () => {
         const before = starts();
         const first = writePair("first");
         expect(await readPair()).toEqual(first);
-        expect(starts() - before).toBe(2);
+        expect(starts() - before).toBe(workers);
         await vi.advanceTimersByTimeAsync(2 * 60_000);
         const changed = writePair("second image");
         expect(await readPair()).toEqual(changed);
         await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
         expect(await readPair()).toEqual(changed);
-        expect(starts() - before).toBe(2);
+        expect(starts() - before).toBe(workers);
         await vi.advanceTimersByTimeAsync(10 * 60_000);
         expect(await readPair()).toEqual(changed);
-        expect(starts() - before).toBe(script === "identity-avatar-file" ? 2 : 4);
+        expect(starts() - before).toBe(script === "identity-avatar-file" ? workers : workers * 2);
         const afterIdle = writePair("third image");
         expect(await readPair()).toEqual(afterIdle);
-        expect(starts() - before).toBe(4);
+        expect(starts() - before).toBe(workers * 2);
       } finally {
         await drainGlobalSingletonLifecycleState();
         vi.useRealTimers();
