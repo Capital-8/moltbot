@@ -392,6 +392,7 @@ export async function finishGatewayStartup(params: {
   runtime.openclawIdService.bindEffects(async () =>
     (await import("./openclaw-id/removal-effects.js")).createOpenClawIdRemovalEffects({
       clients: () => clients.authorityClients,
+      context: () => gatewayRequestContext,
       log,
     }),
   );

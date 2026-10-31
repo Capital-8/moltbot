@@ -119,7 +119,7 @@ describe("Gateway membership authority and enforcement", () => {
   });
 
   // Spec section 11 #12 and #4: removal takes effect at the claw without Discovery.
-  it("removes a member: cuts tunnel access, closes sessions and revokes tokens", async () => {
+  it("removes a member: cuts tunnel access, cancels its runs, closes sessions and revokes tokens", async () => {
     const claw = await linkedClaw();
     const { service, effects } = serviceFor(claw.authority);
     const bob = formatIrohEndpointKey(randomBytes(32));
@@ -142,6 +142,7 @@ describe("Gateway membership authority and enforcement", () => {
     expect((await claw.authority.admittedPeerKeys()).admitted).not.toContain(bob);
     const connection = `conn-${bob.slice(5, 9)}`;
     expect(effects.captureConnections).toHaveBeenCalledWith([bob]);
+    expect(effects.cancelRuns).toHaveBeenCalledWith([connection]);
     expect(effects.closeConnections).toHaveBeenCalledWith([connection]);
     expect(effects.revokeDeviceTokens).toHaveBeenCalledWith([
       { deviceId: "bob-device", role: "operator" },

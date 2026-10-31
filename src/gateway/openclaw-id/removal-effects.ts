@@ -1,16 +1,26 @@
-// Removal side effects (spec section 7): when a member or device key is
-// removed, its relayed Gateway connections are found and closed and its device
-// tokens revoked.
+// Removal side effects (spec section 7, decided 2026-10-29): when a member or
+// device key is removed, its relayed Gateway connections are found, its active
+// runs are cancelled through the ordinary Stop path (which keeps the transcript
+// up to the cut), its connections are closed and its device tokens revoked.
 import { revokeDeviceToken } from "../../infra/device-pairing-tokens.js";
+import {
+  getRpcSourceIdentity,
+  isRpcSourceActive,
+  listRpcSourceEntries,
+} from "../../sessions/session-controller.rpc-sources.js";
+import { dispatchGatewayRequestInProcess } from "../server-in-process-dispatch.js";
+import type { GatewayRequestContext } from "../server-methods/types.js";
+import { createSyntheticPluginRuntimeClient } from "../server-plugin-runtime-client.js";
 import { invalidateGatewayPolicyClient } from "../server/ws-policy-close.js";
 import type { GatewayWsClient } from "../server/ws-types.js";
 import type { OpenClawIdEffects } from "./service.js";
 
 type EffectsLogger = { warn: (message: string) => void };
 
-/** Builds the effects over the Gateway's live client registry. */
+/** Builds the effects over the Gateway's live client registry and request context. */
 export function createOpenClawIdRemovalEffects(params: {
   clients: () => Iterable<GatewayWsClient>;
+  context: () => GatewayRequestContext;
   log: EffectsLogger;
 }): OpenClawIdEffects {
   const byConnection = new Map<string, GatewayWsClient>();
@@ -25,6 +35,28 @@ export function createOpenClawIdRemovalEffects(params: {
         }
       }
       return ids;
+    },
+
+    async cancelRuns(connectionIds) {
+      const context = params.context();
+      // An internal admin Stop, like an operator pressing Stop on each run.
+      const client = createSyntheticPluginRuntimeClient({ scopes: ["operator.admin"] });
+      for (const [runId, ref] of listRpcSourceEntries()) {
+        const owner = ref.adapter.requester?.connectionId;
+        if (!owner || !connectionIds.includes(owner) || !isRpcSourceActive(ref)) {
+          continue;
+        }
+        const { sessionKey } = getRpcSourceIdentity(ref);
+        try {
+          await dispatchGatewayRequestInProcess(
+            "chat.abort",
+            { sessionKey, runId },
+            { context, client },
+          );
+        } catch (error) {
+          params.log.warn(`openclaw-id: could not cancel run ${runId}: ${String(error)}`);
+        }
+      }
     },
 
     closeConnections(connectionIds) {
