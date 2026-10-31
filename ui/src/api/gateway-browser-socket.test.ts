@@ -157,3 +157,28 @@ describe("createBrowserGatewaySocket", () => {
     },
   );
 });
+
+describe("createBrowserGatewaySocket with an embedder transport", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the embedder's socket for URLs it carries and the browser socket otherwise", () => {
+    sockets.length = 0;
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const carried = new MockWebSocket("wss://claw.example/");
+    sockets.length = 0;
+    const createWebSocket = vi.fn((url: string) =>
+      url.startsWith("wss://claw.example") ? (carried as unknown as WebSocket) : undefined,
+    );
+    vi.stubGlobal("__openclawTransport", { createWebSocket });
+    const handlers = { open: vi.fn(), message: vi.fn(), close: vi.fn(), error: vi.fn() };
+
+    createBrowserGatewaySocket("wss://claw.example/", handlers);
+    expect(createWebSocket).toHaveBeenCalledWith("wss://claw.example/");
+    expect(sockets).toHaveLength(0);
+
+    createBrowserGatewaySocket("wss://other.example/", handlers);
+    expect(sockets).toHaveLength(1);
+  });
+});
