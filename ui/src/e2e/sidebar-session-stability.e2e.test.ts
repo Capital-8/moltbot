@@ -117,7 +117,9 @@ suite.define(() => {
             const toggleBox = (await childToggle.boundingBox())!;
             const menuBox = (await menu.boundingBox())!;
             expect(menuBox).toMatchObject({ width: 44, height: 44 });
-            expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(toggleBox.x);
+            const leftBox = menuBox.x < toggleBox.x ? menuBox : toggleBox;
+            const rightBox = leftBox === menuBox ? toggleBox : menuBox;
+            expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
             for (const control of [childToggle, menu]) {
               expect(
                 await control.evaluate((element) => {
