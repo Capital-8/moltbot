@@ -8,7 +8,11 @@ import { SettingsRow, SettingsToggleRow } from "../../components/solid/settings-
 import { formatUiError } from "../../lib/format-error.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { generateOwnerDeviceKey, saveOwnerDeviceKey } from "./openclaw-id-device-key.ts";
-import { createOpenClawIdCeremony, type OpenClawIdKit } from "./openclaw-id-link.ts";
+import {
+  createOpenClawIdCeremony,
+  linkCodePageUrl,
+  type OpenClawIdKit,
+} from "./openclaw-id-link.ts";
 import type { OpenClawIdLinkPreparation, OpenClawIdPublication } from "./openclaw-id-types.ts";
 
 type Step =
@@ -177,6 +181,18 @@ export function showMakeReachableDialog(params: {
                         />
                       }
                     />
+                    <a
+                      class="btn btn--sm"
+                      href={linkCodePageUrl(
+                        params.preparation.hostname.slice(
+                          params.preparation.hostname.indexOf(".") + 1,
+                        ),
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {t("labsPage.openclawId.getLinkCode")}
+                    </a>
                     <SettingsToggleRow
                       title={t("labsPage.openclawId.kitSaved")}
                       checked={saved()}
