@@ -231,6 +231,7 @@ describe("createGatewayKernel", () => {
           kernel.kernel.unlockStartupMethods();
           kernel.kernel.markSidecarsReady();
           kernel.kernel.setDispatchReady(true);
+          kernel.startupState.postAttachSettled = true;
         }
         if (!kernel) {
           throw new Error("Expected the real Gateway kernel to be captured");
@@ -628,6 +629,7 @@ describe("createGatewayKernel", () => {
         failing: ["startup-sidecars"],
       });
       kernel.kernel.setDispatchReady(true);
+      kernel.startupState.postAttachSettled = true;
       expectCoreAgentDatabaseReadiness(getReadiness, state);
       await expect(
         dispatchGatewayRequestInProcess("chat.send", chatParams, dispatchOptions),
