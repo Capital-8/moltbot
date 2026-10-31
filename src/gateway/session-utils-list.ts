@@ -709,7 +709,7 @@ async function readProjectedSessions(params: {
       },
       {
         selection: selectionPreparation,
-        subagentArchive: broadArchive ? subagentArchive : undefined,
+        subagentArchive: broadArchive && exactKey === undefined ? subagentArchive : undefined,
       },
     );
   });
