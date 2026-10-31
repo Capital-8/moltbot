@@ -73,6 +73,25 @@ type ExpectedBinding = {
   rootEpoch: number;
 };
 
+/**
+ * The Revocation statement `input` when applying it newly revoked its target (kept for
+ * publication to Discovery); undefined for anything else, including repeats.
+ */
+function newRevocation(
+  input: unknown,
+  before: AuthorityState,
+  after: AuthorityState,
+): SignedStatement<"Revocation"> | undefined {
+  const parsed = parseStatement(input, "Revocation");
+  if (!parsed.ok) {
+    return undefined;
+  }
+  const target = parsed.statement.body.target_fp;
+  return !before.revoked.includes(target) && after.revoked.includes(target)
+    ? parsed.statement
+    : undefined;
+}
+
 // True for a statement that parses as a RootRotation.
 function isRootRotation(input: unknown): boolean {
   return parseStatement(input, "RootRotation").ok;
@@ -419,9 +438,11 @@ export function createOpenClawIdAuthority(
           return { ok: false, code: result.code, detail: result.detail };
         }
         const resolved = resolvedInvite(input);
+        const revocation = newRevocation(input, current.authority, result.state);
         await commit({
           ...current,
           authority: result.state,
+          ...(revocation ? { revocations: [...(current.revocations ?? []), revocation] } : {}),
           ...(resolved
             ? {
                 invite_reports: resolveReport(

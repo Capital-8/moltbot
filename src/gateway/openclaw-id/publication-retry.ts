@@ -6,6 +6,12 @@
 // until a publish succeeds with no newer request in between. Pending work runs
 // now, again after transient failures with bounded exponential backoff, at
 // startup and whenever the mailbox reconnects.
+//
+// Freshness (freshness/v1): clients treat a snapshot older than 3 h as no evidence,
+// so a registered claw also re-signs and publishes at every start and again before
+// SNAPSHOT_REPUBLISH_SECONDS pass after each successful publication, even when
+// nothing changed.
+import { SNAPSHOT_REPUBLISH_SECONDS } from "../../../packages/openclaw-id-protocol/src/index.js";
 import type { StoredClaw } from "./claw-store.js";
 import type { PublishOutcome } from "./publisher.js";
 
@@ -13,6 +19,11 @@ import type { PublishOutcome } from "./publisher.js";
 export const PUBLICATION_RETRY_INITIAL_MS = 2_000;
 /** Longest delay between retries; retries continue at this pace until one succeeds. */
 export const PUBLICATION_RETRY_MAX_MS = 5 * 60_000;
+/**
+ * Delay from a successful publication to the next re-sign: 55 minutes, jittered down by up
+ * to 10%, so even with a few retries the published snapshot stays younger than an hour.
+ */
+export const PUBLICATION_REFRESH_MS = SNAPSHOT_REPUBLISH_SECONDS * 1000 - 5 * 60_000;
 
 /**
  * True when Discovery may be behind the stored authority: a publication was
@@ -27,8 +38,14 @@ export function publicationPending(record: StoredClaw | undefined): boolean {
   return (
     record.discovery.publish_pending === true ||
     record.discovery.published_snapshot_seq < record.authority.seq ||
-    record.discovery.published_binding_seq < (record.binding?.body.binding_seq ?? 0)
+    record.discovery.published_binding_seq < (record.binding?.body.binding_seq ?? 0) ||
+    (record.discovery.published_revocations ?? 0) < (record.revocations?.length ?? 0)
   );
+}
+
+// True when the claw is registered at Discovery, so the Gateway can publish on its own.
+function registered(record: StoredClaw | undefined): boolean {
+  return Boolean(record?.authority && record.discovery.owner_account_id);
 }
 
 type RetryLogger = { info: (message: string) => void; warn: (message: string) => void };
@@ -44,6 +61,7 @@ export type PublicationRetryParams = {
   log: RetryLogger;
   initialDelayMs?: number;
   maxDelayMs?: number;
+  refreshMs?: number;
   /** Returns [0, 1); jitter spreads the retries of many Gateways after a Discovery outage. */
   random?: () => number;
 };
@@ -52,13 +70,17 @@ export type PublicationRetryParams = {
  * Creates the publication retrier. `request` asks for a publication after a
  * change; `resume` runs pending work now with the backoff reset (startup,
  * mailbox reconnect, a stale-seq refusal). Overlapping requests coalesce into
- * one follow-up attempt. Retry timers run only between `start` and `stop`.
+ * one follow-up attempt. `start` publishes once, and every success arms the next
+ * re-sign. Retry and refresh timers run only between `start` and `stop`.
  */
 export function createPublicationRetry(params: PublicationRetryParams) {
   const initialDelay = params.initialDelayMs ?? PUBLICATION_RETRY_INITIAL_MS;
   const maxDelay = params.maxDelayMs ?? PUBLICATION_RETRY_MAX_MS;
   const random = params.random ?? Math.random;
+  const refreshMs = params.refreshMs ?? PUBLICATION_REFRESH_MS;
   let active = false;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshAt: number | undefined;
   let running = false;
   let rerun = false;
   let attempt = 0;
@@ -71,6 +93,30 @@ export function createPublicationRetry(params: PublicationRetryParams) {
     }
     timer = undefined;
     retryAt = undefined;
+  };
+
+  const cancelRefresh = () => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+    }
+    refreshTimer = undefined;
+    refreshAt = undefined;
+  };
+
+  // Arms the next re-sign after a successful publication, replacing any earlier one.
+  const armRefresh = () => {
+    cancelRefresh();
+    if (!active) {
+      return;
+    }
+    const delay = Math.round(refreshMs * (0.9 + 0.1 * random()));
+    refreshAt = Date.now() + delay;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = undefined;
+      refreshAt = undefined;
+      void run();
+    }, delay);
+    refreshTimer.unref?.();
   };
 
   // Delay before retry number n (1-based): doubling from the initial delay,
@@ -109,6 +155,7 @@ export function createPublicationRetry(params: PublicationRetryParams) {
     }));
     if (outcome?.state === "published") {
       attempt = 0;
+      armRefresh();
       if (rerun) {
         return "again";
       }
@@ -179,22 +226,36 @@ export function createPublicationRetry(params: PublicationRetryParams) {
       await run();
     },
 
-    /** Enables retry timers and resumes pending work (remote access started). */
+    /**
+     * Enables retry and refresh timers and publishes once (remote access started): pending
+     * work, and a freshly signed snapshot even when Discovery is current.
+     */
     async start(): Promise<void> {
       active = true;
-      await this.resume();
+      if (running || !registered(params.current())) {
+        return;
+      }
+      cancelTimer();
+      attempt = 0;
+      await run();
     },
 
     /** Cancels any scheduled retry; the durable pending flag stays for the next start. */
     stop(): void {
       active = false;
       cancelTimer();
+      cancelRefresh();
       attempt = 0;
     },
 
     /** When the next automatic retry runs (epoch ms), if one is scheduled. */
     nextRetryAt(): number | undefined {
       return retryAt;
+    },
+
+    /** When the next scheduled re-sign runs (epoch ms), if one is armed. */
+    nextRefreshAt(): number | undefined {
+      return refreshAt;
     },
   };
 }

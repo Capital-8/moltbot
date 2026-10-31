@@ -2,6 +2,7 @@
 // Discovery mirror. Discovery stores them; clients verify them against their
 // own pins, so a failed or withheld publication never changes who has access.
 import {
+  PUBLISH_REVOCATIONS_MAX,
   signStatement,
   snapshotBody,
   type ClawDescriptor,
@@ -12,7 +13,17 @@ import type { DiscoveryClient } from "./discovery-client.js";
 
 /** Outcome of one publication attempt, shown in status. */
 export type PublishOutcome =
-  | { state: "published"; ownerAccountId: string | null; snapshotSeq: number }
+  | {
+      state: "published";
+      ownerAccountId: string | null;
+      snapshotSeq: number;
+      /** issued_at of the snapshot Discovery accepted. */
+      snapshotIssuedAt: number;
+      /** How many of the record's revocations Discovery has now. */
+      revocationsPublished: number;
+      /** When the Gateway re-signs next (epoch ms), if a re-sign is scheduled. */
+      refreshAt?: number;
+    }
   | { state: "needs_enrollment_code" }
   | {
       state: "failed";
@@ -32,8 +43,15 @@ export type PublishOutcome =
 // Discovery statuses worth retrying unchanged: concurrent updates, rate limits, outages.
 const RETRYABLE_STATUSES = new Set([408, 409, 425, 429]);
 
-/** Classifies a failed Discovery call: no HTTP status (network) or 5xx is transient. */
+/**
+ * Classifies a failed Discovery call: no HTTP status (network) or 5xx is transient.
+ * `stale_snapshot` is final: Discovery already holds a snapshot at least as new, and
+ * resending the same one cannot change that.
+ */
 export function isRetryableDiscoveryError(error: unknown): boolean {
+  if ((error as { code?: unknown }).code === "stale_snapshot") {
+    return false;
+  }
   const status = (error as { status?: unknown }).status;
   if (typeof status !== "number") {
     return true;
@@ -78,7 +96,9 @@ export function buildDescriptor(
  * A failed descriptor republish does not hold back the snapshot when Discovery
  * already has this binding: the snapshot only depends on the published binding,
  * and a stale snapshot is what blocks enrollment. The outcome still reports the
- * descriptor failure, so the caller retries both.
+ * descriptor failure, so the caller retries both. Every call signs a new snapshot
+ * (same seq, new issued_at: freshness/v1), then appends the revocations Discovery
+ * does not have yet.
  */
 export async function publishClaw(params: {
   record: StoredClaw;
@@ -130,5 +150,32 @@ export async function publishClaw(params: {
     const failed = descriptorFailure ?? failure(error);
     return !registeredBefore && ownerAccountId ? { ...failed, ownerAccountId } : failed;
   }
-  return descriptorFailure ?? { state: "published", ownerAccountId, snapshotSeq: state.seq };
+  let revocationsPublished: number;
+  try {
+    revocationsPublished = await publishRevocations(params.record, params.client);
+  } catch (error) {
+    return descriptorFailure ?? failure(error);
+  }
+  return (
+    descriptorFailure ?? {
+      state: "published",
+      ownerAccountId,
+      snapshotSeq: state.seq,
+      snapshotIssuedAt: now,
+      revocationsPublished,
+    }
+  );
+}
+
+// Appends the record's revocations Discovery does not have yet, in batches; returns how
+// many Discovery has afterwards.
+async function publishRevocations(record: StoredClaw, client: DiscoveryClient): Promise<number> {
+  const all = record.revocations ?? [];
+  let published = Math.min(record.discovery.published_revocations ?? 0, all.length);
+  while (published < all.length) {
+    const batch = all.slice(published, published + PUBLISH_REVOCATIONS_MAX);
+    await client.publishRevocations(record.claw_id, batch);
+    published += batch.length;
+  }
+  return published;
 }

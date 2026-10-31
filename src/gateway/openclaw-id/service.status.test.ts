@@ -20,6 +20,8 @@ describe("OpenClaw ID link status", () => {
       state: "published",
       ownerAccountId: "acct-owner",
       snapshotSeq: 4,
+      snapshotIssuedAt: 0,
+      revocationsPublished: 0,
     });
   });
 });

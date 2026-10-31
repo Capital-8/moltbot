@@ -256,6 +256,8 @@ export function createOpenClawIdService(params: {
         owner_account_id: outcome.ownerAccountId,
         published_binding_seq: record.binding?.body.binding_seq ?? 0,
         published_snapshot_seq: outcome.snapshotSeq,
+        published_snapshot_at: outcome.snapshotIssuedAt,
+        published_revocations: outcome.revocationsPublished,
       });
       await startMailbox();
     } else if (outcome.state === "failed") {
@@ -530,12 +532,16 @@ export function createOpenClawIdService(params: {
         publication:
           (lastPublish?.state === "failed"
             ? { ...lastPublish, retryAt: publicationRetry.nextRetryAt() }
-            : lastPublish) ??
+            : lastPublish?.state === "published"
+              ? { ...lastPublish, refreshAt: publicationRetry.nextRefreshAt() }
+              : lastPublish) ??
           (record?.discovery.owner_account_id
             ? {
                 state: "published" as const,
                 ownerAccountId: record.discovery.owner_account_id,
                 snapshotSeq: record.discovery.published_snapshot_seq,
+                snapshotIssuedAt: record.discovery.published_snapshot_at ?? 0,
+                revocationsPublished: record.discovery.published_revocations ?? 0,
               }
             : undefined),
       };

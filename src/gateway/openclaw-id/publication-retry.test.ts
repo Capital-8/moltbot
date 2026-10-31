@@ -12,6 +12,7 @@ import { DiscoveryRequestError } from "./discovery-client.js";
 import { linkedClaw, nowSeconds, type LinkedClaw } from "./openclaw-id.test-support.js";
 import {
   createPublicationRetry,
+  PUBLICATION_REFRESH_MS,
   PUBLICATION_RETRY_INITIAL_MS,
   PUBLICATION_RETRY_MAX_MS,
   publicationPending,
@@ -22,9 +23,16 @@ const log = () => ({ info: vi.fn(), warn: vi.fn() });
 
 // A Discovery mirror that keeps the last snapshot seq and fails the calls it is told to.
 function fakeDiscovery() {
-  const failures: Array<{ call: "descriptor" | "snapshot"; error: Error }> = [];
-  const mirror = { snapshotSeq: 1, descriptors: 0 };
-  const take = (call: "descriptor" | "snapshot") => {
+  type Call = "descriptor" | "snapshot" | "revocations";
+  const failures: Array<{ call: Call; error: Error }> = [];
+  const mirror = {
+    snapshotSeq: 1,
+    snapshotIssuedAt: 0,
+    descriptors: 0,
+    snapshots: 0,
+    revocations: [] as SignedStatement<"Revocation">[],
+  };
+  const take = (call: Call) => {
     const index = failures.findIndex((failure) => failure.call === call);
     const [failure] = index >= 0 ? failures.splice(index, 1) : [];
     if (failure) {
@@ -41,13 +49,21 @@ function fakeDiscovery() {
       async (_clawId: string, snapshot: SignedStatement<"MembershipSnapshot">) => {
         take("snapshot");
         mirror.snapshotSeq = snapshot.body.seq;
+        mirror.snapshotIssuedAt = snapshot.body.issued_at;
+        mirror.snapshots += 1;
+      },
+    ),
+    publishRevocations: vi.fn(
+      async (_clawId: string, revocations: SignedStatement<"Revocation">[]) => {
+        take("revocations");
+        mirror.revocations.push(...revocations);
       },
     ),
   };
   return {
     client,
     mirror,
-    fail: (call: "descriptor" | "snapshot", error: Error) => failures.push({ call, error }),
+    fail: (call: Call, error: Error) => failures.push({ call, error }),
   };
 }
 
@@ -77,6 +93,8 @@ async function registeredClaw() {
       await claw.authority.recordDiscovery({
         published_binding_seq: record.binding!.body.binding_seq,
         published_snapshot_seq: outcome.snapshotSeq,
+        published_snapshot_at: outcome.snapshotIssuedAt,
+        published_revocations: outcome.revocationsPublished,
       });
     }
     return outcome;
@@ -200,7 +218,8 @@ describe("publication retry (OCF-313)", () => {
     }
     expect(delays.slice(0, 4)).toEqual([2_000, 4_000, 8_000, 16_000]);
     expect(Math.max(...delays)).toBe(PUBLICATION_RETRY_MAX_MS);
-    expect(outcomes).toHaveLength(13);
+    // The re-sign at start, then 12 failures and the success.
+    expect(outcomes).toHaveLength(14);
     expect(discovery.mirror.snapshotSeq).toBe(2);
   });
 
@@ -241,7 +260,8 @@ describe("publication retry (OCF-313)", () => {
     await retry.request();
     retry.stop();
     await advance(PUBLICATION_RETRY_MAX_MS * 2);
-    expect(outcomes).toHaveLength(1);
+    // The re-sign at start and the failed attempt; nothing after stop.
+    expect(outcomes).toHaveLength(2);
     expect(claw.authority.current()?.discovery.publish_pending).toBe(true);
   });
 
@@ -273,7 +293,14 @@ describe("publication retry (OCF-313)", () => {
     const publish = vi.fn(
       () =>
         new Promise<PublishOutcome>((resolve) => {
-          release = () => resolve({ state: "published", ownerAccountId: "a", snapshotSeq: 1 });
+          release = () =>
+            resolve({
+              state: "published",
+              ownerAccountId: "a",
+              snapshotSeq: 1,
+              snapshotIssuedAt: nowSeconds(),
+              revocationsPublished: 0,
+            });
         }),
     );
     const setPending = vi.fn(async () => {});
@@ -292,6 +319,166 @@ describe("publication retry (OCF-313)", () => {
     await first;
     expect(publish).toHaveBeenCalledTimes(2);
     expect(setPending).toHaveBeenLastCalledWith(false);
+  });
+});
+
+// An owner-signed Revocation of a fresh device key, signed by R.
+async function revocationOf(claw: LinkedClaw) {
+  const key = formatEd25519PublicKey((await generateEd25519Signer()).publicKey);
+  const { fingerprint } = await import("../../../packages/openclaw-id-protocol/src/index.js");
+  return await signStatement(
+    "Revocation",
+    {
+      target_fp: await fingerprint(key),
+      target_kind: "owner_device",
+      reason: "lost",
+      root_epoch: 1,
+      issued_at: nowSeconds(),
+    },
+    claw.root,
+  );
+}
+
+describe("snapshot freshness (freshness/v1, OCF-320)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("re-signs the same seq at startup even when Discovery is current", async () => {
+    const { discovery, retry, advance } = await registeredClaw();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await retry.start();
+    await advance(0);
+    expect(discovery.mirror.snapshots).toBe(1);
+    expect(discovery.mirror.snapshotSeq).toBe(1);
+    expect(retry.nextRefreshAt()).toBeDefined();
+  });
+
+  it("keeps an idle claw's published snapshot younger than an hour for two hours", async () => {
+    const { discovery, retry, advance } = await registeredClaw();
+    await retry.start();
+    await advance(0);
+    for (let minute = 5; minute <= 120; minute += 5) {
+      await advance(5 * 60_000);
+      const age = nowSeconds() - discovery.mirror.snapshotIssuedAt;
+      expect(age, `minute ${minute}`).toBeLessThan(3600);
+    }
+    expect(discovery.mirror.snapshotSeq).toBe(1);
+    expect(discovery.mirror.snapshots).toBeGreaterThanOrEqual(3);
+  });
+
+  it("re-signs no later than PUBLICATION_REFRESH_MS after a change, then keeps the rhythm", async () => {
+    const { claw, discovery, retry, advance } = await registeredClaw();
+    await retry.start();
+    await claw.authority.submit(await kitEnrollment(claw, 1), "mailbox");
+    await retry.request();
+    const after = discovery.mirror.snapshots;
+    await advance(PUBLICATION_REFRESH_MS);
+    expect(discovery.mirror.snapshots).toBe(after + 1);
+    expect(discovery.mirror.snapshotSeq).toBe(2);
+  });
+
+  it("retries a failed re-sign with backoff and returns to the hourly rhythm", async () => {
+    const { discovery, retry, advance } = await registeredClaw();
+    await retry.start();
+    await advance(0);
+    discovery.fail("snapshot", new TypeError("fetch failed"));
+    await advance(PUBLICATION_REFRESH_MS);
+    expect(retry.nextRetryAt()).toBeDefined();
+    await advance(PUBLICATION_RETRY_INITIAL_MS);
+    expect(nowSeconds() - discovery.mirror.snapshotIssuedAt).toBeLessThan(5);
+    expect(retry.nextRefreshAt()).toBeDefined();
+  });
+
+  it("stops re-signing on stop", async () => {
+    const { discovery, retry, advance } = await registeredClaw();
+    await retry.start();
+    await advance(0);
+    retry.stop();
+    const count = discovery.mirror.snapshots;
+    await advance(3 * PUBLICATION_REFRESH_MS);
+    expect(discovery.mirror.snapshots).toBe(count);
+    expect(retry.nextRefreshAt()).toBeUndefined();
+  });
+
+  it("does not retry stale_snapshot: Discovery already holds one at least as new", async () => {
+    const { discovery, retry, advance, logger } = await registeredClaw();
+    discovery.fail("snapshot", new DiscoveryRequestError(409, "stale_snapshot", "older"));
+    await retry.start();
+    await advance(0);
+    expect(retry.nextRetryAt()).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("stale_snapshot"));
+  });
+});
+
+describe("revocation publication (freshness/v1, OCF-320)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps each accepted Revocation and appends it to Discovery once", async () => {
+    const { claw, discovery, retry, advance } = await registeredClaw();
+    await retry.start();
+    await advance(0);
+    const revocation = await revocationOf(claw);
+    expect((await claw.authority.submit(revocation, "mailbox")).ok).toBe(true);
+    // A repeat changes nothing and is not kept twice.
+    await claw.authority.submit(revocation, "mailbox");
+    expect(claw.authority.current()?.revocations).toEqual([revocation]);
+    expect(publicationPending(claw.authority.current())).toBe(true);
+    await retry.request();
+    expect(discovery.mirror.revocations).toEqual([revocation]);
+    expect(claw.authority.current()?.discovery.published_revocations).toBe(1);
+    expect(publicationPending(claw.authority.current())).toBe(false);
+    // Later publications send nothing again.
+    await advance(PUBLICATION_REFRESH_MS);
+    expect(discovery.client.publishRevocations).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed revocation publication until Discovery has it", async () => {
+    const { claw, discovery, retry, advance } = await registeredClaw();
+    await retry.start();
+    await advance(0);
+    const revocation = await revocationOf(claw);
+    await claw.authority.submit(revocation, "mailbox");
+    discovery.fail("revocations", new DiscoveryRequestError(503, "unavailable", "down"));
+    await retry.request();
+    expect(discovery.mirror.revocations).toEqual([]);
+    await advance(PUBLICATION_RETRY_INITIAL_MS);
+    expect(discovery.mirror.revocations).toEqual([revocation]);
+  });
+
+  it("publishes many revocations in batches", async () => {
+    const claw = await linkedClaw();
+    const revocations = await Promise.all(Array.from({ length: 70 }, () => revocationOf(claw)));
+    const record = {
+      ...claw.authority.current()!,
+      revocations,
+      discovery: {
+        ...claw.authority.current()!.discovery,
+        owner_account_id: "acct",
+        published_binding_seq: 1,
+        published_revocations: 2,
+      },
+    };
+    const discovery = fakeDiscovery();
+    const outcome = await publishClaw({
+      record,
+      relayUrl: "https://relay.example.test/",
+      client: discovery.client as never,
+      signer: await generateEd25519Signer(),
+    });
+    expect(outcome).toMatchObject({ state: "published", revocationsPublished: 70 });
+    expect(discovery.client.publishRevocations.mock.calls.map(([, batch]) => batch.length)).toEqual(
+      [64, 4],
+    );
+    expect(discovery.mirror.revocations).toEqual(revocations.slice(2));
   });
 });
 
