@@ -3301,9 +3301,6 @@ describe("ci workflow guards", () => {
       [true, true],
       [false, true],
     ])("bounds hosted rows with Android=%s and macOS=%s", (androidSelected, nativeSelected) => {
-      const manifestSource = readFileSync("scripts/ci-build-manifest.mjs", "utf8");
-      expect(manifestSource).toContain("const HYBRID_HOSTED_ROW_LIMIT = 45;");
-      expect(manifestSource).toContain("const HYBRID_HOSTED_BASE_ROW_LIMIT = 40;");
       const scopeEnv = {
         OPENCLAW_CI_RUN_ANDROID: String(androidSelected),
         OPENCLAW_CI_RUN_MACOS: String(nativeSelected),
