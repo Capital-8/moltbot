@@ -151,6 +151,7 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
   const cronCreatorToolAllowlistCaptureRef: {
     value?: { version: 1; source: "final-executable-surface" };
   } = {};
+  let creatorAuthorityReady = false;
   const scheduledAppAuthoritySourceRef: {
     current?: Omit<Parameters<typeof captureScheduledCodexAppAuthority>[0], "auth">;
   } = {};
@@ -237,8 +238,14 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
     ...(canResolveAnyScheduledCreatorAuthority
       ? {
           resolveCronCreatorToolAuthority: (options?: { signal?: AbortSignal }) => {
-            if (!resolveCreatorAuthorityImpl) {
-              throw new Error("configured MCP authority resolver was invoked before tool setup");
+            if (
+              !resolveCreatorAuthorityImpl ||
+              !creatorAuthorityReady ||
+              (canResolveScheduledCodexAppAuthority && !scheduledAppAuthoritySourceRef.current)
+            ) {
+              throw new Error(
+                "Automation tool preparation is unavailable before creator startup completes.",
+              );
             }
             options?.signal?.throwIfAborted();
             if (creatorAuthorityPromise) {
@@ -563,6 +570,9 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
         // Require the exact-thread resolver before certifying a default cap.
         delete cronCreatorToolAllowlistCaptureRef.value;
       }
+      // Startup calls this after the exact client's managed-policy preflight.
+      // Apps need canonical materialization even when the dynamic cap is incomplete.
+      creatorAuthorityReady = true;
     };
     if (canResolveAnyScheduledCreatorAuthority) {
       resolveCreatorAuthorityImpl = async (options) => {

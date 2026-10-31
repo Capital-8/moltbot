@@ -633,6 +633,41 @@ describe("runCodexAppServerAttempt configured MCP creator authority", () => {
     }
   });
 
+  it("does not discover or cache creator authority before native startup completes", async () => {
+    const params = createMcpAuthorityParams(true);
+    admitLocalOperatorCronAuthority(params);
+    const entered = createDeferred<void>();
+    const release = createDeferred<void>();
+    const read = vi
+      .spyOn(attemptContext, "readMirroredSessionHistoryMessages")
+      .mockImplementationOnce(async () => {
+        entered.resolve();
+        await release.promise;
+        return [];
+      });
+    const harness = createStartedThreadHarness();
+    const run = runCodexAppServerAttempt(params);
+    try {
+      await entered.promise;
+      const resolver = mcpMocks.authorityResolvers[0]!;
+      expect(() => resolver()).toThrow("before creator startup completes");
+      expect(mcpMocks.staticCalls).toHaveLength(0);
+      release.resolve();
+      await harness.waitForMethod("turn/start");
+      const authority = await resolver();
+      expect(
+        authority.tools.map((tool) => (typeof tool === "string" ? tool : tool.name)),
+      ).toContain("fake__show");
+      expect(mcpMocks.staticCalls).toHaveLength(1);
+    } finally {
+      release.resolve();
+      read.mockRestore();
+      await harness.waitForMethod("turn/start");
+      await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+      await expect(run).resolves.toBeDefined();
+    }
+  });
+
   it("offers explicit finite tools when inherited configured MCP discovery is incomplete", async () => {
     const params = createMcpAuthorityParams(true);
     admitLocalOperatorCronAuthority(params);
