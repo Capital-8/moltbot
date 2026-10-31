@@ -129,8 +129,8 @@ Failure codes (stable; callers match codes, never detail text): `malformed`,
 
 ## Revoking an owner device (OCF-280)
 
-An owner device is active only while its certificate is in the current root epoch and no
-fingerprint in its chain is revoked (`isOwnerDeviceActive`). A Revocation of an owner device
+An owner device is active only while its certificate is in the current root epoch, has not
+expired, and no fingerprint in its chain is revoked (`isOwnerDeviceActive`). A Revocation of an owner device
 therefore also ends every owner device it approved, directly or further down the chain
 (phone approved by a laptop approved by the first browser). The Gateway lists, admits and
 accepts statements from active owner devices only, and it cuts the connections of every

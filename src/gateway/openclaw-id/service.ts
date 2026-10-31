@@ -573,10 +573,10 @@ export function createOpenClawIdService(params: {
         // Conflicting root rotations: remote root changes wait for owner-key regeneration.
         frozen: state?.frozen ?? false,
         seq: state?.seq,
-        // Revoked and earlier-epoch devices stay in the record but are no longer owners.
+        // Revoked, expired and earlier-epoch devices stay in the record but are no longer owners.
         ownerDevices: state
           ? Object.values(state.owner_devices)
-              .filter((device) => isOwnerDeviceActive(state, device))
+              .filter((device) => isOwnerDeviceActive(state, device, Math.floor(Date.now() / 1000)))
               .map((device) => ({
                 devicePub: device.cert.body.device_pub,
                 label: device.cert.body.label,
