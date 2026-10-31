@@ -71,7 +71,12 @@ export type CreateEnrollmentCodeResponse = { code: string; expires_at: UnixSecon
  */
 export type CheckClawNameRequest = { code: string; name: string };
 /** Response to {@link CheckClawNameRequest}. `available` is false once a claw ever used the hostname. */
-export type CheckClawNameResponse = { name: string; account_tag: string; hostname: string; available: boolean };
+export type CheckClawNameResponse = {
+  name: string;
+  account_tag: string;
+  hostname: string;
+  available: boolean;
+};
 
 /** POST /v1/claws (signed by the K_gw named in the descriptor's binding). */
 export type RegisterClawRequest = { code: string; descriptor: ClawDescriptor };

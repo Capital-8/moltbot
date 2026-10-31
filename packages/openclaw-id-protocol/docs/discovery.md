@@ -52,24 +52,24 @@ ready message.
 
 ## Endpoints
 
-| Name                    | Method and path                                       | Auth                                     | Request -> response                                                                          |
-| ----------------------- | ----------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| createEnrollmentCode    | `POST /v1/enrollment-codes`                           | user                                     | - -> `{ code, expires_at }` (one-time, 10 min)                                               |
-| checkClawName           | `POST /v1/claw-names`                                 | gateway (any K_gw; the code is not spent) | `{ code, name }` -> `{ name, account_tag, hostname, available }`                            |
-| registerClaw            | `POST /v1/claws`                                      | gateway (key = binding.k_gw)             | `{ code, descriptor }` -> `{ claw_id, owner_account_id }`                                    |
-| listClaws               | `GET /v1/claws`                                       | user                                     | -> `{ claws: [{ claw_id, hostname, name, relationship, role, online, descriptor_published_at }] }` |
-| publishDescriptor       | `PUT /v1/claws/{claw_id}/descriptor`                  | gateway                                  | `{ descriptor }` -> 204; `stale_binding` if binding_seq decreases                            |
-| getDescriptor           | `GET /v1/claws/{claw_id}/descriptor`                  | user                                     | -> `{ descriptor }`                                                                          |
-| publishSnapshot         | `PUT /v1/claws/{claw_id}/snapshot`                    | gateway                                  | `{ snapshot }` -> 204; `stale_snapshot` if seq does not increase                             |
-| getSnapshot             | `GET /v1/claws/{claw_id}/snapshot`                    | user                                     | -> `{ snapshot }`                                                                            |
-| bindDevice              | `POST /v1/devices`                                    | device (signer = device_pub)             | `{ device_pub, peer_key, label, ts, peer_key_proof }` -> `DeviceEntry`                       |
-| listDevices             | `GET /v1/devices`                                     | user                                     | -> `{ devices: [...] }`                                                                      |
-| unbindDevice            | `DELETE /v1/devices/{device_fp}`                      | user                                     | -> 204                                                                                       |
-| sendMail                | `POST /v1/claws/{claw_id}/mailbox`                    | user (device-signed when a device sends) | `{ to, payload }` -> `{ message_id, expires_at }`                                            |
-| receiveMail             | `GET /v1/claws/{claw_id}/mailbox?after=&wait=`        | gateway                                  | -> `{ messages, cursor }` (to `gateway`)                                                     |
-| receiveDeviceMail       | `GET /v1/claws/{claw_id}/mailbox/device?after=&wait=` | device                                   | -> `{ messages, cursor }` (to `owners` if an owner device, and to its own fp)                |
-| ackMail / ackDeviceMail | `POST .../mailbox/ack`, `POST .../mailbox/device/ack` | gateway / device                         | `{ cursor }` -> 204                                                                          |
-| irohAdmit               | `POST /iroh/admit`                                    | relay                                    | header `X-Iroh-Endpoint-Id` -> body `true` / `false`                                         |
+| Name                    | Method and path                                       | Auth                                      | Request -> response                                                                                |
+| ----------------------- | ----------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| createEnrollmentCode    | `POST /v1/enrollment-codes`                           | user                                      | - -> `{ code, expires_at }` (one-time, 10 min)                                                     |
+| checkClawName           | `POST /v1/claw-names`                                 | gateway (any K_gw; the code is not spent) | `{ code, name }` -> `{ name, account_tag, hostname, available }`                                   |
+| registerClaw            | `POST /v1/claws`                                      | gateway (key = binding.k_gw)              | `{ code, descriptor }` -> `{ claw_id, owner_account_id }`                                          |
+| listClaws               | `GET /v1/claws`                                       | user                                      | -> `{ claws: [{ claw_id, hostname, name, relationship, role, online, descriptor_published_at }] }` |
+| publishDescriptor       | `PUT /v1/claws/{claw_id}/descriptor`                  | gateway                                   | `{ descriptor }` -> 204; `stale_binding` if binding_seq decreases                                  |
+| getDescriptor           | `GET /v1/claws/{claw_id}/descriptor`                  | user                                      | -> `{ descriptor }`                                                                                |
+| publishSnapshot         | `PUT /v1/claws/{claw_id}/snapshot`                    | gateway                                   | `{ snapshot }` -> 204; `stale_snapshot` if seq does not increase                                   |
+| getSnapshot             | `GET /v1/claws/{claw_id}/snapshot`                    | user                                      | -> `{ snapshot }`                                                                                  |
+| bindDevice              | `POST /v1/devices`                                    | device (signer = device_pub)              | `{ device_pub, peer_key, label, ts, peer_key_proof }` -> `DeviceEntry`                             |
+| listDevices             | `GET /v1/devices`                                     | user                                      | -> `{ devices: [...] }`                                                                            |
+| unbindDevice            | `DELETE /v1/devices/{device_fp}`                      | user                                      | -> 204                                                                                             |
+| sendMail                | `POST /v1/claws/{claw_id}/mailbox`                    | user (device-signed when a device sends)  | `{ to, payload }` -> `{ message_id, expires_at }`                                                  |
+| receiveMail             | `GET /v1/claws/{claw_id}/mailbox?after=&wait=`        | gateway                                   | -> `{ messages, cursor }` (to `gateway`)                                                           |
+| receiveDeviceMail       | `GET /v1/claws/{claw_id}/mailbox/device?after=&wait=` | device                                    | -> `{ messages, cursor }` (to `owners` if an owner device, and to its own fp)                      |
+| ackMail / ackDeviceMail | `POST .../mailbox/ack`, `POST .../mailbox/device/ack` | gateway / device                          | `{ cursor }` -> 204                                                                                |
+| irohAdmit               | `POST /iroh/admit`                                    | relay                                     | header `X-Iroh-Endpoint-Id` -> body `true` / `false`                                               |
 
 Types for every body are in `src/discovery/api.ts`; the endpoint table is
 `DISCOVERY_ENDPOINTS`.

@@ -38,7 +38,7 @@ async function linkedClaw() {
   const prep = await authority.prepareLink({
     kSrv: K_SRV,
     kGw,
-    loaderDomain: "claws.example.test",
+    hostname: "studio-k7x2q.claws.example.test",
   });
   if ("ok" in prep) {
     throw new Error(prep.detail);

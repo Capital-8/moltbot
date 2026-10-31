@@ -79,7 +79,7 @@ async function prepared() {
   const prep = await authority.prepareLink({
     kSrv: K_SRV,
     kGw,
-    loaderDomain: "claws.example.test",
+    hostname: "studio-k7x2q.claws.example.test",
   });
   if ("ok" in prep) {
     throw new Error(prep.detail);
@@ -88,11 +88,11 @@ async function prepared() {
 }
 
 describe("OpenClaw ID membership authority: linking", () => {
-  it("prepares a stable claw id and hostname for the loader domain", async () => {
+  it("prepares a stable claw id with the hostname Discovery assigned", async () => {
     const { prep, kGw, authority } = await prepared();
     expect(prep.claw_id).toMatch(/^[0-9a-f]{32}$/);
     expect(prep).toMatchObject({
-      hostname: `${prep.claw_id}.claws.example.test`,
+      hostname: "studio-k7x2q.claws.example.test",
       k_srv: K_SRV,
       k_gw: kGw,
       binding_seq: 1,
@@ -101,7 +101,7 @@ describe("OpenClaw ID membership authority: linking", () => {
     const again = await authority.prepareLink({
       kSrv: K_SRV,
       kGw,
-      loaderDomain: "claws.example.test",
+      hostname: "studio-k7x2q.claws.example.test",
     });
     expect(again).toMatchObject({ claw_id: prep.claw_id });
   });
@@ -161,11 +161,11 @@ describe("OpenClaw ID membership authority: linking", () => {
       kGw,
     });
     expect(second).toMatchObject({ ok: false, code: "already_linked" });
-    expect(await authority.prepareLink({ kSrv: K_SRV, kGw, loaderDomain: "x.test" })).toMatchObject(
-      {
-        ok: false,
-        code: "already_linked",
-      },
-    );
+    expect(
+      await authority.prepareLink({ kSrv: K_SRV, kGw, hostname: "other-k7x2q.x.test" }),
+    ).toMatchObject({
+      ok: false,
+      code: "already_linked",
+    });
   });
 });

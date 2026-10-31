@@ -55,7 +55,9 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
   },
 
   // Writes to the membership authority, by action:
-  // - prepare / commit: the local link ceremony ("Make reachable"), direct loopback only;
+  // - check_name / prepare / commit: the local link ceremony ("Make reachable"),
+  //   direct loopback only. check_name and prepare take the owner's link code and
+  //   claw name; Discovery assigns the address "<name>-<account tag>.<domain>";
   // - publish: (re)publish to Discovery, optionally with an enrollment code;
   // - submit: an owner-signed statement (MembershipChange, Revocation, root
   //   re-certification) sent directly over the tunnel or loopback. The authority
@@ -70,8 +72,21 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
     }
     const params = isRecord(opts.params) ? opts.params : {};
     const channel = resolveOpenClawIdClientChannel(opts.client);
+    const nameRequest = {
+      enrollmentCode: optionalCode(params.enrollmentCode),
+      name: optionalCode(params.name),
+    };
+    if (params.action === "check_name") {
+      const result = await service.checkClawName(channel, nameRequest);
+      if ("ok" in result) {
+        refuse(opts, result);
+        return;
+      }
+      opts.respond(true, result);
+      return;
+    }
     if (params.action === "prepare") {
-      const result = await service.prepareLink(channel);
+      const result = await service.prepareLink(channel, nameRequest);
       if ("ok" in result) {
         refuse(opts, result);
         return;
@@ -111,7 +126,7 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
     if (params.action !== "commit") {
       refuse(opts, {
         code: "malformed",
-        detail: "action must be prepare, commit, publish, submit or register_invite",
+        detail: "action must be check_name, prepare, commit, publish, submit or register_invite",
       });
       return;
     }

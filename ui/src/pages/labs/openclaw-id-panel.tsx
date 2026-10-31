@@ -13,11 +13,7 @@ import { showMakeReachableDialog } from "./openclaw-id-dialog.tsx";
 import { OpenClawIdInvites } from "./openclaw-id-invites.tsx";
 import { linkCodePageUrl } from "./openclaw-id-link.ts";
 import { OpenClawIdMembers } from "./openclaw-id-members.tsx";
-import type {
-  OpenClawIdLinkPreparation,
-  OpenClawIdStatusResult,
-  OpenClawIdTunnelStatus,
-} from "./openclaw-id-types.ts";
+import type { OpenClawIdStatusResult, OpenClawIdTunnelStatus } from "./openclaw-id-types.ts";
 
 type StatusKind = "ok" | "warn" | "danger" | "accent" | "muted";
 
@@ -106,17 +102,14 @@ export function OpenClawIdPanel() {
       rootFingerprint: await shortFingerprint(result.link.rootPub),
     };
   });
-  const makeReachable = async () => {
+  const makeReachable = async (loaderDomain: string) => {
     const client = page.client;
     if (!client) {
       return;
     }
     setActionError(null);
     try {
-      const preparation = await client.request<OpenClawIdLinkPreparation>("openclawId.authority", {
-        action: "prepare",
-      });
-      await showMakeReachableDialog({ client, preparation });
+      await showMakeReachableDialog({ client, loaderDomain });
     } catch (error) {
       setActionError(formatUiError(error));
     } finally {
@@ -200,7 +193,7 @@ export function OpenClawIdPanel() {
                           type="button"
                           class="btn primary btn--sm"
                           disabled={!canLink()}
-                          onClick={() => void makeReachable()}
+                          onClick={() => void makeReachable(state().services.loaderDomain ?? "")}
                         >
                           {t("labsPage.openclawId.makeReachable")}
                         </button>

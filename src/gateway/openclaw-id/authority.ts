@@ -186,11 +186,14 @@ export function createOpenClawIdAuthority(
       return record;
     },
 
-    /** Ensures a claw id exists and returns the values the link ceremony signs. */
+    /**
+     * Ensures a claw id exists, records the hostname Discovery assigned for the owner's chosen
+     * name and returns the values the link ceremony signs.
+     */
     prepareLink(params: {
       kSrv: IrohEndpointKey;
       kGw: Ed25519PublicKey;
-      loaderDomain: string;
+      hostname: string;
     }): Promise<LinkPreparation | AuthorityRefusal> {
       return serialize(async () => {
         const current = await load();
@@ -198,7 +201,7 @@ export function createOpenClawIdAuthority(
           return { ok: false, code: "already_linked", detail: "this claw is already linked" };
         }
         const next = current ?? emptyRecord(bytesToHex(randomBytes(16)));
-        const hostname = `${next.claw_id}.${params.loaderDomain}`;
+        const hostname = params.hostname;
         if (next !== current || next.hostname !== hostname) {
           await commit({ ...next, hostname });
         }

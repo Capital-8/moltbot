@@ -118,8 +118,17 @@ const enLabs = {
       kitWarning:
         "Anyone with this kit can take ownership of your claws. Never share it or read it to anyone.",
       downloadKit: "Download as text file",
-      enrollmentCode: "OpenClaw ID enrollment code (optional)",
-      enrollmentCodeHint: "Lists this claw in your OpenClaw ID account. You can add it later.",
+      enrollmentCode: "OpenClaw ID link code",
+      enrollmentCodeHint:
+        "Get one while signed in to OpenClaw ID. It lists this claw in your account.",
+      nameBody:
+        "Name your claw. The name becomes its address; the ending is unique to your account, so names never collide.",
+      clawName: "Claw name",
+      clawNameHint:
+        "Lower-case letters, digits and hyphens. Your address ends with your account's tag.",
+      nameAvailable: "Available: https://{host}",
+      nameTaken: "https://{host} is taken. Choose another name.",
+      continue: "Continue",
       getLinkCode: "Get a link code",
       kitSaved: "I saved my recovery kit somewhere safe",
       thisBrowser: "This browser",

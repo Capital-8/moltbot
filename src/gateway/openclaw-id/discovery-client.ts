@@ -4,6 +4,7 @@ import {
   DISCOVERY_ENDPOINTS,
   DISCOVERY_SIGNATURE_HEADER,
   signDiscoveryRequest,
+  type CheckClawNameResponse,
   type ClawDescriptor,
   type DiscoveryEndpoint,
   type MailboxPayload,
@@ -75,6 +76,9 @@ export function createDiscoveryClient(params: {
   };
 
   return {
+    /** The hostname the code's account gets for a claw name, and whether it is free (code not spent). */
+    checkClawName: (code: string, name: string) =>
+      call<CheckClawNameResponse>("checkClawName", {}, { code, name }),
     /** Registers the claw with a one-time enrollment code from the signed-in owner. */
     registerClaw: (code: string, descriptor: ClawDescriptor) =>
       call<RegisterClawResponse>("registerClaw", {}, { code, descriptor }),

@@ -81,6 +81,17 @@ function sameSettings(a: TunnelRuntimeSettings, b: TunnelRuntimeSettings): boole
 
 const refusal = (code: string, detail: string): AuthorityRefusal => ({ ok: false, code, detail });
 
+/** The owner's choice for "Make reachable": a one-time link code and a claw name. */
+export type ClawNameRequest = { enrollmentCode?: string; name?: string };
+
+/** The address Discovery assigns for a claw name, and whether it is free. */
+export type ClawNameCheck = {
+  name: string;
+  accountTag: string;
+  hostname: string;
+  available: boolean;
+};
+
 /** Creates the OpenClaw ID owner. It stays inert until the Labs switch is on. */
 export function createOpenClawIdService(params: {
   getConfig: () => GatewayOpenClawIdConfig | undefined;
@@ -340,6 +351,48 @@ export function createOpenClawIdService(params: {
       ? (status.tunnel.endpointKey as IrohEndpointKey)
       : undefined;
 
+  /**
+   * Asks Discovery which address the link code's account gets for a claw name
+   * ("<name>-<account tag>.<loader domain>") and whether it is free. Local only.
+   */
+  const checkClawName = async (
+    channel: Channel | undefined,
+    request: ClawNameRequest,
+  ): Promise<ClawNameCheck | AuthorityRefusal> => {
+    if (channel !== "local_operator") {
+      return refusal("not_local_operator", "Make reachable only works on this machine");
+    }
+    const config = params.getConfig();
+    if (!isOpenClawIdEnabled(config) || !config?.loaderDomain || !config.discoveryUrl) {
+      return refusal("unconfigured", "set gateway.openclawId.loaderDomain and discoveryUrl first");
+    }
+    if (!request.enrollmentCode || !request.name) {
+      return refusal("malformed", "a link code and a claw name are required");
+    }
+    const [{ createDiscoveryClient }, { loadGatewaySigner }] = await Promise.all([
+      import("./discovery-client.js"),
+      import("./gateway-key.js"),
+    ]);
+    const { signer } = await loadGatewaySigner(params.getStateDir());
+    const client = createDiscoveryClient({ baseUrl: config.discoveryUrl, signer });
+    try {
+      const checked = await client.checkClawName(request.enrollmentCode, request.name);
+      // The binding is only usable on a single label under the loader domain.
+      if (checked.hostname !== `${checked.name}-${checked.account_tag}.${config.loaderDomain}`) {
+        return refusal("wrong_domain", `Discovery offered ${checked.hostname}`);
+      }
+      return {
+        name: checked.name,
+        accountTag: checked.account_tag,
+        hostname: checked.hostname,
+        available: checked.available,
+      };
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? "unavailable";
+      return refusal(code, error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return {
     /** Connects removal side effects owned by the Gateway's connection and run owners (loaded on first use). */
     bindEffects(load: () => Promise<OpenClawIdEffects>): void {
@@ -406,25 +459,33 @@ export function createOpenClawIdService(params: {
       };
     },
 
-    /** Step 1 of "Make reachable": the claw identity and keys the owner root will sign. */
-    async prepareLink(channel: Channel | undefined): Promise<LinkPreparation | AuthorityRefusal> {
-      if (channel !== "local_operator") {
-        return refusal("not_local_operator", "Make reachable only works on this machine");
-      }
-      const config = params.getConfig();
-      if (!isOpenClawIdEnabled(config) || !config?.loaderDomain) {
-        return refusal("unconfigured", "set gateway.openclawId.loaderDomain first");
+    /**
+     * Step 1 of "Make reachable": the claw identity, keys and the address for the
+     * owner's chosen name, which the owner root will sign.
+     */
+    async prepareLink(
+      channel: Channel | undefined,
+      request: ClawNameRequest,
+    ): Promise<LinkPreparation | AuthorityRefusal> {
+      const checked = await checkClawName(channel, request);
+      if ("ok" in checked) {
+        return checked;
       }
       const kSrv = runningServerKey();
       if (!kSrv) {
         return refusal("tunnel_not_running", "the tunnel is not running yet");
       }
+      if (!checked.available) {
+        return refusal("name_taken", `${checked.hostname} is already taken`);
+      }
       const { loadGatewaySigner } = await import("./gateway-key.js");
       const { pub } = await loadGatewaySigner(params.getStateDir());
       return await (
         await getAuthority()
-      ).prepareLink({ kSrv, kGw: pub, loaderDomain: config.loaderDomain });
+      ).prepareLink({ kSrv, kGw: pub, hostname: checked.hostname });
     },
+
+    checkClawName,
 
     /** Step 2: pin fp(R), admit owner device D1, store the binding, then publish. */
     async commitLink(
