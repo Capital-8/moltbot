@@ -17,6 +17,7 @@ import type {
   LinkPreparation,
   OpenClawIdAuthority,
 } from "./authority.js";
+import { clawOriginOfRecord, setOpenClawIdClawOriginResolver } from "./claw-origin.js";
 import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
 import type { TunnelApiHandler } from "./ingress-listener.js";
 import { listInviteViews } from "./invites-view.js";
@@ -128,6 +129,7 @@ export function createOpenClawIdService(params: {
     mailbox = undefined;
     setDeviceTokenBindingOwner(undefined);
     setOpenClawIdTunnelPrincipalResolver(undefined);
+    setOpenClawIdClawOriginResolver(undefined);
     await current?.stop();
   };
 
@@ -284,6 +286,7 @@ export function createOpenClawIdService(params: {
         ),
     });
     setOpenClawIdTunnelPrincipalResolver((peerKey) => owner.resolvePeer(peerKey));
+    setOpenClawIdClawOriginResolver(() => clawOriginOfRecord(owner.current()));
   };
 
   // Reads the Discovery mailbox once the claw is registered there.
