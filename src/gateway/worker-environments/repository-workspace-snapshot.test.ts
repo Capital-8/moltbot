@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+} from "../../../test/helpers/promise.js";
+import * as processExec from "../../process/exec.js";
+import { openDiskCleanupTransport } from "./placement-disk-cleanup.test-support.js";
+import { writePlacementEnvironmentFixture } from "./placement-test-fixtures.js";
 import { captureRepositoryDiskCheckpoint } from "./repository-workspace-snapshot.js";
+import { openRepositoryCaptureTransport } from "./repository-workspace-snapshot.test-support.js";
 import { withSessionRepositoryCheckpoint } from "./session-repository-checkpoints.js";
-import { sessionTarget } from "./worker-turn-launcher.test-support.js";
+import { database, placements, sessionTarget } from "./worker-turn-launcher.test-support.js";
 import { requireWorkspaceResultGit } from "./workspace-result-git.js";
 import { useRepositoryWorkspaceResultFixture } from "./workspace-result-repository.test-support.js";
 import {
@@ -21,67 +30,6 @@ vi.mock("./repository-github-identity.js", () => ({
   }),
 }));
 const { fixture } = useRepositoryWorkspaceResultFixture();
-
-it.each(["replacement", "revoked"] as const)(
-  "rejects %s disk capture before workspace effects",
-  async (condition) => {
-    const f = await fixture("worker-turn");
-    const repository = await f.bindDisk();
-    assert(repository.diskAuthority);
-    const original = f.environments.get(repository.diskAuthority.environmentId);
-    assert(original?.state === "attached");
-    const quiesce = vi.spyOn(f.tunnel, "quiesceWorkspace");
-    const upload = vi.spyOn(f.workspaceTransfer, "prepareUpload");
-    let current = true;
-    if (condition === "replacement") {
-      vi.mocked(f.environments.get).mockReturnValue({
-        ...original,
-        resourceReceipt: {
-          ...repository.diskAuthority.resourceReceipt,
-          identity: { diskId: "another-disk" },
-        },
-      });
-    } else {
-      vi.mocked(f.environments.startTunnel).mockImplementation(async () => {
-        await Promise.resolve();
-        current = false;
-        return f.tunnel;
-      });
-    }
-    const checkpointRef = workerWorkspaceResultRef(`refused-${condition}`);
-    const consume = vi.fn(async () => {});
-    await expect(
-      captureRepositoryDiskCheckpoint(
-        {
-          identity: sessionTarget,
-          repository,
-          checkpointRef,
-          purpose: "publication",
-          placements: f.placements,
-          environments: f.environments,
-          assertCurrent() {
-            if (!current) {
-              throw new Error("request revoked");
-            }
-          },
-        },
-        consume,
-      ),
-    ).rejects.toThrow(
-      condition === "replacement" ? "disk is missing or changed" : "request revoked",
-    );
-    expect(quiesce).not.toHaveBeenCalled();
-    expect(upload).not.toHaveBeenCalled();
-    expect(consume).not.toHaveBeenCalled();
-    expect(
-      await hasWorkerWorkspaceResultRef({
-        root: f.store.artifactPath(repository.workspaceId),
-        stagedResultRef: checkpointRef,
-      }),
-    ).toBe(false);
-    expect(await f.store.get(repository.workspaceId)).toEqual(repository);
-  },
-);
 
 it("exports current private history and files, then fences a late source edit before handoff", async () => {
   const f = await fixture("worker-turn");
@@ -170,4 +118,223 @@ it("refuses a lossy staged-index export while retaining the original disk", asyn
     "different working content\n",
   );
   expect(await f.store.get(repository.workspaceId)).toEqual(repository);
+});
+
+describe("new capture through native private transport", () => {
+  let wire: Awaited<ReturnType<typeof openDiskCleanupTransport>>;
+  let beforePairing = async () => {};
+  beforeAll(async () => {
+    // Configured synthetic pairing, not a login/enrollment or cloud allocation claim.
+    wire = await openDiskCleanupTransport({
+      resolveCurrentPairingState: async () => {
+        await beforePairing();
+        return { identity: "disk-cleanup-pairing", generation: "disk-cleanup-generation" };
+      },
+    });
+  });
+  afterAll(async () => {
+    await wire.close();
+  });
+
+  it.for([
+    { boundary: "build", change: "disk" },
+    { boundary: "build", change: "session" },
+    { boundary: "capability", change: "request" },
+    { boundary: "final-input", change: "request" },
+    { boundary: "final-input", change: "none" },
+  ] as const)(
+    "checks $change authority at $boundary with real transport",
+    async ({ boundary, change }, { signal }) => {
+      const f = await openRepositoryCaptureTransport(wire);
+      const artifact = f.store.artifactPath(f.repository.workspaceId);
+      const checkpointRef = workerWorkspaceResultRef("capture-wire-selected");
+      const aliasRef = workerWorkspaceResultRef("capture-wire-alias");
+      const refs = () =>
+        requireWorkspaceResultGit(artifact, [
+          "for-each-ref",
+          "--format=%(refname)",
+          "refs/openclaw/",
+        ]);
+      const beforeRefs = await refs();
+      await fs.writeFile(path.join(f.remote, "captured.txt"), "synthetic current disk bytes\n");
+      const entered = createDeferred();
+      const release = createDeferred();
+      const pause = async () => {
+        entered.resolve();
+        await release.promise;
+      };
+      const abort = () => release.resolve();
+      signal.addEventListener("abort", abort, { once: true });
+      let requestCurrent = true;
+      let finalInputChecked = false;
+      const consume = vi.fn(async (snapshot: { checkpointRef: string }) => {
+        await withSessionRepositoryCheckpoint(
+          { workspaceId: f.repository.workspaceId, checkpointRef: snapshot.checkpointRef },
+          async (payload) => {
+            expect(payload.publicationDigest).toMatch(/^sha256:/);
+            expect(payload.publicationStagingRoot).toBeDefined();
+            expect(await fs.readFile(path.join(payload.stagingRoot, "captured.txt"), "utf8")).toBe(
+              "synthetic current disk bytes\n",
+            );
+          },
+        );
+      });
+      const receive = f.transfer.receiveUpload.bind(f.transfer);
+      let uploads = 0;
+      vi.spyOn(f.transfer, "receiveUpload").mockImplementation(async (params) => {
+        const result = await receive(params);
+        uploads++;
+        return result;
+      });
+      if (boundary === "build") {
+        f.preparation.beforeBuild = pause;
+      }
+      if (boundary === "capability") {
+        beforePairing = async () => {
+          beforePairing = async () => {};
+          await pause();
+        };
+      }
+      const run = processExec.runCommandWithTimeout;
+      const runner = vi
+        .spyOn(processExec, "runCommandWithTimeout")
+        .mockImplementation(async (argv, options) => {
+          if (
+            boundary === "final-input" &&
+            argv.includes("update-ref") &&
+            typeof options !== "number" &&
+            options.input?.toString().includes("create " + checkpointRef + "\0")
+          ) {
+            await pause();
+            const beforeInput = options.beforeInput;
+            assert(beforeInput);
+            return await run(argv, {
+              ...options,
+              beforeInput: (...args) => {
+                finalInputChecked = true;
+                beforeInput(...args);
+              },
+            });
+          }
+          return await run(argv, options);
+        });
+      const pending = captureRepositoryDiskCheckpoint(
+        {
+          identity: sessionTarget,
+          repository: f.repository,
+          checkpointRef,
+          additionalRefs: [aliasRef],
+          purpose: "publication",
+          placements,
+          environments: f.environments,
+          assertCurrent() {
+            if (!requestCurrent) {
+              throw new Error("capture requester revoked");
+            }
+          },
+        },
+        consume,
+      );
+      void pending.catch(() => {});
+      try {
+        await withinTest(
+          awaitGateBeforeSettlement(
+            entered.promise,
+            pending,
+            "Capture settled before the selected boundary",
+          ),
+          signal,
+        );
+        expect(
+          await hasWorkerWorkspaceResultRef({ root: artifact, stagedResultRef: checkpointRef }),
+        ).toBe(false);
+        if (change === "request") {
+          requestCurrent = false;
+        }
+        if (change === "disk" || change === "session") {
+          // A nearest-neighbor durable fault preserves epoch and every other field.
+          writePlacementEnvironmentFixture(database, {
+            ...f.original,
+            ...(change === "disk"
+              ? {
+                  resourceReceipt: {
+                    ...f.repository.diskAuthority!.resourceReceipt,
+                    identity: { diskId: "replacement-disk" },
+                  },
+                }
+              : { attachedSessionIds: ["different-session"] }),
+          });
+        }
+        release.resolve();
+        if (change === "none") {
+          await withinTest(pending, signal);
+        } else {
+          await expect(withinTest(pending, signal)).rejects.toThrow(
+            change === "disk"
+              ? "disk is missing or changed"
+              : change === "session"
+                ? "lost its exact session attachment"
+                : "capture requester revoked",
+          );
+        }
+        expect(wire.errors).toEqual([]);
+        expect(f.workspace.quiescence.hasActiveWork()).toBe(false);
+        const selected = await hasWorkerWorkspaceResultRef({
+          root: artifact,
+          stagedResultRef: checkpointRef,
+        });
+        const alias = await hasWorkerWorkspaceResultRef({
+          root: artifact,
+          stagedResultRef: aliasRef,
+        });
+        expect(selected).toBe(change === "none");
+        expect(alias).toBe(selected);
+        expect(consume).toHaveBeenCalledTimes(change === "none" ? 1 : 0);
+        expect(await f.store.get(f.repository.workspaceId)).toEqual(f.repository);
+        expect(await fs.readFile(path.join(f.remote, "captured.txt"), "utf8")).toBe(
+          "synthetic current disk bytes\n",
+        );
+        if (boundary === "final-input") {
+          expect(uploads).toBe(2);
+          expect(finalInputChecked).toBe(true);
+          expect(f.events).toContain("quiescence:acquire:ack");
+          expect(f.events).toContain("quiescence:release:ack");
+          expect(f.events.indexOf("repository-upload:ack")).toBeLessThan(
+            f.events.indexOf("publication-upload:ack"),
+          );
+        } else {
+          expect(wire.commands).toEqual([]);
+          expect(uploads).toBe(0);
+        }
+        if (change !== "none") {
+          expect(await refs()).toBe(beforeRefs);
+        } else {
+          expect(
+            (await refs()).split("\n").filter((ref) => !beforeRefs.split("\n").includes(ref)),
+          ).toHaveLength(4);
+        }
+        console.info(
+          JSON.stringify({
+            operation: "capture:" + boundary + ":" + change,
+            status: selected ? "published" : "refused",
+            selectedRefExists: selected,
+            aliasRefExists: alias,
+            transport: f.events
+              .filter(
+                (operation) =>
+                  operation.endsWith(":ack") && !operation.startsWith("workspace-command:"),
+              )
+              .map((operation) => ({ operation, status: "acknowledged" })),
+          }),
+        );
+      } finally {
+        release.resolve();
+        beforePairing = async () => {};
+        signal.removeEventListener("abort", abort);
+        await pending.catch(() => {});
+        runner.mockRestore();
+        await f.close();
+      }
+    },
+  );
 });

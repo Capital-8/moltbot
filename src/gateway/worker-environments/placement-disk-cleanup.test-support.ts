@@ -17,17 +17,17 @@ import {
   parseNodeWorkerWorkspaceExecInput,
 } from "../../worker/node-workspace-protocol.js";
 import { createNodeRegistryRuntime, updateNodeRunnerInventory } from "../node-registry-private.js";
-import { NodeRegistry } from "../node-registry.js";
+import { NodeRegistry, type NodeRegistryOptions } from "../node-registry.js";
 import { makeClient } from "../node-registry.test-helpers.js";
 import { gatewayTestTextTransport } from "../server/connection-transport.test-support.js";
 
 // Only the remote endpoint is a fixture. Discovery, dispatch authorization, pending
 // invokes, serialization and both directions of socket delivery use the real owners.
-export async function openDiskCleanupTransport() {
+export async function openDiskCleanupTransport(options: NodeRegistryOptions = {}) {
   const nodeId = "disk-cleanup-node";
   const connId = "disk-cleanup-connection";
   const { nodeRegistry, nodeWorkerSupervisorTransport } = createNodeRegistryRuntime(
-    () => new NodeRegistry(),
+    () => new NodeRegistry(options),
   );
   const port = await acquireTestPortBlock({ offsets: [0] });
   const server = new WebSocketServer({ host: "127.0.0.1", port: port.port });
@@ -60,6 +60,8 @@ export async function openDiskCleanupTransport() {
         environmentSession: 1,
         capturedExecPolicy: true,
         promptContext: 1,
+        workspaceQuiescence: 1,
+        workspaceResultVersion: 2,
       },
     },
   });
@@ -67,7 +69,10 @@ export async function openDiskCleanupTransport() {
     workspace: NodeWorkerWorkspaceRuntime;
     events: string[];
     beforeStop: () => Promise<void>;
+    gateway?: Parameters<NodeWorkerWorkspaceRuntime["exec"]>[2];
+    observeWorkspace?: (input: ReturnType<typeof parseNodeWorkerWorkspaceExecInput>) => void;
   };
+  const operations = new Map<string, string>();
   const commands: string[] = [];
   const errors: unknown[] = [];
   const requests = new Set<Promise<void>>();
@@ -85,7 +90,10 @@ export async function openDiskCleanupTransport() {
           payloadJSON: result.payloadJSON,
         }),
       );
-      endpoint.events.push(result.payloadJSON === "null" ? "stop:ack" : "drain:ack");
+      const operation = operations.get(result.id);
+      assert(operation);
+      operations.delete(result.id);
+      endpoint.events.push(`${operation}:ack`);
     } catch (error) {
       errors.push(error);
     }
@@ -101,6 +109,7 @@ export async function openDiskCleanupTransport() {
       let payload: unknown;
       if (request.command === NODE_WORKER_ENVIRONMENT_STOP_COMMAND) {
         const input = parseNodeWorkerEnvironmentStopInput(request.paramsJSON);
+        operations.set(request.id, "stop");
         endpoint.events.push("stop:received");
         await endpoint.beforeStop();
         await endpoint.workspace.processes.stopEnvironment(input);
@@ -109,10 +118,26 @@ export async function openDiskCleanupTransport() {
       } else {
         assert.equal(request.command, NODE_WORKER_WORKSPACE_EXEC_COMMAND);
         const input = parseNodeWorkerWorkspaceExecInput(request.paramsJSON);
-        assert.deepEqual(input.argv, [NODE_WORKSPACE_DRAIN_COMMAND]);
-        endpoint.events.push("drain:received");
-        payload = await endpoint.workspace.exec(input);
-        endpoint.events.push("drain:complete");
+        // Cleanup-only consumers still reject any non-drain effect. Capture consumers
+        // supply the real HTTP endpoint and observe labels, never replacement results.
+        if (!endpoint.gateway) {
+          assert.deepEqual(input.argv, [NODE_WORKSPACE_DRAIN_COMMAND]);
+        }
+        const operation =
+          input.argv[0] === NODE_WORKSPACE_DRAIN_COMMAND
+            ? "drain"
+            : input.quiescence
+              ? `quiescence:${input.quiescence.action}`
+              : input.transfer
+                ? input.transfer.direction === "upload" && input.transfer.publicationBaseCommit
+                  ? "publication-upload"
+                  : "repository-upload"
+                : "workspace-command";
+        operations.set(request.id, operation);
+        endpoint.observeWorkspace?.(input);
+        endpoint.events.push(`${operation}:received`);
+        payload = await endpoint.workspace.exec(input, undefined, endpoint.gateway);
+        endpoint.events.push(`${operation}:complete`);
       }
       client.send(
         JSON.stringify({ id: request.id, ok: true, payloadJSON: JSON.stringify(payload) }),
