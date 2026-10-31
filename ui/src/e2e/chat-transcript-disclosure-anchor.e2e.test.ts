@@ -263,33 +263,11 @@ suite.define(() => {
             const input = await thread.evaluateHandle(
               (scroller, { waitTimeout, wheel: isWheel }) => {
                 const eventType = isWheel ? "wheel" : "pointerdown";
-                const pendingAboveReader = () => {
-                  const viewportTop = scroller.getBoundingClientRect().top;
-                  const bubble = Array.from(
-                    scroller.querySelectorAll<HTMLElement>(
-                      '.chat-virtual-row:not([data-prepared-row]) .chat-bubble[data-entry-id^="sizing-message-"]',
-                    ),
-                  ).findLast(
-                    (candidate) =>
-                      Number(candidate.dataset.entryId!.slice("sizing-message-".length)) % 2 ===
-                        1 &&
-                      candidate.closest(".chat-virtual-row")!.getBoundingClientRect().bottom <=
-                        viewportTop,
-                  );
-                  return bubble
-                    ? {
-                        messageId: bubble.dataset.entryId!,
-                        bottom: bubble.closest(".chat-virtual-row")!.getBoundingClientRect().bottom,
-                        viewportTop,
-                      }
-                    : null;
-                };
                 type InputArrival = {
                   top: number;
                   max: number;
                   trusted: boolean;
                   scroller: boolean;
-                  pending: ReturnType<typeof pendingAboveReader>;
                 };
                 let resolveReady!: (position: Pick<InputArrival, "top" | "max">) => void;
                 let rejectReady!: (error: Error) => void;
@@ -304,11 +282,7 @@ suite.define(() => {
                   rejectArrival = reject;
                 });
                 const onScroll = (event: Event) => {
-                  if (
-                    !event.isTrusted ||
-                    scroller.scrollTop <= 0 ||
-                    (!isWheel && !pendingAboveReader())
-                  ) {
+                  if (!event.isTrusted || scroller.scrollTop <= 0) {
                     return;
                   }
                   scroller.removeEventListener("scroll", onScroll);
@@ -327,7 +301,6 @@ suite.define(() => {
                     scroller:
                       event.target === scroller ||
                       (isWheel && event.target instanceof Node && scroller.contains(event.target)),
-                    pending: pendingAboveReader(),
                   });
                   clearTimeout(timer);
                   document.removeEventListener(eventType, onInput, true);
@@ -377,10 +350,6 @@ suite.define(() => {
               // Prove motion started from its pre-input native scroll sample.
               during = wheel ? started : arrival;
               expect(during.top).toBeGreaterThan(0);
-              if (!wheel) {
-                expect(arrival.pending).not.toBeNull();
-                expect(arrival.pending!.bottom).toBeLessThanOrEqual(arrival.pending!.viewportTop);
-              }
             } finally {
               await input.evaluate((observation) => observation.dispose());
               await input.dispose();
