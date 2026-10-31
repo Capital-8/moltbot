@@ -543,6 +543,14 @@ export async function resolveSettledUpdateCommandResult(
   settlementFailed: boolean;
   captured?: UpdateCommandTerminalRecord;
 }> {
+  if (
+    failure instanceof UpdateCommandPendingRecoveryFailure &&
+    failure.cause instanceof UpdateRecoveryRequiredError
+  ) {
+    // Retained state already has an owner; report the captured initiating failure
+    // without reopening it or treating that intentional refusal as cleanup failure.
+    throw failure;
+  }
   const settlementFailed =
     failure !== undefined &&
     (!(failure instanceof UpdateCommandFailure) ||

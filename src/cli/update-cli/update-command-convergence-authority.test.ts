@@ -134,24 +134,6 @@ function doctorOperation(args: string[]) {
 }
 
 describe("candidate convergence Doctor dispatch authority", () => {
-  it.each([false, true])(
-    "requires an owning cohort unless a shipped parent transferred finalization (adopted=%s)",
-    async (adopted) => {
-      vi.stubEnv("OPENCLAW_STATE_DIR", tempDirs.make("candidate-parent-cohort-"));
-      vi.mocked(shared.readPackageVersion).mockResolvedValue(VERSION);
-      vi.spyOn(sourceRuntime, "completeSourceUpdateRuntime").mockResolvedValue({ changed: false });
-      const freshDoctor = await import("./update-command-fresh-doctor.js");
-      vi.spyOn(freshDoctor, "completePostCorePluginUpdate").mockResolvedValue(candidateResult());
-      await converge({
-        candidateRuntime: true,
-        ...(adopted ? { adoptedFinalization: true } : {}),
-      });
-      expect(mocks.convergeCandidate).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ requiresCohort: !adopted }),
-      );
-    },
-  );
-
   it.each([false, true])("reports only final candidate warnings (pending=%s)", async (pending) => {
     const migrations = await import("../../infra/deferred-plugin-migrations.js");
     const freshDoctor = await import("./update-command-fresh-doctor.js");

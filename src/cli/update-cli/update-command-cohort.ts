@@ -92,7 +92,10 @@ export async function createUpdateCommandRollbackCapture(
       const authority = captureUpdateCommandExecutorAuthority(fence, run.runId);
       const runtime = {
         root: execution.root,
-        nodePath: execution.packageUpdateNodeRunner ?? process.execPath,
+        nodePath:
+          execution.packageActivationRuntime?.path ??
+          execution.packageUpdateNodeRunner ??
+          process.execPath,
       };
       await beginUpdatePluginCohort({
         runId: run.runId,

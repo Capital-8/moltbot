@@ -13,6 +13,7 @@ import { createConfigIO } from "../../config/io.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import * as serviceMembership from "../../daemon/service-process-membership.js";
 import { buildBackupArchivePath } from "../../infra/backup-archive-path-policy.js";
+import { capturePackageActivationRuntime } from "../../infra/package-update-activation-paths.js";
 import { swapStagedPackageInstall } from "../../infra/package-update-swap.js";
 import { createPackageSwapFixture } from "../../infra/package-update-swap.test-support.js";
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
@@ -183,6 +184,7 @@ const expectMissing = (file: string) =>
 
 it.each([
   "package",
+  "relative-node",
   "exited-writer",
   "git",
   "git-edited",
@@ -723,6 +725,10 @@ it.each([
               startedAt: Date.now(),
               invocationCwd: base,
               packageTargetSchemaVersions: candidateSchemas,
+              ...(scenario === "relative-node" && {
+                packageUpdateNodeRunner: "node",
+                packageActivationRuntime: capturePackageActivationRuntime("node", process.execPath),
+              }),
               shouldRestart: scenario !== "serving",
             };
             const execution = await executeMutableUpdate(await bindExecutionGuards(params));

@@ -176,7 +176,7 @@ export const makeOkUpdateResult = (overrides: Partial<UpdateRunResult> = {}): Up
   ...overrides,
 });
 
-async function retainFixtureGitRuntime(
+export async function retainFixtureGitRuntime(
   gitRoot: string,
   onTransaction: NonNullable<Parameters<typeof updateGitCheckout>[0]["opts"]["onTransaction"]>,
 ) {
@@ -257,9 +257,7 @@ export function createGitUpdateAfterMutationFixture(
       expectDefined(result.after?.sha ?? undefined, "candidate commit"),
       undefined,
     );
-    if (result.root) {
-      await opts.validateCandidate(result.root);
-    }
+    await opts.validateCandidate(result.root ?? gitRoot);
     await expectDefined(opts.beforeGitMutation, "Git mutation admission")({});
     mutationAdmitted();
     if (opts.onTransaction) {

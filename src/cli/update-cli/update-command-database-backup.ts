@@ -239,9 +239,9 @@ export async function restoreFailedUpdateDatabases(params: {
   try {
     // Every restore path, including a settled Doctor failure before finalization,
     // must retain this run's matching recovery pair in the restored database.
+    // Preserve the source artifacts until the restore owner checks their generation.
     const pair = loadPluginCohortRecovery(params.runId, {
       env: params.env,
-      allowNativeRead: true,
     });
     const migratedPaths = await restoreUpdateDatabaseBackup({
       ...params,

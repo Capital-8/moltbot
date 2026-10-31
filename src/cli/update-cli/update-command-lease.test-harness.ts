@@ -1,11 +1,16 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { resolveSqliteSchemaAssetInputs } from "../../../scripts/lib/sqlite-schema-assets.mts";
+import { vitestWorkerRuntimeAssets } from "../../../scripts/lib/vitest-worker-declarations.mts";
 import { readConfigFileSnapshot } from "../../config/config.js";
+import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import * as temporaryState from "../../infra/tmp-openclaw-dir.js";
 import { createUpdateRun } from "../../infra/update-run-ledger.js";
+import { createCompiledSdkHost } from "../../plugins/compiled-sdk-host.test-support.js";
 import { defaultRuntime } from "../../runtime.js";
 import {
   createOpenClawTestState,
@@ -165,10 +170,79 @@ export async function cleanupUpdateLeaseHarness(): Promise<void> {
   await state.cleanup();
 }
 
+async function prepareCandidateDoctorRuntime(): Promise<void> {
+  const installed = createCompiledSdkHost(
+    [
+      runtimeProcessEntrypoints.updateMigratedFinalize,
+      runtimeProcessEntrypoints.workerNativeLifecycle,
+      runtimeProcessEntrypoints.sqliteWriterAdmission,
+      runtimeProcessEntrypoints.sqliteStore,
+      runtimeProcessEntrypoints.sqliteIntegrity,
+      runtimeProcessEntrypoints.sqliteReadOnly,
+      runtimeProcessEntrypoints.sqliteReadOnlyNativeResource,
+      runtimeProcessEntrypoints.sqliteSnapshotStaging,
+      runtimeProcessEntrypoints.sqliteSourceRevision,
+      runtimeProcessEntrypoints.sharedStateStore,
+      runtimeProcessEntrypoints.stateOwnership,
+      runtimeProcessEntrypoints.stateLeaseHeartbeat,
+      runtimeProcessEntrypoints.stateRead,
+    ],
+    () => state.root,
+  );
+  if (!installed) {
+    throw new Error("The candidate lease fixture requires the prepared compiled worker graph.");
+  }
+  const worker = state.path(
+    "dist",
+    runtimeProcessEntrypoints.updateMigratedFinalize.distWorkerPath,
+  );
+  const generation = path.resolve(
+    path.dirname(
+      fileURLToPath(resolveRuntimeWorkerUrl(runtimeProcessEntrypoints.updateMigratedFinalize)),
+    ),
+    "../..",
+  );
+  for (const asset of vitestWorkerRuntimeAssets) {
+    await fs.copyFile(path.join(generation, asset), state.path(asset));
+  }
+  for (const asset of resolveSqliteSchemaAssetInputs()) {
+    const relative = path.join("dist/assets/sqlite-schema", path.basename(asset));
+    await fs.mkdir(path.dirname(state.path(relative)), { recursive: true });
+    await fs.copyFile(path.join(generation, relative), state.path(relative));
+  }
+  const preserved = path.join(generation, "dist/legacy-finalizer");
+  await fs.cp(preserved, state.root, { recursive: true });
+  // Consume the real delegated grant and retain its native owner. Only the Doctor
+  // health body uses this fixture's existing lease probes and intentional failures.
+  await fs.writeFile(
+    worker,
+    `
+    import {registerHooks} from 'node:module';
+    const health = new URL('../../src/flows/doctor-health.js',import.meta.url).href;
+    registerHooks({load(url,context,nextLoad) {
+      return url !== health ? nextLoad(url,context) : {
+        format:'module',shortCircuit:true,source:
+          'export * from '+JSON.stringify(url+'?fixture-original')+';\\n'+
+          'export async function runDoctorHealthFlow(runtime,options,authority) {'+
+          'authority.assertCurrent(); const argv=process.argv;'+
+          'try { process.argv=[...argv.slice(0,2),"doctor","--repair","--non-interactive",'+
+          '...(options.workspaceSuggestions ? [] : ["--no-workspace-suggestions"]),'+
+          '...(options.yes ? ["--yes"] : [])]; await import('+${JSON.stringify(JSON.stringify(pathToFileURL(entrypoint).href))}+') }'+
+          'finally {process.argv=argv} authority.assertCurrent(); }'
+      };
+    }});
+    await import('../../src/infra/update-migrated-finalize.worker.js');
+  `,
+  );
+}
+
 export async function writeScenario(
   lane: Lane,
   scenario: Omit<LeaseScenario, "lane"> = {},
 ): Promise<void> {
+  if (lane === "candidate-runtime") {
+    await prepareCandidateDoctorRuntime();
+  }
   // Fresh-process fixtures must advertise a runtime supporting continuation;
   // legacy targets intentionally exercise the current-process fallback.
   await fs.writeFile(

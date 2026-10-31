@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
+import { withPluginCohortConfigCapture } from "../config/plugin-cohort-recovery.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import { pluginCohortPublicationContext } from "../infra/update-plugin-cohort-context.js";
 import type { PluginCohortRecovery } from "../infra/update-plugin-cohort-schema.js";
@@ -251,23 +252,27 @@ it("retires an inactive intermediate generation instead of making it discoverabl
     async (state) => {
       const f = await fixture(state);
       f.begin();
-      await markRetainedManagedNpmInstall({
-        packageDir: f.middle.packageDir,
-        pluginId: "fixture",
-        reason: RETAINED_MANAGED_NPM_KEEP_FILES_REASON,
-        beforeWrite: (contents) =>
-          recordPluginCohortRetentionMarker(
-            {
-              runId: f.runId,
-              transactionId: f.cohort.transactionId,
-              installKey: state.root,
-              env: state.env,
-              assertCurrent: () => fence.assertCurrent(),
-            },
-            f.middle.packageDir,
-            contents,
-          ),
-      });
+      await withPluginCohortConfigCapture(
+        {
+          runId: f.runId,
+          installKey: f.cohort.installKey,
+          env: state.env,
+          assertCurrent: () => fence.assertCurrent(),
+        },
+        async () => {
+          const context = pluginCohortPublicationContext.getStore();
+          if (!context) {
+            throw new Error("Plugin cohort capture is missing");
+          }
+          await markRetainedManagedNpmInstall({
+            packageDir: f.middle.packageDir,
+            pluginId: "fixture",
+            reason: RETAINED_MANAGED_NPM_KEEP_FILES_REASON,
+            beforeWrite: (contents) =>
+              recordPluginCohortRetentionMarker(context, f.middle.packageDir, contents),
+          });
+        },
+      );
       await f.settle();
       await f.settle();
       expect(
@@ -292,10 +297,9 @@ it("reopens a cohort after tentative index publication and owned config compensa
       const f = await fixture(state);
       f.begin();
       const refusal = new Error("configuration publication refused");
-      await pluginCohortPublicationContext.run(
+      await withPluginCohortConfigCapture(
         {
           runId: f.runId,
-          transactionId: f.cohort.transactionId,
           installKey: f.cohort.installKey,
           env: state.env,
           assertCurrent: () => fence.assertCurrent(),
@@ -355,10 +359,9 @@ it("restores valid install records when the prior index metadata requires regene
         { revision: 1, index: { version: 999, installRecords: f.current } },
         { env: state.env },
       );
-      await pluginCohortPublicationContext.run(
+      await withPluginCohortConfigCapture(
         {
           runId: f.runId,
-          transactionId: f.cohort.transactionId,
           installKey: f.cohort.installKey,
           env: state.env,
           assertCurrent: () => fence.assertCurrent(),
@@ -390,10 +393,9 @@ it("journals owned index-row deletion before reopening cumulative cohort recover
     async (state) => {
       const f = await fixture(state);
       f.begin();
-      await pluginCohortPublicationContext.run(
+      await withPluginCohortConfigCapture(
         {
           runId: f.runId,
-          transactionId: f.cohort.transactionId,
           installKey: f.cohort.installKey,
           env: state.env,
           assertCurrent: () => fence.assertCurrent(),
