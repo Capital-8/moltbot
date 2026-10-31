@@ -64,9 +64,13 @@ export class BoardWidgetSandboxHost {
   private requestGeneration = 0;
   private readonly pendingRequests = new Set<string>();
 
-  constructor(private options: BoardWidgetSandboxHostOptions) {
-    this.documentHost = new WidgetSandboxHost(this.documentOptions());
+  constructor(
+    private options: BoardWidgetSandboxHostOptions,
+    prepared?: WidgetSandboxHost,
+  ) {
+    this.documentHost = prepared ?? new WidgetSandboxHost(this.documentOptions());
     this.documentHost.setActive(options.documentActive);
+    prepared?.update(this.documentOptions());
   }
 
   get frame(): HTMLIFrameElement {

@@ -44,6 +44,7 @@ const { values } = parseArgs({
     "capture-ms": { type: "string", default: "8000" },
     route: { type: "string", default: "both" },
     "trace-board": { type: "boolean", default: false },
+    "board-phases": { type: "boolean", default: false },
     "audit-report": { type: "string" },
     "paint-audit": { type: "string" },
     help: { type: "boolean", default: false },
@@ -390,7 +391,7 @@ async function captureReload(
       timeout: captureMs + 60000,
     });
     const probe = await readProbe(page);
-    if (values["trace-board"]) {
+    if (values["trace-board"] || values["board-phases"]) {
       const phases = await page.evaluate(() => ({
         readiness: Reflect.get(window, "__readWidgetReadiness")(),
         phases: Reflect.get(window, "__readBoardSandboxPhases")(),
@@ -775,7 +776,7 @@ try {
         try {
           const page = await context.newPage();
           diagnosticPage = page;
-          if (values["trace-board"]) {
+          if (values["trace-board"] || values["board-phases"]) {
             await page.addInitScript({
               content: `globalThis.__name = (fn) => fn; (${installWidgetReadiness.toString()})(); (${installBoardSandboxPhaseProbe.toString()})();`,
             });
