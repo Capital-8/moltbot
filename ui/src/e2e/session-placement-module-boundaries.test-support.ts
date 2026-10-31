@@ -493,6 +493,7 @@ export function defineSessionPlacementModuleBoundaryTests(
       await sessionRow.waitFor();
       await localSessionRow.waitFor();
       const managedCloudBadge = sessionRow.locator(".session-row-badge--cloud");
+      await managedCloudBadge.waitFor();
       expect(await managedCloudBadge.count()).toBe(1);
       expect(await managedCloudBadge.getAttribute("data-placement-state")).toBe("active");
       expect(await localSessionRow.locator(".session-row-badge--cloud").count()).toBe(0);
