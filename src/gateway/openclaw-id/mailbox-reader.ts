@@ -67,7 +67,10 @@ export async function applyMailboxMessage(
 /**
  * Long-polls the mailbox until stopped; acknowledges what it applied. `onEffects`
  * receives the side effects of accepted writes and of refusals that carry them
- * (a conflicting rotation's freeze alert).
+ * (a conflicting rotation's freeze alert). `onRefused` sees each refusal with
+ * its message, so the Gateway can react (a stale seq means Discovery's mirror is
+ * behind). `onConnected` runs on the first successful read and after each
+ * recovery from a failed read: Discovery is reachable again.
  */
 export function startMailboxReader(params: {
   clawId: string;
@@ -75,12 +78,15 @@ export function startMailboxReader(params: {
   sink: MailboxSink;
   cursor: string | null;
   onEffects: (events: AuthorityEvent[]) => Promise<void>;
+  onRefused?: (message: MailboxMessage, refusal: AuthorityRefusal) => Promise<void>;
+  onConnected?: () => void;
   log: ReaderLogger;
 }) {
   const controller = new AbortController();
   let cursor = params.cursor;
   const loop = async () => {
     let backoff = BACKOFF_INITIAL_MS;
+    let connected = false;
     while (!controller.signal.aborted) {
       try {
         const batch = await params.client.receiveMail(
@@ -88,12 +94,21 @@ export function startMailboxReader(params: {
           cursor,
           MAILBOX_MAX_WAIT_SECONDS,
         );
+        if (!connected) {
+          connected = true;
+          params.onConnected?.();
+        }
         for (const message of batch.messages) {
           for (const result of await applyMailboxMessage(message, params.sink)) {
             if (!result.ok) {
               params.log.warn(
                 `openclaw-id: mailbox ${message.payload.kind} refused (${result.code})`,
               );
+              await params
+                .onRefused?.(message, result)
+                .catch((error: unknown) =>
+                  params.log.warn(`openclaw-id: mailbox refusal handling failed: ${String(error)}`),
+                );
             }
             if (result.ok || (result.events?.length ?? 0) > 0) {
               await params.onEffects(result.events ?? []);
@@ -110,6 +125,7 @@ export function startMailboxReader(params: {
         if (controller.signal.aborted) {
           return;
         }
+        connected = false;
         params.log.warn(
           `openclaw-id: mailbox read failed: ${String((error as Error)?.message ?? error)}`,
         );

@@ -18,10 +18,19 @@ export type MailboxPayload =
   | { kind: "revocation"; revocation: SignedStatement<"Revocation"> }
   /** SAS enrollment messages; `data` per step is defined in docs/discovery.md. */
   | { kind: "enrollment"; request_id: string; step: EnrollmentStep; data: Record<string, unknown> }
-  /** Gateway hints to owner devices. Never authority: devices confirm at the Gateway directly. */
+  /**
+   * Gateway hints to owner devices. Never authority: devices confirm at the Gateway directly.
+   * `seq_conflict` goes to the one device whose root statement was refused for a stale seq;
+   * `ref` is the Gateway's current seq, and the Gateway has republished its snapshot.
+   */
   | {
       kind: "notice";
-      event: "kit_used" | "redemption_pending" | "redemption_resolved" | "rotation_conflict";
+      event:
+        | "kit_used"
+        | "redemption_pending"
+        | "redemption_resolved"
+        | "rotation_conflict"
+        | "seq_conflict";
       ref: string;
     };
 

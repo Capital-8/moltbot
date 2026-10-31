@@ -31,6 +31,8 @@ export type StoredClaw = {
     owner_account_id: string | null;
     published_binding_seq: number;
     published_snapshot_seq: number;
+    /** A publication was requested and has not succeeded yet (publication-retry.ts). */
+    publish_pending?: boolean;
     mailbox_cursor: string | null;
   };
 };

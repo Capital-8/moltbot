@@ -24,6 +24,7 @@ import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
 import type { TunnelApiHandler } from "./ingress-listener.js";
 import { listInviteViews } from "./invites-view.js";
 import { createOwnerExpiryTimer } from "./owner-expiry.js";
+import { createPublicationRetry } from "./publication-retry.js";
 import type { PublishOutcome } from "./publisher.js";
 import { setOpenClawIdTunnelPrincipalResolver } from "./tunnel-principal.js";
 import type { TunnelRuntime, TunnelRuntimeSettings } from "./tunnel-runtime.js";
@@ -122,6 +123,15 @@ export function createOpenClawIdService(params: {
       ),
   });
 
+  // Retries failed Discovery publications until the mirror catches up (OCF-313).
+  const publicationRetry = createPublicationRetry({
+    publish: () => publish(),
+    current: () => authority?.current(),
+    setPending: async (pending) =>
+      await (await getAuthority()).recordDiscovery({ publish_pending: pending }),
+    log: params.log,
+  });
+
   // The removal effects load once; they also start remembering run custody.
   const getEffects = () => (effectsPromise ??= loadEffects?.());
 
@@ -138,6 +148,7 @@ export function createOpenClawIdService(params: {
     const current = runtime;
     runtime = undefined;
     ownerExpiry.stop();
+    publicationRetry.stop();
     mailbox?.stop();
     mailbox = undefined;
     setDeviceTokenBindingOwner(undefined);
@@ -210,6 +221,7 @@ export function createOpenClawIdService(params: {
       await getEffects();
       await publishTokenBindings();
       await startMailbox();
+      await publicationRetry.start();
     } catch (error) {
       status = { state: "failed", reason: String((error as Error)?.message ?? error) };
       params.log.warn(`openclaw-id: could not start remote access: ${status.reason}`);
@@ -278,9 +290,11 @@ export function createOpenClawIdService(params: {
       params.log.warn(`openclaw-id: owner notices failed: ${String(error)}`),
     );
     if (events.some((event) => event.type === "publish_snapshot")) {
-      void publish().catch((error: unknown) =>
-        params.log.warn(`openclaw-id: publication failed: ${String(error)}`),
-      );
+      void publicationRetry
+        .request()
+        .catch((error: unknown) =>
+          params.log.warn(`openclaw-id: publication failed: ${String(error)}`),
+        );
     }
   };
 
@@ -346,9 +360,10 @@ export function createOpenClawIdService(params: {
       ]);
     const owner = await getAuthority();
     const { signer } = await loadGatewaySigner(params.getStateDir());
+    const client = createDiscoveryClient({ baseUrl: config.discoveryUrl, signer });
     mailbox = startMailboxReader({
       clawId: record.claw_id,
-      client: createDiscoveryClient({ baseUrl: config.discoveryUrl, signer }),
+      client,
       cursor: record.discovery.mailbox_cursor,
       sink: {
         submit: (statement) => owner.submit(statement, "mailbox"),
@@ -356,6 +371,26 @@ export function createOpenClawIdService(params: {
         saveCursor: (cursor) => owner.recordDiscovery({ mailbox_cursor: cursor }),
       },
       onEffects: applyEvents,
+      // A stale-seq root statement means the mirror is behind: republish, tell the sender.
+      onRefused: async (message, refused) => {
+        const { handleStaleSeqRefusal, isStaleSeqRefusal } = await import("./stale-seq.js");
+        if (isStaleSeqRefusal(message, refused)) {
+          await handleStaleSeqRefusal({
+            message,
+            currentSeq: owner.current()?.authority?.seq ?? 0,
+            republish: () => publicationRetry.request(),
+            target: async () => ({ clawId: record.claw_id, client }),
+            log: params.log,
+          });
+        }
+      },
+      // Discovery is reachable again: publish anything still pending.
+      onConnected: () =>
+        void publicationRetry
+          .resume()
+          .catch((error: unknown) =>
+            params.log.warn(`openclaw-id: publication failed: ${String(error)}`),
+          ),
       log: params.log,
     });
   };
@@ -483,7 +518,9 @@ export function createOpenClawIdService(params: {
         invites: listInviteViews(record, Math.floor(Date.now() / 1000)),
         // After a restart, the last publication recorded with the claw stands in.
         publication:
-          lastPublish ??
+          (lastPublish?.state === "failed"
+            ? { ...lastPublish, retryAt: publicationRetry.nextRetryAt() }
+            : lastPublish) ??
           (record?.discovery.owner_account_id
             ? {
                 state: "published" as const,

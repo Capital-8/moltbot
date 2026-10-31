@@ -7,6 +7,7 @@ import {
   type CheckClawNameResponse,
   type ClawDescriptor,
   type DiscoveryEndpoint,
+  type KeyFingerprint,
   type MailboxPayload,
   type ReceiveMailResponse,
   type RegisterClawResponse,
@@ -99,6 +100,12 @@ export function createDiscoveryClient(params: {
     /** Mails a notice to every owner device (K_gw-signed, no bearer; notices are never authority). */
     sendOwnerNotice: (clawId: string, payload: Extract<MailboxPayload, { kind: "notice" }>) =>
       call<SendMailResponse>("sendMail", { claw_id: clawId }, { to: "owners", payload }),
+    /** Mails a notice to one device of this claw, by its key fingerprint. */
+    sendDeviceNotice: (
+      clawId: string,
+      deviceFp: KeyFingerprint,
+      payload: Extract<MailboxPayload, { kind: "notice" }>,
+    ) => call<SendMailResponse>("sendMail", { claw_id: clawId }, { to: deviceFp, payload }),
   };
 }
 
