@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { expect, it, onTestFinished } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { i18n } from "../../../i18n/index.ts";
 import { loadLazyLocaleTranslation } from "../../../i18n/lib/registry.ts";
@@ -11,13 +11,17 @@ import { ChatComposerPlusMenu } from "./chat-composer-plus-menu.tsx";
 
 it("keeps plugin management visually secondary to capability navigation", async () => {
   onTestFinished(cleanupSolid);
-  const view = mountSolid(() => (
-    <ChatComposerPlusMenu
-      menu={makeMenu({ view: "connectors", capabilityMenu: makeCapabilities() })}
-    />
-  ));
+  const [open, setOpen] = createSignal(false);
+  const menu = makeMenu({
+    view: "connectors",
+    capabilityMenu: makeCapabilities(),
+    onOpenChange: setOpen,
+  });
+  const view = mountSolid(() => <ChatComposerPlusMenu menu={{ ...menu, open: open() }} />);
   const trigger = view.container.querySelector<HTMLElement>('[aria-haspopup="menu"]')!;
   await page.elementLocator(trigger).click();
+  // Chunk loading precedes the DOM settlement window used by the assertions.
+  await vi.dynamicImportSettled();
   await expect
     .poll(() => view.container.querySelector('[data-value="manage-plugins"]'))
     .not.toBeNull();
@@ -67,6 +71,7 @@ it("wraps translated composer headings without adding keyboard stops", async () 
   const trigger = view.container.querySelector<HTMLElement>('[aria-haspopup="menu"]')!;
   trigger.focus();
   await userEvent.keyboard("{Enter}");
+  await vi.dynamicImportSettled();
   await expect
     .poll(
       () =>
