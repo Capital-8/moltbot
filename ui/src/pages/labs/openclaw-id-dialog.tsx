@@ -1,10 +1,10 @@
 import "../../styles/secret-reveal.css";
-import "./openclaw-id.css";
 import { createSignal, Match, Show, Switch } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { withPromiseModalHost } from "../../components/promise-modal-host.ts";
 import { CopyButton } from "../../components/solid/copy-button.tsx";
 import { Icon } from "../../components/solid/icon.tsx";
+import { SettingsRow, SettingsToggleRow } from "../../components/solid/settings-ui.tsx";
 import { formatUiError } from "../../lib/format-error.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { generateOwnerDeviceKey, saveOwnerDeviceKey } from "./openclaw-id-device-key.ts";
@@ -108,7 +108,7 @@ export function showMakeReachableDialog(params: {
           description={t("labsPage.openclawId.dialogDescription")}
           onModal-cancel={cancel}
         >
-          <div class="exec-approval-card openclaw-id-dialog">
+          <div class="exec-approval-card">
             <div class="secret-reveal__header">
               <Show when={step().kind === "done"}>
                 <span class="secret-reveal__status" aria-hidden="true">
@@ -162,32 +162,26 @@ export function showMakeReachableDialog(params: {
                     >
                       {t("labsPage.openclawId.downloadKit")}
                     </button>
-                    <label class="settings-row settings-row--nested">
-                      <span class="settings-row__text">
-                        <span class="settings-row__title">
-                          {t("labsPage.openclawId.enrollmentCode")}
-                        </span>
-                        <span class="settings-row__desc">
-                          {t("labsPage.openclawId.enrollmentCodeHint")}
-                        </span>
-                      </span>
-                      <input
-                        class="settings-row__control"
-                        type="text"
-                        autocomplete="off"
-                        spellcheck="false"
-                        value={enrollmentCode()}
-                        onInput={(event) => setEnrollmentCode(event.currentTarget.value)}
-                      />
-                    </label>
-                    <label class="openclaw-id-dialog__confirm">
-                      <input
-                        type="checkbox"
-                        checked={saved()}
-                        onChange={(event) => setSaved(event.currentTarget.checked)}
-                      />
-                      <span>{t("labsPage.openclawId.kitSaved")}</span>
-                    </label>
+                    <SettingsRow
+                      title={t("labsPage.openclawId.enrollmentCode")}
+                      description={t("labsPage.openclawId.enrollmentCodeHint")}
+                      control={
+                        <input
+                          class="settings-input"
+                          type="text"
+                          aria-label={t("labsPage.openclawId.enrollmentCode")}
+                          autocomplete="off"
+                          spellcheck="false"
+                          value={enrollmentCode()}
+                          onInput={(event) => setEnrollmentCode(event.currentTarget.value)}
+                        />
+                      }
+                    />
+                    <SettingsToggleRow
+                      title={t("labsPage.openclawId.kitSaved")}
+                      checked={saved()}
+                      onChange={(next) => setSaved(next)}
+                    />
                     <openclaw-modal-actions class="exec-approval-actions">
                       <button type="button" class="btn" onClick={() => finish(false)}>
                         {t("common.cancel")}

@@ -127,6 +127,14 @@ const enLabs = {
       doneNotPublished:
         "It is not listed in OpenClaw ID yet. Add an enrollment code to publish it.",
       done: "Done",
+      enrollmentCodePlaceholder: "Enrollment code",
+      publish: "Publish",
+      memberDescription: "{role} · {devices} devices",
+      remove: "Remove",
+      removing: "Removing…",
+      removeFailed: "Couldn't remove this member",
+      noOwnerKey:
+        "This browser has no owner device key for this claw. Remove members from an owner device.",
     },
     workerDesktop: {
       title: "Cloud Worker Desktop",

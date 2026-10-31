@@ -321,6 +321,8 @@ export function createOpenClawIdService(params: {
               devicePub: device.cert.body.device_pub,
               label: device.cert.body.label,
               peerKeys: device.cert.body.peer_keys,
+              // Public and signed: owner devices need it as the chain of their own changes.
+              cert: device.cert,
             }))
           : [],
         members: state

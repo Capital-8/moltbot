@@ -37,7 +37,8 @@ export type OpenClawIdStatusResult = {
     clawId?: string;
     hostname?: string;
     rootPub?: string;
-    ownerDevices?: Array<{ devicePub: string; label: string; peerKeys: string[] }>;
+    seq?: number;
+    ownerDevices?: Array<{ devicePub: string; label: string; peerKeys: string[]; cert: unknown }>;
     members?: Array<{ accountId: string; role: string; peerKeys: string[] }>;
     publication?: OpenClawIdPublication;
   };

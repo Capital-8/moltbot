@@ -10,6 +10,7 @@ import { useApplication } from "../../lib/reactive/context.ts";
 import { useGatewayPage } from "../../lib/reactive/gateway-page.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { showMakeReachableDialog } from "./openclaw-id-dialog.tsx";
+import { OpenClawIdMembers } from "./openclaw-id-members.tsx";
 import type {
   OpenClawIdLinkPreparation,
   OpenClawIdStatusResult,
@@ -43,7 +44,7 @@ function tunnelPresentation(status: OpenClawIdStatusResult["status"]): {
             kind: "ok",
             label: t("labsPage.openclawId.running", { count: String(tunnel.connections) }),
           }
-        : { kind: "accent", label: t("labsPage.openclawId.relayOffline") };
+        : { kind: "warn", label: t("labsPage.openclawId.relayOffline") };
     case "starting":
       return { kind: "accent", label: t("labsPage.openclawId.starting") };
     case "backoff":
@@ -96,6 +97,26 @@ export function OpenClawIdPanel() {
         action: "prepare",
       });
       await showMakeReachableDialog({ client, preparation });
+    } catch (error) {
+      setActionError(formatUiError(error));
+    } finally {
+      setRevision((value) => value + 1);
+    }
+  };
+
+  const [enrollmentCode, setEnrollmentCode] = createSignal("");
+  const publish = async () => {
+    const client = page.client;
+    if (!client) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await client.request("openclawId.authority", {
+        action: "publish",
+        enrollmentCode: enrollmentCode().trim() || undefined,
+      });
+      setEnrollmentCode("");
     } catch (error) {
       setActionError(formatUiError(error));
     } finally {
@@ -177,25 +198,47 @@ export function OpenClawIdPanel() {
                     description={t("labsPage.openclawId.ownerDescription")}
                     control={<SettingsValue mono value={state().rootFingerprint ?? "—"} />}
                   />
-                  <Show when={state().link.publication}>
-                    {(publication) => (
-                      <SettingsRow
-                        nested
-                        title={t("labsPage.openclawId.discoveryTitle")}
-                        description={
-                          publication().state === "failed"
-                            ? (publication() as { message: string }).message
-                            : undefined
-                        }
-                        control={
+                  <SettingsRow
+                    nested
+                    title={t("labsPage.openclawId.discoveryTitle")}
+                    description={
+                      state().link.publication?.state === "failed"
+                        ? (state().link.publication as { message: string }).message
+                        : state().link.publication?.state === "published"
+                          ? undefined
+                          : t("labsPage.openclawId.enrollmentCodeHint")
+                    }
+                    control={
+                      <Show
+                        when={state().link.publication?.state !== "published"}
+                        fallback={
                           <SettingsStatus
-                            kind={publication().state === "published" ? "ok" : "warn"}
-                            label={t(`labsPage.openclawId.publication.${publication().state}`)}
+                            kind="ok"
+                            label={t("labsPage.openclawId.publication.published")}
                           />
                         }
-                      />
-                    )}
-                  </Show>
+                      >
+                        <input
+                          class="settings-input"
+                          type="text"
+                          aria-label={t("labsPage.openclawId.enrollmentCode")}
+                          placeholder={t("labsPage.openclawId.enrollmentCodePlaceholder")}
+                          autocomplete="off"
+                          spellcheck="false"
+                          value={enrollmentCode()}
+                          onInput={(event) => setEnrollmentCode(event.currentTarget.value)}
+                        />
+                        <button type="button" class="btn btn--sm" onClick={() => void publish()}>
+                          {t("labsPage.openclawId.publish")}
+                        </button>
+                      </Show>
+                    }
+                  />
+                  <OpenClawIdMembers
+                    client={page.client}
+                    link={state().link}
+                    onChanged={() => setRevision((value) => value + 1)}
+                  />
                 </Show>
                 <Show when={actionError()}>
                   {(message) => (
