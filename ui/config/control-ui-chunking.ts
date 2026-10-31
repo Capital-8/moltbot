@@ -297,8 +297,8 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/pages/chat/components/chat-composer-menu.tsx":
     case "ui/src/pages/chat/components/chat-composer-skill-menu.tsx":
     case "ui/src/pages/chat/components/chat-composer-slash-menu.tsx":
-      // Warm dismissal surfaces without evaluating their optional option renderers.
-      return "composer-invocation-shells";
+      // Dismissal shells share route boot; optional option renderers remain deferred.
+      return "control-ui-boot-shared";
     case "ui/src/pages/chat/components/chat-composer-emoji-options.tsx":
     case "ui/src/pages/chat/components/chat-composer-emoji-engine.ts":
     case "ui/src/pages/chat/components/chat-composer-mention-menu-engine.ts":
