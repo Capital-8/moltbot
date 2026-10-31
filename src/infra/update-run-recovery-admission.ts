@@ -5,7 +5,7 @@ import { openDoctorStateSchemaReadAdmission } from "../state/openclaw-state-db-d
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { pathEntryExists } from "./path-existence.js";
 import type { PluginCohortRecoveryPair } from "./update-plugin-cohort-schema.js";
-import { withUpdateRunRead } from "./update-run-admission.js";
+import { withUpdateRunRead } from "./update-run-read-admission.js";
 import {
   decodeUpdateRecovery,
   isUpdateRecoveryPending,

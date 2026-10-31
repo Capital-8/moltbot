@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { openClawStateDatabaseCache } from "../state/openclaw-state-db-cache.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../state/openclaw-state-db-contract.js";
+import { runExistingOpenClawStateWriteTransaction } from "../state/openclaw-state-db-existing-write.js";
 import {
   closeTrackedStateDatabase,
   openTrackedStateDatabase,
@@ -22,17 +23,18 @@ import { runManagedStateTransaction } from "../state/openclaw-state-db-transacti
 import type { DB } from "../state/openclaw-state-db.generated.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
+import { getOpenClawStateFeatureSchemaSql } from "../state/openclaw-state-feature-schema.js";
 import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
 import type { WorkerOperationHandlers } from "../state/worker-operation-registry.js";
 import {
   capturePluginCohortMigrationRowsBeforeWrite,
   captureCohortMigrationContext,
   cohortMigrationBinding,
-  DEFERRED_PLUGIN_MIGRATION_RUN_PREFIX as RUN_PREFIX,
   recordPluginCohortMigrationRowsAfterWrite,
   restorePluginCohortMigrationRowsInDatabase,
 } from "./deferred-plugin-migrations.cohort.js";
 import {
+  DEFERRED_PLUGIN_MIGRATION_RUN_PREFIX as RUN_PREFIX,
   deferredPluginMigrationSchema,
   type DeferredPluginMigration,
 } from "./deferred-plugin-migrations.contract.js";
@@ -50,6 +52,7 @@ import { runWithSqliteCleanup, throwSqliteLifecycleErrors } from "./sqlite-lifec
 import { invalidateSuccessfulMigrationCheckpointsInTransaction } from "./startup-migration-checkpoint.js";
 import { withStateDatabaseSchemaMaintenance } from "./state-database-maintenance.js";
 import { recordLegacyMigrationRun } from "./state-migrations.receipts.js";
+import { foldPluginCohortMigrationPublications } from "./update-plugin-cohort-records.js";
 import type {
   PluginCohortMigrationPublication,
   PluginCohortRecoveryWriteBinding,
@@ -624,29 +627,45 @@ export async function restorePluginCohortMigrationPublications(
   if (publications.length === 0) {
     return;
   }
+  const rows = foldPluginCohortMigrationPublications(publications);
+  const present = withExistingOpenClawStateDatabaseArtifactPreservingReadOnly(
+    ({ db }) => tableExists(db, "migration_runs"),
+    { env: authority.env },
+  );
+  authority.assertCurrent();
+  if (!present) {
+    if ([...rows.values()].some((row) => row.before !== undefined)) {
+      throw new Error(
+        "Plugin migration recovery is missing its original obligations; recovery preserved the database.",
+      );
+    }
+    // A pre-migration backup can predate this obligation table. Original absence
+    // is already restored; settlement must not initialize the candidate schema.
+    return;
+  }
   const { withPluginLifecycleLease } = await import("../plugins/plugin-lifecycle-lease.js");
   await withPluginLifecycleLease(
-    { env: authority.env, assertCurrent: authority.assertCurrent },
+    { env: authority.env, schemaPolicy: "existing", assertCurrent: authority.assertCurrent },
     async (lease) => {
       const assertCurrent = () => {
         authority.assertCurrent();
         lease.assertOwned();
       };
-      runOpenClawStateWriteTransaction(
+      runExistingOpenClawStateWriteTransaction(
         ({ db }) => {
-          restorePluginCohortMigrationRowsInDatabase(
-            db,
-            publications,
-            assertCurrent,
-            (database) => {
-              invalidatePinnedMigrationReads();
-              invalidateSuccessfulMigrationCheckpointsInTransaction(database);
-              publishSqliteDatabaseAdmission(database, migrationReceipt, {});
-            },
-          );
+          restorePluginCohortMigrationRowsInDatabase(db, rows, assertCurrent, (database) => {
+            invalidatePinnedMigrationReads();
+            invalidateSuccessfulMigrationCheckpointsInTransaction(database);
+            publishSqliteDatabaseAdmission(database, migrationReceipt, {});
+          });
         },
         { env: authority.env },
-        { operationLabel: "state.plugin-migration-cohort-rollback" },
+        {
+          operationLabel: "state.plugin-migration-cohort-rollback",
+          schemaSql: ["schema_meta", "migration_runs"]
+            .map((table) => getOpenClawStateFeatureSchemaSql(table))
+            .join("\n"),
+        },
       );
     },
   );

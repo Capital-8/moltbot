@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 import { readConfigFileSnapshot } from "../../config/config.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import * as temporaryState from "../../infra/tmp-openclaw-dir.js";
+import { createUpdateRun } from "../../infra/update-run-ledger.js";
 import { defaultRuntime } from "../../runtime.js";
 import {
   createOpenClawTestState,
@@ -66,6 +67,7 @@ vi.mock("../../infra/update-triage.js", () => ({
 }));
 
 import { updateExecutorNativeEntrypoints } from "./update-command-executor-native-runtime.test-support.js";
+import { withUpdateCommandExecutor } from "./update-command-executor.js";
 import { updateFinalizeCommand } from "./update-command-finalize.js";
 import type { LeaseScenario } from "./update-command-lease.test-support.js";
 import type { PostCorePluginUpdateResult } from "./update-command-plugins-internals.js";
@@ -191,11 +193,19 @@ export async function invoke(
   startedAt = Date.now(),
 ): Promise<void> {
   if (lane === "resume") {
-    return resumePostCoreUpdate({
-      root: state.root,
-      channel: "stable",
-      opts: { json: true, yes: true },
-      timeoutMs: 15_000,
+    const env = { ...process.env };
+    const { runId } = createUpdateRun(
+      { trigger: "cli", runId: env.OPENCLAW_UPDATE_RUN_ID?.trim() || undefined },
+      { env },
+    );
+    return withUpdateCommandExecutor(runId, async (executor) => {
+      const executorFence = await executor.enter(state.root);
+      return resumePostCoreUpdate({
+        root: state.root,
+        channel: "stable",
+        opts: { json: true, yes: true, run: { runId, env, executorFence } },
+        timeoutMs: 15_000,
+      });
     });
   }
   if (lane === "repair") {
@@ -209,37 +219,44 @@ export async function invoke(
       recoveryRunIds,
     );
   }
-  await finishUpdate(
-    {
-      mutationStarted: true,
-      result: {
-        status: "ok",
-        mode: "npm",
-        root: state.root,
-        before: {
-          version: lane === "fresh-process" || lane === "candidate-runtime" ? "0.9.0" : "2.0.0",
+  const env = { ...process.env };
+  const { runId } = createUpdateRun({ trigger: "cli" }, { env });
+  await withUpdateCommandExecutor(runId, async (executor) => {
+    const executorFence = await executor.enter(state.root);
+    await finishUpdate(
+      {
+        mutationStarted: true,
+        result: {
+          status: "ok",
+          mode: "npm",
+          root: state.root,
+          before: {
+            version: lane === "fresh-process" || lane === "candidate-runtime" ? "0.9.0" : "2.0.0",
+          },
+          after: { version: lane === "fresh-process" ? VERSION : "1.0.0" },
+          steps: [],
+          durationMs: 1,
         },
-        after: { version: lane === "fresh-process" ? VERSION : "1.0.0" },
-        steps: [],
-        durationMs: 1,
+        root: state.root,
+        installKindChanged: false,
+        configSnapshot: await readConfigFileSnapshot({ skipPluginValidation: true }),
+        requestedChannel: null,
+        storedChannel: "stable",
+        channel: "stable",
+        downgradeRisk: lane !== "fresh-process" && lane !== "candidate-runtime",
+        shouldRestart: false,
+        opts: { json: true, yes: true, run: { runId, env, executorFence } },
+        ownedManagedUpdateEnv: { ...process.env },
+        controlPlaneUpdateSentinelMeta: null,
+        preUpdatePluginInstallRecords: {
+          stale: { source: "path", sourcePath: state.path("stale") },
+        },
+        startedAt,
+        updateStepTimeoutMs: 15_000,
       },
-      root: state.root,
-      installKindChanged: false,
-      configSnapshot: await readConfigFileSnapshot({ skipPluginValidation: true }),
-      requestedChannel: null,
-      storedChannel: "stable",
-      channel: "stable",
-      downgradeRisk: lane !== "fresh-process" && lane !== "candidate-runtime",
-      shouldRestart: false,
-      opts: { json: true, yes: true },
-      ownedManagedUpdateEnv: { ...process.env },
-      controlPlaneUpdateSentinelMeta: null,
-      preUpdatePluginInstallRecords: { stale: { source: "path", sourcePath: state.path("stale") } },
-      startedAt,
-      updateStepTimeoutMs: 15_000,
-    },
-    { candidateRuntime: lane === "candidate-runtime" },
-  );
+      { candidateRuntime: lane === "candidate-runtime" },
+    );
+  });
 }
 
 export async function events(): Promise<string[]> {

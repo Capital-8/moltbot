@@ -342,14 +342,6 @@ export async function rollbackFailedUpdate(params: {
           env,
           assertCurrent,
           assertRollbackSafe: packageTransaction.assertRollbackSafe,
-          ...(cohort
-            ? {
-                pluginCohortRecovery: {
-                  runId: cohort.cohort.runId,
-                  transactionId: cohort.cohort.transactionId,
-                },
-              }
-            : {}),
         });
       } catch (cause) {
         // A partial restore must not reopen the ledger through ordinary failure reporting.

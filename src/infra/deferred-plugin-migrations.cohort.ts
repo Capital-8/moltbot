@@ -1,7 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 import type { DB } from "../state/openclaw-state-db.generated.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
-import type { DeferredPluginMigration } from "./deferred-plugin-migrations.contract.js";
+import {
+  DEFERRED_PLUGIN_MIGRATION_RUN_PREFIX as RUN_PREFIX,
+  type DeferredPluginMigration,
+} from "./deferred-plugin-migrations.contract.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
 import type { EngineConnection } from "./sql-connection.js";
 import {
@@ -14,9 +17,6 @@ import {
   type PluginCohortRecoveryWriteBinding,
 } from "./update-plugin-cohort-schema.js";
 import { recordPluginCohortMigrationPublicationInDatabase } from "./update-run-recovery-store.js";
-
-export const DEFERRED_PLUGIN_MIGRATION_RUN_PREFIX = "deferred-plugin-migration:";
-const RUN_PREFIX = DEFERRED_PLUGIN_MIGRATION_RUN_PREFIX;
 
 export function captureCohortMigrationContext(
   env: NodeJS.ProcessEnv | undefined,
@@ -126,22 +126,10 @@ export function recordPluginCohortMigrationRowsAfterWrite(
 /** The lifecycle owner retains the lease, transaction and cache invalidation. */
 export function restorePluginCohortMigrationRowsInDatabase(
   db: EngineConnection,
-  publications: readonly PluginCohortMigrationPublication[],
+  rows: ReadonlyMap<string, PluginCohortMigrationPublication["rows"][number]>,
   assertCurrent: () => void,
   onRestored: (database: EngineConnection) => void,
 ): void {
-  const rows = new Map<string, PluginCohortMigrationPublication["rows"][number]>();
-  for (const publication of publications) {
-    for (const row of publication.rows) {
-      const previous = rows.get(row.pluginId);
-      if (previous && !isDeepStrictEqual(previous.after, row.before)) {
-        throw new Error(
-          `Plugin migration obligation changed between update publications: ${row.pluginId}. Recovery preserved the decisions.`,
-        );
-      }
-      rows.set(row.pluginId, { ...row, before: previous ? previous.before : row.before });
-    }
-  }
   assertCurrent();
   const current = readCohortMigrationRows(db, [...rows.keys()]);
   const changes = [...rows.values()].filter((row) => {

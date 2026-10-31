@@ -151,7 +151,18 @@ describe.skipIf(!connection)("PostgreSQL plugin cohort backup restoration", () =
             installKey: state.root,
             priorArtifacts: [],
             artifacts: [],
-            publications: [],
+            publications: [
+              {
+                kind: "records",
+                records: [
+                  {
+                    pluginId: "fixture",
+                    before: { source: "npm", version: "1.0.0" },
+                    after: { source: "npm", version: "2.0.0" },
+                  },
+                ],
+              },
+            ],
             settledPublications: 0,
           };
           const fence = { assertCurrent() {} };

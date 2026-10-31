@@ -109,8 +109,9 @@ export async function resumePostCoreUpdate(params: ResumePostCoreUpdateParams): 
       );
     }
     let completed: Awaited<ReturnType<typeof resumePostCoreUpdateInternal>>;
-    if (runId && record && isUnfencedUpdateDriver(record.before.version)) {
-      if (!parent) {
+    if (runId && record) {
+      const legacyPackageBridge = isUnfencedUpdateDriver(record.before.version);
+      if (legacyPackageBridge && !parent) {
         throw new UpdateCommandRecoveryPendingError(
           "Legacy package parent identity is unavailable.",
           { cause: parentError },
@@ -123,19 +124,21 @@ export async function resumePostCoreUpdate(params: ResumePostCoreUpdateParams): 
         current.steps.findLast((entry) => entry.step === "post-update verification")?.status ===
           "in_progress";
       const root = resolveUpdateInstallRoot(params.root);
-      const executingRoot = resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url });
+      const executingRoot = legacyPackageBridge
+        ? resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url })
+        : null;
       if (
-        !inPostCore(record) ||
-        !executingRoot ||
-        resolveUpdateInstallRoot(executingRoot) !== root
+        legacyPackageBridge &&
+        (!inPostCore(record) || !executingRoot || resolveUpdateInstallRoot(executingRoot) !== root)
       ) {
         throw new UpdateCommandRecoveryPendingError(
           "Legacy post-core update does not match its running installation.",
         );
       }
-      const meta = await readControlPlaneUpdateSentinelMeta(env);
+      const meta = legacyPackageBridge ? await readControlPlaneUpdateSentinelMeta(env) : undefined;
       const managedHandoff =
-        env.OPENCLAW_UPDATE_RUN_HANDOFF === "1" || Boolean(meta?.handoffId || meta?.root);
+        legacyPackageBridge &&
+        (env.OPENCLAW_UPDATE_RUN_HANDOFF === "1" || Boolean(meta?.handoffId || meta?.root));
       if (
         (meta?.runId && meta.runId !== runId) ||
         (managedHandoff && (!meta?.runId || !meta.handoffId || !meta.root))
@@ -190,14 +193,16 @@ export async function resumePostCoreUpdate(params: ResumePostCoreUpdateParams): 
             },
           });
         },
-        {
-          legacyPackageParent: parent,
-          // Metadata correlates the shipped handoff, never substitutes for its
-          // unchanged lease row and the captured live package parent's identity.
-          ...(meta?.handoffId && meta.root
-            ? { legacyPackageHandoff: { handoffId: meta.handoffId, root: meta.root } }
-            : {}),
-        },
+        legacyPackageBridge && parent
+          ? {
+              legacyPackageParent: parent,
+              // Metadata correlates the shipped handoff, never substitutes for its
+              // unchanged lease row and the captured live package parent's identity.
+              ...(meta?.handoffId && meta.root
+                ? { legacyPackageHandoff: { handoffId: meta.handoffId, root: meta.root } }
+                : {}),
+            }
+          : undefined,
       );
     } else {
       completed = await resumePostCoreUpdateInternal(resumed);

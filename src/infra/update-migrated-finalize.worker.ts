@@ -30,7 +30,7 @@ import { createWindowsTaskAutoStartGuard } from "../cli/update-cli/update-comman
 import { withUpdateCommandTerminalResult } from "../cli/update-cli/update-command-terminal.js";
 import { createWindowsTaskAutoStartRecovery } from "../cli/update-cli/update-command-windows-task.js";
 import { cloneEnvWithPlatformSemantics } from "../config/config-env-vars.js";
-import { withPluginCohortConfigCapture } from "../config/plugin-cohort-publication.js";
+import { withPluginCohortConfigCapture } from "../config/plugin-cohort-recovery.js";
 import { routeLogsToStderr } from "../logging/console.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
 import { finalizeActiveDebugProxyCaptures } from "../proxy-capture/runtime-cleanup.js";

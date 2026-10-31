@@ -282,11 +282,10 @@ export function writePersistedInstalledPluginIndexToSqlite(
       const previousRow = parseInstalledPluginIndexRow(before);
       const previous = previousRow ? parseInstalledPluginIndex(previousRow.index) : null;
       let previousInstallRecords = previous?.installRecords;
-      if (!previous) {
+      // Raw unversioned rows need record preimages only during cohort recovery.
+      if (!previous && before && (previousRow || pluginCohort)) {
         const state = inspectPersistedInstalledPluginIndexInstallRecords({
-          state: before
-            ? { status: "present", value: safeParseJson(before.value_json) }
-            : { status: "missing" },
+          state: { status: "present", value: safeParseJson(before.value_json) },
         });
         if (state.status === "invalid") {
           throw new Error(

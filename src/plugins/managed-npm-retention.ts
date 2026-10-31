@@ -185,10 +185,8 @@ export async function clearActiveRetainedManagedNpmInstallMarkers(
     try {
       contents = await fs.promises.readFile(markerPath, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        continue;
-      }
-      throw error;
+      ignoreMissingPath(error);
+      continue;
     }
     // Journal before removal: the helper can refuse after deleting the marker.
     clearedMarkers.push({ markerPath, contents });

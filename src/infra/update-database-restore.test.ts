@@ -54,6 +54,7 @@ async function createRestoreFixture(
   state: OpenClawTestState,
   linked = false,
   captureClientAbsent = false,
+  retainHistory = true,
 ) {
   expect(process.env.OPENCLAW_STATE_DIR).toBe(state.stateDir);
   expect(process.env.HOME).toBe(state.home);
@@ -93,6 +94,10 @@ async function createRestoreFixture(
     // Model a driver's absent preimage even though current fresh bootstrap creates this family.
     await fs.unlink(resolveClientCredentialStorePath(state.env));
   }
+  if (!retainHistory) {
+    // A service can have no local run history when its controller uses another database.
+    shared.db.exec("DROP TABLE update_runs");
+  }
   const input = {
     backupRoot: state.path("retained-package"),
     stateDir: state.stateDir,
@@ -106,7 +111,9 @@ async function createRestoreFixture(
     ...input,
     inspectionPlan: await discoverUpdateStateSchemaInspectionInProcess(input),
   });
-  recordUpdateRunPhase(run.runId, "staging", {}, { env: state.env });
+  if (retainHistory) {
+    recordUpdateRunPhase(run.runId, "staging", {}, { env: state.env });
+  }
   for (const owner of [shared, agent]) {
     owner.db.exec(
       "UPDATE restore_witness SET value = 'candidate'; CREATE TABLE candidate_only(value TEXT);",
@@ -131,54 +138,89 @@ async function createRestoreFixture(
 
 type RestoreFixture = Awaited<ReturnType<typeof createRestoreFixture>>;
 
-function withFixture(run: (fixture: RestoreFixture) => Promise<void>, linked = false) {
+function withFixture(
+  run: (fixture: RestoreFixture) => Promise<void>,
+  linked = false,
+  retainHistory = true,
+) {
   return withOpenClawTestState(
     { layout: "split", prefix: "update-database-restore-", scenario: "minimal" },
-    async (state) => run(await createRestoreFixture(state, linked)),
+    async (state) => run(await createRestoreFixture(state, linked, false, retainHistory)),
   );
 }
 
-it("preserves only the named plugin cohort recovery pair alongside current history", async () => {
-  await withFixture(async (fixture) => {
-    const options = { env: fixture.state.env };
-    const runtime = {
-      root: fixture.state.home,
-      nodePath: process.execPath,
-      version: "2026.10.9",
-      buildId: "fixture",
-    };
-    // Synthetic retained storage, not a serving or restoration receipt.
-    const reservation = createRetainedUpdateRecovery(
-      { runId: fixture.run.runId, from: runtime, to: runtime },
-      options,
-    );
-    const binding = { runId: reservation.runId, transactionId: reservation.transactionId };
-    writeConfigMachineState(
-      "update.pluginCohort." + binding.runId,
-      {
-        ...binding,
-        revision: 0,
-        disposition: "rollback",
-        installKey: fixture.state.home,
-        priorArtifacts: [],
-        artifacts: [],
-        publications: [],
-        settledPublications: 0,
+it.each([true, false])(
+  "preserves only the named plugin cohort pair (history=%s)",
+  async (retainHistory) => {
+    await withFixture(
+      async (fixture) => {
+        const options = { env: fixture.state.env };
+        const runtime = {
+          root: fixture.state.home,
+          nodePath: process.execPath,
+          version: "2026.10.9",
+          buildId: "fixture",
+        };
+        // Synthetic retained storage, not a serving or restoration receipt.
+        const reservation = createRetainedUpdateRecovery(
+          { runId: fixture.run.runId, from: runtime, to: runtime },
+          options,
+        );
+        const binding = { runId: reservation.runId, transactionId: reservation.transactionId };
+        writeConfigMachineState(
+          "update.pluginCohort." + binding.runId,
+          {
+            ...binding,
+            revision: 0,
+            disposition: "rollback",
+            installKey: fixture.state.home,
+            priorArtifacts: [],
+            artifacts: [],
+            publications: [],
+            settledPublications: 0,
+          },
+          options,
+        );
+        writeConfigMachineState("fixture.unrelated-candidate-state", { retain: false }, options);
+        const retainedRows = readPluginCohortRecoveryPairRows(fixture.shared.db, binding);
+        await restoreUpdateDatabaseBackup({
+          backup: fixture.backup,
+          runId: fixture.run.runId,
+          env: fixture.state.env,
+          assertCurrent() {},
+          pluginCohortRecovery: binding,
+        });
+        const restored = openOpenClawStateDatabase(options);
+        expect(readPluginCohortRecoveryPairRows(restored.db, binding)).toEqual(retainedRows);
+        expect(
+          readConfigMachineState("fixture.unrelated-candidate-state", options),
+        ).toBeUndefined();
       },
-      options,
+      false,
+      retainHistory,
     );
-    writeConfigMachineState("fixture.unrelated-candidate-state", { retain: false }, options);
-    const retainedRows = readPluginCohortRecoveryPairRows(fixture.shared.db, binding);
-    await restoreUpdateDatabaseBackup({
-      backup: fixture.backup,
-      runId: fixture.run.runId,
-      env: fixture.state.env,
-      assertCurrent() {},
-      pluginCohortRecovery: binding,
+  },
+);
+
+it("refuses restoration when its named live cohort pair is missing", async () => {
+  await withFixture(async (fixture) => {
+    await expect(
+      restoreUpdateDatabaseBackup({
+        backup: fixture.backup,
+        runId: fixture.run.runId,
+        env: fixture.state.env,
+        assertCurrent() {},
+        pluginCohortRecovery: {
+          runId: fixture.run.runId,
+          transactionId: "00000000-0000-4000-8000-000000000001",
+        },
+      }),
+    ).rejects.toThrow("Database rollback lost its live plugin cohort recovery pair.");
+    const current = openOpenClawStateDatabase({ env: fixture.state.env });
+    expect(current.db.prepare("SELECT value FROM restore_witness").get()).toEqual({
+      value: "candidate",
     });
-    const restored = openOpenClawStateDatabase(options);
-    expect(readPluginCohortRecoveryPairRows(restored.db, binding)).toEqual(retainedRows);
-    expect(readConfigMachineState("fixture.unrelated-candidate-state", options)).toBeUndefined();
+    expect(getUpdateRun(fixture.run.runId, { env: fixture.state.env })?.status).toBe("running");
   });
 });
 

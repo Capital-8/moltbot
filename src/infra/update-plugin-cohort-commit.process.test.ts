@@ -131,8 +131,8 @@ it.each([false, true])(
           runUtf8CommandWithTimeout(
             [
               process.execPath,
-              "--import",
-              import.meta.resolve("tsx"),
+              // Only Node needs a loader for the source-form handoff preload.
+              ...(process.versions.bun ? [] : ["--import", import.meta.resolve("tsx")]),
               binding.nodeOption,
               ...resolveRuntimeWorkerArgv(worker),
               "--commit-plugin-cohort",

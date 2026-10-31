@@ -1,7 +1,7 @@
 import { formatErrorMessage } from "../../infra/errors.js";
 import { verifyPackageUpdateRecovery } from "../../infra/update-global.js";
 import type { PluginCohortRecoveryPair } from "../../infra/update-plugin-cohort-schema.js";
-import { withUpdateRunRead } from "../../infra/update-run-admission.js";
+import { withUpdateRunRead } from "../../infra/update-run-read-admission.js";
 import { assertUpdateRecoveryAdmission } from "../../infra/update-run-recovery-admission.js";
 import {
   decodeUpdateRecovery,

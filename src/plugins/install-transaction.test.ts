@@ -19,7 +19,8 @@ import {
 
 const repairPeerLinks = vi.hoisted(() => vi.fn());
 const createCohortPublication = vi.hoisted(() => vi.fn());
-vi.mock("./update-cohort-recovery.js", () => ({
+vi.mock("./update-cohort-recovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./update-cohort-recovery.js")>()),
   createPluginCohortPublication: createCohortPublication,
 }));
 vi.mock("./plugin-peer-link.js", async (importOriginal) => ({

@@ -12,6 +12,7 @@ import {
   type UpdateDatabaseBackup,
 } from "../../infra/update-database-backup.js";
 import { restoreUpdateDatabaseBackup } from "../../infra/update-database-restore.js";
+import { loadPluginCohortRecovery } from "../../infra/update-run-recovery-store.js";
 import { reportUpdateStepCompletion } from "../../infra/update-runner-command.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import type { UpdateStepResult } from "../../infra/update-step-result.js";
@@ -189,7 +190,6 @@ export async function restoreFailedUpdateDatabases(params: {
   assertCurrent: () => void;
   assertRollbackSafe?: () => Promise<void>;
   progress?: Progress;
-  pluginCohortRecovery?: { runId: string; transactionId: string };
 }): Promise<boolean> {
   const assertCurrent = params.assertCurrent;
   const startedAt = Date.now();
@@ -237,8 +237,17 @@ export async function restoreFailedUpdateDatabases(params: {
     return await refuse("Migration receipt belongs to a different database backup");
   }
   try {
+    // Every restore path, including a settled Doctor failure before finalization,
+    // must retain this run's matching recovery pair in the restored database.
+    const pair = loadPluginCohortRecovery(params.runId, {
+      env: params.env,
+      allowNativeRead: true,
+    });
     const migratedPaths = await restoreUpdateDatabaseBackup({
       ...params,
+      pluginCohortRecovery: pair
+        ? { runId: pair.cohort.runId, transactionId: pair.cohort.transactionId }
+        : undefined,
       expectedGenerations: params.backup.migration?.to ?? params.backup.sourceGenerations,
     });
     if (migratedPaths === null) {

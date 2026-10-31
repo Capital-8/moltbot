@@ -24,7 +24,7 @@ import { createConfigFileSnapshot } from "../../config/io.snapshot-shared.js";
 import type { ConfigWriteOptions } from "../../config/io.types.js";
 import { asResolvedSourceConfig, asRuntimeConfig } from "../../config/materialize.js";
 import { resolveConfigPath, resolveIncludeRoots } from "../../config/paths.js";
-import { withPluginCohortConfigCapture } from "../../config/plugin-cohort-publication.js";
+import { withPluginCohortConfigCapture } from "../../config/plugin-cohort-recovery.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../../config/types.openclaw.js";
 import { shouldWarnOnTouchedVersion } from "../../config/version.js";
 import { composeConfigWriteAssertions } from "../../config/write-authority.js";

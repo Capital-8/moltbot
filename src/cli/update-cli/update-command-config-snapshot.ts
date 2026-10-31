@@ -11,10 +11,10 @@ import {
   resolveConfigForRead,
   resolveConfigIncludesForRead,
 } from "../../config/io.read-helpers.js";
+import type { ConfigFileWritePathSnapshot } from "../../config/io.write-path.types.js";
 import {
   captureConfigFileWritePathProof,
   assertConfigFileWritePathSnapshot,
-  type ConfigFileWritePathSnapshot,
 } from "../../config/io.write-safety.js";
 import { ConfigMutationConflictError } from "../../config/mutation-conflict.js";
 import { resolveConfigPath } from "../../config/paths.js";

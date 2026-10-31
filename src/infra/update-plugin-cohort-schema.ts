@@ -1,6 +1,6 @@
 import path from "node:path";
 import { z } from "zod";
-import type { ConfigFileWritePathSnapshot } from "../config/io.write-safety.js";
+import type { ConfigFileWritePathSnapshot } from "../config/io.write-path.types.js";
 import { StrictPluginInstallRecordSchema } from "../config/zod-schema.installs.js";
 import type { UpdateRecoveryRecord } from "./update-run-recovery-schema.js";
 

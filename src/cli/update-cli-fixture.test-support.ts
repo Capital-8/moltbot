@@ -18,6 +18,7 @@ import * as assert from "./update-cli-assertions.test-support.js";
 import { registerUpdateCliLifecycle } from "./update-cli-lifecycle.test-support.js";
 import * as mocks from "./update-cli-mocks.test-support.js";
 import * as update from "./update-cli-modules.test-support.js";
+import { withPostCoreUpdateFixtureRun } from "./update-cli-shared-fixture.test-support.js";
 import * as configs from "./update-cli/update-cli-config.test-support.js";
 import * as packages from "./update-cli/update-cli-package.test-support.js";
 
@@ -199,7 +200,7 @@ export function createUpdateCliFixture() {
         OPENCLAW_COMPATIBILITY_HOST_VERSION: process.env.OPENCLAW_COMPATIBILITY_HOST_VERSION,
         ...env,
       },
-      () => update.updateCommand(options),
+      () => withPostCoreUpdateFixtureRun(() => update.updateCommand(options)),
     );
 
   const mockGatewayHealth = (version: string, connId: string, buildId?: string) => {

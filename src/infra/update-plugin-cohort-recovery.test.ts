@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
@@ -10,7 +11,7 @@ import { ConfigMutationConflictError } from "../config/mutation-conflict.js";
 import {
   restorePluginCohortConfigPublication,
   withPluginCohortConfigCapture,
-} from "../config/plugin-cohort-publication.js";
+} from "../config/plugin-cohort-recovery.js";
 import { setRuntimeConfigSnapshotRefreshHandler } from "../config/runtime-snapshot.js";
 import {
   deleteConfigMachineState,
@@ -23,12 +24,12 @@ import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../state/openclaw-state-db.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import {
   readDeferredPluginMigrations,
   recordDeferredPluginMigrations,
   restorePluginCohortMigrationPublications,
 } from "./deferred-plugin-migrations.js";
-import { pluginCohortPublicationContext } from "./update-plugin-cohort-context.js";
 import {
   decodePluginCohortRecovery,
   type PluginCohortRecovery,
@@ -237,12 +238,11 @@ it.each([false, true])(
       );
       const context = {
         runId: pair.cohort.runId,
-        transactionId: pair.cohort.transactionId,
         installKey: pair.cohort.installKey,
         env: f.options.env,
         assertCurrent: () => fence.assertCurrent(),
       };
-      await pluginCohortPublicationContext.run(context, async () => {
+      await withPluginCohortConfigCapture(context, async () => {
         await recordDeferredPluginMigrations({
           env: f.options.env,
           pending: [created],
@@ -329,6 +329,91 @@ it.each([false, true])(
   },
 );
 
+it.each(["present", "originally absent", "originally present"] as const)(
+  "settles actual migration publications on an older database without initialization (%s)",
+  async (table) => {
+    const f = setup();
+    const obligation = {
+      pluginId: "fixture",
+      reason: "settings need repair",
+      command: "openclaw doctor --fix",
+      requiresStateMigration: true as const,
+    };
+    const database = resolveOpenClawStateSqlitePath(f.options.env);
+    const inspect = () => {
+      using db = new DatabaseSync(database, { readOnly: true });
+      return {
+        version: db.prepare("PRAGMA user_version").get(),
+        metadata: db.prepare("SELECT * FROM schema_meta ORDER BY meta_key").all(),
+        schema: db
+          .prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name")
+          .all(),
+      };
+    };
+    if (table !== "originally absent") {
+      await recordDeferredPluginMigrations({ env: f.options.env, pending: [obligation] });
+    }
+    const pair = beginPluginCohortRecovery(
+      f.reservation,
+      { ...f.cohort, publications: [] },
+      fence,
+      f.options,
+    );
+    await withPluginCohortConfigCapture(
+      {
+        runId: pair.cohort.runId,
+        installKey: pair.cohort.installKey,
+        env: f.options.env,
+        assertCurrent: () => fence.assertCurrent(),
+      },
+      async () => {
+        await recordDeferredPluginMigrations({
+          env: f.options.env,
+          pending: [{ ...obligation, reason: "candidate needs repair" }],
+        });
+        await recordDeferredPluginMigrations({
+          env: f.options.env,
+          pending: [],
+          resolvedPluginIds: [obligation.pluginId],
+        });
+      },
+    );
+    const publications = loadPluginCohortRecovery(
+      pair.cohort.runId,
+      f.options,
+    )!.cohort.publications.filter((publication) => publication.kind === "plugin-migrations");
+    expect(publications).toHaveLength(2);
+    await closeOpenClawStateDatabaseAsync();
+    {
+      using db = new DatabaseSync(database);
+      // Test-only restored publication floor; canonical content can remain newer.
+      db.exec(
+        "PRAGMA user_version=15; UPDATE schema_meta SET schema_version=15 WHERE meta_key='primary'",
+      );
+      if (table !== "present") {
+        // Model a backup captured before the migration owner's tables existed.
+        db.exec("DROP TABLE migration_sources; DROP TABLE migration_runs");
+      }
+    }
+    const before = inspect();
+    const restore = () =>
+      restorePluginCohortMigrationPublications(publications, {
+        env: f.options.env,
+        assertCurrent: () => fence.assertCurrent(),
+      });
+    if (table === "originally present") {
+      await expect(restore()).rejects.toThrow("missing its original obligations");
+    } else {
+      await restore();
+      await restore();
+      if (table === "present") {
+        expect(readDeferredPluginMigrations(f.options)).toEqual([obligation]);
+      }
+    }
+    expect(inspect()).toEqual(before);
+  },
+);
+
 it.each([
   ["unchanged paths", false],
   ["unchanged paths", true],
@@ -383,7 +468,7 @@ it.each([
       const pair = loadPluginCohortRecovery(f.cohort.runId, f.options)!;
       expect(pair.cohort.publications).toHaveLength(1);
       const publication = pair.cohort.publications[0];
-      if (publication.kind !== "config") {
+      if (!publication || publication.kind !== "config") {
         throw new Error("Expected a physical configuration publication");
       }
       let intent = publication.file;
@@ -428,7 +513,7 @@ it.each([
         await closeOpenClawStateDatabaseAsync();
         const reopenedPublication = loadPluginCohortRecovery(f.cohort.runId, f.options)!.cohort
           .publications[0];
-        if (reopenedPublication.kind !== "config") {
+        if (!reopenedPublication || reopenedPublication.kind !== "config") {
           throw new Error("Expected the reopened physical config publication");
         }
         intent = reopenedPublication.file;
@@ -494,7 +579,7 @@ it.each([
       expect(await fs.readFile(filePath, "utf8")).toBe(conflictingRaw);
       const retainedPublication = loadPluginCohortRecovery(f.cohort.runId, f.options)!.cohort
         .publications[0];
-      if (retainedPublication.kind !== "config") {
+      if (!retainedPublication || retainedPublication.kind !== "config") {
         throw new Error("Expected the retained physical config publication");
       }
       expect(retainedPublication.file.pathSnapshot).toEqual(historicalPathSnapshot);

@@ -10,6 +10,7 @@ import {
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import { hasErrnoCode } from "../infra/errno.js";
 import type { PluginCohortPublicationContext } from "../infra/update-plugin-cohort-context.js";
+import { foldPluginCohortRecordPublications } from "../infra/update-plugin-cohort-records.js";
 import type {
   PluginCohortRecovery,
   PluginCohortRecoveryPair,
@@ -22,6 +23,9 @@ import {
   writePluginCohortRecovery,
 } from "../infra/update-run-recovery-store.js";
 import type { UpdateRecoveryFence } from "../infra/update-run-recovery-types.js";
+import { OPENCLAW_STATE_SCHEMA_VERSION } from "../state/openclaw-state-db-contract.js";
+import { withOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
+import { assertSupportedStateSchemaVersion } from "../state/openclaw-state-db-schema-version.js";
 import { commitPluginInstallRecordsOnly } from "./install-record-commit.js";
 import type { PluginCohortInstallObserver } from "./install-transaction.js";
 import {
@@ -351,8 +355,19 @@ export function recordPluginCohortRetentionMarker(
 export async function settleUpdatePluginCohort(
   params: CohortOptions & { runId: string; action: "commit" | "rollback" },
 ): Promise<{ configPaths: string[] }> {
+  params.fence.assertCurrent();
+  // A cold candidate must not migrate a database just restored for its older core.
+  // The canonical reader still rejects newer content before selecting the stable lease subset.
+  const schemaPolicy = withOpenClawStateDatabaseReadOnly<"existing" | undefined>(
+    ({ db, path }) =>
+      assertSupportedStateSchemaVersion(db, path) < OPENCLAW_STATE_SCHEMA_VERSION
+        ? "existing"
+        : undefined,
+    { env: params.env },
+  );
+  params.fence.assertCurrent();
   return await withPluginLifecycleLease(
-    { env: params.env, assertCurrent: params.fence.assertCurrent },
+    { env: params.env, schemaPolicy, assertCurrent: params.fence.assertCurrent },
     async (lease) => {
       const fence = {
         assertCurrent: () => {
@@ -379,28 +394,7 @@ export async function settleUpdatePluginCohort(
         { env: params.env },
       );
       if (params.action === "rollback") {
-        type RecordChange = Extract<
-          PluginCohortRecovery["publications"][number],
-          { kind: "records" }
-        >["records"][number];
-        const recordChanges = new Map<string, RecordChange>();
-        for (const publication of pair.cohort.publications) {
-          if (publication.kind !== "records") {
-            continue;
-          }
-          for (const change of publication.records) {
-            const previous = recordChanges.get(change.pluginId);
-            if (previous && !isDeepStrictEqual(previous.after, change.before)) {
-              throw new Error(
-                `Plugin ${change.pluginId} changed between update publications; cohort recovery preserved it.`,
-              );
-            }
-            recordChanges.set(change.pluginId, {
-              ...change,
-              before: previous ? previous.before : change.before,
-            });
-          }
-        }
+        const recordChanges = foldPluginCohortRecordPublications(pair.cohort.publications);
         const migrations = pair.cohort.publications.filter(
           (publication) => publication.kind === "plugin-migrations",
         );
@@ -417,7 +411,7 @@ export async function settleUpdatePluginCohort(
           const publication = publications[index]!;
           if (publication.kind === "config") {
             const { restorePluginCohortConfigPublication } =
-              await import("../config/plugin-cohort-publication.js");
+              await import("../config/plugin-cohort-recovery.js");
             await restorePluginCohortConfigPublication(publication.file, {
               env: params.env,
               assertCurrent: fence.assertCurrent,

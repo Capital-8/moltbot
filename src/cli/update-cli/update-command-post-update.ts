@@ -148,7 +148,9 @@ async function finishSettledUpdate(
       params.opts.run,
       (failure) =>
         terminal.prepareSettledUpdateCommandResult(params, reportingState(failure), assertCurrent),
-      () => pendingResult,
+      (cause) =>
+        terminal.createPostUpdateExceptionResult({ ...params, result: pendingResult }, cause)
+          .result,
     ) || deferUpdateCommandTerminalResult(params.opts.run, publishFinalResult);
   const recoverFailedResult = async (
     initialResult: UpdateRunResult,
@@ -234,10 +236,7 @@ async function finishSettledUpdate(
     if (recoverService) {
       params.rollbackBlockedReason = undefined;
     }
-    if (isUpdateGatewayReadinessPending(result)) {
-      return { result, recoverService: false };
-    }
-    return { result, recoverService };
+    return { result, recoverService: !isUpdateGatewayReadinessPending(result) && recoverService };
   };
   const reportResult = async (
     initialResult: UpdateRunResult,

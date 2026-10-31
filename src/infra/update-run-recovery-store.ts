@@ -28,7 +28,7 @@ import {
   type PluginCohortMigrationPublication,
   type PluginCohortRecoveryWriteBinding,
 } from "./update-plugin-cohort-schema.js";
-import { withUpdateRunRead } from "./update-run-admission.js";
+import { withUpdateRunRead } from "./update-run-read-admission.js";
 import { UPDATE_RECOVERY_KEY_END, UPDATE_RECOVERY_KEY_PREFIX } from "./update-run-recovery-keys.js";
 import {
   decodeUpdateRecovery,
