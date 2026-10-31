@@ -100,10 +100,15 @@ export async function startOpenClawIdIngressListener(params: {
 }
 
 // Removes the ingress contract headers so nothing downstream can read or forward them.
+// Node builds `headers` and `headersDistinct` lazily from `rawHeaders` using the
+// header count it parsed, so both views are built and cleaned before rawHeaders
+// shrinks; a view built afterwards would read past the end of the shorter array.
 function stripContractHeaders(req: IncomingMessage): void {
   const names = new Set<string>([INGRESS_HEADERS.proxyToken, INGRESS_HEADERS.peerKey]);
+  const distinct = req.headersDistinct;
   for (const name of names) {
     delete req.headers[name];
+    delete distinct[name];
   }
   const raw = req.rawHeaders;
   const kept: string[] = [];
