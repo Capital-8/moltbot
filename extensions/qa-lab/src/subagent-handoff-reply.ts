@@ -1,4 +1,7 @@
-import { wrapPromptDataBlock } from "openclaw/plugin-sdk/qa-runtime";
+import {
+  selectQaActiveSessionTranscriptEvents,
+  wrapPromptDataBlock,
+} from "openclaw/plugin-sdk/qa-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { extractGatewayMessageText } from "./gateway-log-sentinel.js";
 
@@ -60,20 +63,35 @@ export async function findSubagentHandoffReply(
     return undefined;
   }
 
-  const afterDelivery = new Set<string>();
-  for (const event of await readRequesterTranscript()) {
-    if (
-      !isRecord(event) ||
-      event.type !== "message" ||
-      typeof event.id !== "string" ||
-      !isRecord(event.message)
-    ) {
+  const activeEvents = selectQaActiveSessionTranscriptEvents(await readRequesterTranscript());
+  let delivered = false;
+  let previousIndex = -1;
+  for (const { event, index } of activeEvents) {
+    // Imported transcripts may reuse IDs; ancestry must still advance in stored order.
+    if (index <= previousIndex) {
+      delivered = false;
+    }
+    previousIndex = index;
+    if (!isRecord(event)) {
       continue;
     }
-    const { id, parentId, message } = event;
+    if (
+      event.type === "reset" ||
+      event.type === "compaction" ||
+      (event.type === "custom_message" && event.customType !== "openclaw.runtime-context")
+    ) {
+      delivered = false;
+      continue;
+    }
+    if (event.type !== "message" || !isRecord(event.message)) {
+      continue;
+    }
+    const { id, message } = event;
     if (message.role === "user") {
+      delivered = false;
       const p = message.provenance;
       if (
+        typeof id === "string" &&
         isRecord(p) &&
         p.kind === "inter_session" &&
         p.sourceChannel === "internal" &&
@@ -86,10 +104,10 @@ export async function findSubagentHandoffReply(
           /^status: ([^\n]+)\n(Child result [^\n]*\n<prompt-data>\n[\s\S]*?\n<\/prompt-data>)$/gm,
         );
         if (!another && result?.[1] === "ok" && result[2] === resultBlock) {
-          afterDelivery.add(id);
+          delivered = true;
         }
       }
-    } else if (typeof parentId === "string" && afterDelivery.has(parentId)) {
+    } else if (delivered && typeof id === "string") {
       const meta = isRecord(message["__openclaw"]) ? message["__openclaw"] : undefined;
       const reply =
         visible.get(`id:${id}`) ??
@@ -97,7 +115,6 @@ export async function findSubagentHandoffReply(
       if (reply && message.role === "assistant" && extractGatewayMessageText(message) === reply) {
         return reply;
       }
-      afterDelivery.add(id);
     }
   }
   return undefined;
