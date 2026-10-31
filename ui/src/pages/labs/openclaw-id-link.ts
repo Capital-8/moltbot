@@ -117,3 +117,11 @@ export function createOpenClawIdCeremony() {
     },
   };
 }
+
+/**
+ * The OpenClaw ID page that hands the signed-in owner a one-time enrollment
+ * code for this claw's loader domain (https://claws.<loaderDomain>/link).
+ */
+export function linkCodePageUrl(loaderDomain: string): string {
+  return `https://claws.${loaderDomain}/link`;
+}

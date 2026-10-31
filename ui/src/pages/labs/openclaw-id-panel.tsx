@@ -11,6 +11,7 @@ import { useGatewayPage } from "../../lib/reactive/gateway-page.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { showMakeReachableDialog } from "./openclaw-id-dialog.tsx";
 import { OpenClawIdInvites } from "./openclaw-id-invites.tsx";
+import { linkCodePageUrl } from "./openclaw-id-link.ts";
 import { OpenClawIdMembers } from "./openclaw-id-members.tsx";
 import type {
   OpenClawIdLinkPreparation,
@@ -257,6 +258,18 @@ export function OpenClawIdPanel() {
                         <button type="button" class="btn btn--sm" onClick={() => void publish()}>
                           {t("labsPage.openclawId.publish")}
                         </button>
+                        <Show when={state().services.loaderDomain}>
+                          {(domain) => (
+                            <a
+                              class="btn btn--sm"
+                              href={linkCodePageUrl(domain())}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {t("labsPage.openclawId.getLinkCode")}
+                            </a>
+                          )}
+                        </Show>
                       </Show>
                     }
                   />

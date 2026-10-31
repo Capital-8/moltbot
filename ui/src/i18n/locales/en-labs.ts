@@ -120,6 +120,7 @@ const enLabs = {
       downloadKit: "Download as text file",
       enrollmentCode: "OpenClaw ID enrollment code (optional)",
       enrollmentCodeHint: "Lists this claw in your OpenClaw ID account. You can add it later.",
+      getLinkCode: "Get a link code",
       kitSaved: "I saved my recovery kit somewhere safe",
       thisBrowser: "This browser",
       linking: "Linking this claw…",
