@@ -36,10 +36,9 @@ export function ChatRunFailureNotice(props: {
     return firstLine.length <= 240 ? firstLine : t("chat.recovery.failedHelp");
   });
   // The well always holds the full error, so a one-line error is not repeated above it.
-  const summary = createMemo(() => {
-    const help = t("chat.recovery.failedHelp");
-    return concise() === detail() || concise() === help ? help : `${concise()} ${help}`;
-  });
+  const lead = createMemo(() =>
+    concise() === detail() || concise() === t("chat.recovery.failedHelp") ? undefined : concise(),
+  );
   const logRef = createScrollStateRef(
     (log, state) => {
       log.toggleAttribute("data-fade-top", !state.atStart);
@@ -113,8 +112,14 @@ export function ChatRunFailureNotice(props: {
             setOpen(next);
           }}
         >
-          <p class="chat-run-failure__summary">{summary()}</p>
-          <div class="chat-run-failure__well">
+          <p class="chat-run-failure__summary">
+            <Show when={lead()}>
+              <bdi>{lead()}</bdi>{" "}
+            </Show>
+            {t("chat.recovery.failedHelp")}
+          </p>
+          {/* Logs are technical strings, so they stay left to right in every locale. */}
+          <div class="chat-run-failure__well" dir="ltr">
             <pre
               ref={logRef}
               class="chat-run-failure__log"

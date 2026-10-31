@@ -193,12 +193,6 @@
     linear-gradient(black, black) right top / var(--scrollbar-size) 100% no-repeat;
 }
 
-.chat-run-failure__log:is([data-fade-top], [data-fade-bottom]):dir(rtl) {
-  mask-position:
-    right top,
-    left top;
-}
-
 @supports selector(::-webkit-scrollbar) {
   /* Any non-auto scrollbar property would switch the styled thumb off. */
   .chat-run-failure__panel .chat-run-failure__log {

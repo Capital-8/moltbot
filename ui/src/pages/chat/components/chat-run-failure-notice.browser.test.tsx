@@ -5,7 +5,10 @@ import { phase } from "../../../test-helpers/solid-menu.tsx";
 import { ChatRunFailureNotice } from "./chat-run-failure-notice.tsx";
 import "../../../styles/chat/run-failure.css";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  document.documentElement.removeAttribute("dir");
+});
 
 const trace = ["First failure", ...Array.from({ length: 40 }, (_, k) => `attempt ${k + 1}`)].join(
   "\n",
@@ -88,4 +91,20 @@ it("fades each scrollable edge of the log and clears the fade at that edge", asy
   log.scrollTop = log.scrollHeight;
   await expect.poll(() => log.hasAttribute("data-fade-bottom")).toBe(false);
   expect(log.hasAttribute("data-fade-top")).toBe(true);
+});
+
+it("keeps the log left to right and isolates the error's sentence in a right-to-left locale", async () => {
+  document.documentElement.dir = "rtl";
+  const { view, toggle, panel } = mount(700, 40);
+  await userEvent.click(toggle);
+  await phase(panel, "open");
+  const part = (selector: string) => view.container.querySelector<HTMLElement>(selector)!;
+  const log = part(".chat-run-failure__log");
+  const well = part(".chat-run-failure__well").getBoundingClientRect();
+  const copy = part(".chat-run-failure__copy").getBoundingClientRect();
+  const summary = part(".chat-run-failure__summary");
+  expect(getComputedStyle(log).direction).toBe("ltr");
+  expect(well.right - copy.right).toBeLessThan(copy.left - well.left);
+  expect(getComputedStyle(summary).direction).toBe("rtl");
+  expect(summary.querySelector("bdi")?.textContent).toBe("First failure");
 });
