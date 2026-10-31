@@ -1,0 +1,2 @@
+# Preserve fallback-first errors when configured image refs are both ambiguous.
+26
