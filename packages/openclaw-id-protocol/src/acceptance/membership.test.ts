@@ -236,7 +236,11 @@ describe(acceptanceTitle(9), () => {
         },
         world.root,
       );
-    const first = await submitStatement(world.state, await rotation(rootA), mailbox);
+    // Only the local operator rotates the root; the conflict below may arrive from anywhere.
+    const first = await submitStatement(world.state, await rotation(rootA), {
+      channel: "local_operator",
+      now: WORLD_NOW,
+    });
     expect(first).toMatchObject({
       ok: true,
       state: { anchor: { root_pub: rootA.pub, root_epoch: 2 } },

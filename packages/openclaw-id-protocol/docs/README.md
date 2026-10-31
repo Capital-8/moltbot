@@ -34,7 +34,10 @@ endpoint key held by the tunnel child, sidecar -> tunnel child process, DERP -> 
    ServerBinding it has verified against its pin, and releases stored tokens only after that.
 4. **Approvals travel directly.** Membership changes and invite approvals reach the Gateway
    over the tunnel or direct loopback, never through the mailbox. The mailbox carries only
-   requests and root-signed statements (kit enrollment, rotation, revocation).
+   requests and root-signed statements (kit enrollment, revocation).
+5. **Only the running Gateway changes the root.** Owner-key regeneration (a new root and
+   epoch, which ends every owner certificate) needs the local operator on direct loopback.
+   Certificates have no expiry unless one is entered explicitly (enrollment.md).
 
 ## Layout
 

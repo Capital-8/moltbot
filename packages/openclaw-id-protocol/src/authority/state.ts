@@ -78,6 +78,7 @@ export type AuthorityErrorCode =
   | "not_local_operator"
   | "seq_conflict"
   | "frozen"
+  | "root_reused"
   | "invite_unknown"
   | "invite_used"
   | "invite_not_pending"
@@ -169,6 +170,21 @@ export function linkClaw(
       revoked: [],
     },
   };
+}
+
+/**
+ * The epoch a re-pinned or regenerated root starts: one past every epoch this claw
+ * has seen, so a certificate from any earlier root can never become current again.
+ */
+export function nextRootEpoch(state: AuthorityState): number {
+  return Math.max(state.anchor.root_epoch, ...Object.keys(state.root_history).map(Number)) + 1;
+}
+
+/** Every tunnel key certified by an owner device the claw knows, in any epoch. */
+export function ownerDevicePeerKeys(state: AuthorityState): IrohEndpointKey[] {
+  return [
+    ...new Set(Object.values(state.owner_devices).flatMap((record) => record.cert.body.peer_keys)),
+  ];
 }
 
 /**

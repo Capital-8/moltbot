@@ -22,28 +22,68 @@ must perform (`disconnect`, `invalidate_tokens`, `cancel_runs`, `notify_owners`,
 
 ### Write rules
 
-| Write                                             | Function                                   | Allowed channels       | Notes                                                                          |
-| ------------------------------------------------- | ------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------ |
-| Link claw (pin fp(R), epoch 1)                    | `linkClaw`                                 | local_operator         | spec 4                                                                         |
-| Re-pin a new root (lost kit, conflict resolution) | `repinRoot`                                | local_operator         | spec 8.2 option A, 8.3; clears a freeze                                        |
-| MembershipChange by an owner device               | `submitStatement`                          | tunnel, local_operator | `seq` must be current + 1                                                      |
-| MembershipChange signed by R (kit enrollment)     | `submitStatement`                          | any, incl. mailbox     | `add_owner_device` via mailbox emits `notify_owners: kit_used`                 |
-| OwnerDeviceCert signed by R for a known device    | `submitStatement`                          | any                    | chain compaction after kit use                                                 |
-| Revocation                                        | `submitStatement`                          | any                    | revokes the key and every device certified through it                          |
-| RootRotation                                      | `submitStatement`                          | any                    | a second, different rotation out of the same epoch freezes remote root changes |
-| InviteCap + proof key                             | `registerInvite`                           | tunnel, local_operator | `secret_hash` must equal SHA-256(proof key)                                    |
-| InviteRedemption                                  | `submitRedemption`                         | any (normally mailbox) | becomes **pending**, reserves the invite, admits nothing                       |
-| Approve redemption                                | `submitStatement` (`add` with `invite_id`) | tunnel, local_operator | must match the pending account and peer key; role <= invite role               |
-| Deny redemption                                   | `submitStatement` (`deny_invite`)          | tunnel, local_operator | consumes the invite                                                            |
+| Write                                             | Function                                   | Allowed channels       | Notes                                                                       |
+| ------------------------------------------------- | ------------------------------------------ | ---------------------- | --------------------------------------------------------------------------- |
+| Link claw (pin fp(R), epoch 1)                    | `linkClaw`                                 | local_operator         | spec 4                                                                      |
+| Re-pin a new root (lost kit, conflict resolution) | `repinRoot`                                | local_operator         | spec 8.2 option A, 8.3; clears a freeze                                     |
+| Regenerate the owner key                          | `regenerateOwnerKey`                       | local_operator         | re-pins R', drops older owner devices, enrolls the regenerating device      |
+| MembershipChange by an owner device               | `submitStatement`                          | tunnel, local_operator | `seq` must be current + 1                                                   |
+| MembershipChange signed by R (kit enrollment)     | `submitStatement`                          | any, incl. mailbox     | `add_owner_device` via mailbox emits `notify_owners: kit_used`              |
+| OwnerDeviceCert signed by R for a known device    | `submitStatement`                          | any                    | chain compaction after kit use                                              |
+| Revocation                                        | `submitStatement`                          | any                    | revokes the key and every device certified through it                       |
+| RootRotation                                      | `submitStatement`                          | local_operator         | refused elsewhere even when validly signed; a conflicting one still freezes |
+| InviteCap + proof key                             | `registerInvite`                           | tunnel, local_operator | `secret_hash` must equal SHA-256(proof key)                                 |
+| InviteRedemption                                  | `submitRedemption`                         | any (normally mailbox) | becomes **pending**, reserves the invite, admits nothing                    |
+| Approve redemption                                | `submitStatement` (`add` with `invite_id`) | tunnel, local_operator | must match the pending account and peer key; role <= invite role            |
+| Deny redemption                                   | `submitStatement` (`deny_invite`)          | tunnel, local_operator | consumes the invite                                                         |
 
 Root supremacy: an R-signed statement is accepted wherever a device-signed one is, plus over
-the mailbox. When the state is frozen, root-signed writes are refused except from the local
-operator.
+the mailbox. The exception is RootRotation: changing the root needs the local operator.
+When the state is frozen, root-signed writes are refused except from the local operator.
 
 The conflicting rotation itself is refused (`conflicting_rotation`), but the refusal has
 `persist: true`: its `state` is frozen and its `events` carry the `rotation_conflict` owner
 notice. The Gateway persists that state and performs those events before it reports the
 refusal. Every other refusal leaves the state unchanged and has no events.
+
+### Owner-key regeneration (decision 2026-10-31, OCF-319)
+
+Owner device certificates have **no expiry unless the person approving the device enters
+one** (`expires_at: null`). The only way to end every owner key at once is to **regenerate
+the owner key**, and that needs actual access to the running Gateway: the local operator on
+authenticated direct loopback. Tunnel traffic (relayed or direct path), the mailbox and LAN
+clients can never regenerate the owner key or rotate the root, even with a valid signature
+from the current root.
+
+`regenerateOwnerKey(state, { root_pub, owner_device }, context)`:
+
+1. Refuses anything but `local_operator` (`not_local_operator`) and a root this claw has
+   used in any epoch (`root_reused`). `owner_device` must be `MembershipChange
+   add_owner_device` at seq + 1, signed by R' alone (`target_mismatch`).
+2. Pins R' in a new epoch, one past every epoch the claw has seen (`nextRootEpoch`), and
+   clears a conflicting-rotation freeze. This is how a frozen claw is unfrozen.
+3. Drops every owner device of earlier epochs and enrolls the regenerating device as the first
+   owner device under R'. Members, invites and revocations are kept.
+4. Events: `disconnect` and `invalidate_tokens` for every old owner device key, and
+   `publish_snapshot`.
+
+The regenerating browser generates the new kit secret S and R' itself, shows the new recovery
+kit once and signs (`signOwnerKeyRegeneration`) its own enrollment and a new ServerBinding
+(binding_seq + 1, the new epoch, the same claw id, hostname, K_srv and K_gw). The Gateway
+receives public keys and signed statements only. The old kit stops working. The Gateway
+exposes this as `openclawId.authority` `prepare_regeneration` and `regenerate`; it
+persists the new state and binding, closes the old devices' sessions, revokes their
+tunnel-bound tokens, pushes the new admission list to the tunnel child and republishes.
+
+A RootRotation statement is never accepted by the Gateway's `submit`: from the tunnel or the
+mailbox the protocol refuses it, and on loopback the Gateway answers `unsupported` because a
+rotation alone would leave the binding signed by the old root. A conflicting rotation (a
+different rotation into an epoch the claw already moved past, signed by that epoch's previous
+root) is still detected from every channel and freezes the claw.
+
+`ownerDeviceCertBody` is the certificate builder approvers use: `expires_at` defaults to
+null, and an explicit expiry must be after the issue time. Approval UIs (SAS approval, owner
+devices) offer the expiry as an optional field.
 
 ### Admission
 

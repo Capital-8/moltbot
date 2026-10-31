@@ -13,12 +13,15 @@ import {
   inviteSecretHash,
   OWNER_CAPABILITIES,
   randomBytes,
+  signOwnerKeyRegeneration,
   signStatement,
   type IrohEndpointKey,
+  type OwnerKeyRegenerationPreparation,
   type MailboxMessage,
   type MembershipTarget,
   type StatementSigner,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
+import type { GatewayOpenClawIdConfig } from "../../config/types.gateway.js";
 import { createOpenClawIdAuthority } from "./authority.js";
 import type { StoredClaw } from "./claw-store.js";
 import { createOpenClawIdService, type OpenClawIdEffects } from "./service.js";
@@ -98,7 +101,10 @@ export async function linkedClaw(store = memoryStore()) {
 export type LinkedClaw = Awaited<ReturnType<typeof linkedClaw>>;
 
 /** An OpenClaw ID service over a linked claw with recorded side effects. */
-export function serviceFor(authority: LinkedClaw["authority"]) {
+export function serviceFor(
+  authority: LinkedClaw["authority"],
+  config: GatewayOpenClawIdConfig = { enabled: true },
+) {
   const effects: OpenClawIdEffects = {
     captureConnections: vi.fn((keys: readonly string[]) =>
       keys.map((key) => `conn-${key.slice(5, 9)}`),
@@ -109,7 +115,7 @@ export function serviceFor(authority: LinkedClaw["authority"]) {
   };
   const log = { info: vi.fn(), warn: vi.fn() };
   const service = createOpenClawIdService({
-    getConfig: () => ({ enabled: true }),
+    getConfig: () => config,
     getStateDir: () => "/nonexistent/openclaw-id-test",
     getGatewayServer: () => undefined,
     log,
@@ -117,6 +123,37 @@ export function serviceFor(authority: LinkedClaw["authority"]) {
   });
   service.bindEffects(async () => effects);
   return { service, effects, log };
+}
+
+/**
+ * Owner-key regeneration as the loopback browser signs it: a fresh kit root R', the
+ * browser's own enrollment and the new binding, with an optional explicit expiry.
+ */
+export async function regenerationFor(
+  prep: OwnerKeyRegenerationPreparation,
+  options: { expiresAt?: number | null; peerKeys?: IrohEndpointKey[] } = {},
+) {
+  const root = await deriveRootSigner(generateKitSecret());
+  const browser = await generateEd25519Signer();
+  const statements = await signOwnerKeyRegeneration({
+    preparation: prep,
+    root,
+    device: {
+      device_pub: formatEd25519PublicKey(browser.publicKey),
+      peer_keys: options.peerKeys ?? [],
+      label: "loopback",
+    },
+    expiresAt: options.expiresAt,
+  });
+  return {
+    root,
+    browser,
+    input: {
+      root_pub: statements.rootPub,
+      owner_device: statements.ownerDevice,
+      binding: statements.binding,
+    },
+  };
 }
 
 /** An InviteCap signed by D1 for `email`, with its proof key and link secret. */

@@ -19,6 +19,8 @@ import {
 import {
   certificateWindowError,
   isOwnerDeviceActive,
+  nextRootEpoch,
+  ownerDevicePeerKeys,
   proofKeyHex,
   refuse,
   refuseWithTransition,
@@ -381,8 +383,11 @@ async function addOwnerDevice(
 }
 
 /**
- * Root rotation (spec section 8). A second, different rotation out of an epoch that
- * already rotated freezes remote root changes until the local operator resolves it.
+ * Root rotation (spec section 8). Rotating the root is owner-key regeneration, so it
+ * is accepted only from the local operator on direct loopback, even with a valid
+ * signature from the current root. A second, different rotation out of an epoch that
+ * already rotated, from any channel, still freezes remote root changes and alerts the
+ * owners until the local operator resolves it.
  */
 async function applyRootRotation(
   state: AuthorityState,
@@ -409,10 +414,19 @@ async function applyRootRotation(
   if (state.frozen && context.channel !== "local_operator") {
     return refuse(state, "frozen", "remote root changes are frozen");
   }
+  if (context.channel !== "local_operator") {
+    return refuse(
+      state,
+      "not_local_operator",
+      "owner-key regeneration needs direct loopback on the running Gateway",
+    );
+  }
   const verified = await verifyRootRotation(rotation, state.anchor);
   if (!verified.ok) {
     return refuse(state, verified.code, verified.detail);
   }
+  // Every owner certificate is from the old epoch now: end those devices' sessions and tokens.
+  const ended = ownerDevicePeerKeys(state);
   return applied(
     {
       ...state,
@@ -420,7 +434,11 @@ async function applyRootRotation(
       root_history: { ...state.root_history, [epoch]: verified.anchor.root_pub },
       rotation_seen: { ...state.rotation_seen, [epoch]: rotation.sig },
     },
-    [{ type: "publish_snapshot" }],
+    [
+      { type: "disconnect", peer_keys: ended },
+      { type: "invalidate_tokens", peer_keys: ended },
+      { type: "publish_snapshot" },
+    ],
   );
 }
 
@@ -436,8 +454,7 @@ export function repinRoot(
   if (channel !== "local_operator") {
     return refuse(state, "not_local_operator", "root ceremonies need direct loopback");
   }
-  const epoch =
-    Math.max(state.anchor.root_epoch, ...Object.keys(state.root_history).map(Number)) + 1;
+  const epoch = nextRootEpoch(state);
   return applied(
     {
       ...state,

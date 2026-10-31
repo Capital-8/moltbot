@@ -1,6 +1,7 @@
-// OpenClaw ID remote access methods. The link ceremony ("Make reachable") runs
-// only for a direct-loopback client; relayed clients can read status and send
-// owner-signed membership changes, which the authority verifies itself.
+// OpenClaw ID remote access methods. The root ceremonies (the link ceremony "Make
+// reachable" and owner-key regeneration) run only for a direct-loopback client;
+// relayed clients can read status and send owner-signed membership changes, which
+// the authority verifies itself.
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import type { Ed25519PublicKey } from "../../../packages/openclaw-id-protocol/src/index.js";
@@ -60,11 +61,20 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
   //   claw name; Discovery assigns the address "<name>-<account tag>.<domain>";
   // - publish: (re)publish to Discovery, optionally with an enrollment code;
   // - submit: an owner-signed statement (MembershipChange, Revocation, root
-  //   re-certification) sent directly over the tunnel or loopback. The authority
-  //   verifies signature, chain, capability and seq; the mailbox never reaches here.
-  //   Approving (`add` with invite_id) or denying (`deny_invite`) a pending
-  //   redemption is a submit too;
-  // - register_invite: an owner-signed InviteCap and its base64url proof key.
+  //   re-certification of a known device) sent directly over the tunnel or loopback.
+  //   The authority verifies signature, chain, capability and seq; the mailbox never
+  //   reaches here. Approving (`add` with invite_id) or denying (`deny_invite`) a
+  //   pending redemption is a submit too. A RootRotation is never accepted here: from
+  //   the tunnel it is refused even with a valid root signature, and on loopback the
+  //   owner key is regenerated instead;
+  // - register_invite: an owner-signed InviteCap and its base64url proof key;
+  // - prepare_regeneration / regenerate: owner-key regeneration, direct loopback only.
+  //   prepare_regeneration returns what the new root R' signs; regenerate takes
+  //   rootPub, ownerDevice (R'-signed add_owner_device for the regenerating browser)
+  //   and binding (R'-signed, next binding seq, new epoch). Every older owner
+  //   certificate stops working, their sessions and tunnel-bound tokens end, a
+  //   conflicting-rotation freeze clears, and the claw republishes. The browser
+  //   generates the new recovery kit and shows it once; the Gateway never sees it.
   "openclawId.authority": async (opts) => {
     const service = requireService(opts);
     if (!service) {
@@ -123,10 +133,44 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
       opts.respond(true, { status: result.status, link: await service.linkStatus() });
       return;
     }
+    if (params.action === "prepare_regeneration") {
+      const result = await service.prepareRegeneration(channel);
+      if ("ok" in result) {
+        refuse(opts, result);
+        return;
+      }
+      opts.respond(true, result);
+      return;
+    }
+    if (params.action === "regenerate") {
+      if (!isEd25519PublicKey(params.rootPub) || !params.ownerDevice || !params.binding) {
+        refuse(opts, {
+          code: "malformed",
+          detail: "rootPub, ownerDevice and binding are required",
+        });
+        return;
+      }
+      const result = await service.regenerateOwnerKey(channel, {
+        root_pub: params.rootPub as Ed25519PublicKey,
+        owner_device: params.ownerDevice,
+        binding: params.binding,
+      });
+      if (!result.ok) {
+        refuse(opts, result);
+        return;
+      }
+      opts.respond(true, {
+        regenerated: true,
+        publication: result.publication ?? null,
+        link: await service.linkStatus(),
+      });
+      return;
+    }
     if (params.action !== "commit") {
       refuse(opts, {
         code: "malformed",
-        detail: "action must be check_name, prepare, commit, publish, submit or register_invite",
+        detail:
+          "action must be check_name, prepare, commit, publish, submit, register_invite, prepare_regeneration or regenerate",
       });
       return;
     }

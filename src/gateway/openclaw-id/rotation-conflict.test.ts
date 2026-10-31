@@ -1,7 +1,9 @@
 // Spec section 8 / 11 #9 (OCF-277): a second, different root rotation out of an epoch
 // that already rotated is refused, but the claw freezes remote root changes and alerts
 // its owners. The freeze is persisted, survives a Gateway restart, and the alert is
-// delivered whether the conflict arrives over the mailbox or directly.
+// delivered whether the conflict arrives over the mailbox or directly. Only owner-key
+// regeneration on direct loopback moves the root (OCF-319), so the conflict here is the
+// old, stolen root signing a different rotation into the regenerated epoch.
 import { describe, expect, it, vi } from "vitest";
 import {
   fingerprint,
@@ -15,7 +17,13 @@ import {
 import { createOpenClawIdAuthority } from "./authority.js";
 import type { DiscoveryClient } from "./discovery-client.js";
 import { startMailboxReader } from "./mailbox-reader.js";
-import { linkedClaw, memoryStore, nowSeconds, serviceFor } from "./openclaw-id.test-support.js";
+import {
+  linkedClaw,
+  memoryStore,
+  nowSeconds,
+  regenerationFor,
+  serviceFor,
+} from "./openclaw-id.test-support.js";
 
 const notices = vi.hoisted(() => ({ sent: [] as AuthorityEvent[][] }));
 vi.mock("./owner-notices.js", () => ({
@@ -42,14 +50,20 @@ async function rotation(from: StatementSigner, epoch: number) {
   return { statement, to };
 }
 
-// A linked claw whose root R already rotated to A (epoch 2), and R's conflicting rotation to B.
+// A linked claw whose owner key R was regenerated to A (epoch 2), and R's conflicting rotation to B.
 async function rotatedClaw() {
   const store = memoryStore();
   const claw = await linkedClaw(store);
-  const first = await rotation(claw.root, 2);
-  expect(await claw.authority.submit(first.statement, "mailbox")).toMatchObject({ ok: true });
+  const prep = await claw.authority.prepareRegeneration("local_operator");
+  if ("ok" in prep) {
+    throw new Error(prep.detail);
+  }
+  const regenerated = await regenerationFor(prep);
+  expect(
+    await claw.authority.regenerateOwnerKey(regenerated.input, "local_operator"),
+  ).toMatchObject({ ok: true });
   const conflicting = await rotation(claw.root, 2);
-  return { claw, store, rootA: first.to, conflicting: conflicting.statement };
+  return { claw, store, rootA: regenerated.root, conflicting: conflicting.statement };
 }
 
 function rootMail(clawId: string, statements: unknown[]): MailboxMessage {

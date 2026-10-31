@@ -79,7 +79,7 @@ additive change. v1-draft accepts only `ed25519`.
 | InviteCap          | claw_id, invite_id, role, audience {kind, value}, label, created_at, expires_at, single_use, secret_hash | owner device (or R)                 | `invite`                                                                  |
 | MembershipChange   | claw_id, seq, target (by op), issued_at                                                                  | owner device (or R)                 | `manage_members`; `approve_device` for `add_owner_device`                 |
 | Revocation         | target_fp, target_kind, reason, root_epoch, issued_at                                                    | R or any owner device               | none                                                                      |
-| RootRotation       | old_root_fp, new_root_pub, new_epoch (= old + 1), issued_at                                              | the old R only                      | n/a                                                                       |
+| RootRotation       | old_root_fp, new_root_pub, new_epoch (= old + 1), issued_at                                              | the old R only; local operator only | n/a                                                                       |
 | MembershipSnapshot | claw_id, seq, binding_seq, owner_peer_keys, members[], revoked[], issued_at                              | K_gw of the verified binding        | n/a (a mirror, never an authority)                                        |
 | InviteRedemption   | claw_id, invite_id, account_id, device_pub, peer_key, proof, requested_at                                | the invitee's own D_I (self-signed) | n/a                                                                       |
 
