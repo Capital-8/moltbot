@@ -168,10 +168,11 @@ export function createHostChannelInboundEventContextBuilder<
                 getRuntimeConfig: () => gateway.getRuntimeConfig(),
                 signal: prepared.signal,
                 assertCurrent: () => {
-                  if (!operatorIsCurrent())
+                  if (!operatorIsCurrent()) {
                     throw new CommandOwnerRevokedError(
                       "Channel operator authority changed; send a new request.",
                     );
+                  }
                 },
               });
             }
