@@ -260,7 +260,7 @@ test("required placement survives disconnect but stops setup when committed call
       const resume = createDeferredCore();
       hold = { committed, resume: resume.promise, afterAcknowledgment };
       settled = { remaining: 2, done: createDeferredCore() };
-      const created = rpcReq(ws, "sessions.create", {});
+      const created = rpcReq(ws, "sessions.create", {}, 30_000);
       void created.catch(() => {});
       try {
         if (afterAcknowledgment) {
