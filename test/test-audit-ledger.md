@@ -44,7 +44,7 @@ Routing and pairing: all 19 suites retained after reading the tests, local suppo
 owners, relevant callers, history, and CI routing. Inbound routing, outbound
 account selection, diagnostics, read-worker refusal, and write settlement remain distinct.
 Utility/support areas: all declarations in 35 active suites retained; one unreachable
-71-line target-resolution helper and its private SDK facade await coherent retirement.
+71-line target-resolution helper and its private SDK facade are retired in [PR #189230](https://github.com/openclaw/openclaw/pull/189230).
 Poll/startup/model-picker: eight suites retained for public input, TLS/compiler,
 durable selection, authority, conflict, and publication-order contracts.
 LLM host: 22 suites read; retain 126 declarations and repair one SSRF proof that
@@ -74,7 +74,7 @@ Completed core source review (runtime proof only where a landing row says so):
 | Owner scope                                   | Suites read                        | Decision                                                                                                                                        |
 | --------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Routing / pairing                             | 19                                 | Retain independent routing, identity, authorization, and compatibility contracts.                                                               |
-| Utilities / test utilities / test helpers     | 35                                 | Retain active suites; private channel-target support retirement needs SDK consumer qualification.                                               |
+| Utilities / test utilities / test helpers     | 35                                 | Retain active suites; retire unreachable private channel-target support with its build, alias, and documentation registrations.                 |
 | Boards / projects / decisions                 | 23                                 | Retain durable ownership, ordering, and public projections.                                                                                     |
 | Logging                                       | 64                                 | Retain 465 declarations, including content-absence and privacy guards.                                                                          |
 | Shared                                        | 111                                | Retain 490 declarations; streaming, borrowed identity, work counts, and native process contracts differ.                                        |
@@ -110,6 +110,36 @@ Untouched baseline: 76 tests across seven suites; retained candidate: 73 passed.
 Focused lint and changed test-graph type checks passed. Complete removal-check
 results and landing: [PR #189180](https://github.com/openclaw/openclaw/pull/189180).
 
+Private target-resolution support retirement starts at `187b16c7855`.
+The four-case registrar has no invocation; its SDK facade has been private and
+excluded from packaging since `780bc791470`. Untouched baseline: 146 passed and one
+Windows-only skip across eight suites. Candidate validation and landing:
+[PR #189230](https://github.com/openclaw/openclaw/pull/189230).
+The module and four named-export queries observed zero references at 08:44 UTC:
+public coverage 2,115 complete of 2,527; frozen bundled source `7c99ae1dd41`
+169 complete of 179. Incomplete coverage leaves external reliance unknown.
+
+Further source-only review: 18 reply delivery/lifecycle suites retain 336 declarations
+and need one ordinary tool-output deny proof repair; 24 CLI config/setup suites retain
+209 and need one swallowed-error assertion repaired. Eight provider/search plugins
+(Alibaba, Arcee, Cerebras, GMI, Qianfan, StepFun, Voyage, DuckDuckGo) retain all
+41 declarations after local owner/support/history/routing review. Shared framework
+closure is bounded; no runtime proof claimed for these areas.
+
+Reply session preparation: 23 suites plus the initialization registrar retain
+130 declarations for reset/fork/worktree state, authority, route custody,
+persistence settlement and prompt preparation. CLI plugin lifecycle: 25 suites
+retain 176 declarations and need one contention-proof repair; retired synthetic
+local-state scaffolding remains a later support-only candidate. Source review only.
+
+Further completed source review: reply run/model selection retains 104 declarations
+across 23 suites and three invoked registrars; reply tools/directives retain 161
+across 25 suites and one invoked registrar. Remaining CLI plugin validation retains
+106 across 22 suites and native-artifact support. Fireworks, NVIDIA, Together, and
+Novita retain 45 across 13 suites and one invoked deadline registrar. Catalog,
+onboarding, payload, polling, live-provider, authority, and lifecycle contracts
+remain independent. Local owners/support, relevant history, and static CI routes
+were traced; broader framework closure is bounded. No runtime proof claimed.
 Additional completed source review at the original audit revision (no runtime proof):
 
 | Owner scope                              | Suites    | Decision                                                                                                                                                                              |
@@ -147,6 +177,38 @@ Its full-tree export findings drop from three to two by removing `boundEntry`;
 the four production findings are unchanged. Final removal-check results,
 integrated-head proof, and landing: [PR #189212](https://github.com/openclaw/openclaw/pull/189212).
 No test declarations or production code change.
+
+Additional source review (no runtime result claimed):
+
+| Owner scope                                                                     | Suites read     | Decision                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS app                                                                       | 304 Swift files | 2,653 declaration sites: retain 2,635, repair eight proofs, qualify nine consolidations and one decoding-order deletion. Local owners/support read; native execution remains pending.                      |
+| CLI channel/root, message/device, skills/templates, session/storage             | 98              | Retain 542 declarations; remove one absorbed workshop mock and three unreachable fixture branches, with qualification below.                                                                               |
+| Auto-reply execution, CLI execution, settlement/presentation, remaining helpers | 52              | Retain 322 declarations; repair one account-isolation case whose differing text hides a broken account discriminator. Queue and other reply scopes remain open.                                            |
+| Cohere, Featherless, Groq, LongCat, SGLang, SubQ                                | 12              | Retain all 33 declarations: real payload/replay, discovery, config, credential rotation and cancellation contracts differ. Live suites were read, not executed.                                            |
+| Auto-reply queue policy/state/admission/drain                                   | 20              | Retain 92 declarations; repair one per-case cleanup key that leaves an unrelated source pending until file cleanup. Exact inventories now cover 235 of 429 reply suites; 194 remain unread.                |
+| Voice-call media/config/CLI/delivery                                            | 20              | Retain 165 declarations; repair one monotonic-deadline pending-state oracle whose resolved-promise race cannot detect early settlement. No absorbing layer or orphan support established.                  |
+| Auto-reply collector/followup                                                   | 11              | Retain 124 declarations; repair two mislabeled abort/abandonment rows and collapse one redundant source-kind axis while preserving three real failure branches. Exact reply coverage is 246 of 429 suites. |
+| Voice-call manager/store/recovery                                               | 14              | Retain all 98 declarations: real persistence, timers, FIFO replay, lost ownership, playback settlement and teardown differ. Full plugin inventory is 64 suites; 30 remain outside these two passes.        |
+
+The CLI fixture batch starts at `64daa25640d`. Retire unused config routing in
+`argv-invocation.test.ts`, unused Tailscale setup in `qr-cli.test.ts`, and unused
+preview/rollback/bootstrap controls in `plugin-local-state-owner.test.ts`.
+Keep every active declaration in these suites, including actual lease revocation,
+owner-loss and Tailscale fallback proof. Their removed consumers are evidenced by
+`d331fd73241`, `fb9545ca685`, and `7758bb9cdd7`.
+
+Remove the workshop mock replay in favor of the unchanged persisted keeper in
+`skills-cli.workshop-contract.test.ts:505`. Untouched baseline `34512f4a29d`:
+55 passed across five suites. A temporary fault reacquired custody, replayed the
+committed restore locally and preserved the original transport error. The keeper
+failed on three persisted change rows instead of two. Production source was restored
+byte for byte before test removal. Candidate `081185dc134`: 54 passed across the same
+five suites. Core lint, the affected config/CLI compiler graph, formatting and docs
+lint passed; fresh independent review found no correctness or security findings.
+The first direct run hit an unchanged text assertion under forced color; the failed
+and unfinished scopes passed with the native wrapper's `NO_COLOR=1 FORCE_COLOR=0`.
+Final removal checks and landing: [PR #189259](https://github.com/openclaw/openclaw/pull/189259).
 
 Remaining: declaration-level review across remaining core, plugins, UI, native apps,
 root/script suites and shared fixtures; close owner-reading gaps and land subsequent batches.

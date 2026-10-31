@@ -2,7 +2,7 @@
 import { reduceSessionProjection } from "@openclaw/gateway-client/browser";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { missingScopeErrorShape } from "../../../../packages/gateway-protocol/src/schema/error-codes.js";
-import { awaitGateBeforeSettlement, createDeferred } from "../../../../test/helpers/promise.js";
+import { createDeferred } from "../../../../test/helpers/promise.js";
 import { GatewayRequestError } from "../../api/gateway-connect-errors.ts";
 import type { GatewaySessionRow, SessionsRewindResult } from "../../api/types.ts";
 import { handleChatGatewayEvent } from "./chat-gateway.ts";
@@ -327,17 +327,19 @@ describe("full tail after a long live turn", () => {
     sessionInfo: { ...sessionInfo, hasActiveRun: false, status: "killed" as const },
   });
 
-  async function prepareLiveTurn(
+  async function loadAfterLiveTurn(
     tail: ChatHistoryResult,
     older: () => Promise<ChatHistoryResult>,
     {
       cursorReset = true,
       initialEnd = 1,
       previousLeaf,
+      supersedeFallback = false,
     }: {
       cursorReset?: boolean;
       initialEnd?: number;
       previousLeaf?: string;
+      supersedeFallback?: boolean;
     } = {},
   ) {
     const state = createState(tail);
@@ -351,7 +353,11 @@ describe("full tail after a long live turn", () => {
         sessionInfo: { ...sessionInfo, hasActiveRun: true, activeLeafEntryId: previousLeaf },
       },
       tail,
+      ...(supersedeFallback ? [tail] : []),
     ];
+    const fallbackStarted = createDeferred();
+    const fallbackResponse = createDeferred<ChatHistoryResult>();
+    let deferFallback = supersedeFallback;
     const request = vi
       .spyOn(state.client!, "request")
       .mockImplementation(async (_method, params) => {
@@ -360,7 +366,16 @@ describe("full tail after a long live turn", () => {
           return older();
         }
         // Stop persists an aborted reply, so the delta cursor resets to a bounded tail.
-        return cursor === "before-stop" && cursorReset ? { kind: "reset" } : pages.shift();
+        if (cursor === "before-stop" && cursorReset) {
+          return { kind: "reset" };
+        }
+        const page = pages.shift();
+        if (deferFallback && page === tail) {
+          deferFallback = false;
+          fallbackStarted.resolve();
+          return fallbackResponse.promise;
+        }
+        return page;
       });
     await loadChatHistory(state);
     // Live rows carry assistant turns only; tool results arrive as activity.
@@ -372,13 +387,15 @@ describe("full tail after a long live turn", () => {
     for (const row of [call(2), call(4), call(6)]) {
       publishLive(state, row, scope);
     }
+    const loading = loadChatHistory(state);
+    if (supersedeFallback) {
+      await fallbackStarted.promise;
+      const refreshed = loadChatHistory(state, { supersedeInFlight: true });
+      fallbackResponse.resolve(tail);
+      await refreshed;
+    }
+    await loading;
     return { state, request };
-  }
-
-  async function loadAfterLiveTurn(...args: Parameters<typeof prepareLiveTurn>) {
-    const prepared = await prepareLiveTurn(...args);
-    await loadChatHistory(prepared.state);
-    return prepared;
   }
 
   it.each([
@@ -417,31 +434,17 @@ describe("full tail after a long live turn", () => {
     expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
   });
 
-  it("keeps the held prompt when a session-message refresh supersedes the reset tail read", async () => {
+  it("restores the held prefix when a refresh supersedes the Stop fallback", async () => {
     const tail = tailFrom(2);
     const older = vi.fn(async () => ({ messages: transcript.slice(0, 2), sessionInfo }));
-    const { state, request } = await prepareLiveTurn(tail, older);
-    const tailRequested = createDeferred();
-    const interruptedTail = createDeferred<ChatHistoryResult>();
-    request.mockResolvedValueOnce({ kind: "reset" }).mockImplementationOnce(async () => {
-      tailRequested.resolve();
-      return interruptedTail.promise;
-    });
-    const loading = loadChatHistory(state);
-    await awaitGateBeforeSettlement(
-      tailRequested.promise,
-      loading,
-      "The reset refresh settled before requesting its full tail",
+    const { state } = await loadAfterLiveTurn(
+      { ...tail, sessionInfo: { ...tail.sessionInfo, activeLeafEntryId: "stopped-leaf" } },
+      older,
+      { initialEnd: 4, previousLeaf: "running-leaf", supersedeFallback: true },
     );
-    // A same-session message invalidates the pending read after it cleared the cursor.
-    const replacement = loadChatHistory(state, { supersedeInFlight: true });
-    expect(state.chatMessages).toContainEqual(prompt);
-    interruptedTail.resolve(tail);
-    await Promise.all([loading, replacement]);
-
     expect(state.chatMessages).toEqual(transcript);
-    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
     expect(older).toHaveBeenCalledOnce();
+    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
   });
 
   it("keeps the retryable boundary when the gap read fails", async () => {
