@@ -11,12 +11,12 @@ describe("reference membership authority", () => {
       ok: false,
       code: "not_local_operator",
     });
-    expect(isAdmitted(world.state, world.device2.peer, await fingerprint(world.device2.peer))).toBe(
-      true,
-    );
-    expect(isAdmitted(world.state, world.mallory.peer, await fingerprint(world.mallory.peer))).toBe(
-      false,
-    );
+    expect(
+      isAdmitted(world.state, world.device2.peer, await fingerprint(world.device2.peer), WORLD_NOW),
+    ).toBe(true);
+    expect(
+      isAdmitted(world.state, world.mallory.peer, await fingerprint(world.mallory.peer), WORLD_NOW),
+    ).toBe(false);
     expect(snapshotBody(world.state, 1, WORLD_NOW).owner_peer_keys).toHaveLength(2);
   });
 
@@ -47,7 +47,12 @@ describe("reference membership authority", () => {
       "publish_snapshot",
     ]);
     expect(
-      isAdmitted(removed.state, world.invitee.peer, await fingerprint(world.invitee.peer)),
+      isAdmitted(
+        removed.state,
+        world.invitee.peer,
+        await fingerprint(world.invitee.peer),
+        WORLD_NOW,
+      ),
     ).toBe(false);
   });
 });

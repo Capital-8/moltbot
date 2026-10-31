@@ -21,6 +21,7 @@ import { clawOriginOfRecord, setOpenClawIdClawOriginResolver } from "./claw-orig
 import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
 import type { TunnelApiHandler } from "./ingress-listener.js";
 import { listInviteViews } from "./invites-view.js";
+import { createOwnerExpiryTimer } from "./owner-expiry.js";
 import type { PublishOutcome } from "./publisher.js";
 import { setOpenClawIdTunnelPrincipalResolver } from "./tunnel-principal.js";
 import type { TunnelRuntime, TunnelRuntimeSettings } from "./tunnel-runtime.js";
@@ -112,6 +113,12 @@ export function createOpenClawIdService(params: {
   let mailbox: { stop(): void } | undefined;
   // Serializes start/stop so overlapping config reloads apply in order.
   let queue: Promise<void> = Promise.resolve();
+  const ownerExpiry = createOwnerExpiryTimer({
+    onExpired: () =>
+      expireOwners().catch((error: unknown) =>
+        params.log.warn(`openclaw-id: owner expiry failed: ${String(error)}`),
+      ),
+  });
 
   // The removal effects load once; they also start remembering run custody.
   const getEffects = () => (effectsPromise ??= loadEffects?.());
@@ -128,6 +135,7 @@ export function createOpenClawIdService(params: {
   const stopRuntime = async () => {
     const current = runtime;
     runtime = undefined;
+    ownerExpiry.stop();
     mailbox?.stop();
     mailbox = undefined;
     setDeviceTokenBindingOwner(undefined);
@@ -140,8 +148,21 @@ export function createOpenClawIdService(params: {
     if (!runtime) {
       return;
     }
-    const { seq, admitted } = await (await getAuthority()).admittedPeerKeys();
+    const owner = await getAuthority();
+    const { seq, admitted } = await owner.admittedPeerKeys();
     runtime.pushMembership(seq, admitted);
+    ownerExpiry.arm(await owner.nextOwnerExpiry());
+  };
+
+  // Ends the open sessions of owner devices whose certificates expired, then re-arms.
+  const expireOwners = async () => {
+    const peers = await (await getAuthority()).expiredOwnerPeers();
+    if (peers.length === 0) {
+      await pushMembership();
+      return;
+    }
+    params.log.info(`openclaw-id: closing sessions of ${peers.length} expired owner device key(s)`);
+    await applyEvents([{ type: "disconnect", peer_keys: peers }, { type: "publish_snapshot" }]);
   };
 
   // Accepted writes, and refusals that carry a security transition, have side effects.
@@ -182,6 +203,7 @@ export function createOpenClawIdService(params: {
         handleApi: handleTunnelApi,
       });
       status = { state: "on", tunnel: runtime.supervisor.status() };
+      ownerExpiry.arm(await (await getAuthority()).nextOwnerExpiry());
       // Loaded before any member connects, so removal finds runs of closed connections.
       await getEffects();
       await publishTokenBindings();

@@ -9,6 +9,7 @@ import {
   isIrohEndpointKey,
   isOwnerDeviceActive,
   linkClaw,
+  nextOwnerExpiry,
   randomBytes,
   bytesToHex,
   submitRedemption,
@@ -453,9 +454,10 @@ export function createOpenClawIdAuthority(
       if (!state || state.revoked.includes(await fingerprint(peerKey as IrohEndpointKey))) {
         return undefined;
       }
+      const now = nowSeconds();
       const isOwner = Object.values(state.owner_devices).some(
         (device) =>
-          isOwnerDeviceActive(state, device) &&
+          isOwnerDeviceActive(state, device, now) &&
           device.cert.body.peer_keys.includes(peerKey as IrohEndpointKey),
       );
       if (!isOwner) {
@@ -467,13 +469,13 @@ export function createOpenClawIdAuthority(
         root_pub: state.anchor.root_pub,
         root_epoch: state.anchor.root_epoch,
         binding: current.binding,
-        owner_devices: activeOwnerCerts(state),
+        owner_devices: activeOwnerCerts(state, now),
         members: Object.entries(state.members).map(([account_id, member]) => ({
           account_id,
           role: member.role,
           peer_keys: member.peer_keys,
         })),
-        invites: listInviteViews(current, nowSeconds()),
+        invites: listInviteViews(current, now),
       };
     },
 
@@ -487,12 +489,14 @@ export function createOpenClawIdAuthority(
       if (!state || !isIrohEndpointKey(peerKey)) {
         return undefined;
       }
-      if (!isAdmitted(state, peerKey, await fingerprint(peerKey))) {
+      // Certificate validity is judged now, on every connection and request.
+      const now = nowSeconds();
+      if (!isAdmitted(state, peerKey, await fingerprint(peerKey), now)) {
         return undefined;
       }
       const isOwner = Object.values(state.owner_devices).some(
         (device) =>
-          isOwnerDeviceActive(state, device) && device.cert.body.peer_keys.includes(peerKey),
+          isOwnerDeviceActive(state, device, now) && device.cert.body.peer_keys.includes(peerKey),
       );
       if (isOwner) {
         return { kind: "owner", peerKey };
@@ -511,7 +515,46 @@ export function createOpenClawIdAuthority(
       if (!state) {
         return { seq: 0, admitted: [] };
       }
-      return { seq: state.seq, admitted: await listAdmitted(state) };
+      return { seq: state.seq, admitted: await listAdmitted(state, nowSeconds()) };
+    },
+
+    /**
+     * When (unix seconds) the next owner device certificate, or an ancestor in its
+     * chain, expires; undefined when none expires. Its sessions end at that time.
+     */
+    async nextOwnerExpiry(): Promise<number | undefined> {
+      const state = (await load())?.authority;
+      return (state && nextOwnerExpiry(state, nowSeconds())) ?? undefined;
+    },
+
+    /**
+     * Peer keys of owner devices that are no longer admitted only because their
+     * certificate, or an ancestor in its chain, left its validity window.
+     */
+    async expiredOwnerPeers(): Promise<IrohEndpointKey[]> {
+      const state = (await load())?.authority;
+      if (!state) {
+        return [];
+      }
+      const now = nowSeconds();
+      const expired = new Set<IrohEndpointKey>();
+      for (const device of Object.values(state.owner_devices)) {
+        const unrevoked = device.chain_fps.every((fp) => !state.revoked.includes(fp));
+        if (
+          device.cert.body.root_epoch === state.anchor.root_epoch &&
+          unrevoked &&
+          !isOwnerDeviceActive(state, device, now)
+        ) {
+          device.cert.body.peer_keys.forEach((key) => expired.add(key));
+        }
+      }
+      const peers: IrohEndpointKey[] = [];
+      for (const key of expired) {
+        if (!isAdmitted(state, key, await fingerprint(key), now)) {
+          peers.push(key);
+        }
+      }
+      return peers.toSorted();
     },
 
     /** Records Discovery publication progress (best effort; never authority). */
@@ -538,15 +581,15 @@ function roleChangeDisconnects(before: AuthorityState, after: AuthorityState): A
   return peerKeys.length > 0 ? [{ type: "disconnect", peer_keys: peerKeys }] : [];
 }
 
-// Every candidate key that passes the protocol's admission rule.
-async function listAdmitted(state: AuthorityState): Promise<IrohEndpointKey[]> {
+// Every candidate key that passes the protocol's admission rule at `now`.
+async function listAdmitted(state: AuthorityState, now: number): Promise<IrohEndpointKey[]> {
   const candidates = new Set<IrohEndpointKey>([
     ...Object.values(state.members).flatMap((member) => member.peer_keys),
     ...Object.values(state.owner_devices).flatMap((record) => record.cert.body.peer_keys),
   ]);
   const admitted: IrohEndpointKey[] = [];
   for (const key of candidates) {
-    if (isAdmitted(state, key, await fingerprint(key))) {
+    if (isAdmitted(state, key, await fingerprint(key), now)) {
       admitted.push(key);
     }
   }

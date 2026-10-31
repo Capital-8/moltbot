@@ -17,6 +17,7 @@ import {
   type VerifyOptions,
 } from "../statements/verify.js";
 import {
+  certificateWindowError,
   isOwnerDeviceActive,
   proofKeyHex,
   refuse,
@@ -127,6 +128,7 @@ async function applyOwnerStatement(
       state,
       statement as SignedStatement<"OwnerDeviceCert">,
       verified.authority,
+      context,
     );
   }
   return applyMembershipChange(
@@ -142,6 +144,7 @@ async function applyRecertification(
   state: AuthorityState,
   cert: SignedStatement<"OwnerDeviceCert">,
   authority: Authority,
+  context: WriteContext,
 ): Promise<AuthorityResult> {
   const fp = await fingerprint(cert.body.device_pub);
   if (authority.kind !== "root" || !state.owner_devices[fp]) {
@@ -150,6 +153,10 @@ async function applyRecertification(
       "unsupported",
       "only R re-certifies known owner devices; add devices with add_owner_device",
     );
+  }
+  const window = certificateWindowError(cert.body, context.now);
+  if (window) {
+    return refuse(state, window.code, window.detail);
   }
   const record: OwnerDeviceRecord = { cert, chain_fps: [fp] };
   return applied({ ...state, owner_devices: { ...state.owner_devices, [fp]: record } }, [
@@ -359,6 +366,11 @@ async function addOwnerDevice(
   if (!verified.ok) {
     return refuse(state, verified.code, `certificate: ${verified.detail}`);
   }
+  // Chain verification checks the issuers; the new certificate's own window is checked here.
+  const window = certificateWindowError(cert.body, context.now);
+  if (window) {
+    return refuse(state, window.code, `certificate: ${window.detail}`);
+  }
   const fp = await fingerprint(cert.body.device_pub);
   const record: OwnerDeviceRecord = { cert, chain_fps: await chainFingerprints(cert) };
   const events: AuthorityEvent[] = [{ type: "publish_snapshot" }];
@@ -528,9 +540,12 @@ export async function submitRedemption(
   };
 }
 
-/** Owner devices whose certificates are active (used by kit enrollment to compact chains). */
-export function activeOwnerCerts(state: AuthorityState): SignedStatement<"OwnerDeviceCert">[] {
+/** Owner devices whose certificates are active at `now` (used by kit enrollment to compact chains). */
+export function activeOwnerCerts(
+  state: AuthorityState,
+  now: UnixSeconds,
+): SignedStatement<"OwnerDeviceCert">[] {
   return Object.values(state.owner_devices)
-    .filter((record) => isOwnerDeviceActive(state, record))
+    .filter((record) => isOwnerDeviceActive(state, record, now))
     .map((record) => record.cert);
 }

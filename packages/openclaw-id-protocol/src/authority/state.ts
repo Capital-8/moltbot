@@ -7,6 +7,7 @@ import type {
   InviteCapBody,
   MemberRole,
   MembershipSnapshotBody,
+  OwnerDeviceCertBody,
   SignedStatement,
   UnixSeconds,
 } from "../statements/types.js";
@@ -122,6 +123,26 @@ export function refuseWithTransition(
   return { ok: false, code, detail, state: next, events, persist: true };
 }
 
+/** Tolerated clock skew for a certificate's `issued_at`, as in statement verification. */
+export const CERT_CLOCK_SKEW_SECONDS = 300;
+
+/**
+ * Why an owner device certificate is outside its validity window at `now`, or
+ * null when it is valid: issued in the future (beyond the clock skew) or expired.
+ */
+export function certificateWindowError(
+  body: Pick<OwnerDeviceCertBody, "issued_at" | "expires_at">,
+  now: UnixSeconds,
+): { code: "not_yet_valid" | "expired"; detail: string } | null {
+  if (body.issued_at > now + CERT_CLOCK_SKEW_SECONDS) {
+    return { code: "not_yet_valid", detail: "certificate is issued in the future" };
+  }
+  if (body.expires_at !== null && body.expires_at <= now) {
+    return { code: "expired", detail: "certificate expired" };
+  }
+  return null;
+}
+
 /**
  * "Make reachable" (spec section 4): pin fp(R) and epoch 1. Only over direct loopback,
  * never over the tunnel, even though tunnel traffic reaches the Gateway on loopback.
@@ -150,23 +171,56 @@ export function linkClaw(
   };
 }
 
-/** True when an owner device's certificate is in the current epoch and nothing in its chain is revoked. */
-export function isOwnerDeviceActive(state: AuthorityState, record: OwnerDeviceRecord): boolean {
+/**
+ * True when an owner device's certificate is in the current epoch, nothing in its
+ * chain is revoked, and at `now` the certificate and every ancestor in its chain
+ * are within their validity windows.
+ */
+export function isOwnerDeviceActive(
+  state: AuthorityState,
+  record: OwnerDeviceRecord,
+  now: UnixSeconds,
+): boolean {
   return (
     record.cert.body.root_epoch === state.anchor.root_epoch &&
-    record.chain_fps.every((fp) => !state.revoked.includes(fp))
+    record.chain_fps.every((fp) => !state.revoked.includes(fp)) &&
+    [record.cert, ...record.cert.chain].every(
+      (cert) => certificateWindowError(cert.body, now) === null,
+    )
   );
 }
 
 /**
+ * The earliest moment after `now` at which a currently active owner device stops
+ * being active because its certificate or an ancestor expires, or null if none
+ * expires. The Gateway closes such a device's sessions at that boundary.
+ */
+export function nextOwnerExpiry(state: AuthorityState, now: UnixSeconds): UnixSeconds | null {
+  let next: UnixSeconds | null = null;
+  for (const record of Object.values(state.owner_devices)) {
+    if (!isOwnerDeviceActive(state, record, now)) {
+      continue;
+    }
+    for (const cert of [record.cert, ...record.cert.chain]) {
+      const expiresAt = cert.body.expires_at;
+      if (expiresAt !== null && (next === null || expiresAt < next)) {
+        next = expiresAt;
+      }
+    }
+  }
+  return next;
+}
+
+/**
  * Tunnel admission (the tunnel child asks this for every connection): the peer key
- * belongs to an active owner device or a member and is not revoked. Discovery is not
- * consulted, so a withheld or delayed snapshot cannot keep a removed key admitted.
+ * belongs to an owner device active at `now` or a member and is not revoked. Discovery
+ * is not consulted, so a withheld or delayed snapshot cannot keep a removed key admitted.
  */
 export function isAdmitted(
   state: AuthorityState,
   peerKey: IrohEndpointKey,
   peerKeyFp: KeyFingerprint,
+  now: UnixSeconds,
 ): boolean {
   if (state.revoked.includes(peerKeyFp)) {
     return false;
@@ -175,7 +229,8 @@ export function isAdmitted(
     return true;
   }
   return Object.values(state.owner_devices).some(
-    (record) => isOwnerDeviceActive(state, record) && record.cert.body.peer_keys.includes(peerKey),
+    (record) =>
+      isOwnerDeviceActive(state, record, now) && record.cert.body.peer_keys.includes(peerKey),
   );
 }
 
@@ -186,7 +241,7 @@ export function snapshotBody(
   now: UnixSeconds,
 ): MembershipSnapshotBody {
   const ownerPeerKeys = Object.values(state.owner_devices)
-    .filter((record) => isOwnerDeviceActive(state, record))
+    .filter((record) => isOwnerDeviceActive(state, record, now))
     .flatMap((record) => record.cert.body.peer_keys);
   return {
     claw_id: state.claw_id,
