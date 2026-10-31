@@ -125,9 +125,14 @@ OPENCLAW_PLUGIN_HOME="$HOME/.openclaw/$BUNDLED_PLUGIN_ROOT_DIR"
 demo_plugin_id="demo-plugin"
 demo_plugin_root="$OPENCLAW_PLUGIN_HOME/$demo_plugin_id"
 node scripts/e2e/lib/fixture.mjs plugin-demo "$demo_plugin_root"
-# Let OpenClaw own and version the state schema before the E2E helper writes
-# fixture trust into config_machine_state.
-run_plugins_openclaw_capture "$OPENCLAW_PLUGINS_TMP_DIR/plugins-bootstrap.json" plugins list --json
+
+echo "Testing tgz install flow..."
+pack_dir="$(mktemp -d "$OPENCLAW_PLUGINS_TMP_DIR/openclaw-plugin-pack.XXXXXX")"
+pack_fixture_archive plugin "$pack_dir" "$OPENCLAW_PLUGINS_TMP_DIR/demo-plugin-tgz.tgz" demo-plugin-tgz 0.0.1 demo.tgz "Demo Plugin TGZ"
+
+# Let the installer own and version the state schema before the E2E helper
+# writes fixture trust into config_machine_state.
+run_plugins_fixture_logged install-tgz plugins install "$OPENCLAW_PLUGINS_TMP_DIR/demo-plugin-tgz.tgz" --force
 node scripts/e2e/lib/plugins/assertions.mjs record-fixture-plugin-trust "$demo_plugin_id" "$demo_plugin_root" 1
 
 run_plugins_openclaw_capture "$OPENCLAW_PLUGINS_TMP_DIR/plugins.json" plugins list --json
@@ -135,11 +140,6 @@ run_plugins_openclaw_capture "$OPENCLAW_PLUGINS_TMP_DIR/plugins-inspect.json" pl
 
 node scripts/e2e/lib/plugins/assertions.mjs demo-plugin
 
-echo "Testing tgz install flow..."
-pack_dir="$(mktemp -d "$OPENCLAW_PLUGINS_TMP_DIR/openclaw-plugin-pack.XXXXXX")"
-pack_fixture_archive plugin "$pack_dir" "$OPENCLAW_PLUGINS_TMP_DIR/demo-plugin-tgz.tgz" demo-plugin-tgz 0.0.1 demo.tgz "Demo Plugin TGZ"
-
-run_plugins_fixture_logged install-tgz plugins install "$OPENCLAW_PLUGINS_TMP_DIR/demo-plugin-tgz.tgz" --force
 run_plugins_openclaw_capture "$OPENCLAW_PLUGINS_TMP_DIR/plugins2.json" plugins list --json
 run_plugins_openclaw_capture "$OPENCLAW_PLUGINS_TMP_DIR/plugins2-inspect.json" plugins inspect demo-plugin-tgz --runtime --json
 
