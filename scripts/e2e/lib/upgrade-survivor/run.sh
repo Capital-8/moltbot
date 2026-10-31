@@ -1390,9 +1390,14 @@ prepare_update_restart_probe() {
 }
 
 assert_baseline_state() {
-  local assertion
+  local assertion assert_stage
   for assertion in assert-exec-approvals assert-config assert-state; do
-    OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE=baseline \
+    assert_stage=baseline
+    if [ "$assertion" = "assert-exec-approvals" ] &&
+      [ "${OPENCLAW_UPGRADE_SURVIVOR_BASELINE_DOCTOR_APPLIED:-0}" = "1" ]; then
+      assert_stage=survival
+    fi
+    OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE="$assert_stage" \
       node scripts/e2e/lib/upgrade-survivor/assertions.mjs "$assertion" || return "$?"
   done
 }

@@ -74,7 +74,11 @@ if (args[0] === "fixture-ready") {
 if (args[0] === "doctor") {
   assert.deepEqual(args, ["doctor", "--fix", "--non-interactive"]);
   const legacyPath = path.join(state, "cron", "jobs.json");
+  const approvalsPath = path.join(state, "exec-approvals.json");
   const jobs = read(legacyPath).jobs;
+  const approvals = read(approvalsPath);
+  delete approvals.agents.main.allowlist[0].lastUsedAt;
+  delete approvals.agents.main.allowlist[0].lastUsedCommand;
   const databasePath = path.join(state, "state", "openclaw.sqlite");
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   const { DatabaseSync } = require("node:sqlite");
@@ -82,8 +86,11 @@ if (args[0] === "doctor") {
   db.exec("CREATE TABLE cron_jobs (job_id TEXT PRIMARY KEY, job_json TEXT NOT NULL)");
   const insert = db.prepare("INSERT INTO cron_jobs (job_id, job_json) VALUES (?, ?)");
   for (const job of jobs) insert.run(job.id, JSON.stringify(job));
+  db.exec("CREATE TABLE exec_approvals_config (config_key TEXT PRIMARY KEY, raw_json TEXT NOT NULL)");
+  db.prepare("INSERT INTO exec_approvals_config VALUES (?, ?)").run("current", JSON.stringify(approvals));
   db.close();
   fs.rmSync(legacyPath);
+  fs.rmSync(approvalsPath);
 } else if (args[0] === "config") {
   assert.deepEqual(args, ["config", "validate"]);
   assert.equal(config, original);
