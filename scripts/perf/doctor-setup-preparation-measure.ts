@@ -2,6 +2,7 @@
  * Isolated Doctor setup preparation, including fresh callbacks and awaited phase cleanup.
  * Run the same file on each revision with --route legacy or --route prepared.
  * Use the pinned Bun, serial A/A and alternating A/B processes, and new --output directories.
+ * The default small fixture uses --files; --fixture large captures 26 synthetic dependencies.
  * These phase times exclude fixture creation/imports and are not whole-Doctor timings.
  */
 import assert from "node:assert/strict";
@@ -10,6 +11,7 @@ import fs from "node:fs";
 import { loadavg } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { isMainThread } from "node:worker_threads";
 import {
@@ -33,6 +35,7 @@ const { values } = parseArgs({
   options: {
     output: { type: "string" },
     route: { type: "string" },
+    fixture: { type: "string", default: "small" },
     files: { type: "string", default: "128" },
     phases: { type: "string", default: "3" },
   },
@@ -44,6 +47,10 @@ assert(
 assert(
   values.route === "legacy" || values.route === "prepared",
   "--route must be legacy or prepared",
+);
+assert(
+  values.fixture === "small" || values.fixture === "large",
+  "--fixture must be small or large",
 );
 const files = Number(values.files);
 const phases = Number(values.phases);
@@ -65,37 +72,103 @@ const sourceRoot = path.join(output, "source");
 const stateDir = path.join(output, "state");
 fs.mkdirSync(sourceRoot);
 fs.mkdirSync(stateDir);
+const large = values.fixture === "large";
 const payloads = Array.from(
-  { length: files },
+  { length: large ? 0 : files },
   (_, index) => `payload-${String(index).padStart(5, "0")}.txt`,
 );
 const bytes = payloads.map((_, index) => `synthetic file ${index}\n`.repeat(256));
-fs.writeFileSync(path.join(sourceRoot, "package.json"), JSON.stringify({ type: "module" }));
+const dependencies = Array.from(
+  { length: large ? 26 : 0 },
+  (_, index) => `fixture-dependency-${index}`,
+);
+fs.writeFileSync(
+  path.join(sourceRoot, "package.json"),
+  JSON.stringify({
+    type: "module",
+    ...(large
+      ? { dependencies: Object.fromEntries(dependencies.map((name) => [name, "1.0.0"])) }
+      : {}),
+  }),
+);
 fs.writeFileSync(path.join(sourceRoot, "asset.txt"), "original resource");
+const payloadHash = createHash("sha256");
+for (const [index, name] of dependencies.entries()) {
+  const root = path.join(sourceRoot, "node_modules", name);
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ name, version: "1.0.0", type: "module", main: "index.mjs" }),
+  );
+  fs.writeFileSync(
+    path.join(root, "index.mjs"),
+    `import fs from "node:fs";
+export function updateHash(hash) {
+  for (let index = 0; index < 248; index++) {
+    hash.update(fs.readFileSync(new URL(\`data-\${String(index).padStart(3, "0")}.txt\`, import.meta.url)));
+  }
+  return import.meta.url;
+}
+`,
+  );
+  for (let asset = 0; asset < 248; asset++) {
+    const content = Buffer.alloc(4096, "x");
+    content.write(`${index}:${asset}:`);
+    fs.writeFileSync(path.join(root, `data-${String(asset).padStart(3, "0")}.txt`), content);
+    payloadHash.update(content);
+  }
+}
 fs.writeFileSync(
   path.join(sourceRoot, "doctor-contract-api.mjs"),
   `
   import fs from "node:fs"; import { createHash } from "node:crypto";
-  let calls = 0;
+  ${large ? dependencies.map((name, index) => `import { updateHash as dependency${index} } from ${JSON.stringify(name)};`).join("\n  ") + "\n  " : ""}let calls = 0;
   export const stateMigrations = [{ id: "repair", label: "repair",
     detectLegacyState() { return { preview: ["fixture"] }; },
     migrateLegacyState() {
       const asset = new URL("./asset.txt", import.meta.url);
       const resource = fs.readFileSync(asset, "utf8");
       const hash = createHash("sha256");
-      for (const file of ${JSON.stringify(payloads)}) hash.update(fs.readFileSync(new URL(file, import.meta.url)));
+      ${large ? `const dependencyUrls = [${dependencies.map((_, index) => `dependency${index}(hash)`).join(", ")}];` : `for (const file of ${JSON.stringify(payloads)}) hash.update(fs.readFileSync(new URL(file, import.meta.url)));`}
       fs.writeFileSync(asset, "changed by callback");
-      return { changes: [String(++calls), resource, hash.digest("hex"), import.meta.url], warnings: [] };
+      return { changes: [String(++calls), resource, hash.digest("hex"), import.meta.url${large ? ", JSON.stringify(dependencyUrls)" : ""}], warnings: [] };
     }
   }];
 `,
 );
-for (const [index, name] of payloads.entries())
-  fs.writeFileSync(path.join(sourceRoot, name), bytes[index]!);
-const originalBytes = fs
-  .readdirSync(sourceRoot)
-  .reduce((sum, name) => sum + fs.statSync(path.join(sourceRoot, name)).size, 0);
-const expectedHash = createHash("sha256").update(bytes.join("")).digest("hex");
+if (!large) {
+  for (const [index, name] of payloads.entries())
+    fs.writeFileSync(path.join(sourceRoot, name), bytes[index]!);
+  payloadHash.update(bytes.join(""));
+}
+function inspectFixture() {
+  let files = 0;
+  let bytes = 0;
+  const hash = large ? createHash("sha256") : undefined;
+  const visit = (directory: string) => {
+    for (const entry of fs
+      .readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const filename = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(filename);
+      } else {
+        assert(entry.isFile(), "Synthetic fixture must contain only directories and regular files");
+        files++;
+        bytes += fs.statSync(filename).size;
+        hash
+          ?.update(path.relative(sourceRoot, filename))
+          .update("\0")
+          .update(fs.readFileSync(filename));
+      }
+    }
+  };
+  visit(sourceRoot);
+  return { files, bytes, digest: hash?.digest("hex") };
+}
+const original = inspectFixture();
+const originalBytes = original.bytes;
+const expectedHash = payloadHash.digest("hex");
 const fixture = createDoctorGenerationFixture(sourceRoot, "measure");
 const inventory = fixture.inventory({ stateMigrations: [{ id: "repair" }] });
 const telemetry = fs.existsSync(
@@ -178,6 +251,19 @@ const run = () =>
                 "original resource",
                 expectedHash,
               ]);
+              if (large) {
+                const dependencyUrls: unknown = JSON.parse(result.changes[4]!);
+                assert(Array.isArray(dependencyUrls));
+                assert.equal(dependencyUrls.length, dependencies.length);
+                assert.equal(new Set(dependencyUrls).size, dependencies.length);
+                for (const url of dependencyUrls) {
+                  assert(typeof url === "string");
+                  assert(
+                    !url.startsWith(pathToFileURL(sourceRoot + path.sep).href),
+                    "Dependency callbacks must use private captures",
+                  );
+                }
+              }
               const digest = [...cache.setupModules.values()][0]!.sourceDigest;
               assert(digest);
               sourceDigests.push(digest);
@@ -224,11 +310,14 @@ try {
 const elapsedMs = performance.now() - start;
 const cpu = process.cpuUsage(cpuStart);
 const hostCpu = process.threadCpuUsage(hostCpuStart);
+if (large)
+  assert.deepEqual(inspectFixture(), original, "Callbacks must preserve all original source bytes");
 const result = {
   route: values.route,
+  ...(large ? { fixture: values.fixture } : {}),
   isMainThread,
   runtime: process.versions,
-  files: files + 3,
+  files: original.files,
   originalBytes,
   phases,
   hostLoad,
