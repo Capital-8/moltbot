@@ -23,12 +23,15 @@ trace = nil
 begin
   facts["runtimeHelp"], = Open3.capture3("xcrun", "simctl", "runtime", "help")
   facts["imagesBefore"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
-  WatchRuntimeAdmission.wait!
-  facts["admittedAt"] = Time.now.utc.iso8601
   runtimes = JSON.parse(command("xcrun", "simctl", "list", "runtimes", "--json")).fetch("runtimes")
   runtime = runtimes.select { |entry| entry["isAvailable"] && entry.fetch("identifier").include?(".watchOS-") }
     .max_by { |entry| Gem::Version.new(entry.fetch("version")) }
   raise "No available Watch runtime" unless runtime
+  facts["personalizationHelp"] = command("xcrun", "simctl", "help", "personalization")
+  facts["personalizationOutput"] = command("xcrun", "simctl", "personalization", "personalize", runtime.fetch("identifier"))
+  facts["imagesPersonalized"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
+  WatchRuntimeAdmission.wait!
+  facts["admittedAt"] = Time.now.utc.iso8601
   device = runtime.fetch("supportedDeviceTypes").find { |entry| entry.fetch("name").include?("Ultra") }
   raise "No supported Watch Ultra device" unless device
   udid = command("xcrun", "simctl", "create", "OpenClaw runtime probe", device.fetch("identifier"), runtime.fetch("identifier")).strip
