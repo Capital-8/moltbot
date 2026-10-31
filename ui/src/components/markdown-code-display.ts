@@ -163,10 +163,10 @@ export function captureMarkdownCodeRows(
       if (!prepared) {
         continue;
       }
-      if (
-        Object.keys(captured.rows[messageId] ?? {}).length >= 8 &&
-        !captured.rows[messageId]?.[entry.key]
-      ) {
+      const previous = Object.hasOwn(captured.rows, messageId)
+        ? captured.rows[messageId]
+        : undefined;
+      if (Object.keys(previous ?? {}).length >= 8 && !previous?.[entry.key]) {
         continue;
       }
       const classes = [...new Set([...captured.classes, ...prepared.classes])];
@@ -179,7 +179,11 @@ export function captureMarkdownCodeRows(
           prepared.classes[prepared.offsets.runs[index]!]!,
         );
       }
-      (captured.rows[messageId] ??= {})[entry.key] = prepared.offsets;
+      // Message IDs are literal keys, including names inherited by objects.
+      captured.rows = {
+        ...captured.rows,
+        [messageId]: { ...previous, [entry.key]: prepared.offsets },
+      };
     }
   }
   return captured;

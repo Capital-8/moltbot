@@ -79,7 +79,11 @@ it("captures visible and lower-margin fences while excluding earlier and distant
             content: `<div class="is-collapsible"><pre><code class="hljs language-ts">${highlightCodeHtml("const ready = true;\n", "ts")}</code></pre></div>`,
           }),
           () => ({
-            read: () => ({ scope: `scope-${index}`, messageId: `row-${index}`, facts: {} }),
+            read: () => ({
+              scope: `scope-${index}`,
+              messageId: index === 1 ? "constructor" : `row-${index}`,
+              facts: {},
+            }),
             write: () => {},
           }),
         ),
@@ -97,7 +101,7 @@ it("captures visible and lower-margin fences while excluding earlier and distant
   });
   onTestFinished(() => mounts.forEach((view) => view.unmount()));
   const captured = captureMarkdownCodeRows(items, { top: 0, height: 400, offset: 0 }, () => {});
-  expect(Object.keys(captured.rows)).toEqual(["row-1", "row-2"]);
+  expect(Object.keys(captured.rows)).toEqual(["constructor", "row-2"]);
   expect(captured.classes).toEqual(["hljs-keyword", "hljs-literal"]);
 });
 
