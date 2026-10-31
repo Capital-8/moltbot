@@ -1,0 +1,82 @@
+// Control messages between the Gateway and its supervised tunnel child.
+// The Node IPC channel carries control only: start config, ready, health and
+// membership. Request data travels over the ingress socket, never over IPC.
+
+/** Child exit code: the iroh transport cannot load on this platform. Not retried. */
+export const TUNNEL_EXIT_UNAVAILABLE = 78;
+/** Child exit code: the endpoint key file is unsafe or corrupt. Not retried. */
+export const TUNNEL_EXIT_KEY_REFUSED = 77;
+
+/** Sent once, right after the child starts. */
+export type TunnelStartMessage = {
+  type: "start";
+  /** The only relay in the endpoint's relay map. */
+  relayUrl: string;
+  /** Endpoint secret key file (32 raw bytes, 0600); created by the child on first start. */
+  keyPath: string;
+  /** Optional UDP bind address (`host:port`). */
+  bindAddr?: string;
+  /** Gateway ingress the child proxies every stream to. */
+  ingress: { socketPath: string; proxyToken: string };
+  /** X-Forwarded-Proto the child reports to the Gateway. */
+  forwardedProto: "http" | "https";
+};
+
+/** The admitted peer keys (`iroh:<hex>`). Replaces the previous set; nothing is admitted before the first one. */
+export type TunnelMembershipMessage = { type: "membership"; seq: number; admitted: string[] };
+
+/** Health probe; the child answers with `pong`. */
+export type TunnelPingMessage = { type: "ping"; id: number };
+
+/** Gateway -> child. */
+export type GatewayToTunnelMessage =
+  | TunnelStartMessage
+  | TunnelMembershipMessage
+  | TunnelPingMessage;
+
+/** The endpoint is bound; the descriptor data the Gateway may publish. */
+export type TunnelReadyMessage = {
+  type: "ready";
+  /** K_srv, `iroh:<64 hex>`. */
+  endpointKey: string;
+  relayUrl: string;
+  keyCreated: boolean;
+};
+
+/** Answer to `ping`, with the child's resident set size. */
+export type TunnelPongMessage = { type: "pong"; id: number; rssBytes: number };
+
+/** Relay attachment and live connection counts. */
+export type TunnelStateMessage = { type: "state"; relayOnline: boolean; connections: number };
+
+/** Child -> Gateway. */
+export type TunnelToGatewayMessage = TunnelReadyMessage | TunnelPongMessage | TunnelStateMessage;
+
+/** Narrows an untrusted IPC payload to a child message. */
+export function parseTunnelToGatewayMessage(value: unknown): TunnelToGatewayMessage | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const message = value as Record<string, unknown>;
+  switch (message.type) {
+    case "ready":
+      return typeof message.endpointKey === "string" && typeof message.relayUrl === "string"
+        ? {
+            type: "ready",
+            endpointKey: message.endpointKey,
+            relayUrl: message.relayUrl,
+            keyCreated: message.keyCreated === true,
+          }
+        : undefined;
+    case "pong":
+      return typeof message.id === "number" && typeof message.rssBytes === "number"
+        ? { type: "pong", id: message.id, rssBytes: message.rssBytes }
+        : undefined;
+    case "state":
+      return typeof message.relayOnline === "boolean" && typeof message.connections === "number"
+        ? { type: "state", relayOnline: message.relayOnline, connections: message.connections }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
