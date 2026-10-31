@@ -367,7 +367,6 @@ it.each([
   { target: "unloaded explicit", loaded: false, readOnly: false },
   { target: "loaded automatic in a read-only archive", loaded: true, readOnly: true },
 ])("clears search and navigates to a $target reply target", async ({ loaded, readOnly }) => {
-  vi.useFakeTimers();
   const transcript = createTestTranscript();
   const searchContainer = document.body.appendChild(document.createElement("div"));
   const threadContainer = document.body.appendChild(document.createElement("div"));
@@ -414,6 +413,7 @@ it.each([
   const input = await waitForSolid(
     () => requireElement(searchContainer, "input") as HTMLInputElement,
   );
+  vi.useFakeTimers();
   input.value = "Follow up";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   await vi.advanceTimersByTimeAsync(0);
