@@ -102,6 +102,7 @@ jobs:
 
       - name: Capture iPhone, iPad, and Watch screenshots
         env:
+          OPENCLAW_WATCH_BOOT_TRACE: "1"
           OPENCLAW_SNAPSHOT_DIAGNOSTICS: "1"
           OPENCLAW_IOS_RESOURCE_DIAGNOSTICS: ${{ (inputs.resource_diagnostics || inputs.startup_probe) && '1' || '0' }}
           OPENCLAW_SNAPSHOT_STARTUP_PROBE: ${{ inputs.startup_probe && '1' || '0' }}
@@ -127,6 +128,7 @@ jobs:
             apps/ios/fastlane/screenshots/en-US/*.png
             apps/ios/build/SnapshotTestResults/capture-attempts.json
             apps/ios/build/screenshot-diagnostics.json
+            apps/ios/build/watch-boot-trace.json
             ${{ runner.temp }}/ios-resource-timeline.jsonl
             ${{ runner.temp }}/ios-spotlight-probe.json
           if-no-files-found: error
