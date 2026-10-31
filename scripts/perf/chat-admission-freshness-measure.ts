@@ -259,6 +259,7 @@ try {
           withQualifiedGatewaySessionEntry({
             ...readOptions,
             snapshotFields: candidate ? [] : undefined,
+            borrowResidentEntry: candidate ? true : undefined,
             includeLifecycle: true,
             includeMembership: true,
             consume: (current, members, assertCurrent) => {

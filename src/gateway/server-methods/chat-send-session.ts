@@ -504,6 +504,7 @@ export function withCurrentChatSendSession<T>(params: {
     target: session.sessionTarget,
     logicalStorePath: session.storePath,
     snapshotFields: [],
+    borrowResidentEntry: true,
     includeMembership: params.includeMembership,
     includeLifecycle: true,
     transcript:

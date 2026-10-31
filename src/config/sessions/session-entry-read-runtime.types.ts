@@ -27,6 +27,8 @@ export type SessionEntryWorkerRead = SessionStoreWorkerReadScope &
   SessionExactEntriesWorkerSelection & {
     lifecycleSessionKey?: string;
     snapshotFields?: readonly SessionEntrySnapshotField[];
+    /** Authority-only consumers may keep unrequested snapshots on a frozen resident entry. */
+    borrowResidentEntry?: true;
     projection?: "full" | "sharing" | "list" | "exact" | "worktree";
     includeMembers?: boolean;
     includeParticipantRecords?: boolean;

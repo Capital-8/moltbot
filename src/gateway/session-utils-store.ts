@@ -245,6 +245,7 @@ export async function withQualifiedGatewaySessionEntry<T>(params: {
   logicalStorePath: string;
   includeMembership: boolean;
   snapshotFields?: readonly SessionEntrySnapshotField[];
+  borrowResidentEntry?: true;
   transcript?: import("../config/sessions/session-entry-read.types.js").SessionExactEntriesWorkerRequest["transcript"];
   includeLifecycle?: boolean;
   consume: Parameters<typeof withGatewaySessionEntry<T>>[2];
@@ -254,6 +255,7 @@ export async function withQualifiedGatewaySessionEntry<T>(params: {
     ...params,
     readOptions: {
       snapshotFields: params.snapshotFields,
+      borrowResidentEntry: params.borrowResidentEntry,
       transcript: params.transcript,
       lifecycleSessionKey: params.includeLifecycle ? params.target.storeKey : undefined,
     },

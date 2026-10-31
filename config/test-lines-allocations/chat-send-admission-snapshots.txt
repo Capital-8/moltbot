@@ -1,2 +1,2 @@
-6
-# Admission avoids snapshot transport; resident authority reads borrow immutable entries without copying.
+12
+# Admission avoids snapshot transport; only explicit borrowing bypasses resident snapshot projection.

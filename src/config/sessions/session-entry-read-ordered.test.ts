@@ -286,7 +286,7 @@ test("refreshes cached sharing, lifecycle and runtime targets on replacement", a
   expect(absent.entries).toEqual([]);
 });
 
-test("orders patches before reads and borrows frozen snapshots", async ({ store }) => {
+test("orders patches before reads and borrows snapshots only on request", async ({ store }) => {
   const { scope, input, sessionKey, read: readExact, entry } = store;
   const skillsSnapshot = { prompt: "saved session instructions", skills: [] };
   store.replace({ sessionId: "same-session", label: "before", skillsSnapshot });
@@ -337,8 +337,14 @@ test("orders patches before reads and borrows frozen snapshots", async ({ store 
       includeMembers: true,
     });
     expect(metadata.members?.[sessionKey]).toEqual([]);
-    expect(metadata.entries[0]?.entry).toBe(resident);
-    expect(Reflect.set(metadata.entries[0]!.entry, "label", "caller edit")).toBe(false);
+    expect(metadata.entries[0]?.entry).not.toHaveProperty("skillsSnapshot");
+    const borrowed = await withSessionEntriesFromStoresInWorker(
+      [{ ...input, snapshotFields: [], borrowResidentEntry: true }],
+      ([selected]) => selected?.result.entries[0]?.entry,
+      { ordered: true },
+    );
+    expect(borrowed).toBe(resident);
+    expect(Reflect.set(borrowed!, "label", "caller edit")).toBe(false);
     expect(await entry()).toMatchObject({
       label: "after",
       skillsSnapshot,

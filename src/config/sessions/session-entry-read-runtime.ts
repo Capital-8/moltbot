@@ -495,12 +495,16 @@ export async function withSessionEntriesFromStoreInWorker<T>(
     return consume({ result, database, assertCurrent: () => memory.assertCurrent() });
   }
   const request = captureSessionEntryWorkerRequest(input);
+  const borrowResidentEntry = input.borrowResidentEntry;
   return withSessionStoreReaderInWorker(
     input,
     async ({ reader, database, continuation, assertCurrent }) => {
       assertCurrent();
-      const result = await readSessionEntriesWithRetainedFacts(database, request, () =>
-        reader.readExactEntries({ ...request, env: database.env, continuation }, signal),
+      const result = await readSessionEntriesWithRetainedFacts(
+        database,
+        request,
+        () => reader.readExactEntries({ ...request, env: database.env, continuation }, signal),
+        borrowResidentEntry,
       );
       signal?.throwIfAborted();
       assertCurrent();

@@ -113,7 +113,7 @@ export async function withQualifiedGatewaySessionStoreTarget<T>(params: {
   preparedSource?: SessionEntryWorkerRead["preparedSource"];
   readOptions?: Pick<
     SessionEntryWorkerRead,
-    "projection" | "snapshotFields" | "lifecycleSessionKey" | "transcript"
+    "projection" | "snapshotFields" | "borrowResidentEntry" | "lifecycleSessionKey" | "transcript"
   >;
   consume: (
     target: GatewaySessionStoreTargetWithStore,

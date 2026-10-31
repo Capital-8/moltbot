@@ -102,12 +102,7 @@ export async function readSessionEntryInWorker(
                   : scope.projection,
           };
           const before = readSqliteDatabaseWriteTokenForPath(options.path);
-          const cached = readRetainedSessionEntryFacts(
-            options,
-            request,
-            nativeOwner,
-            request.snapshotFields,
-          );
+          const cached = readRetainedSessionEntryFacts(options, request, nativeOwner);
           const selected =
             cached ??
             (await execution.runExisting(source, (worker) =>
