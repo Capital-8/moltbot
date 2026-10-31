@@ -294,11 +294,6 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/components/emoji-search-panel.tsx":
     case "ui/src/styles/emoji-search-panel.css":
       return "emoji-search-panel";
-    case "ui/src/pages/chat/components/chat-composer-menu.tsx":
-    case "ui/src/pages/chat/components/chat-composer-skill-menu.tsx":
-    case "ui/src/pages/chat/components/chat-composer-slash-menu.tsx":
-      // Dismissal shells share route boot; optional option renderers remain deferred.
-      return "control-ui-boot-shared";
     case "ui/src/pages/chat/components/chat-composer-emoji-options.tsx":
     case "ui/src/pages/chat/components/chat-composer-emoji-engine.ts":
     case "ui/src/pages/chat/components/chat-composer-mention-menu-engine.ts":
@@ -501,6 +496,10 @@ export function createControlUiCodeSplitting(options: { includeBootGroups?: bool
                 modules.add("ui/src/plugins/control-ui-actions.ts");
                 // Both routes read deferred resources; share their existing boot partition.
                 modules.add("node_modules/@solidjs/signals/dist/prod/deferred.js");
+                // Join the measured group; a same-named stable group emits a second request.
+                modules.add("ui/src/pages/chat/components/chat-composer-menu.tsx");
+                modules.add("ui/src/pages/chat/components/chat-composer-skill-menu.tsx");
+                modules.add("ui/src/pages/chat/components/chat-composer-slash-menu.tsx");
                 // Callback-backed leaf owners already share the boot projection runtime.
                 modules.add("ui/src/lib/reactive/callback-owner.ts");
                 // Chat and creation share the same identity-scoped preference owner.
