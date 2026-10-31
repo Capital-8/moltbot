@@ -5,6 +5,7 @@ import { hasErrnoCode } from "../infra/errno.js";
 import { throwSettledAggregate } from "../infra/error-graph-internal.js";
 import { isPathInside, relativePluginPathInsideRootSync } from "./path-safety.js";
 import { getPluginCache } from "./plugin-cache.js";
+import { getPluginGenerationMetrics } from "./plugin-generation-metrics.js";
 import {
   markPluginSourceAcquisitionError,
   markPluginSourcePreparationOperation,
@@ -253,6 +254,8 @@ function copyRecoverySource({
     const relocate = (filename: string) =>
       path.join(directory, path.relative(boundaryRoot, filename));
     const hardlinkedTargets = new Map<string, PluginNativeArtifactFact>();
+    const metrics = getPluginGenerationMetrics();
+    let copiedBytes = 0;
     // Keep dependency links within the new capture without reopening installed packages.
     fs.cpSync(boundaryRoot, recovery.directory, {
       recursive: true,
@@ -260,7 +263,11 @@ function copyRecoverySource({
       filter: (from, to) => {
         const fact = native?.references.get(from);
         if (!fact) {
-          if (fs.lstatSync(from).isSymbolicLink()) {
+          const entry = fs.lstatSync(from);
+          if (metrics && entry.isFile()) {
+            copiedBytes += entry.size;
+          }
+          if (entry.isSymbolicLink()) {
             const target = fs.readlinkSync(from);
             const relative = path.isAbsolute(target)
               ? relativePluginPathInsideRootSync(boundaryRoot, target)
@@ -287,6 +294,9 @@ function copyRecoverySource({
         return false;
       },
     });
+    if (metrics) {
+      metrics.copiedBytes += copiedBytes;
+    }
     const assertReference = createPluginNativeReferenceValidator(recovery.directory, rootDir);
     for (const [target, fact] of hardlinkedTargets) {
       assertReference(target, fact, native!.namespaces.get(fact.namespace)!);

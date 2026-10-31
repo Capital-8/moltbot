@@ -199,6 +199,7 @@ it.for(["readdirSync", "lstatSync", "realpathSync", "escape", "cycle", "nonregul
           boundary: original,
           destination: directory,
           directory,
+          packageKind: "package",
           capturedPaths: new Map(),
           capturedDirectories: new Set(),
           originalSources: new Map(),
