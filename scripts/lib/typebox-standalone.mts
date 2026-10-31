@@ -83,6 +83,16 @@ function onlyStringUniqueItems(value: unknown): boolean {
   return Object.values(value).every(onlyStringUniqueItems);
 }
 
+// TypeBox's emitted and bundled counting reducers return `++result` from the callback.
+// Writing the callback parameter is a dead store; the equivalent sum keeps each count.
+function countWithoutReducerParameterWrites(runtime: string): string {
+  const rewritten = runtime.replace(/\?\+\+result:result,0\)/g, "?result+1:result,0)");
+  if (rewritten.includes("++result")) {
+    throw new Error("Unsupported TypeBox counting reducer shape");
+  }
+  return rewritten;
+}
+
 function removeStringEnumHashing(source: string): string {
   const ranges: Array<{ start: number; end: number }> = [];
   visitSyntax(source, (node) => {
@@ -405,10 +415,11 @@ export async function compileStandaloneValidators(
     minifyWhitespace: true,
     legalComments: "none",
   });
-  const runtime = result.outputFiles[0]?.text;
-  if (runtime === undefined) {
+  const output = result.outputFiles[0]?.text;
+  if (output === undefined) {
     throw new Error("Standalone validator build emitted no output");
   }
+  const runtime = countWithoutReducerParameterWrites(output);
   assertStandaloneValidatorSource(runtime);
   return runtime;
 }
