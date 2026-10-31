@@ -223,16 +223,39 @@ export function createOpenClawIdService(params: {
       const tokens = await (await getAuthority()).unbindPeers(removed);
       await effects?.revokeDeviceTokens(tokens);
     }
-    for (const event of events) {
-      if (event.type === "notify_owners") {
-        params.log.info(`openclaw-id: owner notice ${event.event}`);
-      }
-    }
+    void notifyOwners(events).catch((error: unknown) =>
+      params.log.warn(`openclaw-id: owner notices failed: ${String(error)}`),
+    );
     if (events.some((event) => event.type === "publish_snapshot")) {
       void publish().catch((error: unknown) =>
         params.log.warn(`openclaw-id: publication failed: ${String(error)}`),
       );
     }
+  };
+
+  // Mails owner notices through Discovery once the claw is registered there.
+  const notifyOwners = async (events: AuthorityEvent[]) => {
+    const { sendOwnerNotices } = await import("./owner-notices.js");
+    await sendOwnerNotices({
+      events,
+      log: params.log,
+      target: async () => {
+        const config = params.getConfig();
+        const record = (await getAuthority()).current();
+        if (!config?.discoveryUrl || !record?.discovery.owner_account_id) {
+          return undefined;
+        }
+        const [{ createDiscoveryClient }, { loadGatewaySigner }] = await Promise.all([
+          import("./discovery-client.js"),
+          import("./gateway-key.js"),
+        ]);
+        const { signer } = await loadGatewaySigner(params.getStateDir());
+        return {
+          clawId: record.claw_id,
+          client: createDiscoveryClient({ baseUrl: config.discoveryUrl, signer }),
+        };
+      },
+    });
   };
 
   // Publishes the device-token binding owner while remote access runs.

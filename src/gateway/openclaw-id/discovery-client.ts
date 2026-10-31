@@ -6,8 +6,10 @@ import {
   signDiscoveryRequest,
   type ClawDescriptor,
   type DiscoveryEndpoint,
+  type MailboxPayload,
   type ReceiveMailResponse,
   type RegisterClawResponse,
+  type SendMailResponse,
   type SignedStatement,
   type StatementSigner,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
@@ -90,6 +92,9 @@ export function createDiscoveryClient(params: {
       ),
     ackMail: (clawId: string, cursor: string) =>
       call<void>("ackMail", { claw_id: clawId }, { cursor }),
+    /** Mails a notice to every owner device (K_gw-signed, no bearer; notices are never authority). */
+    sendOwnerNotice: (clawId: string, payload: Extract<MailboxPayload, { kind: "notice" }>) =>
+      call<SendMailResponse>("sendMail", { claw_id: clawId }, { to: "owners", payload }),
   };
 }
 
