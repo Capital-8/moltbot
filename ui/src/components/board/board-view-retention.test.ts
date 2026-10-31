@@ -46,6 +46,19 @@ describe("openclaw-board-view retention", () => {
     expect(prepared.hidden).toBe(false);
     expect(prepared.active).toBe(true);
     expect(prepared.isConnected).toBe(true);
+    await vi.waitFor(
+      () => expect(view.querySelectorAll("openclaw-board-widget-cell")).toHaveLength(3),
+      { timeout: 2000 },
+    );
+    const later = [...view.querySelectorAll("openclaw-board-widget-cell")].find(
+      (cell) => cell.widget?.name === "later-report",
+    )!;
+    view.activeTabId = "main";
+    await settleCells(view);
+    expect(later.isConnected).toBe(true);
+    expect(later.hidden).toBe(true);
+    view.activeTabId = "ops";
+    await settleCells(view);
     // A visited card moved to an unvisited tab still has its original lifetime.
     view.snapshot = {
       ...view.snapshot!,

@@ -893,6 +893,27 @@ export const dataBoardScenarios: readonly InteractionScenario[] = [
     },
   },
   {
+    id: "data-board-tab-return-idle",
+    explicitOnly: true,
+    dataPage: "board",
+    route: controlUiSessionPath(sessionKey),
+    expected: "Returning after reading the second tab preserves bounded speculative cards.",
+    fixtureOverrides: () => createDataBoardFixture(),
+    rowSelector: "openclaw-board-widget-cell",
+    prepare: async (page) => {
+      await prepareBoard(page);
+      await page.locator(`${boardHost} [data-board-tab-id="data-1"]`).click();
+      await waitForBoard(page, 1);
+      await page.waitForTimeout(3000);
+    },
+    run: async (page) => {
+      const before = await boardReportCounts(page);
+      await page.locator(`${boardHost} [data-board-tab-id="data-0"]`).click();
+      await waitForBoard(page);
+      return { preparedCells: before.widgetCells, ...(await boardReportCounts(page)) };
+    },
+  },
+  {
     id: "data-board-preparing-input",
     explicitOnly: true,
     dataPage: "board",
@@ -922,20 +943,29 @@ export const dataBoardScenarios: readonly InteractionScenario[] = [
       if (afterTyping.widgetCells !== before.widgetCells) {
         throw new Error("Board preparation continued during typing");
       }
-      const trigger = page.locator(
-        `${boardHost} [data-widget-name="data-widget-250"] .board-widget__menu-trigger`,
-      );
+      const evidence = {
+        ...afterTyping,
+        nativeInputs: observed.nativeInputs,
+        inputFrameP95Ms: observed.inputFrameP95Ms ?? 0,
+        inputFrameMaxMs: observed.inputFrameMaxMs ?? 0,
+        draftPreserved: true,
+      };
+      // Mobile composition replaces Board. Its menu/focus path is covered by
+      // data-board-report-focus; this row measures typing/navigation cancellation.
+      if (page.viewportSize()!.width < 768) {
+        return evidence;
+      }
+      const card = page.locator(`${boardHost} [data-widget-name="data-widget-250"]`);
+      // Fine-pointer chrome is deliberately hidden while typing in the composer.
+      await card.focus();
+      const trigger = card.locator(".board-widget__menu-trigger");
       await trigger.click();
       await page.locator(".board-widget__menu-panel:visible").waitFor();
       await page.keyboard.press("Escape");
       const scroll = await scrollSurface(page, boardHost);
       return {
         ...scroll,
-        ...afterTyping,
-        nativeInputs: observed.nativeInputs,
-        inputFrameP95Ms: observed.inputFrameP95Ms ?? 0,
-        inputFrameMaxMs: observed.inputFrameMaxMs ?? 0,
-        draftPreserved: true,
+        ...evidence,
       };
     },
   },

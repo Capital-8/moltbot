@@ -36,7 +36,7 @@ type CellEntry = {
   speculative?: boolean;
   retiring?: boolean;
   element?: SolidBridgeElement<BoardWidgetCellProps, BoardWidgetCellMethods>;
-  options: BoardWidgetCellProps;
+  options: BoardWidgetCellProps & { hidden?: boolean; inert?: boolean };
 };
 
 function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
@@ -73,12 +73,19 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
     // existing lifetime; external HTML/MCP documents still require navigation.
     const activeIndex = tabs.findIndex((tab) => tab.tabId === activeTabId);
     const nextTab = tabs[activeIndex + 1] ?? tabs[activeIndex - 1];
-    const speculativeNames = new Set(
+    const retainedTabId = [...entries.values()].find(
+      (entry) => entry.speculative && entries.get(cellKey(entry.options.widget!.name)) === entry,
+    )?.options.widget?.tabId;
+    // Returning to visited content need not destroy the one prepared tab.
+    const prepareTabId =
       props.active && nextTab && !owner.visitedTabs.has(nextTab.tabId)
-        ? (snapshot ? orderedWidgets(snapshot, nextTab.tabId) : [])
+        ? nextTab.tabId
+        : retainedTabId;
+    const speculativeNames = new Set(
+      prepareTabId
+        ? (snapshot ? orderedWidgets(snapshot, prepareTabId) : [])
             .filter(
               (widget) =>
-                widget.tabId === nextTab.tabId &&
                 widget.contentKind === "plugin" &&
                 widget.pluginKind === "session:report" &&
                 !widget.frameUrl &&
@@ -170,10 +177,21 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
           canMutate: props.canMutate,
           canGrant: props.canGrant,
           loadingCovered: loading,
+          hidden: !visible,
+          inert: !visible,
         },
       };
       if (entry.speculative && !previous) {
         pending.push(entry);
+      } else if (
+        previous &&
+        previous.speculative === entry.speculative &&
+        Object.keys(entry.options).every(
+          (key) => Reflect.get(previous.options, key) === Reflect.get(entry.options, key),
+        )
+      ) {
+        // Unchanged inactive cards must not wake their Solid/bridge bindings.
+        previous.present = true;
       } else {
         entries.set(key, entry);
       }
@@ -189,7 +207,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
         entries.set(key, {
           ...entry,
           retiring: true,
-          options: { ...entry.options, active: false },
+          options: { ...entry.options, active: false, hidden: true, inert: true },
         });
         const element = entry.element;
         const finish = () => {
@@ -313,19 +331,7 @@ function BoardViewContent(props: BoardViewProps, host: BoardViewElement) {
                     current.element = element;
                   }
                 };
-                // One reactive object avoids retaining a getter for every field on every card.
-                return (
-                  <BoardWidgetCell
-                    {...{
-                      ...entry().options,
-                      ref: cellRef,
-                      hidden:
-                        !entry().present || !view().activeNames.has(entry().options.widget!.name),
-                      inert:
-                        !entry().present || !view().activeNames.has(entry().options.widget!.name),
-                    }}
-                  />
-                );
+                return <BoardWidgetCell {...{ ...entry().options, ref: cellRef }} />;
               }}
             </For>
             <Show when={view().state.gesture.mode === "move"}>
