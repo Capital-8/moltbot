@@ -21,6 +21,7 @@ facts = { "startedAt" => Time.now.utc.iso8601, "observations" => [] }
 udid = nil
 trace = nil
 begin
+  facts["runtimeHelp"], = Open3.capture3("xcrun", "simctl", "runtime", "help")
   facts["imagesBefore"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
   WatchRuntimeAdmission.wait!
   facts["admittedAt"] = Time.now.utc.iso8601
