@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 // Production-renderer warm interactions. Trace once for attribution; compare untraced AB pairs.
 // --thread-cpu-time excludes renderer descheduling from duration metrics.
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,9 +60,49 @@ import {
 } from "./lib/control-ui-resource-counts.ts";
 import { captureRetention, installRetentionTimers } from "./lib/control-ui-retention.ts";
 import {
+  qualifyRouteNetworkClock,
+  routeNetworkPhase,
+  type RouteNetworkObservation,
+} from "./lib/control-ui-route-network.ts";
+import {
   createWorkboardResourceFixture,
   prepareWorkboardResourceSource,
 } from "./lib/control-ui-workboard-resource-fixture.ts";
+
+// Runs immediately after the fixture installs its WebSocket, before any app code.
+function observeFirstOpenRequests() {
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    if (typeof data === "string") {
+      const frame = JSON.parse(data);
+      if (frame.type === "req" && typeof frame.method === "string") {
+        performance.mark(`route-control:rpc:${frame.method}`);
+      }
+    }
+    return send.call(this, data);
+  };
+}
+
+async function builtModuleRequest(directory: string, source: string): Promise<RegExp> {
+  const assets = path.join(directory, "assets");
+  const matches: string[] = [];
+  for (const name of await readdir(assets)) {
+    if (!name.endsWith(".js.map")) {
+      continue;
+    }
+    const map: { sources: string[] } = JSON.parse(await readFile(path.join(assets, name), "utf8"));
+    if (map.sources.some((entry) => entry.replaceAll("\\", "/").endsWith(`/${source}`))) {
+      matches.push(name.slice(0, -4));
+    }
+  }
+  if (matches.length !== 1) {
+    throw new Error(`Expected one emitted chunk for ${source}, found ${matches.length}`);
+  }
+  return new RegExp(
+    `/assets/${matches[0]!.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:\\?.*)?$`,
+    "u",
+  );
+}
 
 const { values } = parseArgs({
   options: {
@@ -337,6 +377,7 @@ type Result = {
   domAfter?: { nodes: number; menuItems: number; namedAnchors: number };
   rowIdentity?: { initial: number; created: number; retained: number; final: number };
   navigationPreloads?: InteractionNavigationPreloads;
+  firstOpenNetworkArtifact?: string;
   resourcesBefore?: ControlUiResourceCounts;
   resourcesAfter?: ControlUiResourceCounts;
   processWakeups?: ProcessWakeups;
@@ -810,9 +851,42 @@ try {
           let minimizedWindow: number | undefined;
           const events: unknown[] = [];
           const styleSheets = new Map<string, InteractionStyleSheet>();
+          const firstOpenRequests: RouteNetworkObservation[] = [];
+          const gateEntered = Promise.withResolvers<void>();
+          const gateReleased = Promise.withResolvers<void>();
           try {
             cdp = await context.newCDPSession(page);
             await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
+            if (scenario.firstOpenPhase) {
+              await cdp.send("Network.enable");
+              await cdp.send("Performance.enable", {
+                timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
+              });
+              cdp.on("Network.requestWillBeSent", (event) => {
+                firstOpenRequests.push({
+                  requestId: event.requestId,
+                  url: event.request.url,
+                  timestampSeconds: event.timestamp,
+                });
+              });
+              cdp.on("Network.loadingFinished", (event) => {
+                const request = firstOpenRequests.findLast(
+                  (entry) => entry.requestId === event.requestId,
+                );
+                if (request) {
+                  request.finishedTimestampSeconds = event.timestamp;
+                  request.wireBytes = event.encodedDataLength;
+                }
+              });
+              cdp.on("Network.loadingFailed", (event) => {
+                const request = firstOpenRequests.findLast(
+                  (entry) => entry.requestId === event.requestId,
+                );
+                if (request) {
+                  request.failed = event.errorText;
+                }
+              });
+            }
             if (values["function-counts"]) {
               // Starting after warmup can miss calls in already optimized functions.
               await cdp.send("Profiler.enable");
@@ -870,6 +944,9 @@ try {
               page,
               { ...fixture, awaitInitialRoster: false },
               {
+                afterInitScript: scenario.firstOpenPhase
+                  ? `;(${observeFirstOpenRequests.toString()})();`
+                  : undefined,
                 requestHandlers: {
                   ...defaultRequestHandlers,
                   ...scenario.createRequestHandlers?.(defaultRequestHandlers),
@@ -879,8 +956,30 @@ try {
             if (values["retained-heap"]) {
               await installRetentionTimers(page);
             }
+            if (scenario.moduleGate) {
+              const gate = scenario.moduleGate;
+              await page.route(
+                await builtModuleRequest(slot.directory, gate.source),
+                async (route) => {
+                  gateEntered.resolve();
+                  await gateReleased.promise;
+                  if (gate.outcome === "reject") {
+                    const response = await route.fetch();
+                    await route.fulfill({
+                      response,
+                      body: `throw new Error("Synthetic composer import failed");\n${await response.text()}`,
+                    });
+                  } else {
+                    await route.continue();
+                  }
+                },
+              );
+            }
             await scenario.setup?.(page);
-            await page.goto(new URL(scenario.route, slot.server.baseUrl).href);
+            await page.goto(
+              new URL(scenario.route, slot.server.baseUrl).href,
+              scenario.firstOpenPhase ? { waitUntil: "commit" } : undefined,
+            );
             await waitForControlUiInitialRoster(page, 15_000 * cpuThrottle);
             await scenario.prepare(page, gateway);
             if (
@@ -915,13 +1014,15 @@ try {
                 await settleSidebarBackgroundWork(page);
               }
             }
-            if (scenario.route !== "/instance-resource-fixture.html") {
-              result.navigationPreloads = await settleInteractionNavigationPreloads(page);
+            if (scenario.firstOpenPhase !== "ready") {
+              if (scenario.route !== "/instance-resource-fixture.html") {
+                result.navigationPreloads = await settleInteractionNavigationPreloads(page);
+              }
+              // Slow CPUs can still be loading boot modules after the first ready frame.
+              await page.waitForLoadState("networkidle");
+              await page.evaluate(() => document.fonts.ready.then(() => undefined));
+              await settle(page);
             }
-            // Slow CPUs can still be loading boot modules after the first ready frame.
-            await page.waitForLoadState("networkidle");
-            await page.evaluate(() => document.fonts.ready.then(() => undefined));
-            await settle(page);
             const activePet = await page.evaluate(
               () => document.querySelector("openclaw-lobster-pet .lobster-pet__body") !== null,
             );
@@ -929,9 +1030,11 @@ try {
               throw new Error("Warm interaction fixture must disable unrelated pet visits");
             }
             await page.locator(`html[data-theme-mode="${theme}"]`).waitFor({ state: "attached" });
-            await cdp.send("Performance.enable", {
-              timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
-            });
+            if (!scenario.firstOpenPhase) {
+              await cdp.send("Performance.enable", {
+                timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
+              });
+            }
             if (values["retained-heap"]) {
               const artifact = `${artifactPrefix}.before.heapsnapshot`;
               // Scenarios can retain request-count cursors from preparation.
@@ -1118,7 +1221,31 @@ try {
               }, scenario.id);
             }
             const start = performance.now();
-            result.scenarioEvidence = (await scenario.run(page, gateway)) ?? undefined;
+            const [scenarioEvidence] = await Promise.all([
+              scenario.run(page, gateway),
+              (async () => {
+                if (!scenario.moduleGate) {
+                  return;
+                }
+                let timeout: ReturnType<typeof setTimeout> | undefined;
+                try {
+                  await Promise.race([
+                    gateEntered.promise,
+                    new Promise<never>((_, reject) => {
+                      timeout = setTimeout(
+                        () => reject(new Error("The held module was never requested")),
+                        15_000 * cpuThrottle,
+                      );
+                    }),
+                  ]);
+                  await scenario.verifyWhileLoading?.(page, gateway);
+                } finally {
+                  clearTimeout(timeout);
+                  gateReleased.resolve();
+                }
+              })(),
+            ]);
+            result.scenarioEvidence = scenarioEvidence ?? undefined;
             if (scenario.visibility !== "hidden") {
               await settle(page);
             }
@@ -1187,6 +1314,103 @@ try {
             }
             const requestsAfter = (await gateway.getRequests()).slice(requestsBefore);
             result.domAfter = await countDom();
+            if (scenario.firstOpenPhase) {
+              const evidence = result.scenarioEvidence!;
+              const readyAt = evidence.firstReadyAtMs;
+              const activatedAt = evidence.nativeActivationAtMs ?? evidence.nativeClickAtMs;
+              const contentAt = evidence.rafObservedContentAtMs;
+              const focusAt = evidence.rafObservedFocusAtMs;
+              if (
+                typeof readyAt !== "number" ||
+                typeof activatedAt !== "number" ||
+                typeof contentAt !== "number" ||
+                typeof focusAt !== "number"
+              ) {
+                throw new Error("Cold first-open did not retain its phase boundaries");
+              }
+              // Read resources and write artifacts after the existing action metric cutoff.
+              const observed = await page.evaluate(() => ({
+                endedAt: performance.getEntriesByName("interaction:end")[0]!.startTime,
+                gatewayRequests: performance
+                  .getEntriesByType("mark")
+                  .filter((entry) => entry.name.startsWith("route-control:rpc:"))
+                  .map((entry) => ({
+                    method: entry.name.slice("route-control:rpc:".length),
+                    atMs: entry.startTime,
+                  })),
+                resources: performance.getEntriesByType("resource").map((entry) => {
+                  const resource = entry as PerformanceResourceTiming;
+                  return {
+                    url: resource.name,
+                    initiatorType: resource.initiatorType,
+                    startTime: resource.startTime,
+                    responseEnd: resource.responseEnd,
+                    rawBytes: resource.decodedBodySize,
+                    encodedBytes: resource.encodedBodySize,
+                    transferBytes: resource.transferSize,
+                  };
+                }),
+              }));
+              const { endedAt, resources } = observed;
+              const requests = firstOpenRequests;
+              const artifact = `${artifactPrefix}.first-open-network.json`;
+              await writeFile(
+                path.join(artifactDir, artifact),
+                JSON.stringify(
+                  {
+                    phase: scenario.firstOpenPhase,
+                    firstReadyAtMs: readyAt,
+                    nativeActivationAtMs: activatedAt,
+                    ...(typeof evidence.nativeClickAtMs === "number"
+                      ? { nativeClickAtMs: evidence.nativeClickAtMs }
+                      : {}),
+                    actionEndAtMs: endedAt,
+                    requests,
+                    resources,
+                    gatewayRequests: observed.gatewayRequests,
+                    clock: qualifyRouteNetworkClock(requests, before.NavigationStart!, resources),
+                    ...(typeof evidence.nativeClickAtMs === "number"
+                      ? {
+                          beforeClick: routeNetworkPhase(
+                            requests,
+                            before.NavigationStart!,
+                            0,
+                            activatedAt,
+                          ),
+                        }
+                      : {}),
+                    boot: routeNetworkPhase(requests, before.NavigationStart!, 0, readyAt),
+                    readyToActivation: routeNetworkPhase(
+                      requests,
+                      before.NavigationStart!,
+                      readyAt,
+                      activatedAt,
+                    ),
+                    activationToUsable: routeNetworkPhase(
+                      requests,
+                      before.NavigationStart!,
+                      activatedAt,
+                      Math.max(contentAt, focusAt),
+                    ),
+                    beforeActivation: routeNetworkPhase(
+                      requests,
+                      before.NavigationStart!,
+                      0,
+                      activatedAt,
+                    ),
+                    action: routeNetworkPhase(
+                      requests,
+                      before.NavigationStart!,
+                      activatedAt,
+                      endedAt,
+                    ),
+                  },
+                  null,
+                  2,
+                ),
+              );
+              result.firstOpenNetworkArtifact = artifact;
+            }
             if (scenario.projectionFamily) {
               if (minimizedWindow !== undefined) {
                 await cdp.send("Browser.setWindowBounds", {
@@ -1269,6 +1493,10 @@ try {
                 );
               }
             }
+            const verified = await scenario.verifyAfter?.(page, gateway);
+            if (verified) {
+              result.scenarioEvidence = { ...result.scenarioEvidence, ...verified };
+            }
             if (errors.length) {
               throw new Error(errors.join("\n"));
             }
@@ -1281,6 +1509,7 @@ try {
               result.error = String(error);
             }
           } finally {
+            gateReleased.resolve();
             const capture = async <T>(operation: () => Promise<T>): Promise<T | undefined> => {
               try {
                 return await operation();

@@ -1,6 +1,9 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { ElementHandle, Page } from "playwright";
+import type { CommandEntry } from "../../packages/gateway-protocol/src/schema/commands.js";
+import type { UsersMentionableResult } from "../../packages/gateway-protocol/src/schema/human-mentions.js";
 import { buildWidgetDocument } from "../../src/canvas/wrap.ts";
+import type { SessionSystemPromptReport } from "../../src/config/sessions/session-system-prompt-report.js";
 import type { ConfigSchemaResponse, CronJob, GatewaySessionRow } from "../../ui/src/api/types.ts";
 import { pathForAgentPanel, pathForRoute } from "../../ui/src/app-route-paths.ts";
 import { createSkill } from "../../ui/src/pages/skills/view.test-support.ts";
@@ -119,6 +122,11 @@ export type InteractionScenario = {
   id: string;
   route: string;
   expected: string;
+  /** Opt-in first-open cells; ordinary scenarios retain full warm preparation. */
+  firstOpenPhase?: "ready" | "idle";
+  /** Diagnostic only: hold one emitted module until the loading assertions finish. */
+  moduleGate?: { source: string; outcome: "release" | "reject" };
+  verifyWhileLoading?: (page: Page, gateway: MockGatewayControls) => Promise<void>;
   /** Deliberately perturbs execution; exclude its timing from performance comparisons. */
   diagnostic?: string;
   /** Run only when its ID is explicitly named in --steps. */
@@ -145,6 +153,8 @@ export type InteractionScenario = {
   setup?: (page: Page) => Promise<void>;
   prepare: (page: Page, gateway: MockGatewayControls) => Promise<void>;
   run: (page: Page, gateway: MockGatewayControls) => Promise<void | InteractionEvidence>;
+  /** Extra behavior proof after the action CPU/network cutoff; never part of timing. */
+  verifyAfter?: (page: Page, gateway: MockGatewayControls) => Promise<void | InteractionEvidence>;
 };
 
 export function createScenarioFixture(
@@ -1599,6 +1609,557 @@ async function prepareModelPicker(page: Page) {
   await trigger.click();
 }
 
+const routeControlFixtureOverrides: NonNullable<InteractionScenario["fixtureOverrides"]> = (
+  _sandbox,
+  base,
+) => ({
+  featureMethods: [...defaultControlUiFeatureMethods, "board.get"],
+  sessions: base.sessions.map((session) =>
+    session.key === sessionKeys[0]
+      ? {
+          ...session,
+          thinkingLevels: [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High" },
+          ],
+          thinkingDefault: "low",
+        }
+      : session,
+  ),
+  methodResponses: {
+    "board.get": {
+      sessionKey: sessionKeys[0],
+      revision: 1,
+      tabs: [{ tabId: "main", title: "Dashboard", position: 0, chatDock: "right" }],
+      widgets: [],
+    },
+  },
+});
+
+const firstInputCommands: CommandEntry[] = [
+  {
+    name: "viewport",
+    description: "Choose a synthetic viewport option.",
+    category: "tools",
+    acceptsArgs: true,
+    args: [
+      {
+        name: "size",
+        description: "Choose the synthetic viewport size.",
+        type: "string",
+        required: true,
+        choices: [
+          { value: "compact", label: "Compact" },
+          { value: "wide", label: "Wide" },
+        ],
+      },
+    ],
+    scope: "both",
+    source: "plugin",
+    textAliases: ["/viewport"],
+  },
+  {
+    name: "viewport-history",
+    description: "Show synthetic viewport history.",
+    acceptsArgs: false,
+    scope: "both",
+    source: "plugin",
+    textAliases: ["/viewport-history"],
+  },
+  {
+    name: "autoreview",
+    description: "Review the synthetic change.",
+    acceptsArgs: true,
+    scope: "both",
+    source: "skill",
+    skillDisplayName: "Auto Review",
+    skillModelVisible: true,
+  },
+];
+const firstInputPeople: UsersMentionableResult = {
+  users: [
+    {
+      profileId: "00000003-1111-4111-8111-000000000103",
+      displayName: "Casey Vale",
+      online: true,
+    },
+  ],
+  truncated: false,
+};
+const firstInputFixture: NonNullable<InteractionScenario["fixtureOverrides"]> = (
+  _sandbox,
+  base,
+) => ({
+  featureMethods: ["users.mentionable"],
+  methodResponses: {
+    "chat.startup": {
+      ...base.sessionTranscripts[sessionKeys[0]],
+      sessionId: base.sessions[0]!.sessionId,
+      thinkingLevel: null,
+      metadata: { commands: firstInputCommands, models: base.models },
+    },
+    "chat.metadata": { commands: firstInputCommands, models: base.models },
+    "commands.list": { commands: firstInputCommands },
+    "users.mentionable": firstInputPeople,
+  },
+});
+const firstContextReport: SessionSystemPromptReport = {
+  source: "run",
+  generatedAt: 1,
+  sessionId: "interaction-session-0",
+  sessionKey: sessionKeys[0],
+  workspaceDir: "/synthetic/workspace",
+  systemPrompt: { chars: 40000, projectContextChars: 16000, nonProjectContextChars: 24000 },
+  injectedWorkspaceFiles: [
+    {
+      name: "AGENTS.md",
+      path: "/synthetic/workspace/AGENTS.md",
+      origin: { kind: "agent-workspace", rootPath: "/synthetic/workspace" },
+      missing: false,
+      rawChars: 16000,
+      injectedChars: 16000,
+      truncated: false,
+    },
+  ],
+  skills: { promptChars: 8000, entries: [{ name: "autoreview", blockChars: 8000 }] },
+  tools: {
+    listChars: 0,
+    schemaChars: 12000,
+    entries: [{ name: "exec", source: "openclaw", summaryChars: 0, schemaChars: 12000 }],
+  },
+};
+
+type ColdRouteControl = {
+  id: string;
+  newSession?: boolean;
+  phase?: "ready" | "idle";
+  assertNoPaintedFallback?: boolean;
+  trigger: string;
+  content: string;
+  keepsTriggerFocus?: boolean;
+  revealOnFocus?: boolean;
+  dashboard?: boolean;
+  syntheticMicrophone?: boolean;
+  input?: string;
+  seed?: string;
+  requiredRequest?: string;
+  moduleGate?: InteractionScenario["moduleGate"];
+  verifyWhileLoading?: InteractionScenario["verifyWhileLoading"];
+  surface?: string;
+  contentCount?: number;
+  contentText?: string;
+  fixtureOverrides?: InteractionScenario["fixtureOverrides"];
+  verifyReady?: (page: Page, gateway: MockGatewayControls) => Promise<void>;
+  verifyReopened?: (page: Page, gateway: MockGatewayControls) => Promise<void>;
+};
+
+function coldRouteControlScenario(control: ColdRouteControl): InteractionScenario {
+  const scope = control.newSession ? ".new-session-page__composer" : activePane;
+  const triggerSelector = `${scope} ${control.trigger}`;
+  const composerSelector = control.newSession
+    ? ".new-session-page__message"
+    : `${activePane} .agent-chat__input textarea`;
+  const fallbackSelector = [
+    '[data-value="header-session-loading"]',
+    '[data-value="plus-menu-loading"]',
+    '[data-value="loading"]',
+    '[role="option"][aria-busy="true"]',
+    '[aria-busy="true"] [role="option"]',
+  ].join(", ");
+  return {
+    id: control.id,
+    route: control.newSession ? "/new" : controlUiSessionPath(sessionKeys[0]),
+    expected:
+      "The unopened control exposes real content and its expected focus on first activation.",
+    explicitOnly: true,
+    firstOpenPhase: control.phase ?? "ready",
+    ...(control.moduleGate
+      ? {
+          diagnostic: "Held/rejected module; never a timing comparison",
+          moduleGate: control.moduleGate,
+          verifyWhileLoading: control.verifyWhileLoading,
+        }
+      : {}),
+    fixtureOverrides: control.fixtureOverrides ?? routeControlFixtureOverrides,
+    setup: async (page) => {
+      await page.addInitScript(
+        ({
+          triggerSelector: selector,
+          composerSelector,
+          fallbackSelector,
+          content,
+          keepsTriggerFocus,
+          syntheticMicrophone,
+          input,
+          activationValue,
+          surfaceSelector,
+          contentCount,
+          contentText,
+        }) => {
+          if (syntheticMicrophone) {
+            // First-open timing must not depend on host devices or a permission prompt.
+            const media = new EventTarget();
+            Object.assign(media, {
+              enumerateDevices: async () => [
+                {
+                  kind: "audioinput",
+                  deviceId: "synthetic-microphone",
+                  groupId: "synthetic-proof",
+                  label: "Synthetic microphone",
+                  toJSON: () => ({}),
+                },
+              ],
+              getUserMedia: async () => {
+                performance.mark("route-control:media-capture-attempt");
+                throw new DOMException(
+                  "Synthetic fixture forbids media capture",
+                  "NotAllowedError",
+                );
+              },
+            });
+            Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: media });
+          }
+          const recordReady = () => {
+            const composer = document.querySelector<HTMLElement>(composerSelector);
+            if (window.openclawControlUi?.snapshot().ready && composer?.checkVisibility()) {
+              performance.mark("route-control:first-ready");
+            } else {
+              requestAnimationFrame(recordReady);
+            }
+          };
+          requestAnimationFrame(recordReady);
+          const eventName = input ? "input" : "keydown";
+          const recordActivation = (event: Event) => {
+            if (
+              !(event.target instanceof Element) ||
+              !event.target.closest(selector) ||
+              (input
+                ? !(event instanceof InputEvent) ||
+                  !(event.target instanceof HTMLTextAreaElement) ||
+                  event.target.value !== activationValue
+                : !(event instanceof KeyboardEvent) || event.key !== "Enter" || event.repeat)
+            ) {
+              return;
+            }
+            const trigger = event.target.closest<HTMLElement>(selector)!;
+            performance.mark("route-control:native-activation", { startTime: event.timeStamp });
+            performance.mark("route-control:observed-activation");
+            document.removeEventListener(eventName, recordActivation, true);
+            // Same next-frame criterion as chat-menu-idle-warmup.e2e.test.ts.
+            // Observe only this control's opening; unrelated boot skeletons do not count.
+            const counted = new WeakSet<Element>();
+            const observer = new MutationObserver((records) => {
+              for (const record of records) {
+                for (const node of record.addedNodes) {
+                  if (!(node instanceof Element)) {
+                    continue;
+                  }
+                  const rows = [
+                    ...(node.matches(fallbackSelector) ? [node] : []),
+                    ...node.querySelectorAll(fallbackSelector),
+                  ];
+                  for (const row of rows) {
+                    if (counted.has(row)) {
+                      continue;
+                    }
+                    counted.add(row);
+                    requestAnimationFrame(() => {
+                      const id = trigger.getAttribute("aria-controls");
+                      const surface = surfaceSelector
+                        ? document.querySelector(surfaceSelector)
+                        : id
+                          ? document.getElementById(id)
+                          : null;
+                      if (row.isConnected && row.checkVisibility() && surface?.contains(row)) {
+                        performance.mark("route-control:painted-fallback-row");
+                      }
+                    });
+                  }
+                }
+              }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            let contentRecorded = false;
+            let focusRecorded = false;
+            const observeOpen = () => {
+              const surfaceId = trigger.getAttribute("aria-controls");
+              const surface = surfaceSelector
+                ? document.querySelector<HTMLElement>(surfaceSelector)
+                : surfaceId
+                  ? document.getElementById(surfaceId)
+                  : null;
+              if (surface?.checkVisibility()) {
+                if (
+                  !contentRecorded &&
+                  (!input || (trigger instanceof HTMLTextAreaElement && trigger.value === input)) &&
+                  [...surface.querySelectorAll<HTMLElement>(content)].filter(
+                    (node) =>
+                      node.checkVisibility() &&
+                      (!contentText || node.textContent?.includes(contentText)) &&
+                      (!input ||
+                        (!node.closest('[aria-busy="true"]') && !node.querySelector(".skeleton"))),
+                  ).length >= contentCount
+                ) {
+                  performance.mark("route-control:raf-observed-content");
+                  contentRecorded = true;
+                }
+                const focused = document.activeElement;
+                const focusSatisfied = keepsTriggerFocus
+                  ? focused === trigger
+                  : focused instanceof HTMLElement &&
+                    focused !== surface &&
+                    surface.contains(focused) &&
+                    focused.checkVisibility();
+                if (!focusRecorded && focusSatisfied) {
+                  performance.mark("route-control:raf-observed-focus");
+                  focusRecorded = true;
+                }
+              }
+              if (!contentRecorded || !focusRecorded) {
+                requestAnimationFrame(observeOpen);
+              } else {
+                observer.disconnect();
+              }
+            };
+            requestAnimationFrame(observeOpen);
+          };
+          document.addEventListener(eventName, recordActivation, true);
+        },
+        {
+          triggerSelector,
+          composerSelector,
+          fallbackSelector,
+          content: control.content,
+          keepsTriggerFocus: control.keepsTriggerFocus ?? false,
+          syntheticMicrophone: control.syntheticMicrophone ?? false,
+          input: control.input,
+          activationValue: control.seed ? control.input : control.input?.[0],
+          surfaceSelector: control.surface,
+          contentCount: control.contentCount ?? 1,
+          contentText: control.contentText,
+        },
+      );
+    },
+    prepare: async (page) => {
+      await page.waitForFunction(
+        () => performance.getEntriesByName("route-control:first-ready").length > 0,
+      );
+      if (control.dashboard) {
+        await openInteractionPanel(page);
+      }
+      if (control.phase === "idle") {
+        // Match the settled-menu E2E contract; a 500 ms network-idle event alone
+        // can race the native idle owner's chained registrations.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve, reject) => {
+              let count = performance.getEntriesByType("resource").length;
+              let quietSince = performance.now();
+              const deadline = quietSince + 15_000;
+              const sample = () => {
+                const now = performance.now();
+                const current = performance.getEntriesByType("resource").length;
+                if (current !== count) {
+                  count = current;
+                  quietSince = now;
+                }
+                if (now - quietSince >= 1_500) {
+                  resolve();
+                } else if (now >= deadline) {
+                  reject(new Error("Idle first-open resources did not settle"));
+                } else {
+                  setTimeout(sample, 100);
+                }
+              };
+              sample();
+            }),
+        );
+      }
+    },
+    run: async (page, gateway) => {
+      const trigger = page
+        .locator(control.revealOnFocus ? triggerSelector : `${triggerSelector}:visible`)
+        .first();
+      // Focus reveals the microphone affordance; it remains inside the action CPU interval.
+      await trigger.focus();
+      await trigger.waitFor({ state: "visible" });
+      const surfaceId = await trigger.getAttribute("aria-controls");
+      if (!surfaceId && !control.surface) {
+        throw new Error(`Control has no owned popup: ${triggerSelector}`);
+      }
+      const surface = page.locator(control.surface ?? `[id=${JSON.stringify(surfaceId)}]`);
+      if (await surface.isVisible()) {
+        throw new Error(`First-use control was already open: ${triggerSelector}`);
+      }
+      if (control.input) {
+        if (await trigger.inputValue()) {
+          throw new Error("First-input measurement requires an empty composer");
+        }
+        if (control.seed) {
+          // Seed the complete token without opening the command list, then admit
+          // the argument list through one native input event.
+          await trigger.evaluate((element, seed) => {
+            const textarea = element as HTMLTextAreaElement;
+            textarea.value = seed;
+            textarea.setSelectionRange(seed.length, seed.length);
+          }, control.seed);
+        }
+        await trigger.pressSequentially(control.input.slice(control.seed?.length ?? 0));
+      } else {
+        await trigger.press("Enter");
+      }
+      if (control.moduleGate) {
+        await page.evaluate(() => performance.mark("route-control:typing-complete"));
+      }
+      await surface.locator(control.content).first().waitFor({ state: "visible" });
+      await page.waitForFunction(
+        () =>
+          performance.getEntriesByName("route-control:raf-observed-content").length > 0 &&
+          performance.getEntriesByName("route-control:raf-observed-focus").length > 0,
+      );
+      const evidence = await page.evaluate((requiredRequest) => {
+        const mark = (name: string) => {
+          const value = performance.getEntriesByName(`route-control:${name}`)[0]?.startTime;
+          if (value === undefined) {
+            throw new Error(`Missing cold control mark: ${name}`);
+          }
+          return value;
+        };
+        const ready = mark("first-ready");
+        const activation = mark("native-activation");
+        const content = mark("raf-observed-content");
+        const focus = mark("raf-observed-focus");
+        const request = requiredRequest
+          ? performance
+              .getEntriesByName(`route-control:rpc:${requiredRequest}`)
+              .find((entry) => entry.startTime >= activation)
+          : undefined;
+        if (requiredRequest && !request) {
+          throw new Error(`First use did not issue ${requiredRequest} after activation`);
+        }
+        return {
+          ...(request
+            ? {
+                firstRequestAtMs: request.startTime,
+                activationToFirstRequestMs: request.startTime - activation,
+              }
+            : {}),
+          firstReadyAtMs: ready,
+          nativeActivationAtMs: activation,
+          nativeActivationObservedAtMs: mark("observed-activation"),
+          rafObservedContentAtMs: content,
+          rafObservedFocusAtMs: focus,
+          nativeActivationToRafObservedContentMs: content - activation,
+          nativeActivationToRafObservedFocusMs: focus - activation,
+          firstReadyToActivationMs: activation - ready,
+          paintedFallbackRows: performance.getEntriesByName("route-control:painted-fallback-row")
+            .length,
+          openedControls: 1,
+        };
+      }, control.requiredRequest);
+      if (control.assertNoPaintedFallback && evidence.paintedFallbackRows !== 0) {
+        throw new Error(`Idle first open painted ${evidence.paintedFallbackRows} loading rows`);
+      }
+      await control.verifyReady?.(page, gateway);
+      return evidence;
+    },
+    verifyAfter: async (page, gateway) => {
+      const trigger = page
+        .locator(control.revealOnFocus ? triggerSelector : `${triggerSelector}:visible`)
+        .first();
+      const surfaceId = await trigger.getAttribute("aria-controls");
+      const surface = page.locator(control.surface ?? `[id=${JSON.stringify(surfaceId)}]`);
+      if (control.moduleGate?.outcome === "reject") {
+        await surface.getByRole("button", { name: "Close", exact: true }).click();
+        await surface.waitFor({ state: "hidden" });
+        if ((await trigger.inputValue()) !== control.input) {
+          throw new Error("Closing a failed optional import changed the admitted draft");
+        }
+        return {
+          importErrorClosed: true,
+          draftRetained: true,
+          errorCloseRestoredFocus: await trigger.evaluate(
+            (node) => document.activeElement === node,
+          ),
+        };
+      }
+      await page.keyboard.press("Escape");
+      await surface.waitFor({ state: "hidden" });
+      if (!(await trigger.evaluate((node) => document.activeElement === node))) {
+        throw new Error("Dismissal must preserve trigger focus");
+      }
+      if (control.input && (await trigger.inputValue()) !== control.input) {
+        throw new Error("Dismissing the first-input menu changed the composer draft");
+      }
+      if (
+        control.syntheticMicrophone &&
+        (await page.evaluate(
+          () => performance.getEntriesByName("route-control:media-capture-attempt").length,
+        ))
+      ) {
+        throw new Error("The labeled microphone fixture must not request media capture");
+      }
+      if (control.input) {
+        // Escape intentionally suppresses suggestions for the current token.
+        // A new input restores them through the public composer path.
+        await trigger.fill("");
+        if (control.seed) {
+          await trigger.evaluate((element, seed) => {
+            const textarea = element as HTMLTextAreaElement;
+            textarea.value = seed;
+            textarea.setSelectionRange(seed.length, seed.length);
+          }, control.seed);
+        }
+        await trigger.pressSequentially(control.input.slice(control.seed?.length ?? 0));
+      } else {
+        await trigger.focus();
+        await trigger.press("Enter");
+      }
+      await surface.locator(control.content).first().waitFor({ state: "visible" });
+      await control.verifyReopened?.(page, gateway);
+      await page.keyboard.press("Escape");
+      await surface.waitFor({ state: "hidden" });
+      if (!(await trigger.evaluate((node) => document.activeElement === node))) {
+        throw new Error("Reopening and dismissing the control must restore its trigger focus");
+      }
+      return { reopenedControls: 1, behaviorVerifiedAfterMeasurement: true };
+    },
+  };
+}
+
+async function verifyFirstInputSelection(page: Page, expected: string) {
+  const trigger = page.locator(`${activePane} .agent-chat__composer-combobox textarea`);
+  await trigger.press("Tab");
+  await page.waitForFunction(
+    ({ selector, expected }) =>
+      document.querySelector<HTMLTextAreaElement>(selector)?.value.trim() === expected,
+    { selector: `${activePane} .agent-chat__composer-combobox textarea`, expected },
+  );
+}
+
+async function verifyPlusSubview(page: Page) {
+  const menu = page.locator(".agent-chat__capability-menu:visible");
+  await menu.locator('[data-value="open-skills"]').click();
+  await menu.locator('[data-value="back"]').waitFor({ state: "visible" });
+  await menu.locator('[data-value="back"]').click();
+  await menu.locator('[data-value="open-skills"]').waitFor({ state: "visible" });
+}
+
+async function verifySlashArguments(page: Page) {
+  const trigger = page.locator(`${activePane} .agent-chat__composer-combobox textarea`);
+  await trigger.press("Tab");
+  const argument = page.locator('[role="listbox"] [role="option"]').filter({ hasText: "compact" });
+  await argument.first().waitFor({ state: "visible" });
+  await trigger.press("ArrowDown");
+  await trigger.press("ArrowUp");
+  await trigger.press("Tab");
+  await page.waitForFunction(
+    (selector) =>
+      document.querySelector<HTMLTextAreaElement>(selector)?.value.trim() === "/viewport compact",
+    `${activePane} .agent-chat__composer-combobox textarea`,
+  );
+}
+
 async function prepareFirstModelPicker(page: Page) {
   await prepareChat(page);
   await page.locator(`${activePane} .agent-chat__input textarea`).first().click();
@@ -2772,6 +3333,243 @@ export const interactionScenarios: readonly InteractionScenario[] = [
       }
     },
   },
+  coldRouteControlScenario({
+    id: "chat-attach-first-ready-open",
+    requiredRequest: "skills.status",
+    trigger: ".agent-chat__input-btn--attach",
+    content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+    verifyReopened: verifyPlusSubview,
+  }),
+  coldRouteControlScenario({
+    id: "chat-microphone-first-ready-open",
+    trigger: ".chat-talk-input-picker__trigger",
+    content: ".chat-talk-input-picker__heading",
+    revealOnFocus: true,
+    syntheticMicrophone: true,
+  }),
+  coldRouteControlScenario({
+    id: "chat-effort-first-ready-open",
+    trigger: "[data-chat-thinking-select]",
+    surface: ".chat-controls__effort-picker .chat-picker-overlay",
+    content: "[data-chat-thinking-slider]",
+  }),
+  coldRouteControlScenario({
+    id: "chat-dashboard-menu-first-ready-open",
+    trigger: ".chat-dashboard-menu__trigger",
+    content: '[data-value="dashboard-expand"]',
+    dashboard: true,
+  }),
+  coldRouteControlScenario({
+    id: "chat-session-menu-first-ready-open",
+    trigger: ".chat-header-session-menu__trigger",
+    content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
+  }),
+  coldRouteControlScenario({
+    id: "chat-slash-first-ready-open",
+    trigger: ".agent-chat__composer-combobox textarea",
+    input: "/viewport",
+    surface: '[role="listbox"][aria-label="Slash commands"]',
+    content: '[role="option"][aria-selected="true"]',
+    contentText: "/viewport",
+    keepsTriggerFocus: true,
+    fixtureOverrides: firstInputFixture,
+    verifyReopened: verifySlashArguments,
+  }),
+  coldRouteControlScenario({
+    id: "chat-slash-argument-first-ready-open",
+    trigger: ".agent-chat__composer-combobox textarea",
+    input: "/viewport ",
+    seed: "/viewport",
+    surface: '[role="listbox"][aria-label="Command arguments"]',
+    content: '[role="option"][aria-selected="true"]',
+    contentText: "compact",
+    keepsTriggerFocus: true,
+    fixtureOverrides: firstInputFixture,
+    verifyReopened: (page) => verifyFirstInputSelection(page, "/viewport compact"),
+  }),
+  ...(["release", "reject"] as const).map((outcome) =>
+    coldRouteControlScenario({
+      id: `chat-slash-options-${outcome === "release" ? "held" : "failed"}`,
+      trigger: ".agent-chat__composer-combobox textarea",
+      input: "/viewport",
+      surface: '[role="listbox"][aria-label="Slash commands"]',
+      content:
+        outcome === "reject"
+          ? '.lazy-view-error[role="alert"]'
+          : '[role="option"][aria-selected="true"]',
+      contentText: outcome === "reject" ? undefined : "/viewport",
+      keepsTriggerFocus: true,
+      fixtureOverrides: firstInputFixture,
+      moduleGate: { source: "pages/chat/components/chat-composer-slash-menu-options.tsx", outcome },
+      verifyWhileLoading: async (page) => {
+        const input = page.locator(`${activePane} .agent-chat__composer-combobox textarea`);
+        await page.waitForFunction(
+          (selector) =>
+            performance.getEntriesByName("route-control:typing-complete").length > 0 &&
+            document.querySelector<HTMLTextAreaElement>(selector)?.value === "/viewport",
+          `${activePane} .agent-chat__composer-combobox textarea`,
+        );
+        const selected = page.locator(
+          '[role="listbox"][aria-label="Slash commands"] [aria-selected="true"]',
+        );
+        await selected.locator(".skeleton").first().waitFor({ state: "attached" });
+        const selectedId = await selected.getAttribute("id");
+        await input.press("ArrowDown");
+        if ((await selected.getAttribute("id")) === selectedId) {
+          throw new Error("The pending options did not advance the active row");
+        }
+        await input.press("ArrowUp");
+        if (
+          (await selected.getAttribute("id")) !== selectedId ||
+          (await input.inputValue()) !== "/viewport"
+        ) {
+          throw new Error("The pending option module changed the draft or active row identity");
+        }
+        if (!(await input.evaluate((node) => node === document.activeElement))) {
+          throw new Error("The pending option module stole composer focus");
+        }
+        await input.press("Escape");
+        await page
+          .locator('[role="listbox"][aria-label="Slash commands"]')
+          .waitFor({ state: "hidden" });
+        if ((await input.inputValue()) !== "/viewport") {
+          throw new Error("Dismissing pending options changed the admitted draft");
+        }
+        await input.fill("");
+        await input.pressSequentially("/viewport");
+        await selected.locator(".skeleton").first().waitFor({ state: "attached" });
+      },
+      verifyReopened: verifySlashArguments,
+    }),
+  ),
+  coldRouteControlScenario({
+    id: "chat-skill-first-ready-open",
+    trigger: ".agent-chat__composer-combobox textarea",
+    input: "$auto",
+    surface: '[role="listbox"][aria-label="Skill references"]',
+    content: '[role="option"][aria-selected="true"]',
+    contentText: "Auto Review",
+    keepsTriggerFocus: true,
+    fixtureOverrides: firstInputFixture,
+    verifyReopened: (page) => verifyFirstInputSelection(page, "$autoreview"),
+  }),
+  coldRouteControlScenario({
+    id: "chat-mention-first-ready-open",
+    requiredRequest: "users.mentionable",
+    trigger: ".agent-chat__composer-combobox textarea",
+    input: "@Casey",
+    surface: '[role="listbox"][aria-label="Mention a person"]',
+    content: '[role="option"][aria-selected="true"]',
+    contentText: "Casey Vale",
+    keepsTriggerFocus: true,
+    fixtureOverrides: (sandbox, base) => ({
+      ...firstInputFixture(sandbox, base),
+      // People suggestions require an authenticated profile, not only the lookup method.
+      presenceUsers: [
+        {
+          self: true,
+          id: "demo-viewer",
+          identity: { type: "profile", id: "demo-viewer" },
+          name: "Demo viewer",
+        },
+      ],
+    }),
+    verifyReady: async (_page, gateway) => {
+      await gateway.waitForRequest("users.mentionable");
+    },
+    verifyReopened: (page) => verifyFirstInputSelection(page, "@Casey Vale"),
+  }),
+  coldRouteControlScenario({
+    id: "chat-emoji-first-ready-open",
+    trigger: ".agent-chat__composer-combobox textarea",
+    input: ":smi",
+    surface: '.emoji-menu[role="listbox"]',
+    content: '[role="option"][aria-selected="true"]',
+    contentText: ":smi",
+    keepsTriggerFocus: true,
+    fixtureOverrides: firstInputFixture,
+    verifyReopened: (page) => verifyFirstInputSelection(page, "😄"),
+  }),
+  coldRouteControlScenario({
+    id: "chat-context-first-ready-open",
+    requiredRequest: "sessions.usage",
+    trigger: ".context-ring",
+    surface: ".context-usage__popover",
+    content: "[data-context-category]",
+    contentCount: 5,
+    keepsTriggerFocus: true,
+    fixtureOverrides: (_sandbox, base) => ({
+      featureMethods: ["sessions.usage"],
+      sessions: base.sessions.map((session) =>
+        session.key === sessionKeys[0]
+          ? {
+              ...session,
+              contextTokens: 100000,
+              totalTokens: 50000,
+              totalTokensFresh: true,
+            }
+          : session,
+      ),
+      methodResponses: {
+        "sessions.usage": {
+          sessions: [
+            {
+              key: sessionKeys[0],
+              sessionId: firstContextReport.sessionId,
+              contextWeight: firstContextReport,
+            },
+          ],
+        },
+      },
+    }),
+    verifyReady: async (page, gateway) => {
+      await gateway.waitForRequest("sessions.usage", {
+        match: { key: sessionKeys[0], includeContextWeight: true },
+      });
+      const report = page.locator(".context-usage__popover");
+      await report.locator('[data-context-category="files"]').waitFor({ state: "visible" });
+      if (!(await report.getByRole("button", { name: "View context", exact: true }).isEnabled())) {
+        throw new Error("The first context report must expose its details action");
+      }
+    },
+  }),
+  coldRouteControlScenario({
+    id: "new-attach-first-ready-open",
+    newSession: true,
+    trigger: ".agent-chat__input-btn--attach",
+    content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+    verifyReopened: verifyPlusSubview,
+  }),
+  coldRouteControlScenario({
+    id: "chat-layout-menu-first-ready-open",
+    trigger: ".chat-pane__layout-trigger",
+    content: '[data-value="side-panel"]',
+  }),
+  ...[
+    {
+      id: "chat-attach-idle-first-open",
+      newSession: false,
+      trigger: ".agent-chat__input-btn--attach",
+      content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+    },
+    {
+      id: "new-attach-idle-first-open",
+      newSession: true,
+      trigger: ".agent-chat__input-btn--attach",
+      content: '.agent-chat__attach-menu-option, [data-value="open-skills"]',
+    },
+    {
+      id: "chat-session-menu-idle-first-open",
+      trigger: ".chat-header-session-menu__trigger",
+      content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
+    },
+  ].map((control) =>
+    coldRouteControlScenario({
+      ...control,
+      phase: "idle",
+      assertNoPaintedFallback: true,
+    }),
+  ),
   {
     id: "model-picker-first-open-search",
     route: controlUiSessionPath(sessionKeys[0]),
