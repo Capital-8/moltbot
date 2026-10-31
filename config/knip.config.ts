@@ -62,6 +62,7 @@ const repositoryScriptEntries = [
   "scripts/perf/session-append-reload-measure.ts!",
   "scripts/perf/session-maintenance-kick-measure.mjs!",
   "scripts/perf/session-membership-retention-measure.ts!",
+  "scripts/perf/session-topology-sharing-measure.ts!",
   "scripts/perf/session-message-custody-payload-measure.mjs!",
   "scripts/perf/session-patch-response-measure.ts!",
   "scripts/perf/sessions-files-title-measure.ts!",
@@ -72,6 +73,7 @@ const repositoryScriptEntries = [
   "scripts/perf/transcript-pool-idle-measure.ts!",
   "scripts/perf/update-state-io-measure.ts!",
   "scripts/perf/worktree-creation-measure.ts!",
+  "scripts/perf/subagent-registration-fallback-measure.ts!",
   // The source header documents this matched Code Mode engine probe by path.
   "scripts/perf/code-mode-engine-measure.ts!",
   // catalog-compare-released.mts copies and spawns this sandboxed reader by path.
