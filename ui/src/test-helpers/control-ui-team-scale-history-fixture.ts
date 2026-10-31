@@ -26,6 +26,16 @@ export type LongSessionWorkload =
       lastEntryId: string;
     };
 
+type TeamScaleHistoryContent =
+  | { type: "text"; text: string }
+  | ({ type: "image"; mimeType: string; fileName: string } & (
+      | { artifactId: string }
+      | { url: string }
+    ))
+  | { type: "toolCall"; id: string; name: string; arguments: { path: string } }
+  | { type: "image"; url: string; alt: string; width: number; height: number }
+  | ReturnType<typeof createTeamScaleDuplicateReadFixture>["attachments"][number];
+
 export type TeamScaleFixtureAsset = {
   body: string | Buffer;
   contentType: string;
@@ -392,7 +402,7 @@ export function createTeamScaleHistoryFixture(options: {
     content: [
       ...(options.attachments && index === options.messageCount - 1 ? options.attachments : []),
       ...(lateRowFacts && index === options.messageCount - 1
-        ? [
+        ? ([
             {
               type: "image",
               artifactId: lateRowFacts.artifactId,
@@ -405,7 +415,7 @@ export function createTeamScaleHistoryFixture(options: {
               mimeType: "image/png",
               fileName: "Synthetic cacheable thumbnail.png",
             },
-          ]
+          ] satisfies TeamScaleHistoryContent[])
         : []),
       {
         type: "text",
@@ -441,17 +451,17 @@ export function createTeamScaleHistoryFixture(options: {
         ].join("\n\n"),
       },
       ...(options.richTranscript && index % 8 === 5
-        ? [
+        ? ([
             {
               type: "toolCall",
               id: `long-session-tool-${index}`,
               name: "read",
               arguments: { path: "synthetic-checkpoint.md" },
             },
-          ]
+          ] satisfies TeamScaleHistoryContent[])
         : []),
       ...(options.richTranscript && index % 16 === 7
-        ? [
+        ? ([
             {
               type: "image",
               url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a34sAAAAASUVORK5CYII=",
@@ -459,9 +469,9 @@ export function createTeamScaleHistoryFixture(options: {
               width: 320,
               height: 180,
             },
-          ]
+          ] satisfies TeamScaleHistoryContent[])
         : []),
-    ],
+    ] satisfies TeamScaleHistoryContent[],
   }));
   if (options.rowFacts) {
     const tail = historyMessages.slice(-3);

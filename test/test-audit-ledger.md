@@ -69,5 +69,84 @@ Final candidate checks and landing: [PR #189143](https://github.com/openclaw/ope
 The full CI planning suite and its manifest/workflow/Git-owner support were read.
 Other routing, admission, frozen-target, and gate layers retain distinct contracts.
 
+Completed core source review (runtime proof only where a landing row says so):
+
+| Owner scope                                   | Suites read                        | Decision                                                                                                                                        |
+| --------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Routing / pairing                             | 19                                 | Retain independent routing, identity, authorization, and compatibility contracts.                                                               |
+| Utilities / test utilities / test helpers     | 35                                 | Retain active suites; private channel-target support retirement needs SDK consumer qualification.                                               |
+| Boards / projects / decisions                 | 23                                 | Retain durable ownership, ordering, and public projections.                                                                                     |
+| Logging                                       | 64                                 | Retain 465 declarations, including content-absence and privacy guards.                                                                          |
+| Shared                                        | 111                                | Retain 490 declarations; streaming, borrowed identity, work counts, and native process contracts differ.                                        |
+| Transcripts / snapshot                        | 28                                 | Retain actual storage, archive, retention, native permissions, and constrained-heap proof.                                                      |
+| Channels root / direct plugin directory       | 103                                | Retain independent dispatch, registry, Doctor, and compatibility proof; nested directories remain open.                                         |
+| Hooks                                         | 41                                 | Two export-helper replays are absorbed by actual module import and dispatch; fallback selection remains distinct.                               |
+| Templates                                     | 31                                 | Retain 230 declarations and all live support/golden fixtures.                                                                                   |
+| Worker                                        | 36 entry files + 7 imported suites | Retain 259 declarations; native bundle execution remains an explicit runtime gap.                                                               |
+| Meeting bot                                   | 30                                 | Retain 179 direct and four inherited cleanup declarations.                                                                                      |
+| TTS                                           | 23                                 | Move mocked capability assertions to the existing real-registry SDK fixture; retain public helper exports.                                      |
+| LLM                                           | 22                                 | Retain 126 declarations; strengthen one SSRF negative control in a later qualified batch.                                                       |
+| Audit                                         | 16                                 | Retain 118 declarations; repair one discarded privacy result and three stale SQL-count titles later.                                            |
+| Media understanding                           | 43                                 | Retain 241 declarations; two obsolete outbound mocks have a live canonical message-runtime replacement.                                         |
+| Context engine / chat / Canvas                | 19                                 | Retain 139 declarations; one unused mock engine class and one overclaimed title remain candidates.                                              |
+| Process                                       | 118                                | Retain 577 declarations; repair one observer-timing proof that marks settlement too late.                                                       |
+| MCP / proxy capture                           | 26                                 | Retain 130 declarations; strengthen the real CA-lock waiting assertion later.                                                                   |
+| Image / music / video / media generation      | 19                                 | Retain 103 declarations and all live support.                                                                                                   |
+| Web / fetch / search / link understanding     | 8                                  | Retain 69 declarations; preparation, cancellation, decoding, and transport contracts differ.                                                    |
+| Status / trajectory / session cards / storage | 25                                 | Retain 207 declarations; preparation, worker settlement, retention, export, and filesystem identity differ.                                     |
+| Root src suites                               | 25                                 | Retain independent entrypoint, package-export, and adapter contracts; strengthen logger absence proof later. Deep framework closure is partial. |
+| Realtime transcription                        | 1                                  | Retain 13 actual WebSocket, retry, buffer, cancellation, and admission declarations; external provider caller closure is bounded.               |
+
+Bootstrap / provider runtime / interactive / plugin state: all 21 suites read;
+retain 179 declarations. One PostgreSQL worker declaration lacks registration in
+the default conformance CI targets; repair its route rather than delete its proof.
+
+Core batch starting at `be86cd32eba`: remove two hook helper replays covered by
+actual module import/dispatch, two obsolete echo mocks, and the mocked TTS capability
+case plus its unused channel inventory. The existing real-registry delivery rows
+now exercise the public SDK helper. A wrong audio-file capability result passed the
+old mocked declaration and failed the new assertion; the fault was restored exactly.
+Untouched baseline: 76 tests across seven suites; retained candidate: 73 passed.
+Focused lint and changed test-graph type checks passed. Complete removal-check
+results and landing: [PR #189180](https://github.com/openclaw/openclaw/pull/189180).
+
+Additional completed source review at the original audit revision (no runtime proof):
+
+| Owner scope                              | Suites    | Decision                                                                                                                                                                              |
+| ---------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon                                   | 127       | Retain 920 declarations; native process, custody, and platform contracts differ. Windows registered-task proof is conditional on successful fixture creation.                         |
+| Talk                                     | 39        | Retain 250 direct declarations and one inherited database table; measured replacement-work bound remains a regression contract.                                                       |
+| Wizard                                   | 30        | Retain 239 declarations, including the actual PTY child, migration lock, and installed-service state.                                                                                 |
+| Security                                 | 46        | Retain 181 declarations; repair one legacy-auth remediation assertion that assumes POSIX chmod on Windows.                                                                            |
+| Model commands                           | 35        | Retain 215 direct/inherited declarations; credential owners, live authority, RPC settlement, catalog policy, and physical persistence differ.                                         |
+| Model catalog / memory / memory-host SDK | 7         | Retain 71 declarations; host policy, physical storage, provenance, and child snapshots have no absorbing package keeper.                                                              |
+| Docs / remaining root scripts            | 21        | Retain 63 declarations; quoting policy, publication guards, parser contracts, and actual CLI checks differ.                                                                           |
+| Shared OpenClawKit                       | 209 files | Retain 2,523 declarations; three proof repairs and two possible consolidations await qualified native execution.                                                                      |
+| Shared NativeState / MLX protocol        | 5         | Retain 46 declarations; retarget one missing-table test that now stops at credential-cutover refusal. MLX protocol's standalone test CI route remains unverified.                     |
+| Swabble                                  | 6         | Retain 12 declarations; real CLI, parser, cooldown, config, resampling, and wake extraction differ. Explicit package-test CI route inspected.                                         |
+| macOS MLX helper                         | 1         | Retain five declarations; one PCM helper replay is absorbed by actual streaming bytes, pending native keeper proof. Packaging builds do not establish test execution.                 |
+| Advisor / agent guidance                 | 2         | Retain 14 declarations; actual scheduling, run admission, cancellation, instruction snapshots, filesystem boundaries, and atomic registration differ. Host caller closure is bounded. |
+| Auto-reply media / root                  | 39        | Retain 319 direct/inherited declarations; repair one block-streaming case whose mocked runner overstates policy coverage.                                                             |
+| Tokenjuice / MCP Events                  | 2         | Retain 16 declarations: adapter contracts and real HTTP/SQLite lifecycle proof differ; external transport/reducer internals are not claimed.                                          |
+| Doctor                                   | 118       | Retain 673 declarations; make two symlink capability refusals visible as skips instead of silently passing. All local support remains reachable.                                      |
+| Auto-reply reply commands                | 67        | Retain 506 declarations; repair three TTS fixtures that bypass the existing temporary-directory cleanup owner.                                                                        |
+| Auto-reply Stop / cancellation           | 11        | Retain 93 declarations; one test-only reset-entry proof needs replacement at the real reset owner. Five invoked case modules included; no absorbing keeper established.               |
+| Gateway CLI                              | 31        | Retain 246 declarations, including 57 invoked support cases; admission, real process signals, native deadlines, durable log settlement and package staging protect different effects. |
+| Admin HTTP / session share / Bonjour     | 8         | Retain 41 declarations: actual socket cleanup, durable disclosure authority, cancellation, lazy loading and real discovery-library lifecycle differ.                                  |
+| Geolocation / Talk Voice / language pack | 6         | Retain 29 declarations: physical MMDB cache, outage handling, voice destination/config authority and actual asset HTTP responses differ.                                              |
+| QuickJS / oMLX                           | 3         | Retain 41 declarations; narrow one pre-aborted execution title that overclaims worker-construction proof. Actual VM, credential persistence and transport contracts remain distinct.  |
+| Readability / PDF / Auto Review          | 4         | Retain 28 declarations: actual DOM extraction, PDF worker cancellation/render budgets and admitted review-exchange contracts differ. External host/framework closure is bounded.      |
+
+Next support batch starts at `7eec88c07c3`, after the reviewed core batch.
+Remove the mock context engine whose only factory is never invoked during registration,
+and the unused CLI-history entry builder whose last consumer was removed in `cd3e054c9a4`.
+Retain the actual registration supersession cases, passthrough engine methods, and
+all remaining history fixtures. Untouched native baseline: 182 passed and three skipped
+across ten suites. Candidate `9236b5b7e11`: the same 182 passed and three Linux-only cases skipped.
+Its full-tree export findings drop from three to two by removing `boundEntry`;
+the four production findings are unchanged. Final removal-check results,
+integrated-head proof, and landing: [PR #189212](https://github.com/openclaw/openclaw/pull/189212).
+No test declarations or production code change.
+
 Remaining: declaration-level review across remaining core, plugins, UI, native apps,
 root/script suites and shared fixtures; close owner-reading gaps and land subsequent batches.
