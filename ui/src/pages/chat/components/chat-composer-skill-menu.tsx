@@ -17,6 +17,10 @@ const SkillMenuOptions = lazy(() => import("./chat-composer-skill-menu-options.t
 });
 
 export function SkillMenu(props: { menu: SkillMenuState; host: SkillMenuHost }) {
+  const closeMenu = () => {
+    props.menu.reset();
+    props.host.getTextarea()?.focus({ preventScroll: true });
+  };
   const state = () => props.menu.state;
   const loading = () => state().skillCommandRefreshPending || state().skillMenuItems.length === 0;
   return (
@@ -47,7 +51,7 @@ export function SkillMenu(props: { menu: SkillMenuState; host: SkillMenuHost }) 
                   }))}
                 />
               }
-              onClose={() => props.menu.reset()}
+              onClose={closeMenu}
             >
               <SkillMenuOptions menu={props.menu} host={props.host} />
             </ChatLazyBoundary>

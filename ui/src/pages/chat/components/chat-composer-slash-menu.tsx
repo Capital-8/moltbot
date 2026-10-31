@@ -26,6 +26,10 @@ const SlashArgumentOptions = lazy(() => import("./chat-composer-slash-menu-optio
 });
 
 export function SlashMenu(props: { menu: SlashMenuState; host: SlashMenuHost; draft: string }) {
+  const closeMenu = () => {
+    props.menu.reset();
+    props.host.getTextarea()?.focus({ preventScroll: true });
+  };
   const state = () => props.menu.state;
   const mode = () =>
     isSlashMenuVisible(state()) ? (state().slashMenuMode === "args" ? "args" : "command") : null;
@@ -80,7 +84,7 @@ export function SlashMenu(props: { menu: SlashMenuState; host: SlashMenuHost; dr
                     }))}
                   />
                 }
-                onClose={() => props.menu.reset()}
+                onClose={closeMenu}
               >
                 <SlashArgumentOptions menu={props.menu} host={props.host} />
               </ChatLazyBoundary>
@@ -115,7 +119,7 @@ export function SlashMenu(props: { menu: SlashMenuState; host: SlashMenuHost; dr
                           }))}
                         />
                       }
-                      onClose={() => props.menu.reset()}
+                      onClose={closeMenu}
                     >
                       <SlashMenuOptions
                         menu={props.menu}

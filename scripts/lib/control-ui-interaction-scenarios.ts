@@ -2077,12 +2077,13 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
         if ((await trigger.inputValue()) !== control.input) {
           throw new Error("Closing a failed optional import changed the admitted draft");
         }
+        if (!(await trigger.evaluate((node) => document.activeElement === node))) {
+          throw new Error("Closing a failed optional import must restore trigger focus");
+        }
         return {
           importErrorClosed: true,
           draftRetained: true,
-          errorCloseRestoredFocus: await trigger.evaluate(
-            (node) => document.activeElement === node,
-          ),
+          errorCloseRestoredFocus: true,
         };
       }
       await page.keyboard.press("Escape");
