@@ -2,10 +2,15 @@
 
 import { afterEach, expect, it, vi } from "vitest";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
+import {
+  createApplicationGateway,
+  createApplicationGatewaySnapshot,
+} from "../test-helpers/application-context-fixtures.ts";
 import { restorePropertyDescriptor } from "../test-helpers/property-descriptor.ts";
 import { createStorageMock } from "../test-helpers/storage.ts";
 import { autoPromptNotificationsOnSend } from "./notifications-auto-prompt.ts";
 import {
+  createWebPushCapabilityRuntime,
   getExistingSubscription,
   subscribeToWebPush,
   unsubscribeFromWebPush,
@@ -71,6 +76,40 @@ it("returns no subscription without waiting for an unregistered service worker",
 it("treats a registration without PushManager as unsupported instead of throwing", async () => {
   installServiceWorker(Promise.resolve({} as ServiceWorkerRegistration));
   await expect(getExistingSubscription()).resolves.toBeNull();
+});
+
+it("does not read the browser subscription before notification permission is granted", async () => {
+  vi.stubGlobal("Notification", { permission: "default" });
+  const getSubscription = vi.fn().mockResolvedValue(existingSubscription());
+  installServiceWorker(
+    new Promise<ServiceWorkerRegistration>(() => {}),
+    async () => ({ pushManager: { getSubscription } }) as unknown as ServiceWorkerRegistration,
+  );
+  const { client, request } = gatewayClient();
+  const { gateway } = createApplicationGateway(
+    createApplicationGatewaySnapshot({
+      phase: "connected",
+      client,
+      hello: { auth: { role: "operator", scopes: ["operator.admin"] } },
+    } as unknown as Parameters<typeof createApplicationGatewaySnapshot>[0]),
+  );
+  let read: Promise<unknown> | undefined;
+  let subscription: string | undefined;
+  const runtime = createWebPushCapabilityRuntime({
+    gateway,
+    publish: (patch) => {
+      read ??= patch.read;
+      subscription = patch.subscription ?? subscription;
+    },
+  });
+  try {
+    await Promise.resolve(read).catch(() => undefined);
+    expect(getSubscription).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(subscription).toBe("missing");
+  } finally {
+    runtime.dispose();
+  }
 });
 
 it("still rejects when service worker readiness times out", async () => {
