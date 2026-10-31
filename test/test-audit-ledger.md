@@ -110,5 +110,19 @@ Untouched baseline: 76 tests across seven suites; retained candidate: 73 passed.
 Focused lint and changed test-graph type checks passed. Complete removal-check
 results and landing: [PR #189180](https://github.com/openclaw/openclaw/pull/189180).
 
+Private target-resolution support retirement starts at `187b16c7855`.
+The four-case registrar has no invocation; its SDK facade has been private and
+excluded from packaging since `780bc791470`. Baseline and candidate proof are pending.
+The module and four named-export queries observed zero references at 08:44 UTC:
+public coverage 2,115 complete of 2,527; frozen bundled source `7c99ae1dd41`
+169 complete of 179. Incomplete coverage leaves external reliance unknown.
+
+Further source-only review: 18 reply delivery/lifecycle suites retain 336 declarations
+and need one ordinary tool-output deny proof repair; 24 CLI config/setup suites retain
+209 and need one swallowed-error assertion repaired. Eight provider/search plugins
+(Alibaba, Arcee, Cerebras, GMI, Qianfan, StepFun, Voyage, DuckDuckGo) retain all
+41 declarations after local owner/support/history/routing review. Shared framework
+closure is bounded; no runtime proof claimed for these areas.
+
 Remaining: declaration-level review across remaining core, plugins, UI, native apps,
 root/script suites and shared fixtures; close owner-reading gaps and land subsequent batches.
