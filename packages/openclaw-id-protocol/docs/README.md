@@ -11,6 +11,7 @@ against it. It runs unchanged in Node (>= 24), browsers and Workers: WebCrypto o
 | Document                       | Linear  | What it defines                                                             |
 | ------------------------------ | ------- | --------------------------------------------------------------------------- |
 | [statements.md](statements.md) | OCF-190 | Keys, signed statement envelope, chain and pin verification, rollback rules |
+| [tunnel.md](tunnel.md)         | OCF-189 | `openclaw/tunnel/1` over iroh: framing, limits, close codes, headers        |
 
 Source material: the owner-key spec v0.2 ("OpenClaw ID remote access: owner key and device
 approval protocol", 2026-10-29) and the iroh spike (`tailcat-spike/docs/iroh/`). Spec
@@ -35,7 +36,7 @@ endpoint key held by the tunnel child, sidecar -> tunnel child process, DERP -> 
 ## Layout
 
 ```
-src/            protocol code (statements/ and shared key, JCS and crypto helpers)
+src/            protocol code (statements/, tunnel/, shared key, JCS and crypto helpers)
 src/testing/    deterministic vector builder (exported as ./testing)
 fixtures/v1-draft/  JSON test vectors for other languages and repositories
 docs/           these documents
