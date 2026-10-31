@@ -70,6 +70,8 @@ suite.define(() => {
           await page.getByRole("separator", { name: "Resize side panel" }).press("End");
         } else if (mobile) {
           await page.setViewportSize({ width: 390, height: 900 });
+          await page.locator(".agent-chat__header--mobile").waitFor();
+          await openChatSidePanelType(page, "Files");
         }
         const selector = mobile
           ? '.chat-workspace-mobile__group[role="list"] .chat-workspace-mobile__row'
@@ -362,6 +364,7 @@ suite.define(() => {
       await expect.poll(listRequests).toHaveLength(2);
       await waitForFile("AFTER_RUN.md");
       await page.setViewportSize({ height: 900, width: 640 });
+      await openChatSidePanelType(page, "Files");
       const workspaceRail = page.locator(".chat-workspace-mobile");
       await workspaceRail.waitFor();
       await expect

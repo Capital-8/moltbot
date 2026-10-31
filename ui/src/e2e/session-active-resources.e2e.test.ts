@@ -5,7 +5,7 @@ import type { Page } from "playwright";
 import { expect, it } from "vitest";
 import { DESKTOP_PANEL_TOGGLE_EVENT } from "../components/panel-toggle-contract.ts";
 import type { ChatPageHost } from "../pages/chat/chat-state-host.ts";
-import { selectChatLayoutAction } from "../test-helpers/chat-layout-menu.ts";
+import { openChatPanels, selectChatLayoutAction } from "../test-helpers/chat-layout-menu.ts";
 import { waitForControlUiGatewayReady } from "../test-helpers/control-ui-e2e-readiness.ts";
 import { takeControlUiScreenshotFrame } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import {
@@ -157,6 +157,10 @@ suite.define(() => {
             "desktop.observe": desktop,
           },
         });
+        if (width === 390) {
+          await pane(page).locator(".agent-chat__header--mobile").waitFor();
+          await openChatPanels(pane(page), "mobile");
+        }
         await desktopTab(page).waitFor();
         const observe = await gateway.waitForRequest("desktop.observe");
         expect(observe.params).toEqual({
@@ -172,7 +176,7 @@ suite.define(() => {
         const desktopBox = await pane(page).locator(".desktop-surface").boundingBox();
         expect(desktopBox!.width).toBeLessThanOrEqual(width);
         if (width === 390) {
-          // Mobile discovery opens the panel dock while retaining Chat above it.
+          // Open the discovered panel dock while retaining Chat above it.
           expect(chatBox!.height).toBeGreaterThan(100);
           await pane(page).locator('.chat-mobile-host[data-mode="dock"]').waitFor();
           expect(desktopBox!.width).toBeGreaterThan(width - 32);
@@ -260,6 +264,8 @@ suite.define(() => {
           await gateway.emitGatewayEvent("node.runnerInventory.changed", {
             nodeId: "worker-desktop",
           });
+          await pane(page).locator(".agent-chat__header--mobile").waitFor();
+          await openChatPanels(pane(page), "mobile");
           await desktopTab(page).waitFor();
           await assertNoProvisioning(gateway);
           return;
@@ -564,6 +570,10 @@ suite.define(() => {
           ).toBe(false);
           await page.reload();
           await ready(page);
+          if (width === 390) {
+            await pane(page).locator(".agent-chat__header--mobile").waitFor();
+            await openChatPanels(pane(page), "mobile");
+          }
           await pane(page).locator("openclaw-browser-panel[embedded] .bp").waitFor();
           await pane(page).locator("openclaw-browser-panel .bp-shot").waitFor();
           expect(await panel.count()).toBe(1);

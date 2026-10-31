@@ -33,6 +33,10 @@ it("makes the overview readable before extras and retains visible content throug
         { ...TEST_LINK_READER, linkReader: { ...TEST_LINK_READER.linkReader, progressive: true } },
       ],
       heldMethods: ["forge.detail"],
+      heldRequests: [
+        { method: "forge.detail", match: { section: "checks" } },
+        { method: "forge.detail", match: { section: "discussion" } },
+      ],
     },
     async ({ page, gateway, panel, content, button }) => {
       await panel.locator(".lr-skeleton").waitFor();
@@ -43,9 +47,36 @@ it("makes the overview readable before extras and retains visible content throug
       await gateway.waitForRequest("forge.detail", { match: { section: "discussion" } });
       expect((await gateway.getRequests("forge.detail", { section: "files" })).length).toBe(0);
       expect(await panel.getByText("Loading Checks…", { exact: true }).count()).toBe(1);
+      const initialDocument = await panel.locator(".lr-document").elementHandle();
+      const checksBeforeResize = (await gateway.getRequests("forge.detail", { section: "checks" }))
+        .length;
+      const discussionBeforeResize = (
+        await gateway.getRequests("forge.detail", { section: "discussion" })
+      ).length;
       await page.setViewportSize({ width: 390, height: 844 });
+      await page
+        .locator(".chat-pane-cache__pane--active .agent-chat__header--mobile")
+        .getByRole("button", { name: "Panels", exact: true })
+        .click();
+      await content.waitFor({ state: "visible" });
+      expect(await initialDocument!.evaluate((node) => node.isConnected)).toBe(true);
+      expect(
+        await panel
+          .locator(".lr-document")
+          .evaluate((node, original) => node === original, initialDocument),
+      ).toBe(true);
+      await gateway.waitForRequest("forge.detail", {
+        after: checksBeforeResize,
+        match: { section: "checks" },
+      });
+      await gateway.waitForRequest("forge.detail", {
+        after: discussionBeforeResize,
+        match: { section: "discussion" },
+      });
       expect(await content.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
       await page.setViewportSize({ width: 1280, height: 900 });
+      await content.waitFor({ state: "visible" });
+      expect(await initialDocument!.evaluate((node) => node.isConnected)).toBe(true);
       await gateway.rejectDeferred(
         "forge.detail",
         { code: "UNAVAILABLE", message: "Temporarily unavailable", retryable: true },

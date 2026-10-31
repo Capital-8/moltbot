@@ -317,12 +317,7 @@ suite.define(() => {
         });
         await capture(page, "desktop-process-output", processStop);
         await assertParent();
-        const switchTab = async (label: string) => {
-          await parent
-            .locator(".side-panel__header .tabstrip-tab")
-            .filter({ hasText: label })
-            .click();
-        };
+        const switchTab = (label: string) => openChatSidePanelType(parent, label);
         expect(await parent.locator(".side-panel__header .tabstrip-tab").allTextContents()).toEqual(
           expect.arrayContaining([
             expect.stringContaining("Subagents"),

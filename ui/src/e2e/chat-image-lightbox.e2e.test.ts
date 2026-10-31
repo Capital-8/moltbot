@@ -238,6 +238,7 @@ suite.define(() => {
     await expectFocused(sidebarTrigger);
 
     await page.setViewportSize({ height: 844, width: 390 });
+    await openChatSidePanelType(page, "Files");
     await sidebarTrigger.click();
     await sidebarDialog.waitFor({ state: "visible" });
     await page

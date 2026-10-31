@@ -84,7 +84,19 @@ it("keeps check navigation, refresh, and long content usable in a narrow native 
           .slice(1)
           .every((request) => (request.params as { refresh?: boolean }).refresh === true),
       ).toBe(true);
+      const initialDocument = await panel.locator(".lr-document").elementHandle();
       await page.setViewportSize({ width: 390, height: 844 });
+      await page
+        .locator(".chat-pane-cache__pane--active .agent-chat__header--mobile")
+        .getByRole("button", { name: "Panels", exact: true })
+        .click();
+      await content.waitFor({ state: "visible" });
+      expect(await initialDocument!.evaluate((node) => node.isConnected)).toBe(true);
+      expect(
+        await panel
+          .locator(".lr-document")
+          .evaluate((node, original) => node === original, initialDocument),
+      ).toBe(true);
       await button("Files 1").click();
       expect(await content.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
       const mobileNav = await panel.locator(".lr-section-nav").evaluate((node) => ({
