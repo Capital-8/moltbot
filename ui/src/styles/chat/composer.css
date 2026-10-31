@@ -3322,9 +3322,6 @@ html[dir="rtl"] .chat-attachments-preview .chat-attachment-loading__line > span 
 }
 
 .chat-controls__effort-zap--ultrafast {
-  --icon-secondary: color-mix(in oklab, var(--accent) 75%, white);
-  --icon-primary: var(--accent);
-
   width: 16px;
   height: 18px;
   flex-basis: 16px;
@@ -3872,16 +3869,6 @@ html[dir="rtl"] .chat-attachments-preview .chat-attachment-loading__line > span 
   margin: 0;
 }
 
-.agent-chat__hint kbd {
-  display: inline-block;
-  padding: 1px 6px;
-  font-size: 12px;
-  font-family: var(--mono);
-  background: var(--panel-strong);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
 .agent-chat__suggestions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3982,8 +3969,10 @@ html[dir="rtl"] .chat-attachments-preview .chat-attachment-loading__line > span 
   stroke: currentColor;
 }
 
+/* Reset the muted overrides so zapDouble uses its own accent colors. */
 .chat-controls__speed-option[aria-checked="true"] .chat-controls__speed-option-icon {
-  --icon-secondary: color-mix(in oklab, var(--accent) 75%, white);
+  --icon-primary: initial;
+  --icon-secondary: initial;
   color: var(--accent);
 }
 

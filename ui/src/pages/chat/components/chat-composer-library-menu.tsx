@@ -1,5 +1,5 @@
 import { Icon } from "../../../components/solid/icon.tsx";
-import type { MenuEntry, MenuItem } from "../../../components/solid/menu.tsx";
+import type { MenuItem } from "../../../components/solid/menu.tsx";
 import { registerChatComposerMenuEnglish } from "../../../i18n/locales/en-chat-composer-menu.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import type { ChatComposerPlusMenuView } from "../composer-capability-types.ts";
@@ -7,7 +7,6 @@ import type { ComposerLibraryProps } from "../composer-library-session.ts";
 import {
   menuChevron,
   menuDivider,
-  menuSection,
   renderBackRow,
   renderCapabilityMenuState,
   skillIcon,
@@ -16,24 +15,6 @@ import {
 registerEnglishCatalog(registerChatComposerMenuEnglish);
 
 type LibraryMenuEntry = MenuItem | ReturnType<typeof renderCapabilityMenuState>;
-
-export function composerLibraryRows(
-  library: ComposerLibraryProps | undefined,
-  query: string,
-): MenuEntry[] {
-  const items = composerLibraryMenuItems(library).filter(
-    (entry) => entry.kind === "content" || entry.label.toLocaleLowerCase().includes(query),
-  );
-  return items.length
-    ? [
-        {
-          kind: "group",
-          id: "library-skills",
-          items: [menuSection("library-heading", t("chat.composer.menu.fromLibraries")), ...items],
-        },
-      ]
-    : [];
-}
 
 function libraryStatus(library: ComposerLibraryProps): LibraryMenuEntry[] {
   if (library.error) {
