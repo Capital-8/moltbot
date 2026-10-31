@@ -391,8 +391,10 @@ export function controlUiStableChunkName(id: string): string | undefined {
       // Parser extensions and sanitization are shared by non-Chat documents.
       return "markdown-runtime";
     case "ui/src/components/markdown-live.ts":
+    case "ui/src/components/markdown-full.ts":
     case "ui/src/components/markdown-streaming.ts":
     case "ui/src/components/markdown-tokens.ts":
+      // Exact source ownership and streaming share the deferred parser closure.
       return "markdown-streaming-runtime";
     case "ui/src/styles/session-panel-rail.css":
       // Keep normal rail CSS in Chat; other panels import its neutral inline text.
