@@ -20,7 +20,10 @@ it.each([false, true])(
   "defers row resizes without reflecting live geometry (streaming=%s)",
   async (streaming) => {
     const frame = stubAnimationFrames();
-    const rows = contentRows(1).map((row) => ({ ...row, streaming }));
+    const rows = contentRows(1);
+    for (const row of rows) {
+      row.streaming = streaming;
+    }
     const onViewportResize = vi.fn();
     const transcript = createChatTranscript(() => "resize-delivery", { onViewportResize });
     const { container, renderRows } = await mountTestTranscript(
@@ -50,7 +53,7 @@ it.each([false, true])(
     );
     if (streaming) {
       expect(row.style.contentVisibility).toBe("visible");
-      renderRows(rows.map((item) => ({ ...item, streaming: false })));
+      renderRows(rows.map((item) => Object.assign({}, item, { streaming: false })));
       await flushDeferredRowPrune();
       expect(row.style.getPropertyValue("contain-intrinsic-block-size")).toBe("180px");
     }
