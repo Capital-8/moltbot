@@ -169,10 +169,7 @@ export function createSessionRowDescriptionReader(owner: {
         }
         row = owner.describeArchived(row);
       }
-      if (captured && !owner.isCurrent(captured)) {
-        return undefined;
-      }
-      if (!records.ready(row)) {
+      if ((captured && !owner.isCurrent(captured)) || !records.ready(row)) {
         return undefined;
       }
       owner.preparePresentation(row);
