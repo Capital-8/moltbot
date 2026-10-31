@@ -4,16 +4,24 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import {
+  captureRetainedNativeWorkerSource,
+  closeDefaultRetainedNativeWorkerSource,
+} from "../infra/worker-native-lifecycle.js";
 import { withMockedPlatform } from "../test-utils/vitest-spies.js";
 import * as jitiFactory from "./jiti-factory.js";
 import { createPluginCaptureResolver } from "./plugin-capture-resolution.js";
 import { capturePluginGenerationArtifact } from "./plugin-generation-artifact.js";
 import { captureResources } from "./plugin-generation-capture.test-support.js";
 import { withPluginGenerationSourceCustody } from "./plugin-generation-source-lookup.js";
+import { preparePluginGenerationArtifact } from "./plugin-generation-worker.js";
 import { writeArtifacts as writeTree } from "./public-surface.test-support.js";
 
 const temp = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await closeDefaultRetainedNativeWorkerSource();
+});
 
 const silenceWarnings = () => vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
 
@@ -63,16 +71,49 @@ it.each([false, true])(
       resolutionErrors += Error.stackTraceLimit === Infinity ? 1 : 0;
       captureStack(target, constructor);
     });
+    const workerCounts = new Int32Array(new SharedArrayBuffer(8));
+    const nativeSource = captureRetainedNativeWorkerSource({ runtimeGeneration: undefined });
+    const create = nativeSource.create.bind(nativeSource);
+    if (custody) {
+      vi.spyOn(nativeSource, "create").mockImplementation((filename, options = {}, ...rest) =>
+        create(
+          new URL("./doctor-capture-probe.test-support.ts", import.meta.url),
+          {
+            ...options,
+            workerData: {
+              ...options.workerData,
+              doctorCaptureWorkerUrl: String(filename),
+              doctorResolutionCounts: workerCounts,
+            },
+          },
+          ...rest,
+        ),
+      );
+    }
     const capture = async () => {
       await using resources = captureResources();
-      const artifact = resources.keep(capturePluginGenerationArtifact(root, entry, (run) => run()));
+      const artifact = resources.keep(
+        custody
+          ? (
+              await preparePluginGenerationArtifact({
+                rootDir: root,
+                source: entry,
+                standalone: true,
+              })
+            ).artifact
+          : capturePluginGenerationArtifact(root, entry, (run) => run()),
+      );
       for (let index = 0; index < 25; index++) {
         expect(
           fs.readFileSync(artifact.resolve(path.join(root, `part-${index}/value.ts`)), "utf8"),
         ).toBe(`export const value = ${index};`);
       }
-      expect.soft(createResolver.mock.calls.length).toBeLessThanOrEqual(custody ? 3 : 1);
-      expect(resolutionErrors).toBe(0);
+      const resolverCount = custody
+        ? Atomics.load(workerCounts, 0)
+        : createResolver.mock.calls.length;
+      expect(resolverCount).toBeGreaterThan(0);
+      expect.soft(resolverCount).toBeLessThanOrEqual(custody ? 3 : 1);
+      expect(resolutionErrors + Atomics.load(workerCounts, 1)).toBe(0);
     };
     await (custody ? withPluginGenerationSourceCustody(capture) : capture());
   },
