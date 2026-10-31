@@ -14,6 +14,7 @@ import { isHostLocalMarkdownFileHref } from "./markdown-file-links.ts";
 import {
   prepareMarkdownHumanMentions,
   restoreMarkdownHumanMentions,
+  type MarkdownCodeSpanReader,
 } from "./markdown-human-mentions.ts";
 import type { MarkdownJson } from "./markdown-json.ts";
 import { createMarkdownParser } from "./markdown-parser.ts";
@@ -202,9 +203,10 @@ export function toSanitizedJsonHtml(json: MarkdownJson, options: MarkdownRenderO
     .replaceAll("\r", "&#13;");
 }
 
-export function toSanitizedMarkdownHtml(
+export function renderMarkdownHtml(
   markdownLocal: string,
   options: MarkdownRenderOptions = {},
+  readCodeSpans?: MarkdownCodeSpanReader,
 ): string {
   const renderOptions = normalizeMarkdownRenderOptions(options);
   const prepared =
@@ -213,6 +215,7 @@ export function toSanitizedMarkdownHtml(
           markdownLocal,
           renderOptions.humanMentions,
           markdownParser.utils.normalizeReference,
+          readCodeSpans,
         )
       : { source: markdownLocal, tokens: [] };
   renderOptions.humanMentionTokens = prepared.tokens;

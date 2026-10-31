@@ -16,7 +16,7 @@ import {
 } from "solid-js";
 import type { AgentsListResult } from "../api/types.ts";
 import type { ApplicationGateway } from "../app/gateway.ts";
-import { toSanitizedMarkdownHtml } from "../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../components/markdown-render.ts";
 import { SessionProgressCard } from "../components/session-progress-card-solid.tsx";
 import { AgentAvatar } from "../components/solid/agent-avatar.tsx";
 import { Icon } from "../components/solid/icon.tsx";

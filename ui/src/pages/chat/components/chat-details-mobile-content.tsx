@@ -1,5 +1,5 @@
 import { Match, Show, Switch, createMemo, isPending, lazy, onSettled } from "solid-js";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../../components/markdown-render.ts";
 import { StepMarker } from "../../../components/session-progress-card-content.tsx";
 import {
   progressCardNoteSummary,

@@ -1,9 +1,9 @@
 import { expect, it, vi } from "vitest";
 import { shortestFileLabels } from "./file-kind.ts";
 import { markdownFileLinkFromEvent } from "./markdown-file-links.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import type { MarkdownRenderOptions } from "./markdown-render-options.ts";
 import { htmlFragment } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 const render = (source: string, options: MarkdownRenderOptions = { fileLinks: true }) =>
   htmlFragment(toSanitizedMarkdownHtml(source, options));

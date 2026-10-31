@@ -1,7 +1,7 @@
 import { createMemo, onSettled, Show } from "solid-js";
 import { i18nRevision } from "../lib/reactive/i18n.ts";
 import { createMarkdownRef } from "./markdown-dom-ref.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "./markdown-render.ts";
 import { promoteFirstProgressBar } from "./session-progress-card.ts";
 
 export function ProgressCardMarkdown(props: {

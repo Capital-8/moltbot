@@ -8,12 +8,12 @@ import { waitForSolid } from "../test-helpers/solid-settle.ts";
 import { LinkReaderMarkdown } from "./link-reader-markdown.tsx";
 import { handleMarkdownCodeBlockClick } from "./markdown-code-blocks.ts";
 import { createMarkdownRef } from "./markdown-dom-ref.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { parseMarkdownJson } from "./markdown-json.ts";
 import { toStreamingMarkdownDomParts } from "./markdown-live.ts";
 import type { MarkdownRenderOptions } from "./markdown-render-options.ts";
 import corpus from "./markdown-transcript-corpus.json" with { type: "json" };
 import { toStreamingMarkdownParts } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 import { MarkdownHtml } from "./solid/markdown-html.tsx";
 import { SanitizedHtml } from "./solid/sanitized-html.tsx";
 

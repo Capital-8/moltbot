@@ -1,6 +1,6 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { For, Show, createMemo } from "solid-js";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../../components/markdown-render.ts";
 import { AgentIdentityAvatar } from "../../../components/solid/identity-avatar.tsx";
 import { registerChatComposerEnglish } from "../../../i18n/locales/en-chat-composer.ts";
 import { registerChatSessionEnglish } from "../../../i18n/locales/en-chat-session.ts";

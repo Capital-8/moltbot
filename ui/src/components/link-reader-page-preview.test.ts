@@ -19,7 +19,7 @@ function linkHovercardUrl(anchor: HTMLAnchorElement) {
   return target && !target.reader ? new URL(target.href) : null;
 }
 import { prefetchLinkReader } from "./link-reader-prefetch-request.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { installTitleTooltips } from "./tooltip-title.ts";
 
 if (!customElements.get(LINK_HOVERCARD_TAG)) {

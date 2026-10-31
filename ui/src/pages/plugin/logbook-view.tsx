@@ -11,7 +11,7 @@ import {
   Show,
 } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
-import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../components/markdown-render.ts";
 import { Icon } from "../../components/solid/icon.tsx";
 import { SanitizedHtml } from "../../components/solid/sanitized-html.tsx";
 import { i18n } from "../../i18n/index.ts";

@@ -1,22 +1,49 @@
 import type { HumanMention } from "@openclaw/gateway-protocol";
 import type { MarkdownIt, Token } from "markdown-it";
-import { findMarkdownCodeSpans } from "../../../packages/markdown-core/src/markdown-code-regions.js";
 import { escapeHtml } from "../../../src/shared/html-escape.js";
 import { readHumanMentions } from "../lib/chat/human-mentions.ts";
-import type { MarkdownHumanMentionToken, MarkdownRenderEnv } from "./markdown-render-options.ts";
+import {
+  MARKDOWN_PARSE_LIMIT,
+  type MarkdownHumanMentionToken,
+  type MarkdownRenderEnv,
+  type MarkdownRenderOptions,
+} from "./markdown-render-options.ts";
+
+export type MarkdownCodeSpanReader = (source: string) => Array<[number, number]>;
+
+/** Only a selected backtick can remove or replace an enclosing code delimiter. */
+export function markdownNeedsCodeOwnership(
+  source: string,
+  options: MarkdownRenderOptions,
+): boolean {
+  return (
+    (options.mode === "document" || source.length <= MARKDOWN_PARSE_LIMIT) &&
+    (readHumanMentions(source, options.humanMentions)?.some((mention) =>
+      source.slice(mention.start, mention.end).includes("`"),
+    ) ??
+      false)
+  );
+}
 
 /** Protect selected labels before Markdown/line-ending normalization changes source offsets. */
 export function prepareMarkdownHumanMentions(
   source: string,
   value: readonly HumanMention[],
   normalizeReference: (label: string) => string,
+  readCodeSpans?: MarkdownCodeSpanReader,
 ) {
   const mentions = readHumanMentions(source, value);
   const tokens: MarkdownHumanMentionToken[] = [];
   if (!mentions) {
     return { source, tokens };
   }
-  const code = findMarkdownCodeSpans(source);
+  const needsCodeOwnership = mentions.some((mention) =>
+    source.slice(mention.start, mention.end).includes("`"),
+  );
+  if (needsCodeOwnership && !readCodeSpans) {
+    throw new Error("Selected code delimiters require the full Markdown renderer");
+  }
+  const code = needsCodeOwnership ? (readCodeSpans?.(source) ?? []) : [];
   const referenceSource = normalizeReference(source);
   let serial = 0;
   let prefix: string;
@@ -26,7 +53,8 @@ export function prepareMarkdownHumanMentions(
   let cursor = 0;
   let masked = "";
   for (const mention of mentions) {
-    // Code enclosing a selection stays code; delimiters inside the selected name are literal.
+    // Ordinary names cannot change code delimiters; native tokens restore them as code.
+    // Selections containing delimiters need the canonical original-source ownership.
     if (
       code.some(
         ([start, end]) =>

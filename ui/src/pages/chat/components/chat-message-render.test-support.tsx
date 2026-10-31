@@ -1,9 +1,10 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { For, Show } from "solid-js";
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { findMarkdownCodeSpans } from "../../../../../packages/markdown-core/src/markdown-code-regions.js";
 import { loadStreamingMarkdown } from "../../../components/markdown-live-loader.ts";
 import * as markdownLive from "../../../components/markdown-live.ts";
-import * as markdown from "../../../components/markdown.ts";
+import * as markdown from "../../../components/markdown-render.ts";
 import type { MessageGroup } from "../../../lib/chat/chat-types.ts";
 import { setAvatarGatewayOrigin } from "../../../lib/identity-avatar-context.ts";
 import { mountSolid } from "../../../test-helpers/solid-render.tsx";
@@ -33,11 +34,13 @@ export function createChatMessageHarness() {
 
   const mediaSubscribers = new Set<object>();
 
-  const renderMarkdownHtml = markdown.toSanitizedMarkdownHtml;
+  const renderMarkdown = markdown.renderMarkdownHtml;
+  const renderMarkdownHtml: typeof renderMarkdown = (source, options) =>
+    renderMarkdown(source, options, findMarkdownCodeSpans);
 
   const renderStreamingMarkdown = markdownLive.toStreamingMarkdownDomParts;
 
-  const markdownRenderMock = vi.fn<typeof markdown.toSanitizedMarkdownHtml>((value) => value);
+  const markdownRenderMock = vi.fn<typeof markdown.renderMarkdownHtml>((value) => value);
 
   const streamingMarkdownRenderMock = vi.fn<typeof markdownLive.toStreamingMarkdownDomParts>(
     (value) => ["", `<div class="streaming-markdown">${value}</div>`],
@@ -51,7 +54,7 @@ export function createChatMessageHarness() {
   beforeEach(async () => {
     await loadStreamingMarkdown();
     view = document.createElement("div");
-    vi.spyOn(markdown, "toSanitizedMarkdownHtml").mockImplementation(markdownRenderMock);
+    vi.spyOn(markdown, "renderMarkdownHtml").mockImplementation(markdownRenderMock);
     vi.spyOn(markdownLive, "toStreamingMarkdownDomParts").mockImplementation(
       streamingMarkdownRenderMock,
     );

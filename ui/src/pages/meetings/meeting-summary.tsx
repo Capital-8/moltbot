@@ -1,7 +1,7 @@
 import type { TranscriptsGetResult } from "@openclaw/gateway-protocol";
 import MarkdownIt from "markdown-it";
 import { Errored, Loading, Show } from "solid-js";
-import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../components/markdown-render.ts";
 import { SanitizedHtml } from "../../components/solid/sanitized-html.tsx";
 import { formatUiError } from "../../lib/format-error.ts";
 import { t } from "../../lib/reactive/i18n.ts";

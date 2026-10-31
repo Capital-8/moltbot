@@ -11,7 +11,7 @@ ui/src/components/markdown-blocks-owner.ts	7
 ui/src/components/markdown-code-blocks.ts	3
 ui/src/components/markdown-mermaid.tsx	3
 ui/src/components/markdown-tables.ts	10
-ui/src/components/markdown.ts	1
+ui/src/components/markdown-render.ts	1
 ui/src/components/session-progress-card-view.tsx	1
 ui/src/components/session-progress-card.ts	1
 ui/src/lib/chat/pasted-text-excerpt.ts	2

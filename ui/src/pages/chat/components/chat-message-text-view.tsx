@@ -14,10 +14,11 @@ import {
   createMarkdownRef,
   type MarkdownContentValue,
 } from "../../../components/markdown-dom-ref.ts";
+import { loadFullMarkdown } from "../../../components/markdown-full-loader.ts";
 import type { MarkdownJson } from "../../../components/markdown-json.ts";
 import { loadStreamingMarkdown } from "../../../components/markdown-live-loader.ts";
 import type { MarkdownRenderOptions } from "../../../components/markdown-render-options.ts";
-import { partitionMarkdownHtml, toSanitizedJsonHtml } from "../../../components/markdown.ts";
+import { partitionMarkdownHtml, toSanitizedJsonHtml } from "../../../components/markdown-render.ts";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { registerChatMessageMetadataEnglish } from "../../../i18n/locales/en-chat-message-metadata.ts";
 import type { MarkdownContent as PreparedMarkdownContent } from "../../../lib/markdown-content.ts";
@@ -32,6 +33,7 @@ import type { MarkdownMedia } from "./chat-message-media-markdown.ts";
 import { messageOverflowRef, shouldCollapseUserMessage } from "./chat-message-overflow.ts";
 import {
   type MessageTextOptions,
+  messageMarkdownNeedsCodeOwnership,
   prepareMessageMarkdown,
 } from "./chat-message-text-preparation.ts";
 import { ChatRowDisplayContext } from "./chat-row-display-context.ts";
@@ -78,6 +80,11 @@ export type MessageMarkdownProps = {
 };
 
 export function MessageMarkdown(props: MessageMarkdownProps) {
+  const fullMarkdown = createMemo(() =>
+    messageMarkdownNeedsCodeOwnership(props.markdown, props.options, props.markdownOptions)
+      ? (loadFullMarkdown.peek() ?? loadFullMarkdown())
+      : undefined,
+  );
   const streaming = createMemo(
     () =>
       props.options.isStreaming
@@ -93,6 +100,7 @@ export function MessageMarkdown(props: MessageMarkdownProps) {
       props.markdownOptions,
       latest(streaming)?.toStreamingMarkdownDomParts,
       props.options.isStreaming && !latest(streaming),
+      fullMarkdown()?.toSanitizedMarkdownHtml,
     ),
   );
   return (

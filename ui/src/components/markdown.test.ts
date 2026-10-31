@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { i18n } from "../i18n/index.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import type { MarkdownRenderOptions } from "./markdown-render-options.ts";
 import { htmlFragment, withControlUiBasePath } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 function render(source: string, options?: MarkdownRenderOptions) {
   return htmlFragment(toSanitizedMarkdownHtml(source, options));

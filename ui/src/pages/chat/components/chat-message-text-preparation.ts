@@ -1,9 +1,10 @@
+import { markdownNeedsCodeOwnership } from "../../../components/markdown-human-mentions.ts";
 import type { toStreamingMarkdownDomParts } from "../../../components/markdown-live.ts";
 import {
   MARKDOWN_PARSE_LIMIT,
   type MarkdownRenderOptions,
 } from "../../../components/markdown-render-options.ts";
-import { partitionMarkdownHtml, toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { partitionMarkdownHtml, renderMarkdownHtml } from "../../../components/markdown-render.ts";
 import { markdownContentHtml, type MarkdownContent } from "../../../lib/markdown-content.ts";
 import type { LinkFaviconFetcher } from "../link-favicon-cache.ts";
 
@@ -25,13 +26,10 @@ export type AssistantMessageDisclosure = {
   onRetryFullMessage?: () => void;
 };
 
-export function prepareMessageMarkdown(
+function messageMarkdownInput(
   markdown: string,
-  messageKey: string,
   opts: MessageTextOptions,
   markdownRenderOptions: MarkdownRenderOptions,
-  renderStreaming?: typeof toStreamingMarkdownDomParts,
-  mutableStreaming = false,
 ) {
   const disclosure = opts.assistantMessageDisclosure;
   const isAssistant = opts.role === "assistant";
@@ -42,12 +40,38 @@ export function prepareMessageMarkdown(
   const options: MarkdownRenderOptions = recovered
     ? { ...markdownRenderOptions, mode: "document" }
     : markdownRenderOptions;
+  return { source, options, isAssistant, recovered, recoverFullMessage };
+}
+
+export function messageMarkdownNeedsCodeOwnership(
+  markdown: string,
+  opts: MessageTextOptions,
+  markdownRenderOptions: MarkdownRenderOptions,
+): boolean {
+  const { source, options } = messageMarkdownInput(markdown, opts, markdownRenderOptions);
+  return markdownNeedsCodeOwnership(source, options);
+}
+
+export function prepareMessageMarkdown(
+  markdown: string,
+  messageKey: string,
+  opts: MessageTextOptions,
+  markdownRenderOptions: MarkdownRenderOptions,
+  renderStreaming?: typeof toStreamingMarkdownDomParts,
+  mutableStreaming = false,
+  renderMarkdown: (source: string, options: MarkdownRenderOptions) => string = renderMarkdownHtml,
+) {
+  const { source, options, isAssistant, recovered, recoverFullMessage } = messageMarkdownInput(
+    markdown,
+    opts,
+    markdownRenderOptions,
+  );
   const streaming = opts.isStreaming;
   const prepare = () => {
     let parts: [MarkdownContent, MarkdownContent] =
       streaming && renderStreaming
         ? renderStreaming(source, options, isAssistant ? messageKey : undefined)
-        : partitionMarkdownHtml(toSanitizedMarkdownHtml(source, options), messageKey);
+        : partitionMarkdownHtml(renderMarkdown(source, options), messageKey);
     if (mutableStreaming) {
       parts = ["", markdownContentHtml(parts[0]) + markdownContentHtml(parts[1])];
     }

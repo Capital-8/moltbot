@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { htmlFragment } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 describe("CJK-friendly Markdown", () => {
   it.each([{ markdown: "**「先端の記述子」**のが重要", strong: "「先端の記述子」" }])(

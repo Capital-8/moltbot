@@ -3,7 +3,7 @@ import { createMemo, createUniqueId, onSettled, Show } from "solid-js";
 import { i18nRevision, t } from "../lib/reactive/i18n.ts";
 import type { SessionProgressCardRuntime } from "../lib/session-progress-runtime.ts";
 import { animateDetailsSection, DETAILS_SECTION_MOTION } from "./details-section-motion.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "./markdown-render.ts";
 import {
   CardActivity,
   ProgressRuntime,

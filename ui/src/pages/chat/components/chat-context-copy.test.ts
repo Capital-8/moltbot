@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { createComponent, createSignal, flush } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { toSanitizedMarkdownHtml } from "../../../components/markdown-full.ts";
 import { cleanupSolid, mountSolid } from "../../../test-helpers/mount-solid.ts";
 import { AttachmentStateCard, CompactAttachmentCard } from "./chat-attachment-card-solid.tsx";
 import type { AttachmentCardHeaderOptions } from "./chat-attachment-card.ts";

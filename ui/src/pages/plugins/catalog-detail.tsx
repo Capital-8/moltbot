@@ -1,7 +1,7 @@
 import type { JSX } from "@solidjs/web";
 import { createMemo, Errored, Loading, Show } from "solid-js";
 import { handleMarkdownCodeBlockClick } from "../../components/markdown-code-blocks.ts";
-import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../components/markdown-render.ts";
 import { SanitizedHtml } from "../../components/solid/sanitized-html.tsx";
 import { SettingsPage } from "../../components/solid/settings-ui.tsx";
 import { formatUiError, formatUiExternalText } from "../../lib/format-error.ts";

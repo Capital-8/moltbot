@@ -17,7 +17,7 @@ import {
   markdownFileLinkFromKeyboardEvent,
   type MarkdownFileLinkTarget,
 } from "../../../components/markdown-file-links.ts";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../../components/markdown-render.ts";
 import { CopyButton } from "../../../components/solid/copy-button.tsx";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { createTextOverflow } from "../../../components/solid/text-overflow.ts";

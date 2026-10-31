@@ -2,10 +2,10 @@ import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { i18n } from "../i18n/index.ts";
 import { waitForSolid } from "../test-helpers/solid-settle.ts";
 import * as markdownDetails from "./markdown-details.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { splitStableStreamingMarkdown } from "./markdown-streaming.ts";
 import * as markdownText from "./markdown-text.ts";
 import { htmlFragment, toStreamingMarkdownParts } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 const sanitizedInputLengths = vi.hoisted(() => {
   // Cached markdown sanitizers must be created through this file's factory wrapper.

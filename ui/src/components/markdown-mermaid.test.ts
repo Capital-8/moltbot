@@ -5,8 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { copyToClipboard } from "../lib/clipboard.ts";
 import { waitForSolid } from "../test-helpers/solid-settle.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { mountMermaidBlocks } from "./markdown-mermaid.tsx";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 vi.mock("@openclaw/mermaid-renderer", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@openclaw/mermaid-renderer")>()),

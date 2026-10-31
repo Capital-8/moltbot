@@ -14,7 +14,7 @@ import {
   useContext,
 } from "solid-js";
 import { readMessageWorkContext } from "../../../../../src/chat/work-context.js";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../../components/markdown-render.ts";
 import { registerChatComposerEnglish } from "../../../i18n/locales/en-chat-composer.ts";
 import { registerChatMessageMetadataEnglish } from "../../../i18n/locales/en-chat-message-metadata.ts";
 import { registerChatSessionEnglish } from "../../../i18n/locales/en-chat-session.ts";

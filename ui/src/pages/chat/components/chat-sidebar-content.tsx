@@ -11,12 +11,12 @@ import {
   markdownFileLinkFromKeyboardEvent,
   type MarkdownFileLinkTarget,
 } from "../../../components/markdown-file-links.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../../components/markdown-render.ts";
 import {
   markdownSessionLinkFromEvent,
   markdownSessionLinkFromKeyboardEvent,
   type SessionLinkTarget,
 } from "../../../components/markdown-session-links.ts";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
 import { CopyButton } from "../../../components/solid/copy-button.tsx";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { LazyViewError } from "../../../components/solid/lazy-view-error.tsx";

@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import * as markdown from "../../../components/markdown.ts";
+import * as markdown from "../../../components/markdown-render.ts";
 import { mountSolid } from "../../../test-helpers/solid-render.tsx";
 import { waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { MessageGroup } from "./chat-message-group-view.tsx";
@@ -18,7 +18,7 @@ let mounted: ReturnType<typeof mountSolid> | undefined;
 beforeEach(() => {
   mounted = undefined;
   view = document.body.appendChild(document.createElement("div"));
-  vi.spyOn(markdown, "toSanitizedMarkdownHtml").mockImplementation((value) => value);
+  vi.spyOn(markdown, "renderMarkdownHtml").mockImplementation((value) => value);
 });
 
 afterEach(() => {

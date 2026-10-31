@@ -4,9 +4,9 @@ import type { ChatRowDisplayFacts } from "../lib/chat/row-display-facts.ts";
 import { mountSolid } from "../test-helpers/mount-solid.ts";
 import { renderSolidRef } from "../test-helpers/render-solid-ref.ts";
 import { createMarkdownRef } from "./markdown-dom-ref.ts";
+import { partitionMarkdownHtml, toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { updateLinkReaderDisplay } from "./markdown-link-display.ts";
 import { toStreamingMarkdownDomParts } from "./markdown-live.ts";
-import { partitionMarkdownHtml, toSanitizedMarkdownHtml } from "./markdown.ts";
 
 it("publishes only differing PR facts and excludes query-bearing URLs from the cache", () => {
   const pr = "https://github.com/example/project/pull/42";

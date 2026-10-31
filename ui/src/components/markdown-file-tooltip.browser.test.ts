@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import "../lib/toast-host.tsx";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { installTitleTooltips } from "./tooltip-title.ts";
 import "../styles/base.css";
 import "../styles/chat/text.css";

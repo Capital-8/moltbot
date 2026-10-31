@@ -12,10 +12,10 @@ import {
   splitCodeHighlightHtml,
   type CodeHighlightRequest,
 } from "./markdown-code-highlight-chunks.ts";
+import { toSanitizedJsonHtml, toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { parseMarkdownJson } from "./markdown-json.ts";
 import type { MarkdownRenderOptions } from "./markdown-render-options.ts";
 import { htmlFragment, toStreamingMarkdownParts } from "./markdown.test-support.ts";
-import { toSanitizedJsonHtml, toSanitizedMarkdownHtml } from "./markdown.ts";
 
 function render(source: string, options?: MarkdownRenderOptions) {
   return interactiveHtml(toSanitizedMarkdownHtml(source, options));

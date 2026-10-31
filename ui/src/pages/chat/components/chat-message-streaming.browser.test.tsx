@@ -7,10 +7,10 @@ import {
   readMarkdownCodeBlockCopyText,
 } from "../../../components/markdown-code-blocks.ts";
 import { markdownBlocksRef } from "../../../components/markdown-element-refs-solid.ts";
+import { toSanitizedMarkdownHtml } from "../../../components/markdown-full.ts";
 import { loadStreamingMarkdown } from "../../../components/markdown-live-loader.ts";
 import type { MarkdownRenderOptions } from "../../../components/markdown-render-options.ts";
 import { releaseMarkdownTables } from "../../../components/markdown-tables.ts";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
 import { ContentPresentation } from "../../../lib/solid/presentation.ts";
 import { restorePropertyDescriptor } from "../../../test-helpers/property-descriptor.ts";
 import { renderSolidRef } from "../../../test-helpers/render-solid-ref.ts";

@@ -1,7 +1,7 @@
 import { createMemo, For, onSettled } from "solid-js";
 import { cronRunEntryMatchesLink } from "../../../../src/cron/run-link.js";
 import type { CronRunLogEntry, CronDeliveryStatus, CronRunsStatusValue } from "../../api/types.ts";
-import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../components/markdown-render.ts";
 import { Icon } from "../../components/solid/icon.tsx";
 import { Menu } from "../../components/solid/menu.tsx";
 import { SanitizedHtml } from "../../components/solid/sanitized-html.tsx";

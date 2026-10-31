@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ApplicationContext } from "../app/context.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import type { MarkdownRenderOptions } from "./markdown-render-options.ts";
 import {
   markdownSessionLinkFromEvent,
@@ -7,7 +8,6 @@ import {
   navigateMarkdownSession,
 } from "./markdown-session-links.ts";
 import { htmlFragment, toStreamingMarkdownParts } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 import { SessionLinkTitler } from "./session-link-titling.ts";
 
 const repoUrl = "https://github.com/openclaw/openclaw";
@@ -485,6 +485,16 @@ describe("selected human mention rendering", () => {
       expect(rendered).not.toContain("openclawhumanmention");
       expect(rendered).toContain("@Ada");
     });
+
+    it.each(["Before `@Ada` tail", "Intro\r\n> `@Ada` tail"])(
+      "keeps original-source code ownership when a selected name crosses a delimiter: %s",
+      (source) => {
+        const fragment = renderMentions(source, [selected(source, "@Ada` tail")]);
+        expect(person(fragment)).toBeNull();
+        expect(fragment.querySelector("code")?.textContent).toBe("@Ada");
+        expect(fragment.textContent).toContain("@Ada tail");
+      },
+    );
 
     it.each([
       [

@@ -66,6 +66,8 @@ export const uiIsolatedTestFiles = [
   "ui/src/pages/chat/components/chat-annotation-lazy.test.ts",
   // The cold widget placeholder proof holds the renderer import.
   "ui/src/pages/chat/components/chat-message-deferred.test.tsx",
+  // Holds exact Markdown ownership until the first selected-name render.
+  "ui/src/pages/chat/components/chat-message-code-ownership.test.tsx",
   // Holds the rich-message import before first use by any other transcript suite.
   "ui/src/pages/chat/components/chat-rich-message-lazy.test.tsx",
   "ui/src/pages/chat/components/chat-transcript-controller.test.ts",

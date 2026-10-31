@@ -153,7 +153,7 @@ const DOM_ISLANDS = new Set([
   "ui/src/components/markdown-code-blocks.ts",
   "ui/src/components/markdown-mermaid.tsx",
   "ui/src/components/markdown-tables.ts",
-  "ui/src/components/markdown.ts",
+  "ui/src/components/markdown-render.ts",
   "ui/src/components/session-progress-card.ts", // parsed progress HTML
   "ui/src/components/session-progress-card-view.tsx", // rendered progress HTML
   "ui/src/components/desktop/desktop-client.ts", // noVNC canvas

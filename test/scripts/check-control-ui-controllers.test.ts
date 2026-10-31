@@ -155,7 +155,7 @@ describe("Control UI controller guard", () => {
 
   it.each([
     ["untrack", "ui/src/view.ts", "untrack(read);"],
-    ["querySelector", "ui/src/components/markdown.ts", "root.querySelectorAll('a');"],
+    ["querySelector", "ui/src/components/markdown-render.ts", "root.querySelectorAll('a');"],
   ])("ratchets %s allowances and prunes resolved debt", (pattern, file, source) => {
     const root = fixture();
     write(root, file, source);

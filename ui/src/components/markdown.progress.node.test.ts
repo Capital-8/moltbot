@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { stripProgressCardRawContentBlocks } from "./markdown-raw-content.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 describe("progress-card markdown", () => {
   it("allows only progress markup when explicitly enabled", () => {

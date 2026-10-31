@@ -10,7 +10,7 @@ import { createPendingFocus } from "../lib/reactive/pending-focus.ts";
 import { createScrollPosition } from "../lib/reactive/scroll-state.ts";
 import { defineSolidBridge, type SolidBridgeElement } from "../lib/solid-bridge.ts";
 import { type FileKind, fileKindForPath } from "./file-kind.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "./markdown-render.ts";
 import { CopyButton } from "./solid/copy-button.tsx";
 import { Icon, type IconName } from "./solid/icon.tsx";
 import { Kbd } from "./solid/kbd.tsx";

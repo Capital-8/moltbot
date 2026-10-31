@@ -1,7 +1,7 @@
 import { createMemo, onSettled, Show } from "solid-js";
 import { localEditorFilePath } from "../../../app/native-editor-locality.runtime.ts";
 import { createMarkdownRef } from "../../../components/markdown-dom-ref.ts";
-import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
+import { renderMarkdownHtml as toSanitizedMarkdownHtml } from "../../../components/markdown-render.ts";
 import { McpAppCatalog } from "../../../components/mcp-app-catalog.tsx";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { PanelLoadingSkeleton } from "../../../components/solid/panel-loading-skeleton.tsx";

@@ -1,7 +1,7 @@
 // Control UI tests cover full-document markdown behavior.
 import { describe, expect, it } from "vitest";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { htmlFragment } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 describe("document markdown", () => {
   it("preserves safe remote images while sanitizing unsafe sources", () => {

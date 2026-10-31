@@ -3,6 +3,15 @@ import { truncateText } from "../lib/format.ts";
 import { markdownContentHtml, type MarkdownContent } from "../lib/markdown-content.ts";
 import { markdownHighlightingPending } from "./markdown-code-blocks.ts";
 import {
+  appendMarkdownTruncationNotice,
+  HIGHLIGHTABLE_CODE_RE,
+  MARKDOWN_CHAR_LIMIT,
+  markdownRenderKey,
+  partitionMarkdownHtml,
+  renderSanitizedMarkdown,
+  toSanitizedMarkdownHtml,
+} from "./markdown-full.ts";
+import {
   MARKDOWN_PARSE_LIMIT,
   normalizeMarkdownRenderOptions,
   type MarkdownRenderOptions,
@@ -15,15 +24,6 @@ import {
 } from "./markdown-streaming.ts";
 import { isMarkdownBlockArtText, normalizeMarkdownLineBreaks } from "./markdown-text.ts";
 import { renderMarkdownTokens } from "./markdown-tokens.ts";
-import {
-  appendMarkdownTruncationNotice,
-  HIGHLIGHTABLE_CODE_RE,
-  MARKDOWN_CHAR_LIMIT,
-  markdownRenderKey,
-  partitionMarkdownHtml,
-  renderSanitizedMarkdown,
-  toSanitizedMarkdownHtml,
-} from "./markdown.ts";
 
 function normalizeStreamingMarkdownInput(markdownLocal: string, streamKey?: string): string {
   const source = stripUnsupportedCitationControlMarkers(markdownLocal);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { htmlFragment } from "./markdown.test-support.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
 
 const transcriptLine = (text: string) =>
   `[Audio transcript (machine-generated, untrusted)]: ${JSON.stringify(text)}`;

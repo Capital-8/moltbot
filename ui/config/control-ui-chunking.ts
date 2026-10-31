@@ -362,7 +362,8 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/styles/sidebar-update-card.css":
       return "sidebar-update-runtime";
     case "ui/src/components/markdown-parser.ts":
-    case "ui/src/components/markdown.ts":
+    case "ui/src/components/markdown-render.ts":
+    case "ui/src/components/markdown-disclosure-code.ts":
     case "ui/src/components/github-link-target.ts":
     case "ui/src/components/markdown-assistant-transcript.ts":
     case "ui/src/components/markdown-code-blocks.ts":

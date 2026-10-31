@@ -5,7 +5,7 @@ import { GatewayRequestError } from "../api/gateway-connect-errors.ts";
 import { createTestGatewayClient } from "../test-helpers/gateway-client.ts";
 import { TEST_LINK_READER } from "../test-helpers/link-reader.ts";
 import type { LinkReaderHovercardProvider } from "./link-reader-hovercard.ts";
-import { toSanitizedMarkdownHtml } from "./markdown.ts";
+import { toSanitizedMarkdownHtml } from "./markdown-full.ts";
 import { installTitleTooltips } from "./tooltip-title.ts";
 import { settleTooltip } from "./tooltip.test-support.ts";
 

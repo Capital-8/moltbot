@@ -1,5 +1,5 @@
 import type { MarkdownIt, StateBlock } from "markdown-it";
-import { findMarkdownCodeSpans } from "../../../packages/markdown-core/src/markdown-code-regions.js";
+import { findDisclosureLineCodeSpans } from "./markdown-disclosure-code.ts";
 
 const MAX_MARKDOWN_DETAILS_DEPTH = 32;
 const DISCLOSURE_TAG_RE = /<\/?(?:details|summary)(?=[\s>])[^>]*>/gi;
@@ -69,7 +69,7 @@ export function scanMarkdownDisclosureLine(
   if (!first) {
     return null;
   }
-  const spans = codeSpans ?? findMarkdownCodeSpans(line);
+  const spans = codeSpans ?? findDisclosureLineCodeSpans(line);
   const tags: MarkdownDisclosureTag[] = [];
   for (const match of line.matchAll(DISCLOSURE_TAG_RE)) {
     const start = match.index ?? 0;
