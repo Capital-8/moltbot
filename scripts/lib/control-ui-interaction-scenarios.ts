@@ -155,7 +155,7 @@ export type InteractionScenario = {
   setup?: (page: Page) => Promise<void>;
   prepare: (page: Page, gateway: MockGatewayControls) => Promise<void>;
   run: (page: Page, gateway: MockGatewayControls) => Promise<void | InteractionEvidence>;
-  /** Extra behavior proof after the action CPU/network cutoff; never part of timing. */
+  /** Extra behavior proof after action metrics and artifacts; never part of measurement. */
   verifyAfter?: (page: Page, gateway: MockGatewayControls) => Promise<void | InteractionEvidence>;
 };
 

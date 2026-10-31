@@ -849,6 +849,7 @@ try {
           let profiling = false;
           let preciseCoverage = false;
           let minimizedWindow: number | undefined;
+          let verifyAfter: (() => Promise<void | InteractionEvidence>) | undefined;
           const events: unknown[] = [];
           const styleSheets = new Map<string, InteractionStyleSheet>();
           const firstOpenRequests: RouteNetworkObservation[] = [];
@@ -1500,12 +1501,12 @@ try {
                 );
               }
             }
-            const verified = await scenario.verifyAfter?.(page, gateway);
-            if (verified) {
-              result.scenarioEvidence = { ...result.scenarioEvidence, ...verified };
-            }
             if (errors.length) {
               throw new Error(errors.join("\n"));
+            }
+            const verifyScenario = scenario.verifyAfter;
+            if (verifyScenario) {
+              verifyAfter = () => verifyScenario(page, gateway);
             }
             result.status = "passed";
           } catch (error) {
@@ -1643,6 +1644,25 @@ try {
                 await capture(() =>
                   page.screenshot({ path: path.join(artifactDir, `${artifactPrefix}.png`) }),
                 );
+              }
+              if (result.status === "passed" && verifyAfter) {
+                const verified = await capture(async () => {
+                  const evidence = await verifyAfter?.();
+                  if (evidence) {
+                    result.scenarioEvidence = { ...result.scenarioEvidence, ...evidence };
+                  }
+                  if (errors.length) {
+                    throw new Error(errors.join("\n"));
+                  }
+                  return true;
+                });
+                if (!verified) {
+                  await capture(() =>
+                    page.screenshot({
+                      path: path.join(artifactDir, `${artifactPrefix}.verification-failed.png`),
+                    }),
+                  );
+                }
               }
             } finally {
               if (processSession) {
