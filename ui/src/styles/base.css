@@ -51,7 +51,6 @@
     var(--chat-composer-surface)
   );
   --session-hovercard-surface: color-mix(in srgb, var(--card) 94%, black 6%);
-  --session-hovercard-attribution-surface: color-mix(in srgb, var(--text) 6%, transparent);
 
   --panel: #0e1015;
   --panel-strong: #191c24;
@@ -372,6 +371,7 @@
      near-square themes pin them. Shared knobs keep transient menus from drifting. */
   --radius-menu: calc(var(--radius-md) * 1.6 * var(--openclaw-corner-radius-scale));
   --radius-menu-item: calc(var(--radius-sm) * 2 * var(--openclaw-corner-radius-scale));
+  --radius-tooltip: calc(var(--radius-sm) * 1.25 * var(--openclaw-corner-radius-scale));
   --menu-radius: var(--radius-menu);
   --menu-item-radius: var(--radius-menu-item);
   --menu-item-height: 28px;
@@ -625,7 +625,6 @@
   --popover: #ffffff;
   --popover-foreground: #211e1a;
   --session-hovercard-surface: var(--card);
-  --session-hovercard-attribution-surface: color-mix(in srgb, var(--text) 4%, transparent);
 
   --panel: #faf9f7;
   --panel-strong: #f4f1ec;
@@ -953,13 +952,14 @@ summary,
   :root {
     --shell-popup-inline-gutter: var(--chat-mobile-edge-inset);
   }
+}
 
-  html.control-ui-content-canvas,
-  .control-ui-content-canvas body {
-    /* iOS Safari exposes the document canvas around its browser chrome; keep
-       that canvas on the same surface as the exposed narrow route canvas. */
-    background: var(--control-ui-system-chrome-background, var(--bg-content, var(--bg)));
-  }
+/* iOS Safari shows the document canvas around its browser chrome. The system
+   chrome owner selects it where the exposed narrow route canvas or the open
+   navigation drawer's backdrop differs from the page surface. */
+html.control-ui-system-chrome-canvas,
+.control-ui-system-chrome-canvas body {
+  background: var(--control-ui-system-chrome-background, var(--bg));
 }
 
 /* iOS Safari zooms the viewport when a focused text control is under 16px;
