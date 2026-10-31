@@ -1,6 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { CopilotClient } from "@github/copilot-sdk";
+import type {
+  CopilotClient,
+  CopilotSession,
+  ResumeSessionConfig,
+  SessionConfig,
+  SessionEventHandler,
+} from "@github/copilot-sdk";
 import type { AgentHarnessV2 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import type { OpenKeyedStoreOptions } from "openclaw/plugin-sdk/plugin-state-runtime";
@@ -20,11 +26,16 @@ import { asAttemptParams } from "./harness.test-support.js";
 import plugin from "./index.js";
 import { awaitAttemptStage, createAttemptGate } from "./src/attempt.test-support.js";
 import { createCopilotTestHostCapabilities } from "./src/host-capability.test-support.js";
+import { createCopilotIsolatedCompletionParams } from "./src/isolated-completion.test-support.js";
 
 const transport = vi.hoisted(() => ({
   reply: undefined as ((request: Request, signal: AbortSignal) => Promise<Response>) | undefined,
   clients: [] as CopilotClient[],
   sessionId: undefined as string | undefined,
+  // Real runtime acknowledgements and provider egress, in arrival order.
+  egress: [] as string[],
+  remoteSteerable: [] as (boolean | undefined)[],
+  remoteDisableError: undefined as Error | undefined,
 }));
 
 // Only provider I/O is synthetic. The registered harness, pool, SDK stdio runtime,
@@ -44,12 +55,40 @@ vi.mock("./src/sdk-loader.js", async (importOriginal) => {
             throw new Error("No synthetic provider response configured");
           }
           transport.sessionId = context.sessionId;
+          transport.egress.push("provider");
           return transport.reply(request, context.signal);
         }
       }
+      const observeStart =
+        (next?: SessionEventHandler): SessionEventHandler =>
+        (event) => {
+          if (event.type === "session.start" || event.type === "session.resume") {
+            transport.remoteSteerable.push(event.data.remoteSteerable);
+          }
+          next?.(event);
+        };
+      const observeRemoteDeny = (session: CopilotSession) => {
+        const disable = session.rpc.remote.disable;
+        session.rpc.remote.disable = async () => {
+          await disable();
+          if (transport.remoteDisableError) {
+            throw transport.remoteDisableError;
+          }
+          transport.egress.push("remote.disable");
+        };
+        return session;
+      };
       return {
         ...sdk,
         CopilotClient: class extends sdk.CopilotClient {
+          override async createSession(config: SessionConfig) {
+            const onEvent = observeStart(config.onEvent);
+            return observeRemoteDeny(await super.createSession({ ...config, onEvent }));
+          }
+          override async resumeSession(sessionId: string, config: ResumeSessionConfig) {
+            const onEvent = observeStart(config.onEvent);
+            return observeRemoteDeny(await super.resumeSession(sessionId, { ...config, onEvent }));
+          }
           constructor(options: ConstructorParameters<typeof CopilotClient>[0]) {
             super({
               ...options,
@@ -71,6 +110,9 @@ afterEach(async () => {
     await cleanup();
   }
   transport.clients = [];
+  transport.egress = [];
+  transport.remoteSteerable = [];
+  transport.remoteDisableError = undefined;
   transport.reply = undefined;
   clearRuntimeConfigSnapshot();
   vi.restoreAllMocks();
@@ -140,7 +182,7 @@ async function fixture() {
       return result;
     });
   };
-  return { directory, manager, openKeyedStore, run };
+  return { directory, manager, openKeyedStore, params, registered, run };
 }
 
 function replyOk() {
@@ -237,4 +279,57 @@ it("keeps caller-owned memory conversations resumable without marking them detac
   expect(remove).not.toHaveBeenCalled();
   expect(await store.lookup("caller-owned-session")).toEqual(binding);
   expect(openKeyedStore).toHaveBeenCalledTimes(accesses);
+});
+
+async function remoteDenyTurns() {
+  const { directory, params, registered, run } = await fixture();
+  transport.reply = async () => replyOk();
+  const isolated = createCopilotIsolatedCompletionParams();
+  const auth = {
+    apiKey: "synthetic-provider-key",
+    profileId: "fixture-provider:synthetic",
+    source: "profile",
+    mode: "api-key",
+  } as const;
+  const { hostCapabilities: _hostCapabilities, ...attempt } = params;
+  return {
+    complete: () =>
+      registered.runIsolatedCompletionV2?.({
+        ...isolated,
+        provider: params.provider,
+        modelId: params.modelId,
+        authorization: { ...isolated.authorization, model: params.model, auth },
+        agentDir: directory,
+        workspaceDir: directory,
+      }),
+    finalize: async () => {
+      const settledAttempt = await run();
+      expect(settledAttempt.terminal.kind).toBe("ok");
+      transport.egress = [];
+      return registered.finalizeSettledTurn?.({
+        attempt: { ...attempt, runId: "fixture-finalize", prompt: "Finish" },
+        settledAttempt,
+      });
+    },
+  };
+}
+
+it("disables remote export through the real runtime before isolated turns reach the provider", async () => {
+  const turns = await remoteDenyTurns();
+  const reply = await turns.complete();
+  expect(reply?.assistant.content).toEqual([{ type: "text", text: "OK" }]);
+  expect(transport.egress).toEqual(["remote.disable", "provider"]);
+  expect(transport.remoteSteerable).toEqual([false]);
+  const final = await turns.finalize();
+  expect(final?.assistant.content).toEqual([{ type: "text", text: "OK" }]);
+  expect(transport.egress).toEqual(["remote.disable", "provider"]);
+});
+
+it("fails isolated turns closed when the real runtime cannot confirm the remote deny", async () => {
+  const turns = await remoteDenyTurns();
+  transport.remoteDisableError = new Error("remote disable refused");
+  await expect(turns.complete()).rejects.toThrow("remote disable refused");
+  expect(transport.egress).toEqual([]);
+  await expect(turns.finalize()).rejects.toThrow("did not complete successfully");
+  expect(transport.egress).toEqual([]);
 });

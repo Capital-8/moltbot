@@ -25,7 +25,6 @@ export function createCopilotIsolatedSessionRestrictions(): Partial<SessionConfi
     mcpServers: {},
     memory: { enabled: false },
     pluginDirectories: [],
-    remoteSession: "off",
     requestCanvasRenderer: false,
     requestExtensions: false,
     skillDirectories: [],
@@ -33,4 +32,25 @@ export function createCopilotIsolatedSessionRestrictions(): Partial<SessionConfi
     skipEmbeddingRetrieval: true,
     tools: [],
   };
+}
+
+export type CopilotRemoteDenySession = {
+  rpc?: { remote?: { disable?: () => Promise<unknown> } };
+};
+
+/**
+ * Deny Mission Control export and remote steering before an isolated turn sends anything.
+ *
+ * SDK 1.0.26 removed the create/resume `remoteSession` option; the session's
+ * `remote.disable` RPC is the remaining explicit runtime deny. Failure rejects
+ * the turn instead of sending its prompt with remote state unconfirmed.
+ */
+export async function denyCopilotIsolatedSessionRemote(
+  session: CopilotRemoteDenySession,
+): Promise<void> {
+  const remote = session.rpc?.remote;
+  if (!remote?.disable) {
+    throw new Error("[copilot] isolated session cannot disable remote export and steering");
+  }
+  await remote.disable();
 }
