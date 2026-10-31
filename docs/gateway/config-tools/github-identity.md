@@ -317,10 +317,10 @@ Stale observed values are rejected. This is not atomic GitHub compare-and-swap:
 external edits or pushes can race the PATCH. A head change detected after dispatch
 can mean the metadata was applied but confirmation failed. After a lost response,
 the Gateway rereads the same PR; already-applied values need no second write.
-Before retrying uncertainty, read again with only `{ "action": "edit" }`, without
-reusing the previous write preconditions. Omitted action or `publish` still
-publishes workspace source; its title/body are creation-only and do not edit an
-existing PR.
+Before retrying uncertainty, read again with `action: "edit"` and the same
+`pullRequestUrl` when explicitly selected, without reusing the previous write
+preconditions. Omitted action or `publish` still publishes workspace source; its
+title/body are creation-only and do not edit an existing PR.
 
 Guests can mark their own current session's shared draft ready for review with
 `github_publish` and `action: "ready"`. First read its state with `action: "edit"`,
