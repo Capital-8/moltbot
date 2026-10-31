@@ -2,8 +2,9 @@ import { randomUUID, X509Certificate } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import { createServer as createTlsServer } from "node:https";
-import { connect as connectTcp, type Socket } from "node:net";
+import { connect as connectTcp } from "node:net";
 import path from "node:path";
+import type { Duplex } from "node:stream";
 import { expect, it, vi } from "vitest";
 import type { UsersSelfResult } from "../../packages/gateway-protocol/src/schema/users.js";
 import {
@@ -258,7 +259,7 @@ export default { id: "room-proof", register(api) {
         gateway: { ...cfg.gateway, port: instance.port },
       });
       delete instance.env.OPENCLAW_GATEWAY_TOKEN;
-      const proxySockets = new Set<Socket>();
+      const proxySockets = new Set<Duplex>();
       const proxy = createTlsServer({ key: TEST_TLS_KEY_PEM, cert: TEST_TLS_CERT_PEM });
       proxy.on("upgrade", (request, socket, head) => {
         const upstream = connectTcp(instance.port, "127.0.0.1", () => {
