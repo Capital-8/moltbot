@@ -24,10 +24,14 @@ import {
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { installDiscordRegistryHooks } from "../../auto-reply/test-helpers/command-auth-registry-fixture.js";
 import {
+  listSessionEntriesReadOnly,
   loadSessionEntry,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
-import { prepareChannelOperatorAdmin } from "../../gateway/channel-operator-authority.js";
+import {
+  prepareChannelOperatorAdmin,
+  prepareChannelOperatorAuthority,
+} from "../../gateway/channel-operator-authority.js";
 import { createSessionMutationTestContext } from "../../gateway/server-methods/sessions-mutations.owner.test-support.js";
 import { initializeSessionReadContext } from "../../gateway/server-methods/sessions-read-cache.test-support.js";
 import { createSyntheticPluginRuntimeClient } from "../../gateway/server-plugin-runtime-client.js";
@@ -830,6 +834,23 @@ it.each([
           await expect(assign(details.sessionKey, requester.id)).rejects.toThrow(
             "session is shared for this connection",
           );
+          const identity = fixture.admins[0]!.identity;
+          const retained = await prepareChannelOperatorAuthority(fixture.cfg, identity);
+          expect(retained?.isCurrent(fixture.cfg)).toBe(true);
+          const reference = JSON.stringify(retained!.recoveryReference);
+          const store = { agentId: "main", env: fixture.state.env };
+          const beforeRevocation = listSessionEntriesReadOnly(store);
+          unlinkUserChannelIdentity(requester.id, identity);
+          await expect(
+            execute("sessions_create", "revoked-member-create", { label: "Must not be created" }),
+          ).rejects.toThrow(revokedMessage);
+          expect(listSessionEntriesReadOnly(store)).toEqual(beforeRevocation);
+          await closeOpenClawStateDatabaseByPathAsync(
+            resolveOpenClawStateSqlitePath(fixture.state.env),
+          );
+          await expect(
+            prepareChannelOperatorAuthority(fixture.cfg, JSON.parse(reference)),
+          ).resolves.toBeUndefined();
           return;
         }
         await spawn();

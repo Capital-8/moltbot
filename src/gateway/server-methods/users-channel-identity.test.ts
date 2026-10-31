@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { UsersChannelIdentityResult } from "../../../packages/gateway-protocol/src/schema/users.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import {
@@ -14,6 +16,7 @@ import {
 import { listCanonicalUserChannelIdentities } from "../../state/user-channel-identity-operations.js";
 import { prepareUserProfileCatalog } from "../../state/user-profile-list.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
+import { loadBundledPluginFacade } from "../../test-utils/bundled-plugin-public-surface.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -152,18 +155,60 @@ afterEach(async () => {
   await state.cleanup();
   clearRuntimeConfigSnapshot();
   resetGatewayWorkAdmission();
+  vi.unstubAllEnvs();
 });
 
-it("links only the own browser-proven identity, rejects replay and conflicts, and disconnects through the canonical store", async () => {
+it("links through the real Discord adapter, rejects replay and conflicts, and disconnects through the canonical store", async () => {
+  const requests: string[] = [];
+  let userResponse = Promise.withResolvers<void>();
+  const server = createServer((req, res) => {
+    requests.push(`${req.method} ${req.url}`);
+    const body =
+      req.method === "POST" && req.url === "/api/v10/oauth2/token"
+        ? { access_token: "fixture-token" }
+        : req.method === "GET" && req.url === "/api/v10/users/@me"
+          ? { id: "123456789012345678" }
+          : undefined;
+    res.writeHead(body ? 200 : 404, { "content-type": "application/json" });
+    res.end(JSON.stringify(body ?? {}), () => {
+      if (req.method === "GET" && req.url === "/api/v10/users/@me") {
+        userResponse.resolve();
+      }
+    });
+  });
+  onTestFinished(() => server[Symbol.asyncDispose]());
+  await once(server.listen(0, "127.0.0.1"), "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected a loopback HTTP address");
+  }
+  vi.stubEnv("DISCORD_API_URL", `http://127.0.0.1:${address.port}/api/v10`);
+  config = {
+    channels: {
+      discord: {
+        activities: { applicationId: "123456789012345678", clientSecret: "fixture-secret" },
+      },
+    },
+  };
+  setRuntimeConfigSnapshot(config);
+  const { discordPlugin } = await loadBundledPluginFacade<{ discordPlugin: ChannelPlugin }>({
+    pluginId: "discord",
+    artifactBasename: "api.js",
+  });
+  setActivePluginRegistry(
+    createTestRegistry([{ pluginId: "discord", source: "test", plugin: discordPlugin }]),
+  );
   const flow = await start();
   expect(new URL(flow.authorizationUrl!).searchParams.get("redirect_uri")).toBe(
     "https://gateway.example/oauth/provider/callback",
   );
   expect(callback(flow)).toBe(403);
-  expect(exchange).not.toHaveBeenCalled();
+  expect(requests).toEqual([]);
   expect(callback(flow, cookie)).toBe(200);
   expect(callback(flow, cookie)).toBe(410);
+  await userResponse.promise;
   expect((await terminal(flow)).status).toBe("linked");
+  expect(requests).toEqual(["POST /api/v10/oauth2/token", "GET /api/v10/users/@me"]);
   expect(await listCanonicalUserChannelIdentities(owner(alice))).toEqual([
     {
       profileId: owner(alice),
@@ -171,8 +216,10 @@ it("links only the own browser-proven identity, rejects replay and conflicts, an
     },
   ]);
   expect(await listCanonicalUserChannelIdentities(owner(bob))).toEqual([]);
+  userResponse = Promise.withResolvers<void>();
   const other = await start(bob);
   expect(callback(other, cookie)).toBe(200);
+  await userResponse.promise;
   expect(await terminal(other, bob)).toMatchObject({
     status: "failed",
     message: expect.stringContaining("another profile"),
@@ -255,18 +302,17 @@ it("rechecks live authority after exchanging proof and before storing the link",
 });
 
 it("keeps administrative attestation privileged and rejects claimed profile IDs and unknown accounts", async () => {
-  expect(
-    (
-      await rpc(
-        alice,
-        {
-          targetProfileId: owner(bob),
-          identity: { channelId: "discord", accountId: "default", senderId: "123456789012345678" },
-        },
-        "users.linkChannelIdentity",
-      )
-    )[0],
-  ).toBe(false);
+  const denied = await rpc(
+    alice,
+    {
+      profileId: owner(bob),
+      identity: { channelId: "discord", accountId: "default", senderId: "123456789012345678" },
+    },
+    "users.linkChannelIdentity",
+  );
+  expect(denied[0]).toBe(false);
+  expect(denied[2]).toMatchObject({ message: "missing scope: operator.admin" });
+  expect(await listCanonicalUserChannelIdentities(owner(bob))).toEqual([]);
   for (const extra of [{ profileId: owner(bob) }, { accountId: "unknown" }]) {
     expect(
       (

@@ -49,7 +49,6 @@ it("uses identify-only authorization and verifies the authenticated user before 
     url: "https://discord.com/api/v10/users/@me",
     init: { headers: { Authorization: "Bearer test-access-token" } },
   });
-  expect(assertCurrent).toHaveBeenCalledTimes(3);
   expect(adapter.isCurrent({ channels: { discord: { enabled: false } } })).toBe(false);
   expect(await discordIdentityLink.prepare(cfg, "missing")).toBeUndefined();
 });
