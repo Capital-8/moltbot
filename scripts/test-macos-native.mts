@@ -321,8 +321,11 @@ await runWithFailedTrailer("macos-native", async () => {
       bin: string,
       commandArgs: string[],
       timeoutMs?: number,
-      cwd?: string,
-      cleanup = false,
+      {
+        cwd,
+        cleanup = false,
+        outputFd,
+      }: { cwd?: string; cleanup?: boolean; outputFd?: number } = {},
     ) => {
       let effectiveTimeoutMs = timeoutMs;
       if (settings) {
@@ -344,7 +347,7 @@ await runWithFailedTrailer("macos-native", async () => {
           args: commandArgs,
           env: childEnv,
           cwd,
-          stdio: "inherit",
+          stdio: outputFd === undefined ? "inherit" : ["ignore", outputFd, outputFd],
           requireProcessTreeExit: true,
           timeoutMs: effectiveTimeoutMs,
           ...(settings
@@ -369,16 +372,7 @@ await runWithFailedTrailer("macos-native", async () => {
       const output = path.join(root, "service-inspection.txt");
       const fd = fs.openSync(output, "w", 0o600);
       try {
-        canRemove = false;
-        const code = await runManagedCommand({
-          bin: "launchctl",
-          args: ["print", serviceTarget],
-          env: childEnv,
-          stdio: ["ignore", fd, fd],
-          requireProcessTreeExit: true,
-          timeoutMs: 30_000,
-        });
-        canRemove = true;
+        const code = await run("launchctl", ["print", serviceTarget], 30_000, { outputFd: fd });
         const text = fs.readFileSync(output, "utf8");
         const pid = /^\tpid = ([0-9]+)$/mu.exec(text)?.[1];
         if (code === 0 && pid) {
@@ -438,7 +432,7 @@ await runWithFailedTrailer("macos-native", async () => {
               "6.3",
             ],
             45_000,
-            source,
+            { cwd: source },
           );
           if (code !== 0) {
             throw new Error(`Settings Swift stage ${filter} failed (exit ${code})`);
@@ -695,8 +689,7 @@ await runWithFailedTrailer("macos-native", async () => {
               "6.3",
             ],
             45_000,
-            settings.fixed.sourceRoot,
-            true,
+            { cwd: settings.fixed.sourceRoot, cleanup: true },
           );
           if (code !== 0) {
             process.exitCode ||= code;
@@ -732,13 +725,9 @@ await runWithFailedTrailer("macos-native", async () => {
       // A completed failed create may leave a database. Never delete it until every child closed.
       if (canRemove && fs.existsSync(keychain)) {
         try {
-          const cleanupCode = await run(
-            "security",
-            ["delete-keychain", keychain],
-            30_000,
-            undefined,
-            true,
-          );
+          const cleanupCode = await run("security", ["delete-keychain", keychain], 30_000, {
+            cleanup: true,
+          });
           if (cleanupCode !== 0) {
             if (!settings) {
               canRemove = false;
