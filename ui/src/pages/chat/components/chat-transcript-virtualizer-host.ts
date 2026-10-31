@@ -465,8 +465,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
     if (
       this.prependAnchor.hasPrepend &&
       (this.offsetState.touchActive || this.virtualizer.isScrolling) &&
-      !this.offsetState.scrollCommand &&
-      !this.offsetState.pendingScrollOffset &&
+      !this.offsetState.hasPendingCommand &&
       this.renderPreviousRows
     ) {
       return this.renderPreviousRows();
@@ -523,7 +522,8 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
         if (capturePrepend) {
           this.prependAnchor.capture(
             this.scrollElement,
-            this.offsetState.hasPendingAnchor,
+            this.offsetState.hasPendingAnchor ||
+              Boolean(this.callbacks.hasPendingScrollCommand?.()),
             // A peer append can add attribution above a bubble inside an
             // existing run row. Row-height compensation alone cannot hold it.
             rowModelChanged && !this.canAutoFollow(),
@@ -638,7 +638,7 @@ export class ChatSessionVirtualizerHost implements ChatTranscriptSession {
       this.endAnchor.clear();
     }
     this.prependAnchor.clear();
-    if (this.offsetState.scrollCommand === null && !this.offsetState.pendingScrollOffset) {
+    if (!this.offsetState.hasPendingCommand) {
       return;
     }
     const measureSkippedRows = this.offsetState.scrollCommand?.behavior === "smooth";

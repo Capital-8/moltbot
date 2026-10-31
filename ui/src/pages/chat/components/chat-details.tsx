@@ -492,6 +492,7 @@ export function ChatDetails(props: ChatDetailsViewProps) {
     mountSurface(layout);
     position(layout);
   };
+  // Parent snapshots may change while these native observation targets stay the same.
   const resizeTargets = createMemo(
     () =>
       [
@@ -502,6 +503,7 @@ export function ChatDetails(props: ChatDetailsViewProps) {
         props.elements?.getComposerInput?.(),
       ].filter((element): element is HTMLElement => Boolean(element)),
     {
+      lazy: true,
       equals: (before, after) =>
         before.length === after.length &&
         before.every((element, index) => element === after[index]),
