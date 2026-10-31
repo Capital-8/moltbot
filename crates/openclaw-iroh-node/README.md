@@ -5,7 +5,8 @@ OpenClaw ID tunnel needs: bind an endpoint, dial or accept connections, open bid
 close with numeric codes. Stream bytes cross the boundary as `Buffer`/`Uint8Array`, never as
 `Array<number>` (the cause of the ~8 MB/s cap in `@number0/iroh`).
 
-Nothing in OpenClaw loads this package yet. Its JS API is the tailcat spike binding's, unchanged; see
+Nothing in OpenClaw loads this package yet, and it is not published; see [PACKAGING.md](PACKAGING.md)
+for the proposed distribution. Its JS API is the tailcat spike binding's, unchanged; see
 `index.d.ts` (generated) for the full surface.
 
 This crate is its own Cargo workspace. It is not a member of `crates/Cargo.toml`, so the shared Rust
