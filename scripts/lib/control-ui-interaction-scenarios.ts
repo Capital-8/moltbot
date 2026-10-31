@@ -2004,7 +2004,11 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
       if (control.activation === "pointer") {
         if (control.revealOnFocus) {
           // Exercise the actual hover reveal, including its native delay.
-          await page.locator(`${scope} .chat-talk-control`).hover();
+          await page
+            .locator(`${scope} .chat-talk-control`)
+            .filter({ has: page.locator(control.trigger) })
+            .first()
+            .hover();
         }
       } else {
         await trigger.focus();
