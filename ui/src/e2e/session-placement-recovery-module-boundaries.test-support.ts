@@ -50,7 +50,7 @@ export function defineSessionPlacementRecoveryModuleBoundaryTests(
           sessionInfo: { key: sessionKey, sessionId, hasActiveRun: false, status: "done" },
         };
         const gateway = await installMockGateway(page, {
-          // Recovery intentionally holds boot; enforce the roster before and after that interval.
+          // The offline reload below must return before this test reconnects.
           awaitInitialRoster: false,
           methodResponses: {
             "sessions.list": createdSessionListResult(sessionKey),
