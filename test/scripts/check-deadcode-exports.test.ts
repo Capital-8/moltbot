@@ -595,7 +595,7 @@ const unrelatedArgs = [
       );
     }
     for (const [from, to] of [
-      ['import("../../tts/tts.js")', 'import("./other.js")'],
+      ['import("../../plugin-sdk/tts-runtime.js")', 'import("./other.js")'],
       [
         "createLazyRuntimeMethodBinder(loadTtsRuntime)",
         "createLazyRuntimeMethodBinder(loadTtsRequestRuntime)",
