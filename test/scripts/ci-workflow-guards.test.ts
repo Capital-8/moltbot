@@ -1379,6 +1379,7 @@ AFTER_CD
         "clone",
         "-q",
         "--no-local",
+        "--no-checkout",
         "--filter=blob:none",
         "--depth=2",
         origin,
