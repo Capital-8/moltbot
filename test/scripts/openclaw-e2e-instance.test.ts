@@ -713,6 +713,32 @@ describe("scripts/lib/openclaw-e2e-instance.sh", () => {
     });
   });
 
+  it("falls back to the trusted checkout redactor when an installed redactor is incomplete", () => {
+    withTempDir("openclaw-e2e-instance-redactor-fallback-", (tempDir) => {
+      const logPath = path.join(tempDir, "install.log");
+      const brokenRedactor = path.join(tempDir, "installed-redactor.mjs");
+      const trustedRedactor = path.join(tempDir, "dist", "plugin-sdk", "logging-core.js");
+      fs.mkdirSync(path.dirname(trustedRedactor), { recursive: true });
+      fs.writeFileSync(logPath, "actionable failure fixture-secret\n", "utf8");
+      fs.writeFileSync(brokenRedactor, 'import "./missing-chunk.mjs";\n', "utf8");
+      fs.writeFileSync(
+        trustedRedactor,
+        'export const redactSensitiveText = (value) => value.replaceAll("fixture-secret", "***");\n',
+        "utf8",
+      );
+
+      const result = runSourcedHelper(
+        `cd ${shellQuote(tempDir)}; openclaw_e2e_print_log ${shellQuote(logPath)}`,
+        { OPENCLAW_E2E_REDACTOR_MODULE: brokenRedactor },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("actionable failure ***");
+      expect(result.stdout).not.toContain("fixture-secret");
+      expect(result.stdout).not.toContain("failure log omitted");
+    });
+  });
+
   it("bounds commands with the Node watchdog when timeout is unavailable", () => {
     withTempDir("openclaw-e2e-instance-node-watchdog-", (tempDir) => {
       writeNodeShim(tempDir);

@@ -124,15 +124,27 @@ openclaw_e2e_maybe_timeout() {
 }
 openclaw_e2e_print_log() {
   local path="$1"
-  local max_bytes max_lines redactor_module
+  local max_bytes max_lines redactor_module trusted_redactor
   max_bytes="$(openclaw_e2e_read_nonnegative_int_env OPENCLAW_E2E_LOG_TAIL_BYTES 262144)" || return $?
   max_lines="$(openclaw_e2e_read_nonnegative_int_env OPENCLAW_E2E_LOG_TAIL_LINES 120)" || return $?
   [ -f "$path" ] || return 0
   echo "--- $path ---"
   [ -s "$path" ] || return 0
   redactor_module="${OPENCLAW_E2E_REDACTOR_MODULE:-$(openclaw_e2e_package_root)/dist/plugin-sdk/logging-core.js}"
-  [ -f "$redactor_module" ] || redactor_module="$PWD/dist/plugin-sdk/logging-core.js"
-  if [ ! -f "$redactor_module" ]; then
+  trusted_redactor="$PWD/dist/plugin-sdk/logging-core.js"
+  [ -f "$redactor_module" ] || redactor_module="$trusted_redactor"
+  if [ -f "$redactor_module" ] && ! node --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { redactSensitiveText } = await import(pathToFileURL(process.argv[1]).href);
+    if (typeof redactSensitiveText !== "function") process.exit(1);
+  ' "$redactor_module" >/dev/null 2>&1; then
+    if [ "$redactor_module" != "$trusted_redactor" ] && [ -f "$trusted_redactor" ]; then
+      redactor_module="$trusted_redactor"
+    else
+      redactor_module=""
+    fi
+  fi
+  if [ -z "$redactor_module" ] || [ ! -f "$redactor_module" ]; then
     echo "[failure log omitted: canonical redactor unavailable]"
     return 0
   fi
