@@ -412,16 +412,23 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
     expect(canceled).toBe(true);
   });
 
-  it("requires dashboard root markers and same-origin asset URLs", () => {
+  it.each([
+    ["empty root", "<openclaw-app></openclaw-app>"],
+    ["boot frame", '<openclaw-app data-boot="loading">\n<main>Loading…</main>\n</openclaw-app>'],
+  ])("requires dashboard root markers and same-origin asset URLs with %s", (_name, appHtml) => {
     const html = [
       "<title>OpenClaw Control</title>",
-      "<openclaw-app></openclaw-app>",
+      appHtml,
       '<link rel="stylesheet" href="/assets/index.css">',
       '<script type="module" src="assets/index.js"></script>',
       '<script type="module" src="https://example.com/assets/ignored.js"></script>',
     ].join("\n");
 
     expect(dashboardHtmlMarkerStatus(html)).toEqual({ app: true, ready: true, title: true });
+    expect(
+      dashboardHtmlMarkerStatus(html.replace("<title>OpenClaw Control</title>", "")).ready,
+    ).toBe(false);
+    expect(dashboardHtmlMarkerStatus(html.replace(appHtml, "")).ready).toBe(false);
     expect(resolveDashboardAssetUrls("http://127.0.0.1:18789/", html)).toEqual([
       "http://127.0.0.1:18789/assets/index.css",
       "http://127.0.0.1:18789/assets/index.js",

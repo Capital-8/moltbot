@@ -1,0 +1,2 @@
+7
+# Covers populated dashboard boot roots while retaining title, root and asset checks.
