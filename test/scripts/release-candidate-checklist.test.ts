@@ -40,7 +40,7 @@ import { validateReleaseButtonInputs } from "../../scripts/openclaw-release-read
 import {
   PluginSdkApiAcknowledgementError,
   createPluginSdkApiReleaseEvidence,
-  validatePluginSdkApiReleaseNoteRemovals,
+  findPluginSdkApiReleaseNoteOmissions,
   validatePluginSdkApiReleaseEvidence,
 } from "../../scripts/plugin-sdk-api-release-evidence.mjs";
 import {
@@ -720,7 +720,7 @@ describe("release candidate checklist", () => {
           isDeepStrictEqual,
           sha256: () => "fixture-digest",
           validatePreflightManifest: () => {},
-          validatePluginSdkApiReleaseNoteRemovals,
+          findPluginSdkApiReleaseNoteOmissions,
           validatePluginSdkApiReleaseEvidence,
           PluginSdkApiAcknowledgementError,
           stripLeadingPackageManagerSeparator,

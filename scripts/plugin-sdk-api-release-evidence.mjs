@@ -262,7 +262,7 @@ export class PluginSdkApiAcknowledgementError extends Error {
   }
 }
 
-export function validatePluginSdkApiReleaseNoteRemovals({
+export function findPluginSdkApiReleaseNoteOmissions({
   evidence: inputEvidence,
   npmDistTag = "",
   releaseNotes,
@@ -291,18 +291,11 @@ export function validatePluginSdkApiReleaseNoteRemovals({
   }
   const uniqueRemovals = [...new Set(removals)];
   if (uniqueRemovals.length === 0) {
-    return { removals: [] };
+    return { missing: [], removals: [] };
   }
   const notes = typeof releaseNotes === "string" ? releaseNotes : "";
   const missing = uniqueRemovals.filter((reference) => !notes.includes(`\`${reference}\``));
-  if (missing.length > 0) {
-    throw new Error(
-      `Plugin SDK removals require release-note acknowledgement: ${missing
-        .map((reference) => `\`${reference}\``)
-        .join(", ")}`,
-    );
-  }
-  return { removals: uniqueRemovals };
+  return { missing, removals: uniqueRemovals };
 }
 
 export function validatePluginSdkApiReleaseEvidence({

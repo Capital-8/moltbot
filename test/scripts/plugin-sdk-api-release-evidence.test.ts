@@ -12,7 +12,7 @@ import {
   selectPluginSdkApiReleaseEvidence,
   createPluginSdkApiReleaseEvidence,
   createPluginSdkApiReleaseEvidenceSet,
-  validatePluginSdkApiReleaseNoteRemovals,
+  findPluginSdkApiReleaseNoteOmissions,
   validatePluginSdkApiReleaseEvidence,
 } from "../../scripts/plugin-sdk-api-release-evidence.mjs";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
@@ -41,7 +41,7 @@ function evidence(exports: unknown[] = []) {
 }
 
 describe("Plugin SDK API release evidence", () => {
-  it("requires release notes to name removed entrypoints and exports", () => {
+  it("reports release-note omissions for removed entrypoints and exports", () => {
     const payload = {
       entrypointsAdded: [],
       entrypointsRemoved: [
@@ -72,21 +72,25 @@ describe("Plugin SDK API release evidence", () => {
       workflowSha,
     });
 
-    expect(() =>
-      validatePluginSdkApiReleaseNoteRemovals({
+    expect(
+      findPluginSdkApiReleaseNoteOmissions({
         evidence: receipt,
         releaseNotes:
           "Removed `openclaw/plugin-sdk/legacy` and `legacyReceive`; use the supported replacements.",
       }),
-    ).not.toThrow();
-    expect(() =>
-      validatePluginSdkApiReleaseNoteRemovals({
+    ).toEqual({
+      missing: [],
+      removals: ["openclaw/plugin-sdk/legacy", "legacyReceive"],
+    });
+    expect(
+      findPluginSdkApiReleaseNoteOmissions({
         evidence: receipt,
         releaseNotes: "Added `replacement`.",
       }),
-    ).toThrow(
-      "Plugin SDK removals require release-note acknowledgement: `openclaw/plugin-sdk/legacy`, `legacyReceive`",
-    );
+    ).toEqual({
+      missing: ["openclaw/plugin-sdk/legacy", "legacyReceive"],
+      removals: ["openclaw/plugin-sdk/legacy", "legacyReceive"],
+    });
   });
 
   it("enforces selectors acknowledgement through the release CLI", () => {
