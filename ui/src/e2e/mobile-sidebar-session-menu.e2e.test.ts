@@ -246,7 +246,8 @@ suite.define(() => {
         expect(await rail.locator(".sidebar-recent-session").count()).toBe(0);
         for (const width of [320, 390, 768]) {
           await page.setViewportSize({ width, height: 844 });
-          expect((await rail.boundingBox())?.width).toBe(52);
+          // The approved mobile rail is 48px plus the default 1px divider (#189470).
+          expect((await rail.boundingBox())?.width).toBe(49);
           for (const row of [pinned, plugin]) {
             const shortcut = row.getByRole("link");
             await row.hover();

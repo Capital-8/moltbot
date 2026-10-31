@@ -73,11 +73,10 @@ const controlUiPerformanceBudgets = {
   // iOS-style mobile sheet motion (#188162) adds 279 B to a main that already measured
   // 308,922 B: 309,201 B. Vyctor Brzezowski approved exceeding the budget on 2026-10-30.
   // Retain 64 B build variance.
-  // Mobile composer controls stay inside the composer: 309,341 B measured.
-  totalCssGzipBytes: 309_366,
-  // Mobile composer controls stay inside the composer: 1,599,255 B raw measured.
-  // Keep the existing 64 B variance for the measured rendering and layout-stability wins.
-  totalCssRawBytes: 1_599_319,
+  // Mobile rail sizing (#189470) landed with an approved CSS-budget exception:
+  // 309,404 B gzip and 1,600,618 B raw. Retain the existing 64 B build variance.
+  totalCssGzipBytes: 309_468,
+  totalCssRawBytes: 1_600_682,
 } satisfies Record<string, number>;
 export const CONTROL_UI_PERFORMANCE_BUDGETS = Object.freeze(controlUiPerformanceBudgets);
 

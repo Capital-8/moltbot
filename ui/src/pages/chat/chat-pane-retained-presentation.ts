@@ -563,7 +563,6 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
       this.retireHeaderSessionMutations();
       this.dashboardPresentationActivation = undefined;
       this.retainedProgressCard = undefined;
-      this.forgetMobilePresentation();
       this.syncSessionCompanionPresentation(false);
       this.activeSessionResources.sync(null);
       if (this.state) {
