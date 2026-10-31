@@ -6,8 +6,9 @@ import {
   encodeOpenAIDecisionRequest,
   supportsOpenAIDecisionBatch,
 } from "../decisions/openai-codec.js";
+import type { ProviderDecisionOutcomeV2 } from "../decisions/provider-outcomes.js";
 import type { DecisionProviderV2 } from "../decisions/provider-types.js";
-import type { DecisionBatchV2, ProviderDecisionOutcomeV2 } from "../decisions/types-v2.js";
+import type { DecisionBatchV2 } from "../decisions/types-v2.js";
 import type { ModelRequestHeaders } from "../llm/types.js";
 import { getModelProviderRequestTransport } from "./agent-harness-runtime.js";
 import { buildTimeoutAbortSignal } from "./extension-shared.js";

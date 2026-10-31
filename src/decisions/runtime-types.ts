@@ -1,6 +1,7 @@
 import type { DecisionEvaluateOptions, DecisionEvaluateOptionsV2 } from "./execution-types.js";
+import type { DecisionOutcomeV2 } from "./host-outcomes.js";
 import type { DecisionOutcome } from "./host-outcomes.js";
-import type { DecisionBatchV2, DecisionOutcomeV2 } from "./types-v2.js";
+import type { DecisionBatchV2 } from "./types-v2.js";
 import type { DecisionBatch } from "./types.js";
 
 /**
