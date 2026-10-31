@@ -1,6 +1,8 @@
 import { randomUUID, X509Certificate } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
+import { createServer as createTlsServer } from "node:https";
+import { connect as connectTcp, type Socket } from "node:net";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
 import type { UsersSelfResult } from "../../packages/gateway-protocol/src/schema/users.js";
@@ -11,6 +13,7 @@ import {
   respondJson,
 } from "../../test/helpers/gateway-integration-fixtures.js";
 import { writeOpenAiResponsesText } from "../../test/helpers/openai-responses-sse.js";
+import { createOpenClawTestInstance } from "../../test/helpers/openclaw-test-instance.js";
 import {
   awaitGateBeforeSettlement,
   createDeferred,
@@ -19,28 +22,15 @@ import {
 import { runQaGatewayFixture } from "../../test/helpers/qa-gateway-cleanup.js";
 import { TEST_TLS_CERT_PEM, TEST_TLS_KEY_PEM } from "../../test/helpers/tls-fixture.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import {
-  loadOrCreateDeviceIdentity,
-  publicKeyRawBase64UrlFromPem,
-} from "../infra/device-identity.js";
-import { approveDevicePairing } from "../infra/device-pairing-approval.js";
-import { requestDevicePairing } from "../infra/device-pairing.js";
-import { defaultRuntime } from "../runtime.js";
-import { getSessionControllerOperation } from "../sessions/session-controller.js";
+import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import { acquireTestPortBlock } from "../test-utils/port-claims.js";
 import { writeToolCall } from "./gateway-provider-fixture.test-support.js";
 import {
-  createGatewayConfigPath,
   removeGatewayTempHome,
   resetGatewayTestState,
   setupGatewayTempHome,
 } from "./gateway.test-support.js";
-import {
-  connectGatewayClient,
-  disconnectGatewayClient,
-  startGatewayWithClient,
-} from "./test-helpers.e2e.js";
+import { connectGatewayClient, disconnectGatewayClient } from "./test-helpers.e2e.js";
 import { kernelGatewayTestStateOptions } from "./test-helpers.env.js";
 import { buildMockOpenAiResponsesProvider } from "./test-openai-responses-model.js";
 
@@ -51,7 +41,6 @@ it(
   ({ signal }) =>
     withOpenClawTestState(kernelGatewayTestStateOptions("plugin-requester-effects"), async () => {
       resetGatewayTestState();
-      const logErrors = vi.spyOn(defaultRuntime, "error");
       const home = await setupGatewayTempHome({ prefix: "openclaw-plugin-requester-effects-" });
       const effects: Array<{
         operation: string;
@@ -157,10 +146,16 @@ it(
         path.join(pluginDir, "index.js"),
         String.raw`
 export default { id: "room-proof", register(api) {
+ let original;
+ api.registerGatewayMethod("room-proof.status", ({ respond }) => {
+   try { original.requesterProfile.assertCurrent(); respond(true, { current: true, id: original.requesterProfile.id }); }
+   catch (error) { respond(true, { current: false, id: original?.requesterProfile?.id, error: String(error) }); }
+ }, { scope: "operator.admin" });
  const baseUrl = api.pluginConfig.baseUrl;
  api.registerTool({ contextVersion: 2, create(ctx) {
   const profile = ctx.requesterProfile;
   if (ctx.senderIsOwner !== true || !profile) return null;
+  original = ctx;
   return ["room_read", "room_draft"].map(name => ({ name, label: name, description: "Read a synthetic room or create an unsent draft; never send.", parameters: { type: "object", properties: {} },
    async execute() {
     if (name === "room_draft") await fetch(baseUrl + "/prepare");
@@ -174,17 +169,17 @@ export default { id: "room-proof", register(api) {
 } };
 `,
       );
-      const certPath = path.join(home.tempHome, "cert.pem");
-      const keyPath = path.join(home.tempHome, "key.pem");
-      await fs.writeFile(certPath, TEST_TLS_CERT_PEM);
-      await fs.writeFile(keyPath, TEST_TLS_KEY_PEM);
       const tlsFingerprint = new X509Certificate(TEST_TLS_CERT_PEM).fingerprint256;
-      const auth = {
+      const auth: NonNullable<OpenClawConfig["gateway"]>["auth"] = {
         mode: "trusted-proxy" as const,
         trustedProxy: {
           userHeader: "x-forwarded-user",
           requiredHeaders: ["x-forwarded-proto"],
           allowLoopback: true,
+          deviceAutoApprove: {
+            enabled: true,
+            scopes: ["operator.admin", "operator.read", "operator.write"],
+          },
         },
       };
       const cfg: OpenClawConfig = {
@@ -216,7 +211,6 @@ export default { id: "room-proof", register(api) {
         tools: { allow: ["room_read", "room_draft"], codeMode: false, toolSearch: false },
         gateway: {
           auth,
-          tls: { enabled: true, autoGenerate: false, certPath, keyPath },
           trustedProxies: ["127.0.0.1"],
           controlUi: { allowedOrigins: ["https://localhost"] },
           roles: {
@@ -246,49 +240,87 @@ export default { id: "room-proof", register(api) {
         "credentials.sqlite",
       );
       const identity = loadOrCreateDeviceIdentity({ path: devicePath });
-      const pairing = await requestDevicePairing({
-        deviceId: identity.deviceId,
-        publicKey: publicKeyRawBase64UrlFromPem(identity.publicKeyPem),
-        role: "operator",
-        scopes: ["operator.admin", "operator.read", "operator.write"],
-        clientId: "openclaw-control-ui",
-        clientMode: "webchat",
-        platform: process.platform,
-        displayName: "Room proof",
-      });
-      await approveDevicePairing(pairing.request.requestId, { callerScopes: ["operator.admin"] });
       const clients: Awaited<ReturnType<typeof connectGatewayClient>>[] = [];
-      let gateway: Awaited<ReturnType<typeof startGatewayWithClient>> | undefined;
+      const instance = await createOpenClawTestInstance({
+        name: "plugin-requester-effects",
+        signal,
+        config: cfg,
+        env: {
+          OPENCLAW_SKIP_PROVIDERS: undefined,
+          OPENCLAW_TEST_MINIMAL_GATEWAY: undefined,
+          OPENAI_API_KEY: undefined,
+          OPENAI_BASE_URL: undefined,
+        },
+        stopTimeoutMs: 10_000,
+      });
+      await instance.state.writeConfig({
+        ...cfg,
+        gateway: { ...cfg.gateway, port: instance.port },
+      });
+      delete instance.env.OPENCLAW_GATEWAY_TOKEN;
+      const proxySockets = new Set<Socket>();
+      const proxy = createTlsServer({ key: TEST_TLS_KEY_PEM, cert: TEST_TLS_CERT_PEM });
+      proxy.on("upgrade", (request, socket, head) => {
+        const upstream = connectTcp(instance.port, "127.0.0.1", () => {
+          upstream.write(
+            request.method +
+              " " +
+              request.url +
+              " HTTP/1.1\r\n" +
+              request.rawHeaders.reduce(
+                (wireHeaders, value, index) =>
+                  wireHeaders + value + (index % 2 === 0 ? ": " : "\r\n"),
+                "",
+              ) +
+              "\r\n",
+          );
+          if (head.length) {
+            upstream.write(head);
+          }
+          socket.pipe(upstream).pipe(socket);
+        });
+        proxySockets.add(socket);
+        proxySockets.add(upstream);
+        const close = () => {
+          socket.destroy();
+          upstream.destroy();
+          proxySockets.delete(socket);
+          proxySockets.delete(upstream);
+        };
+        socket.on("error", close);
+        upstream.on("error", close);
+        socket.on("close", close);
+        upstream.on("close", close);
+      });
+      const proxyUrl = await listenLoopback(proxy, "https");
       await runQaGatewayFixture(
         async () => {
-          gateway = await startGatewayWithClient({
-            cfg,
-            auth,
-            secure: true,
+          await instance.startGateway();
+          const connection = {
+            url: proxyUrl.replace("https:", "wss:"),
             tlsFingerprint,
-            configPath: await createGatewayConfigPath(home.tempHome),
-            portClaim: await acquireTestPortBlock({ offsets: [0, 1, 2, 3, 4] }),
-            clientName: "openclaw-control-ui",
-            mode: "webchat",
+            clientName: "openclaw-control-ui" as const,
+            mode: "webchat" as const,
             origin: "https://localhost",
+            deviceIdentity: identity,
+          };
+          const admin = await connectGatewayClient({
+            ...connection,
             edgeAuthHeaders: headers("administrator"),
             scopes: ["operator.admin", "operator.read", "operator.write"],
           });
-          await gateway.server.startupSettled;
-          const admin = gateway.client;
+          clients.push(admin);
+          const serving = await admin.request<{ pid: number }>("system.info", {});
+          expect(serving.pid).toBe(instance.child?.pid);
+          expect(serving.pid).not.toBe(process.pid);
           const connectPerson = async (
             person: string,
             scopes = ["operator.admin", "operator.read", "operator.write"],
           ) => {
             const client = await connectGatewayClient({
-              url: "wss://127.0.0.1:" + gateway!.port,
-              tlsFingerprint,
-              clientName: "openclaw-control-ui",
-              mode: "webchat",
-              origin: "https://localhost",
+              ...connection,
               edgeAuthHeaders: headers(person),
               instanceId: person,
-              deviceIdentity: identity,
               scopes,
             });
             clients.push(client);
@@ -329,7 +361,7 @@ export default { id: "room-proof", register(api) {
           const requestCount = inventories.length;
           const memberResult = await wait(await send(memberSession.client));
           expect(memberResult).toMatchObject({ status: "error" });
-          expect(logErrors.mock.calls.flat().join("\n")).toContain(
+          expect(instance.logs()).toContain(
             "No callable tools remain after resolving explicit tool allowlist",
           );
           expect(inventories).toHaveLength(requestCount);
@@ -386,17 +418,16 @@ export default { id: "room-proof", register(api) {
                 queueMode: "steer",
                 idempotencyKey: randomUUID(),
               });
-              // Read the actual production owner; input is admitted only through chat.send.
-              await vi.waitFor(() => {
-                const participants = getSessionControllerOperation(
-                  sharedKey!,
-                )?.personalToolParticipants;
-                expect(participants).toBeDefined();
-                expect(participants?.resolve(person.profileId)?.profileId).toBe(person.profileId);
-                expect(participants?.resolve(other.profileId)?.profileId).toBe(other.profileId);
-                expect(() => participants?.resolve()).toThrow(
-                  "Several people have steered this turn",
-                );
+              // Probe the captured capability across the real plugin RPC boundary, never seed participants.
+              await vi.waitFor(async () => {
+                const observed = await admin.request<{
+                  current: boolean;
+                  id: string;
+                  error?: string;
+                }>("room-proof.status", {});
+                expect(observed.id).toBe(person.profileId);
+                expect(observed.current).toBe(false);
+                expect(observed.error).toContain("Several people have steered this turn");
               });
             } else {
               const connected = await admin.request<
@@ -438,10 +469,13 @@ export default { id: "room-proof", register(api) {
         async () => {
           release.resolve();
           await Promise.all(clients.map(disconnectGatewayClient));
-          if (gateway) {
-            await disconnectGatewayClient(gateway.client);
-            await gateway.server.close({ reason: "requester effect proof complete" });
+          await instance.cleanup();
+        },
+        async () => {
+          for (const socket of proxySockets) {
+            socket.destroy();
           }
+          await closeHttpServer(proxy);
         },
         () => closeHttpServer(provider),
         () => closeHttpServer(room),
@@ -449,7 +483,6 @@ export default { id: "room-proof", register(api) {
           resetGatewayTestState();
           await removeGatewayTempHome(home.tempHome);
           home.envSnapshot.restore();
-          logErrors.mockRestore();
         },
       );
     }),
