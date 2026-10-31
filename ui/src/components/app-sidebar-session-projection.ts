@@ -507,12 +507,11 @@ export class SidebarSessionProjection {
     this.revision += 1;
     this.subtitleDeadline = Infinity;
     const previous = this.previousInput;
-    const connectionChanged =
+    const scopeChanged =
       previous !== null &&
       (previous.agentId !== input.agentId ||
-        previous.connectionIdentity !== input.connectionIdentity);
-    const scopeChanged =
-      connectionChanged || (previous !== null && previous.listSource !== input.listSource);
+        previous.connectionIdentity !== input.connectionIdentity ||
+        previous.listSource !== input.listSource);
     if (
       scopeChanged ||
       (previous !== null &&
@@ -524,7 +523,11 @@ export class SidebarSessionProjection {
     ) {
       this.resetMembership();
     }
-    this.children.beginPass(connectionChanged, input.listLoaded);
+    this.children.beginPass(
+      previous !== null &&
+        (previous.agentId !== input.agentId ||
+          previous.connectionIdentity !== input.connectionIdentity),
+    );
     if (scopeChanged) {
       this.heldSubtitles.clear();
     }
@@ -556,12 +559,9 @@ export class SidebarSessionProjection {
       this.observeSubtitle(session, input.subtitle);
       pending.push(...session.children);
     }
-    // A route placeholder cannot establish that a restored session disappeared.
-    if (input.listLoaded) {
-      for (const key of staleKeys) {
-        this.children.delete(key);
-        this.heldSubtitles.delete(key);
-      }
+    for (const key of staleKeys) {
+      this.children.delete(key);
+      this.heldSubtitles.delete(key);
     }
 
     const { grouping, knownGroups, selfOwnerId, sectionOrder, catalogIds } = input;

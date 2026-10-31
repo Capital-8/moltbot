@@ -6,10 +6,7 @@ import { profileDirectory } from "../lib/profile-directory.ts";
 import { listen } from "../lib/reactive/listener.ts";
 import { projectOwner } from "../lib/reactive/projection.ts";
 import { showToast } from "../lib/toast.ts";
-import {
-  sidebarMountedPresenceScope,
-  sidebarPresenceActivityViewers,
-} from "./app-sidebar-presence.ts";
+import { sidebarPresenceActivityViewers, sidebarPresenceScope } from "./app-sidebar-presence.ts";
 import type { AppSidebarSessionNavigationElement } from "./app-sidebar-session-navigation.ts";
 import { registerPersonActivityData } from "./person-activity-data.ts";
 import type { SidebarPeopleRuntime } from "./sidebar-people.runtime.ts";
@@ -177,7 +174,7 @@ export function createSidebarPeople(
       activityExpiry.sync();
     },
     syncRendered() {
-      const { online, activityProfileIds } = sidebarMountedPresenceScope(host);
+      const { online, activityProfileIds } = sidebarPresenceScope(host);
       const scope = JSON.stringify([online, ...Array.from(activityProfileIds).toSorted()]);
       if (scope !== activityScope) {
         activityScope = scope;
