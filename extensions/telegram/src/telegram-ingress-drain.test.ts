@@ -251,6 +251,54 @@ describe("createTelegramIngressMonitor", () => {
     });
   });
 
+  it("dead-letters exhausted pre-adoption abandonment and delivers the next update", async () => {
+    await withTempState(async ({ queue, monitor: makeMonitor, enqueue }) => {
+      const eventId = "0000000000000003";
+      const payload = updatePayload(3);
+      const receivedAt = Date.now() - 25 * 60 * 60 * 1_000;
+      await queue.enqueue(eventId, payload, {
+        laneKey: telegramSpooledUpdateLaneKey(payload.update),
+        receivedAt,
+      });
+      for (let attempt = 0; attempt < 7; attempt++) {
+        const claim = await queue.claim(eventId, { ownerId: "previous-delivery" });
+        if (!claim) {
+          throw new Error("Expected the previous Telegram ingress claim");
+        }
+        await queue.release(claim, { lastError: "turn-abandoned", releasedAt: receivedAt });
+      }
+      await enqueue(4);
+      const onLog = vi.fn();
+      const dispatch = vi.fn<MonitorOptions["dispatch"]>(async (update, lifecycle) => {
+        if ((update as { update_id: number }).update_id === 3) {
+          lifecycle.onDeferred();
+          await lifecycle.onAbandoned();
+        }
+        return { kind: "completed" };
+      });
+      const monitor = makeMonitor({ dispatch, onLog });
+      try {
+        monitor.start();
+        await monitor.waitForIdle();
+        expect(await queue.listFailed?.({ limit: "all" })).toMatchObject([
+          { id: eventId, reason: "retry-limit-exceeded", message: "turn-abandoned" },
+        ]);
+        expect(await queue.listPending({ limit: "all" })).toEqual([]);
+        expect(dispatch.mock.calls.map(([update]) => update)).toEqual([
+          updatePayload(3).update,
+          updatePayload(4).update,
+        ]);
+        expect(onLog).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "failed after 8 attempts (retry-limit-exceeded): turn-abandoned; dead-lettered",
+          ),
+        );
+      } finally {
+        await monitor.stop();
+      }
+    });
+  });
+
   it("keeps a fresh admission lane when the forum cache changes during ACK", async () => {
     await withTempState(async ({ queue, monitor: makeMonitor }) => {
       const update = {

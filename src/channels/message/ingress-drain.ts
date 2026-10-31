@@ -345,21 +345,6 @@ export function createChannelIngressDrainOwner<
     state.stallTimer.unref?.();
   };
 
-  const releaseUnadopted = async (
-    state: ActiveHandlerState<TPayload, TMetadata>,
-    releaseOptions: { lastError?: string; recordAttempt?: boolean },
-  ) => {
-    if (!isPreAdoptionState(state)) {
-      return;
-    }
-    clearStallTimer(state);
-    await state
-      .settleOnce(async () => {
-        await releaseClaim(state.claim, releaseOptions);
-      })
-      .catch(() => undefined);
-  };
-
   // A release between separate reads can hide a lane's head from both collections.
   const readUnsettled = async () =>
     queue.listUnsettled
@@ -449,10 +434,23 @@ export function createChannelIngressDrainOwner<
       onCancelled: async () => {
         // Cancellation means ownership ended before delivery, so preserve every
         // prior retry fact while reopening the canonical row for replacement.
-        await releaseUnadopted(state, { recordAttempt: false });
+        if (!isPreAdoptionState(state)) {
+          return;
+        }
+        clearStallTimer(state);
+        await state
+          .settleOnce(async () => {
+            await releaseClaim(state.claim, { recordAttempt: false });
+          })
+          .catch(() => undefined);
       },
       onAbandoned: async () => {
-        await releaseUnadopted(state, { lastError: "turn-abandoned" });
+        if (!isPreAdoptionState(state)) {
+          return;
+        }
+        await state.settleOnce(() =>
+          applyFailureDisposition(state.claim, new Error("turn-abandoned")),
+        );
       },
     };
   };
