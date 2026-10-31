@@ -408,18 +408,6 @@
   color: var(--text);
 }
 
-.agent-chat__capability-menu-body > .agent-chat__capability-menu-section {
-  flex-shrink: 0;
-  padding: 6px 10px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.agent-chat__capability-menu-item[data-value="manage-plugins"] {
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .agent-chat__capability-menu-item > .oc-menu-item__icon {
   display: inline-flex;
   align-items: center;

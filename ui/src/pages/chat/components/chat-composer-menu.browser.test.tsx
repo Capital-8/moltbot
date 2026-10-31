@@ -21,8 +21,10 @@ it("keeps plugin management visually secondary to capability navigation", async 
   await expect
     .poll(() => view.container.querySelector('[data-value="manage-plugins"]'))
     .not.toBeNull();
-  const label = (id: string) =>
-    getComputedStyle(view.container.querySelector(`[data-value="${id}"] > .oc-menu-item__label`)!);
+  const label = (id: string) => {
+    const element = view.container.querySelector(`[data-value="${id}"] > .oc-menu-item__label`)!;
+    return getComputedStyle(element.firstElementChild ?? element);
+  };
   const management = label("manage-plugins");
   const navigation = label("back");
   expect(Number.parseFloat(management.fontSize)).toBeLessThan(

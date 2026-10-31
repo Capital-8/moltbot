@@ -211,9 +211,11 @@ export function connectorItems(
       attributes: { title: menu.adminBlockedReason ?? "" },
     });
   }
+  const managePluginsLabel = t("chat.composer.menu.managePlugins");
   footer.push({
     id: "manage-plugins",
-    label: t("chat.composer.menu.managePlugins"),
+    label: managePluginsLabel,
+    content: <span class="agent-chat__capability-menu-note">{managePluginsLabel}</span>,
     href: pathForRoute("plugins", menu.basePath),
     class: "agent-chat__capability-menu-item",
     icon: <Icon name="settings" />,
