@@ -445,6 +445,32 @@ describe("Gateway startup lifetime", () => {
       const cleanupError = new Error("startup cleanup failed");
       const held = mode.startsWith("held-");
       const processOwned = mode === "held-process";
+      const preludeEntered = createDeferred();
+      const releasePrelude = createDeferred();
+      const lateStopEntered = createDeferred();
+      if (processOwned) {
+        // Native prelude work can finish after the first grace expires. Keep that
+        // gap explicit instead of assuming both cleanup timers are already armed.
+        const shutdown = await import("./server-shutdown.js");
+        const closeSteps = shutdown.runGatewayCloseSteps;
+        vi.spyOn(shutdown, "runGatewayCloseSteps").mockImplementation((params) =>
+          closeSteps({
+            ...params,
+            owner: {
+              ...params.owner,
+              runClosePrelude: async () => {
+                await params.owner.runClosePrelude();
+                preludeEntered.resolve();
+                await releasePrelude.promise;
+              },
+              sealAndJoinRegisteredSidecarStops: () => {
+                lateStopEntered.resolve();
+                return params.owner.sealAndJoinRegisteredSidecarStops();
+              },
+            },
+          }),
+        );
+      }
       let failCleanup = mode === "failed";
       const stopEntered = createDeferred();
       const releaseStop = createDeferred();
@@ -506,7 +532,14 @@ describe("Gateway startup lifetime", () => {
           await stopEntered.promise;
           const settled = vi.fn();
           void startupOutcome.then(settled);
-          await vi.advanceTimersByTimeAsync(10_000);
+          await vi.advanceTimersByTimeAsync(processOwned ? 5_000 : 10_000);
+          if (processOwned) {
+            await preludeEntered.promise;
+            expect(settled).not.toHaveBeenCalled();
+            releasePrelude.resolve();
+            await lateStopEntered.promise;
+            await vi.advanceTimersByTimeAsync(5_000);
+          }
           expect(settled).toHaveBeenCalledTimes(processOwned ? 1 : 0);
           releaseStop.resolve();
           vi.useRealTimers();
@@ -529,6 +562,7 @@ describe("Gateway startup lifetime", () => {
           expect(getActiveSecretsRuntimeConfigSnapshot()).toBeNull();
         }
       } finally {
+        releasePrelude.resolve();
         releaseStop.resolve();
         emergencyRelease.resolve();
         vi.useRealTimers();
