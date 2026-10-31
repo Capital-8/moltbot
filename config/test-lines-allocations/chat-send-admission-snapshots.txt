@@ -1,2 +1,2 @@
-3
-# Final admission retains current metadata without transporting unused saved snapshots.
+6
+# Admission avoids snapshot transport; resident authority reads borrow immutable entries without copying.

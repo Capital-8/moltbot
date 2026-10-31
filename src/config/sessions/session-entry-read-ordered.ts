@@ -105,12 +105,16 @@ export function createAdmittedSessionEntryCohortReader(params: {
         sessionKeys: [params.sessionKey],
         snapshotFields: projection === "list" ? [] : projection === "full" ? undefined : projection,
       };
-      const read = await readSessionEntriesWithRetainedFacts(database, request, () =>
-        withSessionHistoryWorkerDatabase(
-          database,
-          (reader) => reader.readExactEntries({ ...request, env: database.env }),
-          targetDiscoveryLane,
-        ),
+      const read = await readSessionEntriesWithRetainedFacts(
+        database,
+        request,
+        () =>
+          withSessionHistoryWorkerDatabase(
+            database,
+            (reader) => reader.readExactEntries({ ...request, env: database.env }),
+            targetDiscoveryLane,
+          ),
+        request.snapshotFields,
       );
       assertCurrent();
       const entry = read.entries.find((row) => row.sessionKey === params.sessionKey)?.entry;

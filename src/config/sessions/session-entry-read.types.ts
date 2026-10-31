@@ -121,7 +121,7 @@ export type SessionExactEntriesWorkerRequest = (
   sourceChecks?: SessionSourcePredicate[];
   manualCompact?: { sessionId: string; sources: SessionSourcePredicate[] };
   expectedIdentity?: SessionEntryListWorkerInput["expectedIdentity"];
-  /** Omitted retains the complete entry; an empty selection reads metadata only. */
+  /** Bounds worker hydration; resident authority reads may retain other frozen snapshots. */
   snapshotFields?: readonly SessionEntrySnapshotField[];
   env: NodeJS.ProcessEnv;
   lifecycleSessionKey?: string;

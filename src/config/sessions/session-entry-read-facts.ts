@@ -23,6 +23,7 @@ import type {
   SessionExactEntriesWorkerRequest,
   SessionExactEntriesWorkerResult,
 } from "./session-entry-read.types.js";
+import type { SessionEntrySnapshotField } from "./session-entry-snapshot-values.js";
 import { runLockedSessionTranscriptRead } from "./session-transcript-execution-read.js";
 import { withTranscriptLockSettlement } from "./session-transcript-lock-settlement.js";
 import {
@@ -153,6 +154,7 @@ export function readRetainedSessionEntryFacts(
   database: Database,
   request: Selection,
   nativeOwner?: AgentDatabaseGenerationClaim,
+  retainedSnapshotFields?: readonly SessionEntrySnapshotField[],
 ): SessionEntryCohortResult | undefined {
   if (!eligible(request)) {
     return undefined;
@@ -178,7 +180,11 @@ export function readRetainedSessionEntryFacts(
     ) {
       return undefined;
     }
-    const facts = readSessionActorEntryFacts(target, projection);
+    // Hydration selections need no copy of resident facts; explicit entry projections still do.
+    const facts = readSessionActorEntryFacts(
+      target,
+      request.projection === "sharing" ? projection : retainedSnapshotFields,
+    );
     if (
       !facts ||
       (request.projection === "sharing" && (!facts.entry || facts.members === undefined)) ||
@@ -368,6 +374,7 @@ export async function readSessionEntriesWithRetainedFacts(
   database: Database & { env: NodeJS.ProcessEnv },
   request: Selection,
   read: () => Promise<SessionExactEntriesWorkerResult>,
+  retainedSnapshotFields?: readonly SessionEntrySnapshotField[],
 ): Promise<SessionExactEntriesWorkerResult> {
   if (!eligible(request)) {
     return await read();
@@ -376,7 +383,12 @@ export async function readSessionEntriesWithRetainedFacts(
   if (borrowed) {
     return await borrowed;
   }
-  const cached = readRetainedSessionEntryFacts(database, request);
+  const cached = readRetainedSessionEntryFacts(
+    database,
+    request,
+    undefined,
+    retainedSnapshotFields,
+  );
   if (cached) {
     return cached;
   }
@@ -406,7 +418,12 @@ export async function readSessionEntryWithRetainedFacts(
     snapshotFields:
       scope.projection === "list" ? [] : scope.projection === "full" ? undefined : scope.projection,
   };
-  const cached = readRetainedSessionEntryFacts(database, request);
+  const cached = readRetainedSessionEntryFacts(
+    database,
+    request,
+    undefined,
+    request.snapshotFields,
+  );
   if (cached) {
     return { ...ok(cached.entries[0]?.entry), source: cached.source };
   }

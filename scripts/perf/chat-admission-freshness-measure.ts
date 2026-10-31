@@ -15,12 +15,12 @@
  * It uses 40 synthetic plugin config entries; no plugin loading or policy benchmark.
  * The selected legacy row lacks sessionStartedAt and has a large saved
  * skills snapshot and 128-message history; 9,999 unrelated rows stay in storage.
- * --workload admission-projection compares full (before) and snapshot-free (after)
- * entries through the qualified Gateway owner, retaining lifecycle and membership reads,
+ * --workload admission-projection compares full (before) and snapshot-free worker
+ * hydration (after), retaining lifecycle and membership reads through the qualified owner,
  * FIFO admission, and current-source checks in both arms. Reservation timings
  * include worker dispatch and publication, not just SQL; they are rounded to ms.
  * Prepare a separate fixture with --session-started to compare modern rows whose
- * lifecycle facts can be served by the retained replica without a worker request.
+ * lifecycle facts can be served by the retained replica without a worker request or copy.
  */
 import assert from "node:assert/strict";
 import { channel } from "node:diagnostics_channel";
@@ -265,7 +265,10 @@ try {
               assertCurrent();
               assert.equal(current.entry?.sessionId, sessionId);
               assert.equal(current.entry?.lifecycleRevision, "synthetic-0");
-              assert.equal(current.entry?.skillsSnapshot !== undefined, !candidate);
+              assert.equal(
+                current.entry?.skillsSnapshot !== undefined,
+                !candidate || prepared.entry?.sessionStartedAt !== undefined,
+              );
               assert.equal(current.lifecycleTimestamps?.sessionStartedAt, 1);
               assert.deepEqual(members.get(sessionKey), []);
               consumed++;
