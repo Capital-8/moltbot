@@ -40,11 +40,12 @@ const {
     vi.fn<(providerId: string, cfg?: OpenClawConfig) => SpeechProviderPlugin | null | undefined>(),
   // Keep the real return union so individual cases can enable transcoding.
   transcodeAudioBufferMock: vi.fn<
-    () => ReturnType<typeof import("../media/media-services.js").transcodeAudioBuffer>
+    () => ReturnType<typeof import("../media/audio-transcode.js").transcodeAudioBuffer>
   >(async () => ({ ok: false, reason: "platform-unsupported" })),
 }));
 
-vi.mock("../media/media-services.js", () => ({
+vi.mock("../media/audio-transcode.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../media/audio-transcode.js")>()),
   transcodeAudioBuffer: transcodeAudioBufferMock,
 }));
 
@@ -94,11 +95,6 @@ vi.mock("../plugins/capability-provider-runtime.js", async () => {
       resolve: () => getSpeechProviderMock(providerId, cfg) ?? undefined,
     }),
   };
-});
-
-vi.mock("./tts-core.js", async () => {
-  const actual = await vi.importActual<typeof import("./tts-core.js")>("./tts-core.js");
-  return { ...actual, scheduleCleanup: vi.fn() };
 });
 
 installSpeechProviders([createMockSpeechProvider("mock", { label: "Mock" })]);

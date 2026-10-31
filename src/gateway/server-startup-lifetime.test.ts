@@ -507,7 +507,8 @@ describe("Gateway startup lifetime", () => {
           const settled = vi.fn();
           void startupOutcome.then(settled);
           await vi.advanceTimersByTimeAsync(10_000);
-          expect(settled).toHaveBeenCalledTimes(processOwned ? 1 : 0);
+          // Required late-sidecar joins retain both hosts after the diagnostic grace.
+          expect(settled).not.toHaveBeenCalled();
           releaseStop.resolve();
           vi.useRealTimers();
         }
@@ -521,11 +522,9 @@ describe("Gateway startup lifetime", () => {
           expect(failure).toBe(startupError);
         }
         expect(resumed).toHaveBeenCalledExactlyOnceWith({ closing: true, listening: true });
-        expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(
-          failCleanup || processOwned,
-        );
+        expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(failCleanup);
         expect(getActiveGatewayRootWorkCount()).toBe(0);
-        if (!failCleanup && !processOwned) {
+        if (!failCleanup) {
           expect(getActiveSecretsRuntimeConfigSnapshot()).toBeNull();
         }
       } finally {

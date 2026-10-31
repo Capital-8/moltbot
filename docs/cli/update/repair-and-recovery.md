@@ -221,8 +221,9 @@ invalidate those chosen bytes or authorize restoring them over current data.
 The backup's existing database warnings remain available when a stable source
 generation could not be recorded. Unsafe source acquisition or file changes during
 copying can still leave a capture incomplete. Capture is best effort: when it fails,
-the update warns that it continues without the original-state capture, names the
-step and source paths that failed, and proceeds.
+the update reports **NO ORIGINAL-STATE SNAPSHOT** in its warning, retains the
+warning in JSON and the update run record, names the step and source paths that
+failed, and proceeds.
 If measured free space is insufficient, the warning explicitly says **this update
 has no original-state snapshot to restore from**, with needed and available bytes.
 The same warning is retained in JSON and the update run record. The update does
@@ -575,6 +576,8 @@ retained paths, or a candidate root still block regardless of start time.
 Repair then replaces the custody with
 its own claim in one transaction, records the settled keys in the
 `finalize:handoff-settlement` step, and releases its claim after finalization.
+Package publication recovery left by the cancelled updater settles under that
+claim, so it does not need fresh update admission.
 A failed or deferred repair keeps the original custody record in its claim and
 reports it as retained custody. A later repair resumes that claim once the
 interrupted repair process has exited; the grace still counts from the cancelled
