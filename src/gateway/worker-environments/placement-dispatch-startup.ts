@@ -114,8 +114,7 @@ export function createWorkerPlacementDispatchStartup(options: {
     if (!eligibility.ok) {
       throw new DevicePlacementUnavailableError(deviceId, eligibility.error);
     }
-    // Workspace preparation consumes no worker slot. Keep identity and commands live;
-    // the node's launch owner admits the eventual turn against physical capacity.
+    // Workspace preparation consumes no slot; launch admits turns against live node capacity.
     return {
       node: eligibility.node,
       requirement: { ...requirement, consumesWorkerSlot: false },
@@ -283,7 +282,7 @@ export function createWorkerPlacementDispatchStartup(options: {
       }
     };
     assertAttachmentCurrent();
-    const credential = await environments.attachSession({
+    const { ownerEpoch } = await environments.attachSession({
       environmentId: provisioned.environmentId,
       ownerEpoch: provisioned.ownerEpoch,
       sessionId: request.sessionId,
@@ -304,7 +303,6 @@ export function createWorkerPlacementDispatchStartup(options: {
     });
     params.signal?.throwIfAborted();
     params.authorize?.();
-    const ownerEpoch = credential.ownerEpoch;
     let activated = false;
     let activationIndeterminate = false;
     let stoppingTunnel: Promise<void> | undefined;
@@ -344,7 +342,10 @@ export function createWorkerPlacementDispatchStartup(options: {
         assertAttachmentCurrent();
         requireAttachedEnvironment();
       };
-      const preparation = readWorkerProjectPreparation(params.environment.profileSnapshot.project);
+      const preparation =
+        params.workspace.kind === "repository" && params.workspace.repository.diskAuthority
+          ? undefined
+          : readWorkerProjectPreparation(params.environment.profileSnapshot.project);
       let lifecycleHomeDir: string | undefined;
       let assertPreparedBindingCurrent: (() => void) | undefined;
       let preparedRepository: Parameters<
@@ -446,8 +447,7 @@ export function createWorkerPlacementDispatchStartup(options: {
             ? (command) =>
                 runProjectLifecycleCommand(provisioned.environmentId, ownerEpoch, command)
             : undefined,
-          // A completed activation is the existing durable witness. An interrupted
-          // first binding retries declared setup; commands should be idempotent.
+          // Retry setup only before first activation; declared commands must be idempotent.
           postCreate: params.environment.lastActivatedAtMs === null,
           assertCurrent: () => {
             assertSyncOwner();

@@ -60,7 +60,7 @@ const { once } = require("node:events");
   if (identity.status !== 0 || JSON.parse(identity.stdout).deviceId !== ${JSON.stringify(request.deviceId)}) throw new Error("Cloud worker retained node identity is missing or changed; resume refused");
   ${createCrabboxNodeProcessRuntime(undefined, request.leaseId)}
   // A live process owns reconnect; never kill or duplicate it to repair transport.
-  if (!reuseNodeProcess(() => {
+  if (!await reuseNodeProcess(() => {
     const setup = ${JSON.stringify(nodeSetup)};
     if (!setup) return;
     const selected = spawnSync("sh", ["-s"], { input: setup, env: nodeEnv, encoding: "utf8", timeout: ${CRABBOX_SETUP_TIMEOUT_MS}, maxBuffer: 65536 });

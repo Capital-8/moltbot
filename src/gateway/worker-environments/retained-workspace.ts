@@ -8,10 +8,60 @@ import type {
   WorkerEnvironmentServiceRecord,
 } from "./service-contract.js";
 import type { WorkerSessionWorkspace } from "./session-workspace.js";
-import type { WorkerEnvironmentRecord } from "./store.js";
+import type { WorkerEnvironmentRecord, WorkerEnvironmentStore } from "./store.js";
+
+/** Existing allocation admission owns the lock and authenticated caller. */
+export async function resumeOriginalRetainedWorkspaceOwner(
+  environment: WorkerEnvironmentRecord,
+  authority: RetainedWorkspaceAuthority,
+  owner: { agentId: string; sessionKey: string; sessionId: string } | undefined,
+  store: Pick<WorkerEnvironmentStore, "resumeParkedRetainedWorkspaceOwner">,
+  signal: AbortSignal | undefined,
+  assertCurrent: (() => void) | undefined,
+): Promise<WorkerEnvironmentRecord> {
+  if (
+    !owner ||
+    !environment.retention ||
+    !isDeepStrictEqual(environment.retention.owner, owner) ||
+    environment.retention.ownerBinding !== authority.ownerBinding ||
+    authority.sessionId !== owner.sessionId
+  ) {
+    throw new Error("Original retained worker owner changed; replacement is refused");
+  }
+  const workspace = await getSessionRepositoryWorkspaceStore().find(owner);
+  signal?.throwIfAborted();
+  assertCurrent?.();
+  if (!isDeepStrictEqual(workspace?.diskAuthority, authority)) {
+    throw new Error("Original retained disk authority changed; replacement is refused");
+  }
+  if (environment.state !== "orphaned") {
+    return environment;
+  }
+  return store.resumeParkedRetainedWorkspaceOwner({
+    environmentId: environment.environmentId,
+    expectedOwnerEpoch: environment.ownerEpoch,
+    owner,
+    expectedDiskAuthority: authority,
+    assertCurrent: () => {
+      signal?.throwIfAborted();
+      assertCurrent?.();
+    },
+  });
+}
 
 export function retainedRepositoryDisk(
-  environment: WorkerEnvironmentRecord | undefined,
+  environment:
+    | Pick<
+        WorkerEnvironmentRecord,
+        | "environmentId"
+        | "providerId"
+        | "profileSnapshot"
+        | "retention"
+        | "leaseId"
+        | "destroyRequestedAtMs"
+        | "ownerEpoch"
+      >
+    | undefined,
   owner: { agentId: string; sessionKey: string; sessionId: string },
   workspaceDir: string,
 ): RetainedWorkspaceAuthority | undefined {

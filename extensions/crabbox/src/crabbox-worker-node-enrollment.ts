@@ -313,11 +313,6 @@ setPhase("preparation");
   }
   ${params.offline ? "const desktopTarget = undefined;" : createCrabboxNodeProcessRuntime(desktopTarget, params.leaseId)}
   if (desktopTarget === "macos") finishDesktopSetup();
-  if (mode && reuseNodeProcess()) {
-    if (desktopTarget !== "macos") finishDesktopSetup();
-    setPhase("complete");
-    return;
-  }
   ${CRABBOX_NPM_RUNTIME_INSTALL_SOURCE}
   ${CRABBOX_RUNTIME_VERIFICATION_SOURCE}
   const verifyRuntime = async (root, fresh = false) => {
@@ -559,6 +554,7 @@ setPhase("preparation");
     setPhase("complete");
     return;
   }
+  const prepareRuntime = async () => {
   fs.mkdirSync(runtimeRoot, { recursive: true, ...directoryOptions });
   const existingRuntime = fs.existsSync(runtimeDir);
   if (existingRuntime) await timed("bootstrap.verification", () => verifyRuntime(runtimeDir));
@@ -650,11 +646,15 @@ setPhase("preparation");
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
   }
   installRuntimePrefetch();
-  // A project snapshot contains only verified runtime bytes, never enrollment state.
+  if (!mode && workerBundle) reportRuntimeInstallation(existingRuntime ? "existing-verified" : "installed");
+  };
+  if (mode && await reuseNodeProcess(prepareRuntime)) {
+    if (desktopTarget !== "macos") finishDesktopSetup();
+    setPhase("complete"); return;
+  }
   if (!mode) {
-    if (workerBundle) reportRuntimeInstallation(existingRuntime ? "existing-verified" : "installed");
-    setPhase("complete");
-    return;
+    await prepareRuntime();
+    setPhase("complete"); return;
   }
   activationStarted = performance.now();
   setPhase("activation");

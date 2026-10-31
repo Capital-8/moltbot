@@ -38,9 +38,9 @@ async function replay(
     leaseId,
     ...(desktop ? { desktop: true, target: "macos" as const } : {}),
     enrollment: {
-      mode: "connect",
-      setupCode: "synthetic-code",
-      setupId: "synthetic-setup",
+      ...(platform === "linux"
+        ? { mode: "resume" as const, deviceId: "synthetic-device" }
+        : { mode: "connect" as const, setupCode: "synthetic-code", setupId: "synthetic-setup" }),
       openclawVersion: "2026.8.1",
       nodeBootstrap: verification.nodeBootstrap,
       displayName,

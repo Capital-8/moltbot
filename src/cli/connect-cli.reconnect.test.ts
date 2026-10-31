@@ -53,109 +53,121 @@ async function runConnect(args: string[]) {
 }
 
 describe("connect setup-code replay", () => {
-  it("reconnects an ephemeral node with its saved token without sending expired bootstrap auth", async () => {
-    await withOpenClawTestState({ label: "connect-replay" }, async (state) => {
-      const claim = await acquireTestPortBlock({ offsets: [0] });
-      const server = new WebSocketServer({ host: "127.0.0.1", port: claim.port });
-      const on = vi.spyOn(process, "on");
-      const previousExitCode = process.exitCode;
-      let running: Promise<void> | undefined;
-      const connected = Promise.withResolvers<void>();
-      fixture.connected.mockImplementation((value: unknown) => {
-        if (value) {
-          connected.resolve();
-        }
-      });
-      // Ignore earlier import-time listeners: the foreground runner registers its
-      // shutdown handler last, before opening the connection.
-      const stop = () => on.mock.calls.findLast(([event]) => event === "SIGTERM")?.[1]?.("SIGTERM");
-      const frames: RequestFrame[] = [];
-      try {
-        await once(server, "listening");
-        const gateway = { host: "127.0.0.1", port: claim.port, tls: false };
-        await configureNodeHost({ gateway, fallbackDisplayName: "Replay fixture" });
-        const identity = loadOrCreateDeviceIdentity();
-        await storeDeviceAuthToken({
-          deviceId: identity.deviceId,
-          role: "node",
-          token: "synthetic-paired-node-token",
-          scopes: [],
+  it.each([false, true])(
+    "uses the exact ephemeral enrollment credential (fresh=%s)",
+    async (fresh) => {
+      await withOpenClawTestState({ label: "connect-replay" }, async (state) => {
+        const claim = await acquireTestPortBlock({ offsets: [0] });
+        const server = new WebSocketServer({ host: "127.0.0.1", port: claim.port });
+        const on = vi.spyOn(process, "on");
+        const previousExitCode = process.exitCode;
+        let running: Promise<void> | undefined;
+        const connected = Promise.withResolvers<void>();
+        fixture.connected.mockImplementation((value: unknown) => {
+          if (value) {
+            connected.resolve();
+          }
         });
-        // Ambient auth must not turn an expired ticket into shared-credential enrollment.
-        process.env.OPENCLAW_GATEWAY_TOKEN = "synthetic-unrelated-gateway-token";
-        const code = encodePairingSetupCode({
-          url: `ws://127.0.0.1:${claim.port}`,
-          bootstrapToken: "synthetic-expired-bootstrap",
-          expiresAtMs: 1,
-        });
-        const targetFile = state.path("setup-code");
-        await fs.writeFile(targetFile, code, { mode: 0o600 });
-        server.on("connection", (socket) => {
-          socket.send(
-            JSON.stringify({
-              type: "event",
-              event: "connect.challenge",
-              payload: { nonce: "synthetic-challenge", ts: Date.now() },
-            }),
-          );
-          socket.on("message", (data) => {
-            const frame = JSON.parse(rawDataToString(data)) as RequestFrame;
-            frames.push(frame);
+        // Ignore earlier import-time listeners: the foreground runner registers its
+        // shutdown handler last, before opening the connection.
+        const stop = () =>
+          on.mock.calls.findLast(([event]) => event === "SIGTERM")?.[1]?.("SIGTERM");
+        const frames: RequestFrame[] = [];
+        try {
+          await once(server, "listening");
+          const gateway = { host: "127.0.0.1", port: claim.port, tls: false };
+          await configureNodeHost({ gateway, fallbackDisplayName: "Replay fixture" });
+          const identity = loadOrCreateDeviceIdentity();
+          await storeDeviceAuthToken({
+            deviceId: identity.deviceId,
+            role: "node",
+            token: "synthetic-paired-node-token",
+            scopes: [],
+          });
+          // Ambient auth must not turn an expired ticket into shared-credential enrollment.
+          process.env.OPENCLAW_GATEWAY_TOKEN = "synthetic-unrelated-gateway-token";
+          const code = encodePairingSetupCode({
+            url: `ws://127.0.0.1:${claim.port}`,
+            bootstrapToken: fresh ? "synthetic-fresh-bootstrap" : "synthetic-expired-bootstrap",
+            expiresAtMs: fresh ? Date.now() + 60000 : 1,
+          });
+          const targetFile = state.path("setup-code");
+          await fs.writeFile(targetFile, code, { mode: 0o600 });
+          server.on("connection", (socket) => {
             socket.send(
               JSON.stringify({
-                type: "res",
-                id: frame.id,
-                ok: true,
-                payload:
-                  frame.method === "connect"
-                    ? {
-                        type: "hello-ok",
-                        protocol: 4,
-                        features: { methods: [], events: [] },
-                        policy: { tickIntervalMs: 30_000 },
-                      }
-                    : {},
+                type: "event",
+                event: "connect.challenge",
+                payload: { nonce: "synthetic-challenge", ts: Date.now() },
               }),
             );
+            socket.on("message", (data) => {
+              const frame = JSON.parse(rawDataToString(data)) as RequestFrame;
+              frames.push(frame);
+              socket.send(
+                JSON.stringify({
+                  type: "res",
+                  id: frame.id,
+                  ok: true,
+                  payload:
+                    frame.method === "connect"
+                      ? {
+                          type: "hello-ok",
+                          protocol: 4,
+                          features: { methods: [], events: [] },
+                          policy: { tickIntervalMs: 30_000 },
+                        }
+                      : {},
+                }),
+              );
+            });
           });
-        });
-        running = runConnect(["--target-file", targetFile, "--ephemeral"]);
-        await Promise.race([
-          connected.promise,
-          running.then(() => {
-            throw new Error("connect returned before the node connected");
-          }),
-        ]);
-        expect(fixture.runtime.error).not.toHaveBeenCalled();
-        expect(fixture.connected).toHaveBeenCalledWith(
-          expect.objectContaining({
-            url: `ws://127.0.0.1:${claim.port}`,
-          }),
-        );
-        const connect = frames.find((frame) => frame.method === "connect");
-        expect(connect?.params).toMatchObject({
-          role: "node",
-          device: { id: identity.deviceId },
-        });
-        expect(connect?.params).toHaveProperty("auth", {
-          deviceToken: "synthetic-paired-node-token",
-        });
-        await expect(fs.stat(targetFile)).rejects.toMatchObject({ code: "ENOENT" });
-      } finally {
-        stop();
-        await running;
-        fixture.connected.mockReset();
-        for (const socket of server.clients) {
-          socket.terminate();
+          running = runConnect([
+            "--target-file",
+            targetFile,
+            "--ephemeral",
+            ...(fresh ? ["--fresh-bootstrap"] : []),
+          ]);
+          await Promise.race([
+            connected.promise,
+            running.then(() => {
+              throw new Error("connect returned before the node connected");
+            }),
+          ]);
+          expect(fixture.runtime.error).not.toHaveBeenCalled();
+          expect(fixture.connected).toHaveBeenCalledWith(
+            expect.objectContaining({
+              url: `ws://127.0.0.1:${claim.port}`,
+            }),
+          );
+          const connect = frames.find((frame) => frame.method === "connect");
+          expect(connect?.params).toMatchObject({
+            role: "node",
+            device: { id: identity.deviceId },
+          });
+          expect(connect?.params).toHaveProperty(
+            "auth",
+            fresh
+              ? { bootstrapToken: "synthetic-fresh-bootstrap" }
+              : { deviceToken: "synthetic-paired-node-token" },
+          );
+          await expect(fs.stat(targetFile)).rejects.toMatchObject({ code: "ENOENT" });
+        } finally {
+          stop();
+          await running;
+          fixture.connected.mockReset();
+          for (const socket of server.clients) {
+            socket.terminate();
+          }
+          await new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+          });
+          await claim.release();
+          process.exitCode = previousExitCode;
         }
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
-        });
-        await claim.release();
-        process.exitCode = previousExitCode;
-      }
-    });
-  });
+      });
+    },
+  );
 
   it.each([
     { name: "missing node token", token: false, wrongGateway: false, args: ["--ephemeral"] },
