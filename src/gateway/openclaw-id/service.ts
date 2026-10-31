@@ -260,6 +260,16 @@ export function createOpenClawIdService(params: {
       await startMailbox();
     } else if (outcome.state === "failed") {
       params.log.warn(`openclaw-id: Discovery publication failed (${outcome.code})`);
+      // Registered before failing: keep the account, so a retry needs no enrollment code.
+      if (outcome.ownerAccountId) {
+        await (
+          await getAuthority()
+        ).recordDiscovery({
+          owner_account_id: outcome.ownerAccountId,
+          published_binding_seq: record.binding?.body.binding_seq ?? 0,
+        });
+        await startMailbox();
+      }
     }
     return outcome;
   };
@@ -580,6 +590,7 @@ export function createOpenClawIdService(params: {
         params.log.warn(`openclaw-id: publication failed: ${String(error)}`);
         return undefined;
       });
+      await publicationRetry.adopt(publication);
       return { ...result, ...(publication ? { publication } : {}) };
     },
 
@@ -608,6 +619,7 @@ export function createOpenClawIdService(params: {
         params.log.warn(`openclaw-id: publication failed: ${String(error)}`);
         return undefined;
       });
+      await publicationRetry.adopt(publication);
       return { ...result, ...(publication ? { publication } : {}) };
     },
 

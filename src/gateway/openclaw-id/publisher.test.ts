@@ -51,6 +51,48 @@ describe("publishClaw", () => {
   });
 });
 
+describe("publishClaw first registration", () => {
+  it("reports the registered account when the snapshot fails after registration", async () => {
+    const claw = await linkedClaw();
+    const client = {
+      registerClaw: vi.fn(async () => ({ owner_account_id: "acct-new" })),
+      publishDescriptor: vi.fn(),
+      publishSnapshot: vi.fn(async (): Promise<void> => {
+        throw new TypeError("fetch failed");
+      }),
+    };
+    const outcome = await publishClaw({
+      record: claw.authority.current()!,
+      relayUrl: "https://relay.example.test/",
+      client: client as never,
+      signer: await generateEd25519Signer(),
+      enrollmentCode: "one-time-code",
+    });
+    expect(outcome).toMatchObject({ state: "failed", retryable: true, ownerAccountId: "acct-new" });
+  });
+
+  it("does not report an account when registration itself failed", async () => {
+    const claw = await linkedClaw();
+    const client = {
+      registerClaw: vi.fn(async () => {
+        throw new DiscoveryRequestError(503, "unavailable", "x");
+      }),
+      publishDescriptor: vi.fn(),
+      publishSnapshot: vi.fn(),
+    };
+    const outcome = await publishClaw({
+      record: claw.authority.current()!,
+      relayUrl: "https://relay.example.test/",
+      client: client as never,
+      signer: await generateEd25519Signer(),
+      enrollmentCode: "one-time-code",
+    });
+    expect(outcome).toMatchObject({ state: "failed", retryable: true });
+    expect(outcome).not.toHaveProperty("ownerAccountId");
+    expect(client.publishSnapshot).not.toHaveBeenCalled();
+  });
+});
+
 describe("isRetryableDiscoveryError", () => {
   it.each([
     [new TypeError("fetch failed"), true],

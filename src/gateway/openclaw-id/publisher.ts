@@ -22,6 +22,11 @@ export type PublishOutcome =
       retryable: boolean;
       /** When the Gateway retries on its own (epoch ms), if a retry is scheduled. */
       retryAt?: number;
+      /**
+       * Set when this attempt registered the claw before failing: the one-time enrollment
+       * code is spent, so the caller must record the account to publish again without it.
+       */
+      ownerAccountId?: string;
     };
 
 // Discovery statuses worth retrying unchanged: concurrent updates, rate limits, outages.
@@ -95,6 +100,7 @@ export async function publishClaw(params: {
   }
   const bindingSeq = descriptor.binding.body.binding_seq;
   let ownerAccountId = params.record.discovery.owner_account_id;
+  const registeredBefore = ownerAccountId !== null;
   let descriptorFailure: Extract<PublishOutcome, { state: "failed" }> | undefined;
   try {
     if (!ownerAccountId) {
@@ -121,7 +127,8 @@ export async function publishClaw(params: {
     );
     await params.client.publishSnapshot(descriptor.claw_id, snapshot);
   } catch (error) {
-    return descriptorFailure ?? failure(error);
+    const failed = descriptorFailure ?? failure(error);
+    return !registeredBefore && ownerAccountId ? { ...failed, ownerAccountId } : failed;
   }
   return descriptorFailure ?? { state: "published", ownerAccountId, snapshotSeq: state.seq };
 }

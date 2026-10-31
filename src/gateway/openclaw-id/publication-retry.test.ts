@@ -245,6 +245,29 @@ describe("publication retry (OCF-313)", () => {
     expect(claw.authority.current()?.discovery.publish_pending).toBe(true);
   });
 
+  it("adopts a failed direct publication (linking, regeneration) and retries it with backoff", async () => {
+    const { claw, discovery, retry, advance, outcomes } = await registeredClaw();
+    await retry.start();
+    await claw.authority.submit(await kitEnrollment(claw, 1), "mailbox");
+    discovery.fail("snapshot", new TypeError("fetch failed"));
+    // The caller published itself to report the outcome, as commitLink does.
+    const record = claw.authority.current()!;
+    const direct = await publishClaw({
+      record,
+      relayUrl: "https://relay.example.test/",
+      client: discovery.client as never,
+      signer: await generateEd25519Signer(),
+    });
+    expect(direct).toMatchObject({ state: "failed", retryable: true });
+    await retry.adopt(direct);
+    expect(claw.authority.current()?.discovery.publish_pending).toBe(true);
+    expect(retry.nextRetryAt()).toBeDefined();
+    await advance(PUBLICATION_RETRY_INITIAL_MS);
+    expect(outcomes.at(-1)?.state).toBe("published");
+    expect(discovery.mirror.snapshotSeq).toBe(2);
+    expect(publicationPending(claw.authority.current())).toBe(false);
+  });
+
   it("coalesces requests that arrive during an attempt into one follow-up", async () => {
     let release: (() => void) | undefined;
     const publish = vi.fn(

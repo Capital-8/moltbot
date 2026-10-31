@@ -153,6 +153,21 @@ export function createPublicationRetry(params: PublicationRetryParams) {
       await run();
     },
 
+    /**
+     * Takes over after a publication the caller ran directly to report its outcome
+     * (linking, owner-key regeneration): a failure stays pending durably, and a
+     * transient one is retried with backoff.
+     */
+    async adopt(outcome: PublishOutcome | undefined): Promise<void> {
+      if (outcome?.state !== "failed") {
+        return;
+      }
+      await params.setPending(true);
+      if (outcome.retryable && !running) {
+        schedule();
+      }
+    },
+
     /** Publishes now, with the backoff reset, if a publication is pending. */
     async resume(): Promise<void> {
       // An attempt in flight publishes the same state; its outcome decides what follows.
