@@ -1,3 +1,7 @@
+import {
+  getDatabaseEngineSelection,
+  isDatabaseEngineReadOnlyAdmission,
+} from "../infra/database-engine/context.js";
 import type { DatabasePathIdentity } from "../infra/sqlite-worker-identity.js";
 import type { SqliteWorkerStateContext } from "../infra/sqlite-worker-state-context.js";
 import {
@@ -73,10 +77,25 @@ export function runOpenClawStateWorkerOperation<T>(
   options: OperationOptions & { existingOnly: boolean },
 ): Promise<T | undefined>;
 export async function runOpenClawStateWorkerOperation<T>(
-  context: OpenClawStateWorkerContext,
+  capturedContext: OpenClawStateWorkerContext,
   operation: (scope: DomainScope) => Promise<T>,
   options?: OperationOptions,
 ): Promise<T | undefined> {
+  let context = capturedContext;
+  if (
+    context.databaseEngineSelection?.access === "writer-preparation" &&
+    !isDatabaseEngineReadOnlyAdmission()
+  ) {
+    // Future writer handles were admitted read-only. Only the canonical host's
+    // completed activation opens this per-operation policy; source/identity stay fixed.
+    context = {
+      ...context,
+      databaseEngineSelection: {
+        ...context.databaseEngineSelection,
+        access: getDatabaseEngineSelection()?.access,
+      },
+    };
+  }
   return runWithCapturedWorkerContext(context, async () => {
     try {
       options?.signal?.throwIfAborted();

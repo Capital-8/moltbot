@@ -1,4 +1,5 @@
 import type { EventFrame, HelloOk } from "@openclaw/gateway-protocol";
+import { GATEWAY_CLIENT_CAPS } from "@openclaw/gateway-protocol/client-info";
 import {
   isGatewayEventFrame,
   isGatewayResponseFrame,
@@ -145,7 +146,20 @@ export class GatewayProtocolClient<TPlan> {
     if (typeof method !== "string" || method.length === 0) {
       return Promise.reject(new Error("invalid request frame: method must be a non-empty string"));
     }
-    return this.requests.request<T>(socket, method, params, options);
+    return this.requests.request<T>(
+      {
+        send: (data) => {
+          const current = this.socket;
+          if (!current?.isOpen()) {
+            throw new Error("gateway not connected");
+          }
+          current.send(data);
+        },
+      },
+      method,
+      params,
+      options,
+    );
   }
 
   addEventListener(listener: (event: EventFrame) => void): () => void {
@@ -356,7 +370,23 @@ export class GatewayProtocolClient<TPlan> {
     this.recordTiming("connect-plan-ready", generation, plan);
     this.recordTiming("request-sent", generation, plan);
     this.connectRequestSent = true;
-    void this.request<HelloOk>("connect", this.opts.buildConnectParams(plan))
+    const params = this.opts.buildConnectParams(plan);
+    const connect = asRecord(params);
+    // This shared wire owner implements retention for Node and browser operators.
+    // Node/worker handshakes do not own user drafts or this reconnect contract.
+    const connectParams =
+      connect && (connect.role === undefined || connect.role === "operator")
+        ? {
+            ...connect,
+            caps: [
+              ...new Set([
+                ...filterStringEntries(connect.caps),
+                GATEWAY_CLIENT_CAPS.PLANNED_HANDOFF_RETENTION_V1,
+              ]),
+            ],
+          }
+        : params;
+    void this.request<HelloOk>("connect", connectParams)
       .then((hello) => {
         // Closing transports remain current until their close callback runs;
         // a late response must not publish readiness or reset reconnect backoff.
@@ -364,7 +394,6 @@ export class GatewayProtocolClient<TPlan> {
           return;
         }
         this.helloReceived = true;
-        this.requests.setSuspensionPhase(hello.snapshot?.suspension?.phase);
         this.clearHandshakeTimer();
         this.connectFailure = undefined;
         this.reconnectSupervisor.reset();
@@ -373,6 +402,12 @@ export class GatewayProtocolClient<TPlan> {
           if (!this.isConnectCurrent(socket, generation)) {
             return;
           }
+          this.requests.acceptReconnectIdentity(
+            hello.auth?.recoveryScope,
+            hello.auth?.storeIdentity,
+            hello.features?.plannedHandoffReadMethods,
+          );
+          this.requests.setSuspensionPhase(hello.snapshot?.suspension?.phase);
           this.invoke("hello", () => this.opts.onHello?.(hello));
         };
         const accepted = this.opts.onConnectHello?.(hello, context);
@@ -559,6 +594,7 @@ export class GatewayProtocolClient<TPlan> {
       decision.pendingError ??
         context.connectFailure?.error ??
         new Error(`gateway closed (${code}): ${reason}`),
+      decision.retry && !this.stopped,
     );
     this.invoke("close", () => this.opts.onClose?.(context, decision));
     // A close callback can reconnect synchronously and already own the next socket or retry.

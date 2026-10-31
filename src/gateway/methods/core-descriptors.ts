@@ -8,6 +8,7 @@ const UNADVERTISED = { advertise: false } as const;
 const PROFILE_DEPENDENT = { profileAccess: "required" } as const;
 const PROFILE_STARTUP = { startup: true, ...PROFILE_DEPENDENT } as const;
 const SESSION_METADATA_READ = {
+  rollingRead: true,
   startup: true,
   shareKey: operatorReadShareKey,
   shareMaxAgeMs: 1_000,
@@ -24,7 +25,7 @@ const PORTAL_SESSION_WRITE = {
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
 export const CORE_GATEWAY_METHOD_SPECS = [
-  ["health", "health", "operator.read", "<=2026.7"],
+  ["health", "health", "operator.read", "<=2026.7", { rollingRead: true }],
   ["diagnostics.stability", "diagnostics", "operator.read", "<=2026.7"],
   ["doctor.memory.status", "doctor", "operator.read", "<=2026.7"],
   ["doctor.memory.dreamDiary", "doctor", "operator.read", "<=2026.7"],
@@ -49,7 +50,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["tts.convert", "tts", "operator.write", "<=2026.7"],
   ["tts.setProvider", "tts", "operator.write", "<=2026.7"],
   ["tts.setPersona", "tts", "operator.write", "<=2026.7"],
-  ["config.get", "config", "operator.read", "<=2026.7"],
+  ["config.get", "config", "operator.read", "<=2026.7", { rollingRead: true }],
   ["config.set", "config", "operator.admin", "<=2026.7"],
   ["config.apply", "config", "operator.admin", "<=2026.7", CONTROL_PLANE_WRITE],
   ["config.patch", "config", "operator.admin", "<=2026.7", CONTROL_PLANE_WRITE],
@@ -144,7 +145,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["board.event", "board", "operator.write", "<=2026.7"],
   ["audit.list", "audit", "operator.read", "2026.7"],
   ["audit.activity.list", "audit", "operator.read", "2026.7"],
-  ["users.list", "users", "operator.read", "<=2026.7"],
+  ["users.list", "users", "operator.read", "<=2026.7", { rollingRead: true }],
   // Resolve identity before the router captures the caller's profile guard.
   ["users.self", "users", "operator.read", "<=2026.7", PROFILE_DEPENDENT],
   ["users.linkEmail", "users", "operator.admin", "<=2026.7", PROFILE_DEPENDENT],
@@ -235,7 +236,13 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["secrets.resolve", null, "operator.admin", "<=2026.7"],
   ["voicewake.routing.get", "voicewake-routing", "operator.read", "<=2026.7"],
   ["sessions.list", "sessions-read", "operator.read", "<=2026.7", SESSION_METADATA_READ],
-  ["sessions.subscribe", "sessions-subscriptions", "operator.read", "<=2026.7", { startup: true }],
+  [
+    "sessions.subscribe",
+    "sessions-subscriptions",
+    "operator.read",
+    "<=2026.7",
+    { startup: true, rollingRead: true },
+  ],
   ["sessions.messages.subscribe", "sessions-subscriptions", "operator.read", "<=2026.7"],
   ["sessions.messages.unsubscribe", "sessions-subscriptions", "operator.read", "<=2026.7"],
   ["sessions.viewers.set", "sessions-subscriptions", "operator.read", "2026.7"],
@@ -353,9 +360,9 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["send", "send", "operator.write", "<=2026.7"],
   // Params-aware: ordinary turns need write; /new and /reset mutate lifecycle state as admin.
   ["agent", "agent", "dynamic", "<=2026.7", { startup: true }],
-  ["agent.identity.get", "agent-identity", "operator.read", "<=2026.7"],
+  ["agent.identity.get", "agent-identity", "operator.read", "<=2026.7", { rollingRead: true }],
   ["agent.wait", "agent", "operator.write", "<=2026.7", { ...PROFILE_STARTUP, ...OBSERVATION }],
-  ["chat.history", "chat", "operator.read", "<=2026.7", { startup: true }],
+  ["chat.history", "chat", "operator.read", "<=2026.7", { startup: true, rollingRead: true }],
   ["chat.startup", "chat", "operator.read", "<=2026.7", { startup: true }],
   ["chat.metadata", "chat", "operator.read", "<=2026.7", SESSION_METADATA_READ],
   ["chat.message.get", "chat", "operator.read", "<=2026.7", { startup: true }],
@@ -410,7 +417,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["terminal.attach", "terminal", "operator.admin", "2026.7"],
   ["terminal.list", "terminal", "operator.admin", "2026.7"],
   ["controlUi.githubPreview", "control-ui", "operator.read", "<=2026.7"],
-  ["system.info", "system", "operator.read", "<=2026.7"],
+  ["system.info", "system", "operator.read", "<=2026.7", { rollingRead: true }],
   // Workspace contents stay in the documented trusted operator domain, like session and log
   // reads. Strong user/tenant isolation requires separate Gateways; see operator-scopes.md.
   ["agents.workspace.list", "agents-workspace", "operator.read", "2026.7"],

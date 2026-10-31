@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEventPayload } from "../infra/agent-events.js";
+import { readLifecycleWriteCustody } from "../infra/lifecycle-write-custody.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { createAgentEventAuditRecorder } from "./agent-event-audit.js";
 import type { AuditEventInput } from "./audit-event-types.js";
@@ -101,12 +102,15 @@ describe("buffered agent audit starts", () => {
     });
     try {
       recorder.record(runEvent("rejected"));
+      expect(readLifecycleWriteCustody()).toContainEqual({ phase: "audit-persistence", count: 1 });
       recorder.record(runEvent("rejected", 2, "end"));
       expect(inputs).toEqual([]);
+      expect(readLifecycleWriteCustody()).toContainEqual({ phase: "audit-persistence", count: 1 });
       accepting = true;
       recorder.record(runEvent("rejected", 3, "end"));
       recorder.record(runEvent("rejected", 4, "end"));
       await recorder.stop();
+      expect(readLifecycleWriteCustody()).toEqual([]);
       expect(inputs.map(({ action, sourceSequence }) => ({ action, sourceSequence }))).toEqual([
         { action: "agent.run.started", sourceSequence: 1 },
         { action: "agent.run.finished", sourceSequence: 3 },

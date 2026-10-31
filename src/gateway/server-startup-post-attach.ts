@@ -19,6 +19,7 @@ import { runWithGatewayIndependentRootWorkAdmission } from "../process/gateway-w
 import { createDeferredCore } from "../shared/deferred.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import type { AgentRecoveryProgress } from "../state/agent-database-preparation-recovery.js";
+import type { GatewayRollingStartup } from "./rolling-startup.js";
 import type { GatewayBroadcastFn, GatewayBroadcastToConnIdsFn } from "./server-broadcast-types.js";
 import type { GatewayControlUiRootLifecycle } from "./server-control-ui-root.js";
 import type { GatewayRecoveryRuntime } from "./server-instance-runtime.types.js";
@@ -52,6 +53,8 @@ const loadMainSessionRestartRecoveryModule = createLazyRuntimeModule(
 
 /** Start work that depends on the HTTP server being attached and visible. */
 export async function startGatewayPostAttachRuntime(params: {
+  rollingStartup?: GatewayRollingStartup;
+  unlockReadOnlyStartupMethods?: () => void;
   scheduler: GatewayScheduler;
   minimalTestGateway: boolean;
   updateCanary?: boolean;
@@ -127,6 +130,7 @@ export async function startGatewayPostAttachRuntime(params: {
   const subagentRecoverySettled = createDeferredCore();
   const mainSessionOrphansReady = params
     .trackStartupWork(async (signal) => {
+      await params.rollingStartup?.waitForMutableStartup(signal);
       await params.waitForPostReadyWork?.();
       if (params.minimalTestGateway || candidateCanary || signal.aborted || params.isClosing?.()) {
         return;
@@ -288,9 +292,16 @@ export async function startGatewayPostAttachRuntime(params: {
   // Startup failure can precede publication of the post-attach return handle.
   params.onGatewayLifetimeSidecars(updateCheck);
 
-  const startSidecars = () =>
+  const startSidecars = (signal?: AbortSignal) =>
     params.minimalTestGateway
-      ? startStartupLog().then(() => pluginRegistry)
+      ? startStartupLog().then(async () => {
+          if (params.rollingStartup) {
+            params.unlockReadOnlyStartupMethods?.();
+            params.rollingStartup.publishReadReady();
+            await params.rollingStartup.waitForMutableStartup(signal);
+          }
+          return pluginRegistry;
+        })
       : nextTurn().then(async () => {
           if (params.isClosing?.()) {
             skipStartupLog();
@@ -302,6 +313,12 @@ export async function startGatewayPostAttachRuntime(params: {
             return pluginRegistry;
           }
           const startupLog = startStartupLog();
+          if (params.rollingStartup) {
+            params.unlockReadOnlyStartupMethods?.();
+            await startupLog;
+            params.rollingStartup.publishReadReady();
+            await params.rollingStartup.waitForMutableStartup(signal);
+          }
           if (candidateCanary) {
             await startupLog;
             // Retain attributed plugin failures in the published registry for health reporting.

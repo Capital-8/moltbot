@@ -1,3 +1,4 @@
+import type { GatewayRollingContract } from "../gateway/rolling-release-contract.js";
 import type { StateLeaseProcessOwner } from "./state-lease-process-owner.js";
 
 export type GatewayOwnerSupervisor = {
@@ -14,4 +15,8 @@ export type GatewayOwnerLeaseIdentity = StateLeaseProcessOwner & {
   expired: boolean;
   heartbeatAt?: number;
   listeningAt?: number;
+  /** Written only after predecessor domain mutators have fenced and positively settled. */
+  rollingHandoff?: GatewayRollingContract;
+  /** A never-activated successor returns the same row to this exact predecessor. */
+  rollingReturnToOwner?: string;
 };

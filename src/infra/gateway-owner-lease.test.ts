@@ -777,4 +777,60 @@ describe("Gateway owner lease", () => {
     await lease.release();
     expect(readGatewayOwnerLease({ env })?.owner).toBe("replacement");
   });
+
+  it("returns an unactivated successor grant without retiring the predecessor's reader owner", async () => {
+    await using owner = fixture();
+    const predecessor = owner.acquire();
+    await predecessor.ready;
+    const contract = {
+      version: 1 as const,
+      releaseId: "same-release",
+      predecessorBootId: "old-boot",
+      candidateBootId: "new-boot",
+      predecessorOwner: predecessor.owner,
+      compatibilityDigest: "a".repeat(64),
+      companionGeneration: "final-companion",
+      expiresAtMs: Date.now() + 60_000,
+    };
+    await predecessor.yieldTo(contract);
+    expect(() => predecessor.assertCurrent()).toThrow(/not current/);
+    const candidate = acquireGatewayOwnerLease({
+      env: owner.env,
+      port: 19484,
+      mode: "foreground",
+      supervisor: null,
+      owner: "exact-candidate-owner",
+      rollingHandoff: contract,
+    });
+    await candidate.ready;
+    await expect(predecessor.restoreYield()).rejects.toThrow(/transferred/);
+    await candidate.returnToPredecessor();
+    await candidate.release();
+    expect(readGatewayOwnerLease({ env: owner.env })).toMatchObject({
+      owner: candidate.owner,
+      rollingReturnToOwner: predecessor.owner,
+      rollingHandoff: contract,
+    });
+    await predecessor.restoreYield();
+    predecessor.assertCurrent();
+    expect(readGatewayOwnerLease({ env: owner.env })).toMatchObject({ owner: predecessor.owner });
+    expect(readGatewayOwnerLease({ env: owner.env })?.rollingHandoff).toBeUndefined();
+  });
+
+  it("routes an unexpected execution-lease loss through the existing process-owner shutdown signal", async () => {
+    await using owner = fixture();
+    let lost: ((error: Error) => void) | undefined;
+    const realHeartbeat = leaseHeartbeat.startOpenClawStateLeaseHeartbeat;
+    vi.spyOn(leaseHeartbeat, "startOpenClawStateLeaseHeartbeat").mockImplementation((params) => {
+      lost = params.onLost;
+      return realHeartbeat(params);
+    });
+    const lease = owner.acquire();
+    await lease.ready;
+    const current = stateOwners.captureGatewayStateOwner(resolveOpenClawStateSqlitePath(owner.env));
+    expect(current?.signal.aborted).toBe(false);
+    lost?.(new Error("synthetic unexpected lease replacement"));
+    expect(current?.signal.aborted).toBe(true);
+    expect(() => lease.assertCurrent()).toThrow();
+  });
 });

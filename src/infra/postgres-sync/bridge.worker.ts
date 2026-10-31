@@ -20,6 +20,7 @@ const {
   connectTimeoutMs,
   lockTimeoutMs,
   statementTimeoutMs,
+  readOnly,
 }: BridgeWorkerData = workerData;
 const control = new Int32Array(signal);
 let client: pg.Client;
@@ -72,8 +73,14 @@ async function handleRequest(request: BridgeRequest) {
       await client.connect();
       await client.query(
         "SELECT set_config('lock_timeout', $1, false), " +
-          "set_config('statement_timeout', $2, false), set_config('search_path', $3, false)",
-        [`${lockTimeoutMs}ms`, `${statementTimeoutMs}ms`, `"${schema.replaceAll('"', '""')}"`],
+          "set_config('statement_timeout', $2, false), set_config('search_path', $3, false), " +
+          "set_config('default_transaction_read_only', $4, false)",
+        [
+          `${lockTimeoutMs}ms`,
+          `${statementTimeoutMs}ms`,
+          `"${schema.replaceAll('"', '""')}"`,
+          readOnly ? "on" : "off",
+        ],
       );
       reply = {
         id: request.id,

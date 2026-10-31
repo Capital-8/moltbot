@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { GATEWAY_CLIENT_CAPS } from "@openclaw/gateway-protocol/client-info";
 import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { GatewayClient, type GatewayClientOptions } from "./client.js";
@@ -55,6 +56,22 @@ function receiveHello(connection: Connection): void {
 }
 
 describe("GatewayProtocolClient connect handshake", () => {
+  it.each([undefined, "operator", "node"])(
+    "advertises the shared retention owner only for operator connects (role=%s)",
+    (role) => {
+      const { connection } = startProtocolHarness({
+        buildConnectParams: () => ({ role, caps: ["existing-capability"] }),
+      });
+      receiveConnectChallenge(connection);
+      const raw = connection.send.mock.calls[0]?.[0];
+      assert(raw);
+      expect(JSON.parse(raw).params.caps).toEqual(
+        role === "node"
+          ? ["existing-capability"]
+          : ["existing-capability", GATEWAY_CLIENT_CAPS.PLANNED_HANDOFF_RETENTION_V1],
+      );
+    },
+  );
   it.each([{ retryable: true, retryAfterMs: 90_000, delayMs: 99_000, draw: 0.5, nextDelayMs: 22 }])(
     "keeps admitted retry timing while advancing backoff: %j",
     async ({ retryable, retryAfterMs, delayMs, draw, nextDelayMs }) => {

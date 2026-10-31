@@ -11,6 +11,7 @@ export const gatewayPluginTestFiles = [
 
 // Native database consumers retain lifecycle cleanup within each forked process.
 export const gatewayDatabaseWorkerTestFiles = [
+  "src/gateway/server-methods/sessions.dispatch.retained-original.test.ts",
   "src/gateway/agent-runtime-identity-token.test.ts",
   "src/gateway/agent-turn/agent-run-execution-phase.owner.test.ts",
   "src/gateway/agent-turn/agent-run-media.test.ts",
@@ -471,6 +472,9 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/provider-reconciliation.test.ts",
   "src/gateway/worker-environments/provider-node-resume.test.ts",
   "src/gateway/worker-environments/retained-lease-lifecycle.test.ts",
+  "src/gateway/worker-environments/retained-workspace-cleanup.test.ts",
+  "src/gateway/worker-environments/retained-workspace-runtime.test.ts",
+  "src/gateway/worker-environments/worker-turn-pg-boundary.test.ts",
   "src/gateway/worker-environments/provider-runtime-refresh.test.ts",
   "src/gateway/worker-environments/provider-ssh-identity.test.ts",
   "src/gateway/worker-environments/repository-project-access.test.ts",

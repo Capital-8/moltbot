@@ -22,6 +22,7 @@ import {
 } from "./gateway-active-work.js";
 
 const GATEWAY_SUSPEND_TTL_MS = 2 * 60_000;
+const GATEWAY_ROLLING_PREPARATION_TTL_MS = 10 * 60_000;
 // Thirty seconds to drain, then fifteen to hand off or release. Reconnects do not
 // extend user-visible downtime; freeze/snapshot leases retain their own TTL.
 const GATEWAY_SUSPEND_DRAIN_BUDGET_MS = 45_000;
@@ -52,6 +53,7 @@ type HeldGatewaySuspension = {
   requestId: string;
   terminalPolicy: GatewaySuspendTerminalPolicy;
   drain: boolean;
+  rollingReleaseId?: string;
   suspensionId: string;
   expiresAtMs: number;
   deadlineAtMs: number;
@@ -61,6 +63,7 @@ type HeldGatewaySuspension = {
   shutdown?: { signal: AbortSignal; phase: "interrupting" | "exiting" };
   commitAdmission?: () => boolean;
   nowMs: () => number;
+  executionYielded?: true;
 };
 
 /** Private identity of one live process-owning host iteration, never a wire token. */
@@ -119,11 +122,31 @@ function resumeAndReopen(entry: HeldGatewaySuspension, reason = "resume"): void 
 }
 
 function normalizeExpiredHeldSuspension(held: HeldGatewaySuspension): HeldGatewaySuspension | null {
+  // An intentional lease yield cannot automatically resurrect the predecessor.
+  // Explicit same-run resume must first prove that no successor acquired it.
+  if (held.executionYielded) {
+    return held;
+  }
   if (held.nowMs() < held.expiresAtMs && performance.now() < held.deadlineAtMs) {
     return held;
   }
   resumeAndReopen(held, "expired");
   return COORDINATOR_STATE.current;
+}
+
+/** Commits the execution fence before the asynchronous existing-lease transfer. */
+export function holdGatewaySuspendExecutionYield(suspensionId: string): void {
+  const held = currentSuspension();
+  if (
+    !held ||
+    held.suspensionId !== suspensionId ||
+    getGatewaySuspendAdmissionPhase() !== "prepared" ||
+    !refreshHeldSuspension(held)?.idle
+  ) {
+    throw new Error("Gateway execution yield requires the exact quiescent suspension");
+  }
+  clearEntryTimer(held);
+  held.executionYielded = true;
 }
 
 function currentSuspension(): HeldGatewaySuspension | null {
@@ -208,6 +231,7 @@ export function prepareGatewaySuspend(params: {
   requestId: string;
   terminalPolicy?: GatewaySuspendTerminalPolicy;
   drain?: boolean;
+  rollingReleaseId?: string;
   pauseScheduling: () => void;
   resumeScheduling: () => void;
   inspect?: Partial<GatewayActiveWorkInspectors>;
@@ -222,19 +246,24 @@ export function prepareGatewaySuspend(params: {
     ignoreTerminalSessions: terminalPolicy === "terminate",
   };
   const nowMs = (params.nowMs ?? Date.now)();
-  const ttlMs = drain ? GATEWAY_SUSPEND_DRAIN_BUDGET_MS : GATEWAY_SUSPEND_TTL_MS;
+  const ttlMs = drain
+    ? GATEWAY_SUSPEND_DRAIN_BUDGET_MS
+    : params.rollingReleaseId
+      ? GATEWAY_ROLLING_PREPARATION_TTL_MS
+      : GATEWAY_SUSPEND_TTL_MS;
   const deadlineAtMs = performance.now() + ttlMs;
   const existing = currentSuspension();
   if (existing) {
     if (
       existing.requestId !== params.requestId ||
       existing.terminalPolicy !== terminalPolicy ||
-      existing.drain !== drain
+      existing.drain !== drain ||
+      existing.rollingReleaseId !== params.rollingReleaseId
     ) {
       return { status: "conflict", expiresAtMs: existing.expiresAtMs };
     }
-    // Drain admission has an absolute deadline, including after becoming ready.
-    if (!existing.drain && !existing.handoff) {
+    // Drain and rolling preparation retain their original deadline, including after becoming ready.
+    if (!existing.drain && !existing.rollingReleaseId && !existing.handoff) {
       existing.nowMs = params.nowMs ?? Date.now;
       renewHeldSuspension(existing, nowMs);
     }
@@ -324,6 +353,7 @@ export function prepareGatewaySuspend(params: {
       requestId: params.requestId,
       terminalPolicy,
       drain,
+      rollingReleaseId: params.rollingReleaseId,
       suspensionId,
       expiresAtMs,
       deadlineAtMs,

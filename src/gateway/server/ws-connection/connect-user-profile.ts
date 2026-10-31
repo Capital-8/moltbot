@@ -1,5 +1,12 @@
 import { resolveHostAccountName } from "../../../infra/host-account-name.js";
+import { resolveDatabasePath } from "../../../state/openclaw-state-db.paths.js";
 import { prepareUserProfileRoleAuthority } from "../../../state/user-channel-identity-operations.js";
+import { normalizeProfileEmail } from "../../../state/user-profile-email.kernel.js";
+import {
+  prepareUserProfileCatalog,
+  readResidentGatewayOwnerProfile,
+  readResidentUserProfileForEmail,
+} from "../../../state/user-profile-list.js";
 import {
   ensureCanonicalGatewayOwnerProfile,
   ensureCanonicalUserProfileForEmail,
@@ -19,6 +26,8 @@ import type { GatewayWsClient } from "../ws-types.js";
 import {
   rejectUnavailableProfileConnect,
   resolveGatewayConnectPolicyFailure,
+  isGatewayConnectReadOnly,
+  runWhenGatewayConnectMutable,
 } from "./connect-admission.js";
 import {
   bindGatewayConnectOperatorAccess,
@@ -41,6 +50,12 @@ export function scheduleGatewayConnectProfileSync(params: {
     profile: PreparedConnectProfile["profile"],
   ) => ReturnType<typeof prepareGatewayLocalUserIngress>;
 }): void {
+  if (isGatewayConnectReadOnly()) {
+    runWhenGatewayConnectMutable(params.context, params.state, () =>
+      scheduleGatewayConnectProfileSync(params),
+    );
+    return;
+  }
   const { context, state, client, lifecycle, prepareIngress } = params;
   const { connId, logGateway } = context.handler;
   const { runDetachedConnectWork } = context;
@@ -206,16 +221,35 @@ export async function resolveGatewayConnectProfileAdmission(params: {
     const options = { assertCurrent: params.assertCurrent };
     const ensureStartedAt = performance.now();
     context.setConnectPhase?.("profile-ensure");
-    const profile = ownerProfileExpected
-      ? await ensureCanonicalGatewayOwnerProfile(resolveHostAccountName, options)
-      : params.resolveAuthenticatedGitHubIdentity
-        ? await params.resolveAuthenticatedGitHubIdentity()
-        : state.authResult.tailscaleIdentity
-          ? await ensureCanonicalUserProfileForTailscaleIdentity(
-              state.authResult.tailscaleIdentity,
-              options,
-            )
-          : await ensureCanonicalUserProfileForEmail(authenticatedUserId!, options);
+    const readExistingProfile = async () => {
+      const catalog = await prepareUserProfileCatalog();
+      try {
+        const pathname = resolveDatabasePath({});
+        const existing = ownerProfileExpected
+          ? readResidentGatewayOwnerProfile(pathname)
+          : authenticatedUserId
+            ? readResidentUserProfileForEmail(normalizeProfileEmail(authenticatedUserId), pathname)
+            : undefined;
+        if (!existing) {
+          throw new Error("Gateway rolling read phase cannot create or reconcile a user profile");
+        }
+        return existing;
+      } finally {
+        catalog.release();
+      }
+    };
+    const profile = isGatewayConnectReadOnly()
+      ? await readExistingProfile()
+      : ownerProfileExpected
+        ? await ensureCanonicalGatewayOwnerProfile(resolveHostAccountName, options)
+        : params.resolveAuthenticatedGitHubIdentity
+          ? await params.resolveAuthenticatedGitHubIdentity()
+          : state.authResult.tailscaleIdentity
+            ? await ensureCanonicalUserProfileForTailscaleIdentity(
+                state.authResult.tailscaleIdentity,
+                options,
+              )
+            : await ensureCanonicalUserProfileForEmail(authenticatedUserId!, options);
     params.assertCurrent?.();
     params.context.recordAttachTiming?.("profileEnsureMs", ensureStartedAt);
     const authorityStartedAt = performance.now();
@@ -232,6 +266,10 @@ export async function resolveGatewayConnectProfileAdmission(params: {
     }
     return { ok: true, prepared };
   } catch (error) {
+    if (isGatewayConnectReadOnly()) {
+      await rejectUnavailableProfileConnect(context, error);
+      return { ok: false };
+    }
     context.handler.logWsControl.warn(
       `user profile resolution failed conn=${context.handler.connId} user=${formatForLog(authenticatedUserId)}: ${formatForLog(error)}`,
     );

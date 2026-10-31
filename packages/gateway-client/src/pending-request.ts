@@ -3,6 +3,8 @@ import {
   GATEWAY_SUSPEND_IDENTITY_RETRY_AFTER_MS,
   isGatewayRestartUnavailableError,
   isGatewaySuspendUnavailableError,
+  isGatewayPlannedHandoffUnavailableError,
+  isGatewayPlannedHandoffReadInterruption,
 } from "@openclaw/gateway-protocol/restart-unavailable";
 import { isRetryableGatewayStartupUnavailableError } from "@openclaw/gateway-protocol/startup-unavailable";
 import {
@@ -35,8 +37,11 @@ type GatewayPendingRequest = {
   startedAtMs: number;
   resend?: () => void;
   retryStartup?: (retryAfterMs?: number) => void;
-  prepareRetry: () => boolean;
+  prepareRetry: (provenNonDelivery?: boolean) => boolean;
   waitingForResume?: boolean;
+  plannedNonDelivery?: { recoveryScope: string; storeIdentity: string };
+  plannedRead?: { recoveryScope: string; storeIdentity: string };
+  waitingForReconnect?: boolean;
 };
 
 type GatewayPendingRequestsOptions = {
@@ -52,6 +57,8 @@ type GatewayPendingRequestsOptions = {
 
 /** Owns request deadlines, correlation, settlement, and generation-scoped IDs. */
 export class GatewayPendingRequests {
+  private reconnectIdentity?: { recoveryScope: string; storeIdentity: string };
+  private plannedReadMethods = new Set<string>();
   private pending = new Map<string, GatewayPendingRequest>();
   private requestSequence = 0;
   private bootstrapPause:
@@ -65,6 +72,38 @@ export class GatewayPendingRequests {
     | undefined;
 
   constructor(private readonly opts: GatewayPendingRequestsOptions) {}
+
+  /** Called after the new authenticated hello is accepted, before retained sends resume. */
+  acceptReconnectIdentity(
+    recoveryScope: string | undefined,
+    storeIdentity: string | undefined,
+    plannedReadMethods: readonly string[] = [],
+  ): void {
+    this.reconnectIdentity =
+      recoveryScope && storeIdentity ? { recoveryScope, storeIdentity } : undefined;
+    this.plannedReadMethods = new Set(plannedReadMethods);
+    for (const [id, pending] of this.pending) {
+      const expected = pending.plannedNonDelivery ?? pending.plannedRead;
+      if (
+        expected &&
+        (expected.recoveryScope !== recoveryScope ||
+          expected.storeIdentity !== storeIdentity ||
+          (pending.plannedRead && !this.plannedReadMethods.has(pending.method)))
+      ) {
+        this.pending.delete(id);
+        pending.cleanup?.();
+        this.finishTiming(id, pending, false, "HANDOFF_IDENTITY_CHANGED");
+        pending.reject(
+          new Error("Gateway identity or logical store changed during planned handoff"),
+        );
+        continue;
+      }
+      pending.waitingForReconnect = false;
+      if (pending.plannedRead && pending.waitingForResume) {
+        pending.resend?.();
+      }
+    }
+  }
 
   setSuspensionPhase(phase: unknown): void {
     if (phase === "accepting") {
@@ -157,6 +196,7 @@ export class GatewayPendingRequests {
       let startupRetry: ReturnType<typeof setTimeout> | undefined;
       let requestSent = false;
       let inFlight = false;
+      let retainedSend: (() => void) | undefined;
       const pending: GatewayPendingRequest = {
         resolve: (value) => resolve(value as T),
         reject,
@@ -166,9 +206,14 @@ export class GatewayPendingRequests {
         unbounded: timeoutMs === undefined,
         method,
         startedAtMs: this.opts.nowMs(),
-        prepareRetry: () => {
+        ...(this.reconnectIdentity && this.plannedReadMethods.has(method)
+          ? { plannedRead: { ...this.reconnectIdentity } }
+          : {}),
+        prepareRetry: (provenNonDelivery = true) => {
           inFlight = false;
-          requestSent = false;
+          if (provenNonDelivery) {
+            requestSent = false;
+          }
           if (options?.signal?.aborted) {
             onAbort();
             return false;
@@ -235,12 +280,14 @@ export class GatewayPendingRequests {
         const send = () => {
           if (
             this.pending.get(id) !== pending ||
+            inFlight ||
+            pending.waitingForReconnect ||
             options?.signal?.aborted ||
             (timeoutMs !== undefined && this.opts.nowMs() - pending.startedAtMs >= timeoutMs)
           ) {
             return;
           }
-          const pause = pending.resend ? this.bootstrapPause : undefined;
+          const pause = pending.resend && !pending.plannedRead ? this.bootstrapPause : undefined;
           if (pause && !pause.announced && !pause.timer && !pause.probe) {
             pause.probe = { pending, revision: pause.revision };
           }
@@ -251,6 +298,11 @@ export class GatewayPendingRequests {
             return;
           }
           try {
+            clearTimeout(startupRetry);
+            startupRetry = undefined;
+            // A new send has an unknown outcome until this generation proves
+            // non-delivery again. Never reuse the predecessor's refusal proof.
+            pending.plannedNonDelivery = undefined;
             inFlight = true;
             sender.send(frame);
             if (this.pending.get(id) !== pending) {
@@ -265,10 +317,11 @@ export class GatewayPendingRequests {
             }
           }
         };
+        retainedSend = send;
         // A startup refusal proves the handler has not run, so later attempts can
         // share pause/resume. Ordinary writes still send synchronously.
         pending.retryStartup = (retryAfterMs) => {
-          pending.resend = send;
+          pending.resend = retainedSend;
           clearTimeout(startupRetry);
           startupRetry = setTimeout(
             send,
@@ -308,6 +361,26 @@ export class GatewayPendingRequests {
       return;
     }
     const startupDetails = frame.error?.details;
+    if (
+      !frame.ok &&
+      !pending.acceptedNotified &&
+      this.reconnectIdentity &&
+      (isGatewayPlannedHandoffUnavailableError(frame.error) ||
+        (pending.plannedRead && isGatewayPlannedHandoffReadInterruption(frame.error))) &&
+      startupDetails &&
+      typeof startupDetails === "object" &&
+      "method" in startupDetails &&
+      startupDetails.method === pending.method &&
+      pending.prepareRetry()
+    ) {
+      if (isGatewayPlannedHandoffUnavailableError(frame.error)) {
+        pending.plannedNonDelivery = { ...this.reconnectIdentity };
+      }
+      this.pauseBootstrapRequests(1_000, true);
+      pending.retryStartup?.(1_000);
+      pending.waitingForResume = true;
+      return;
+    }
     const startupRefusal =
       !frame.ok &&
       isRetryableGatewayStartupUnavailableError(frame.error) &&
@@ -377,14 +450,33 @@ export class GatewayPendingRequests {
     pending.reject(error);
   }
 
-  flush(error: Error): void {
+  flush(error: Error, preservePlannedHandoff = false): void {
     clearTimeout(this.bootstrapPause?.timer);
     this.bootstrapPause = undefined;
     const retired = this.pending;
     this.pending = new Map();
+    if (preservePlannedHandoff) {
+      for (const [id, pending] of retired) {
+        if ((pending.plannedNonDelivery || pending.plannedRead) && !pending.acceptedNotified) {
+          this.pending.set(id, pending);
+          retired.delete(id);
+          if (!pending.prepareRetry(pending.plannedNonDelivery !== undefined)) {
+            continue;
+          }
+          pending.retryStartup?.(1);
+          pending.waitingForResume = true;
+          pending.waitingForReconnect = true;
+        }
+      }
+      if (this.pending.size > 0) {
+        this.pauseBootstrapRequests(1_000, true);
+      }
+    }
     // Timing observers can reconnect synchronously, so detach the entire old
     // generation and reset its sequence before running any caller-owned code.
-    this.requestSequence = 0;
+    if (this.pending.size === 0) {
+      this.requestSequence = 0;
+    }
     for (const [id, pending] of retired) {
       pending.cleanup?.();
       this.finishTiming(id, pending, false, "CLIENT_CLOSED");
