@@ -44,7 +44,7 @@ Routing and pairing: all 19 suites retained after reading the tests, local suppo
 owners, relevant callers, history, and CI routing. Inbound routing, outbound
 account selection, diagnostics, read-worker refusal, and write settlement remain distinct.
 Utility/support areas: all declarations in 35 active suites retained; one unreachable
-71-line target-resolution helper and its private SDK facade await coherent retirement.
+71-line target-resolution helper and its private SDK facade are retired in [PR #189230](https://github.com/openclaw/openclaw/pull/189230).
 Poll/startup/model-picker: eight suites retained for public input, TLS/compiler,
 durable selection, authority, conflict, and publication-order contracts.
 LLM host: 22 suites read; retain 126 declarations and repair one SSRF proof that
@@ -74,7 +74,7 @@ Completed core source review (runtime proof only where a landing row says so):
 | Owner scope                                   | Suites read                        | Decision                                                                                                                                        |
 | --------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Routing / pairing                             | 19                                 | Retain independent routing, identity, authorization, and compatibility contracts.                                                               |
-| Utilities / test utilities / test helpers     | 35                                 | Retain active suites; private channel-target support retirement needs SDK consumer qualification.                                               |
+| Utilities / test utilities / test helpers     | 35                                 | Retain active suites; retire unreachable private channel-target support with its build, alias, and documentation registrations.                 |
 | Boards / projects / decisions                 | 23                                 | Retain durable ownership, ordering, and public projections.                                                                                     |
 | Logging                                       | 64                                 | Retain 465 declarations, including content-absence and privacy guards.                                                                          |
 | Shared                                        | 111                                | Retain 490 declarations; streaming, borrowed identity, work counts, and native process contracts differ.                                        |
@@ -123,6 +123,12 @@ and need one ordinary tool-output deny proof repair; 24 CLI config/setup suites 
 (Alibaba, Arcee, Cerebras, GMI, Qianfan, StepFun, Voyage, DuckDuckGo) retain all
 41 declarations after local owner/support/history/routing review. Shared framework
 closure is bounded; no runtime proof claimed for these areas.
+
+Reply session preparation: 23 suites plus the initialization registrar retain
+130 declarations for reset/fork/worktree state, authority, route custody,
+persistence settlement and prompt preparation. CLI plugin lifecycle: 25 suites
+retain 176 declarations and need one contention-proof repair; retired synthetic
+local-state scaffolding remains a later support-only candidate. Source review only.
 
 Remaining: declaration-level review across remaining core, plugins, UI, native apps,
 root/script suites and shared fixtures; close owner-reading gaps and land subsequent batches.
