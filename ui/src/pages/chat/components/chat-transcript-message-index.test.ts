@@ -123,10 +123,14 @@ describe("long completed runs", () => {
     ];
   }
 
-  it.each([1, 2])(
-    "windows medium frames only when their combined history is large (%s runs)",
-    (runs) => {
-      const messages = Array.from({ length: runs }, (_, run) => longRun([], 199, run)).flat();
+  it.each([
+    { runs: 1, steps: 80, windowed: false },
+    { runs: 2, steps: 80, windowed: true },
+    { runs: 1, steps: 199, windowed: true },
+  ])(
+    "preserves reply identities across $runs completed runs of $steps steps",
+    ({ runs, steps, windowed }) => {
+      const messages = Array.from({ length: runs }, (_, run) => longRun([], steps, run)).flat();
       const chain = projectHistory(messages, { sessionKey: "agent:main:telegram:direct:42" });
       const frames = framesOf(chain);
       expect(frames).toHaveLength(runs);
@@ -134,8 +138,8 @@ describe("long completed runs", () => {
       for (const [run, frame] of frames.entries()) {
         const suffix = run === 0 ? "" : `-${run}`;
         const first = index.messageRowKeysById.get(`step-0${suffix}`);
-        const last = index.messageRowKeysById.get(`step-198${suffix}`);
-        if (runs === 1) {
+        const last = index.messageRowKeysById.get(`step-${steps - 1}${suffix}`);
+        if (!windowed) {
           expect(first).toBe(frame.key);
           expect(last).toBe(frame.key);
         } else {

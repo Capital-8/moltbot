@@ -323,7 +323,7 @@ export function projectTranscriptIndex(
     const windowCompletedFrames = chain.transcriptItems.some((item) => {
       for (const group of chatItemGroups(item)) {
         sourceCount += group.messages.length;
-        if (sourceCount > 256) {
+        if (sourceCount > 128) {
           return true;
         }
       }
