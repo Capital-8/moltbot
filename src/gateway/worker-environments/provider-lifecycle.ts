@@ -119,6 +119,7 @@ export function createWorkerProviderLifecycle(
     nodeRuntimeIdentity?: types.WorkerNodeRuntimeIdentity,
     beforeProvision?: () => void,
     repositorySource?: projects.WorkerProviderRepositorySource,
+    wakeRetained?: () => void,
   ) => {
     let record = initialRecord;
     let lease: types.WorkerLease;
@@ -217,6 +218,19 @@ export function createWorkerProviderLifecycle(
           repositorySource,
         });
       }
+      if (record.retention && record.resourceReceipt && wakeRetained) {
+        // An explicit retry re-admits source and caller authority before reopening compute.
+        // Background provisioning retains custody but never supplies wake authority.
+        await retained.resumeProvision(
+          record,
+          () => {
+            assertCurrent();
+            projectOperation?.project.assertCurrent();
+            wakeRetained();
+          },
+          workSignal,
+        );
+      }
       const provisionOptions = {
         nodeBootstrapTimeoutMs,
         profileId: record.profileId,
@@ -254,9 +268,7 @@ export function createWorkerProviderLifecycle(
           : {}),
         signal: workSignal,
         ...(projectOperation ? { project: projectOperation.project } : {}),
-      } satisfies NonNullable<Parameters<types.WorkerProvider["provision"]>[2]> & {
-        assertCurrent: () => void;
-      };
+      } satisfies NonNullable<Parameters<types.WorkerProvider["provision"]>[2]>;
       cancellation?.assertActive();
       const provision = async () => {
         assertCurrent();
@@ -286,13 +298,9 @@ export function createWorkerProviderLifecycle(
           ? preparedProvision()
           : provider.provision(profile, record.provisionOperationId, provisionOptions);
       };
+      const trackedProvision = cancellation ? cancellation.retainProvider(provision) : provision;
       lease = check.requireWorkerLease(
-        await callProvider(
-          record.environmentId,
-          "provision",
-          cancellation ? cancellation.retainProvider(provision) : provision,
-          providerTimeoutMs,
-        ),
+        await callProvider(record.environmentId, "provision", trackedProvision, providerTimeoutMs),
       );
       receipts.assertWorkerResourceReceiptMatch(record.resourceReceipt, lease.resourceReceipt);
     } catch (error) {
@@ -423,6 +431,7 @@ export function createWorkerProviderLifecycle(
     retainProviderSettlement?: (settled: Promise<void>) => void,
     beforeProvision?: () => void,
     repositorySource?: projects.WorkerProviderRepositorySource,
+    wakeRetained?: () => void,
   ) => {
     const workSignal = signal
       ? AbortSignal.any([options.ownerSignal, signal])
@@ -483,6 +492,7 @@ export function createWorkerProviderLifecycle(
         preparedNode?.identity,
         beforeProvision,
         repositorySource,
+        wakeRetained,
       );
     } catch (error) {
       return await failUnallocatedImageIntent(options, record, error, workSignal);
