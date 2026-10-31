@@ -111,7 +111,7 @@ it("falls back to explicit imageModel config", () => {
   ).toEqual({ primary: "openai/gpt-5.4-mini" });
 });
 
-it("reports an ambiguous image fallback before an ambiguous primary", () => {
+it("resolves image refs after fallback-first ambiguity", () => {
   const models = ["moondream", "llava"].map((id): ModelDefinitionConfig => ({
     id,
     name: id,
@@ -134,6 +134,16 @@ it("reports an ambiguous image fallback before an ambiguous primary", () => {
   ).toThrow(
     'Ambiguous image model "llava". Configure a provider-prefixed ref such as "ollama/llava" or "lmstudio/llava".',
   );
+  expect(
+    resolve({
+      agents: { defaults: { imageModel: { primary: "moondream", fallbacks: ["llava"] } } },
+      models: {
+        providers: {
+          ollama: { baseUrl: "https://example.com/v1", models },
+        },
+      },
+    }),
+  ).toEqual({ primary: "ollama/moondream", fallbacks: ["ollama/llava"] });
 });
 
 it.each([
