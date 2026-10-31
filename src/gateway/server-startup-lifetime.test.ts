@@ -437,7 +437,7 @@ describe("Gateway startup lifetime", () => {
   );
 
   it.for(["clean", "failed", "held-process", "held-embedded"] as const)(
-    "releases post-ready work and joins or bounds startup rollback (%s)",
+    "releases post-ready work and joins startup rollback with process grace (%s)",
     async (mode, { signal }) => {
       const port = await getFreePort();
       await using state = await createStartupTestState("gateway-post-ready-startup-failure");
@@ -539,15 +539,15 @@ describe("Gateway startup lifetime", () => {
             releasePrelude.resolve();
             await lateStopEntered.promise;
             await vi.advanceTimersByTimeAsync(5_000);
-            // Advancing the clock expires cleanup, but does not join startup
-            // rejection propagation. Keep the clock frozen and the sidecar held.
-            await withinTest(startupOutcome, signal);
+            // Required late cleanup keeps custody after its diagnostic grace.
+            // Startup cannot settle until this fixture releases the held sidecar.
           }
-          expect(settled).toHaveBeenCalledTimes(processOwned ? 1 : 0);
+          expect(settled).not.toHaveBeenCalled();
+          expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(true);
           releaseStop.resolve();
           vi.useRealTimers();
         }
-        const failure = await startupOutcome;
+        const failure = await withinTest(startupOutcome, signal);
         if (processOwned || failCleanup) {
           expectStartupCleanupError(failure, startupError);
           expect(formatErrorMessage(failure)).toContain(
@@ -557,11 +557,9 @@ describe("Gateway startup lifetime", () => {
           expect(failure).toBe(startupError);
         }
         expect(resumed).toHaveBeenCalledExactlyOnceWith({ closing: true, listening: true });
-        expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(
-          failCleanup || processOwned,
-        );
+        expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(failCleanup);
         expect(getActiveGatewayRootWorkCount()).toBe(0);
-        if (!failCleanup && !processOwned) {
+        if (!failCleanup) {
           expect(getActiveSecretsRuntimeConfigSnapshot()).toBeNull();
         }
       } finally {
