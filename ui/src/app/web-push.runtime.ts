@@ -160,7 +160,10 @@ async function reconcileWebPushCapability(
   canManage: boolean,
   publish: (patch: WebPushCapabilityPatch) => void,
 ): Promise<WebPushCapabilityPatch> {
-  const subscription = await getExistingSubscription();
+  // A push subscription requires granted notification permission. WebKit stops running
+  // the page's script while this passive PushManager read is pending, so skip it otherwise.
+  const subscription =
+    Notification.permission === "granted" ? await getExistingSubscription() : null;
   if (subscription && !canManage) {
     publish({ subscription: "local" });
     return {
