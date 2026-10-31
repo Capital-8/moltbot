@@ -9,7 +9,11 @@ import type { GuardedTranscriptItem } from "./chat-transcript-render-guard.ts";
 
 export type TranscriptContent = GuardedTranscriptItem | JSX.Element;
 
-export type TranscriptRow<T = unknown> = { estimatedSize?: number; retainDom?: boolean } & (
+export type TranscriptRow<T = unknown> = {
+  estimatedSize?: number;
+  retainDom?: boolean;
+  streaming?: boolean;
+} & (
   | { kind: "item"; key: string; item: T; revision?: string }
   | { kind: "content"; key: string; content: TranscriptContent }
 );

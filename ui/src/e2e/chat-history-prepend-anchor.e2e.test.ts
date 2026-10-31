@@ -428,8 +428,19 @@ suite.define(() => {
           await thread.hover();
           await page.mouse.wheel(0, -tailHeight);
           await page.getByText("Synthetic message 72.", { exact: true }).waitFor();
-          await page.getByRole("button", { name: "Scroll to latest", exact: true }).click();
           await waitForChatScrollIdle(page);
+          // A large end jump mounts only the arriving viewport. Return through
+          // ordinary reader scrolling so the real above-fold overscan row is
+          // measured before its delayed media contraction below.
+          const returnStep = await thread.evaluate((element) => element.clientHeight / 2);
+          for (
+            let remaining = (await position()).distance;
+            remaining > 0;
+            remaining -= returnStep
+          ) {
+            await page.mouse.wheel(0, returnStep);
+            await waitForChatScrollIdle(page);
+          }
           await expect.poll(async () => (await position()).distance).toBeLessThanOrEqual(8);
 
           // Force a delayed media measurement in an overscan row above the viewport.

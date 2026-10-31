@@ -141,6 +141,7 @@ function TranscriptRows(props: {
               });
               const active = createMemo(() => props.snapshot.activeRowKeys.has(row()?.key ?? ""));
               const preparing = createMemo(() => row()?.key === props.snapshot.preparingRowKey);
+              const streaming = createMemo(() => row()?.streaming === true);
               const gap = () => gaps().get(virtualRow().key) ?? 0;
               return (
                 <>
@@ -154,22 +155,24 @@ function TranscriptRows(props: {
                       { "chat-virtual-row--first": virtualRow().index === 0 },
                     ]}
                     style={{
-                      "contain-intrinsic-block-size": `${virtualRow().size}px`,
+                      // Live content stays measurable; reflecting every resize back into
+                      // its own style would invalidate it again after native layout.
+                      "contain-intrinsic-block-size": streaming()
+                        ? undefined
+                        : `${virtualRow().size}px`,
                       "min-height": `${props.snapshot.layout.rowMinimum(index())}px`,
                       display: active() ? undefined : preparing() ? "flow-root" : "none",
                       position: active() ? undefined : "absolute",
                       top: active() ? undefined : "0",
                       opacity: active() ? undefined : "0",
-                      "content-visibility": preparing()
-                        ? "visible"
-                        : active()
-                          ? undefined
-                          : "hidden",
+                      "content-visibility":
+                        preparing() || streaming() ? "visible" : active() ? undefined : "hidden",
                     }}
                     data-index={String(virtualRow().index)}
                     data-virtual-row-key={row()?.key}
                     data-prepared-row={active() ? undefined : "true"}
                     data-preparing-row={preparing() ? "true" : undefined}
+                    data-streaming-row={streaming() ? "true" : undefined}
                     inert={!active()}
                     aria-hidden={active() ? undefined : "true"}
                   >

@@ -336,8 +336,7 @@ export function projectTranscriptIndex(
       }
       const groups = chatItemGroups(item);
       const parts = item.kind === "agent-run-frame" ? item.parts : [item];
-      if (
-        chain.continuations.has(item.key) ||
+      const streaming =
         (item.kind === "agent-run-frame" && item.outcome.kind === "active") ||
         groups.some((group) => group.isStreaming) ||
         parts.some(
@@ -345,9 +344,9 @@ export function projectTranscriptIndex(
             part.kind === "stream-run" ||
             part.kind === "stream" ||
             part.kind === "reading-indicator",
-        )
-      ) {
-        return { kind: "item", key, item };
+        );
+      if (chain.continuations.has(item.key) || streaming) {
+        return { kind: "item", key, item, streaming };
       }
       // Settled items keep their identity across unrelated live-tail changes.
       // Reactions replace their map; active and continuation rows never enter this memo.

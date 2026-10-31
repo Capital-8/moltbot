@@ -130,9 +130,10 @@ export function isTranscriptRangeCommitted(
       node !== undefined &&
       inner?.contains(node) === true &&
       // CSSOM rounds fractional lengths; a subpixel serialization difference is committed.
-      Math.abs(
-        Number.parseFloat(node.style.getPropertyValue("contain-intrinsic-block-size")) - row.size,
-      ) < 1
+      (node.dataset.streamingRow === "true" ||
+        Math.abs(
+          Number.parseFloat(node.style.getPropertyValue("contain-intrinsic-block-size")) - row.size,
+        ) < 1)
     );
   });
 }
