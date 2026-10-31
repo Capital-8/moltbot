@@ -1705,6 +1705,10 @@ const firstInputFixture: NonNullable<InteractionScenario["fixtureOverrides"]> = 
     "users.mentionable": firstInputPeople,
   },
 });
+const firstInputRoutes = [
+  { id: "chat", scope: activePane },
+  { id: "new", scope: ".new-session-page__composer" },
+] as const;
 const firstContextReport: SessionSystemPromptReport = {
   source: "run",
   generatedAt: 1,
@@ -2130,13 +2134,14 @@ function coldRouteControlScenario(control: ColdRouteControl): InteractionScenari
   };
 }
 
-async function verifyFirstInputSelection(page: Page, expected: string) {
-  const trigger = page.locator(`${activePane} .agent-chat__composer-combobox textarea`);
+async function verifyFirstInputSelection(page: Page, expected: string, scope = activePane) {
+  const triggerSelector = `${scope} .agent-chat__composer-combobox textarea`;
+  const trigger = page.locator(triggerSelector);
   await trigger.press("Tab");
   await page.waitForFunction(
     ({ selector, expected }) =>
       document.querySelector<HTMLTextAreaElement>(selector)?.value.trim() === expected,
-    { selector: `${activePane} .agent-chat__composer-combobox textarea`, expected },
+    { selector: triggerSelector, expected },
   );
 }
 
@@ -2148,8 +2153,9 @@ async function verifyPlusSubview(page: Page) {
   await menu.locator('[data-value="open-skills"]').waitFor({ state: "visible" });
 }
 
-async function verifySlashArguments(page: Page) {
-  const trigger = page.locator(`${activePane} .agent-chat__composer-combobox textarea`);
+async function verifySlashArguments(page: Page, scope = activePane) {
+  const triggerSelector = `${scope} .agent-chat__composer-combobox textarea`;
+  const trigger = page.locator(triggerSelector);
   await trigger.press("Tab");
   const argument = page.locator('[role="listbox"] [role="option"]').filter({ hasText: "compact" });
   await argument.first().waitFor({ state: "visible" });
@@ -2159,7 +2165,7 @@ async function verifySlashArguments(page: Page) {
   await page.waitForFunction(
     (selector) =>
       document.querySelector<HTMLTextAreaElement>(selector)?.value.trim() === "/viewport compact",
-    `${activePane} .agent-chat__composer-combobox textarea`,
+    triggerSelector,
   );
 }
 
@@ -3367,17 +3373,20 @@ export const interactionScenarios: readonly InteractionScenario[] = [
     trigger: ".chat-header-session-menu__trigger",
     content: '[data-value="submenu:view"], [data-value="compact:open-view"]',
   }),
-  coldRouteControlScenario({
-    id: "chat-slash-first-ready-open",
-    trigger: ".agent-chat__composer-combobox textarea",
-    input: "/viewport",
-    surface: '[role="listbox"][aria-label="Slash commands"]',
-    content: '[role="option"][aria-selected="true"]',
-    contentText: "/viewport",
-    keepsTriggerFocus: true,
-    fixtureOverrides: firstInputFixture,
-    verifyReopened: verifySlashArguments,
-  }),
+  ...firstInputRoutes.map((route) =>
+    coldRouteControlScenario({
+      id: `${route.id}-slash-first-ready-open`,
+      newSession: route.id === "new",
+      trigger: ".agent-chat__composer-combobox textarea",
+      input: "/viewport",
+      surface: '[role="listbox"][aria-label="Slash commands"]',
+      content: '[role="option"][aria-selected="true"]',
+      contentText: "/viewport",
+      keepsTriggerFocus: true,
+      fixtureOverrides: firstInputFixture,
+      verifyReopened: (page) => verifySlashArguments(page, route.scope),
+    }),
+  ),
   coldRouteControlScenario({
     id: "chat-slash-argument-first-ready-open",
     trigger: ".agent-chat__composer-combobox textarea",
@@ -3442,57 +3451,66 @@ export const interactionScenarios: readonly InteractionScenario[] = [
         await input.pressSequentially("/viewport");
         await selected.locator(".skeleton").first().waitFor({ state: "attached" });
       },
-      verifyReopened: verifySlashArguments,
+      verifyReopened: (page) => verifySlashArguments(page),
     }),
   ),
-  coldRouteControlScenario({
-    id: "chat-skill-first-ready-open",
-    trigger: ".agent-chat__composer-combobox textarea",
-    input: "$auto",
-    surface: '[role="listbox"][aria-label="Skill references"]',
-    content: '[role="option"][aria-selected="true"]',
-    contentText: "Auto Review",
-    keepsTriggerFocus: true,
-    fixtureOverrides: firstInputFixture,
-    verifyReopened: (page) => verifyFirstInputSelection(page, "$autoreview"),
-  }),
-  coldRouteControlScenario({
-    id: "chat-mention-first-ready-open",
-    requiredRequest: "users.mentionable",
-    trigger: ".agent-chat__composer-combobox textarea",
-    input: "@Casey",
-    surface: '[role="listbox"][aria-label="Mention a person"]',
-    content: '[role="option"][aria-selected="true"]',
-    contentText: "Casey Vale",
-    keepsTriggerFocus: true,
-    fixtureOverrides: (sandbox, base) => ({
-      ...firstInputFixture(sandbox, base),
-      // People suggestions require an authenticated profile, not only the lookup method.
-      presenceUsers: [
-        {
-          self: true,
-          id: "demo-viewer",
-          identity: { type: "profile", id: "demo-viewer" },
-          name: "Demo viewer",
-        },
-      ],
+  ...firstInputRoutes.map((route) =>
+    coldRouteControlScenario({
+      id: `${route.id}-skill-first-ready-open`,
+      newSession: route.id === "new",
+      trigger: ".agent-chat__composer-combobox textarea",
+      input: "$auto",
+      surface: '[role="listbox"][aria-label="Skill references"]',
+      content: '[role="option"][aria-selected="true"]',
+      contentText: "Auto Review",
+      keepsTriggerFocus: true,
+      fixtureOverrides: firstInputFixture,
+      verifyReopened: (page) => verifyFirstInputSelection(page, "$autoreview", route.scope),
     }),
-    verifyReady: async (_page, gateway) => {
-      await gateway.waitForRequest("users.mentionable");
-    },
-    verifyReopened: (page) => verifyFirstInputSelection(page, "@Casey Vale"),
-  }),
-  coldRouteControlScenario({
-    id: "chat-emoji-first-ready-open",
-    trigger: ".agent-chat__composer-combobox textarea",
-    input: ":smi",
-    surface: '.emoji-menu[role="listbox"]',
-    content: '[role="option"][aria-selected="true"]',
-    contentText: ":smi",
-    keepsTriggerFocus: true,
-    fixtureOverrides: firstInputFixture,
-    verifyReopened: (page) => verifyFirstInputSelection(page, "😄"),
-  }),
+  ),
+  ...firstInputRoutes.map((route) =>
+    coldRouteControlScenario({
+      id: `${route.id}-mention-first-ready-open`,
+      newSession: route.id === "new",
+      requiredRequest: "users.mentionable",
+      trigger: ".agent-chat__composer-combobox textarea",
+      input: "@Casey",
+      surface: '[role="listbox"][aria-label="Mention a person"]',
+      content: '[role="option"][aria-selected="true"]',
+      contentText: "Casey Vale",
+      keepsTriggerFocus: true,
+      fixtureOverrides: (sandbox, base) => ({
+        ...firstInputFixture(sandbox, base),
+        // People suggestions require an authenticated profile, not only the lookup method.
+        presenceUsers: [
+          {
+            self: true,
+            id: "demo-viewer",
+            identity: { type: "profile", id: "demo-viewer" },
+            name: "Demo viewer",
+          },
+        ],
+      }),
+      verifyReady: async (_page, gateway) => {
+        await gateway.waitForRequest("users.mentionable");
+      },
+      verifyReopened: (page) => verifyFirstInputSelection(page, "@Casey Vale", route.scope),
+    }),
+  ),
+  ...firstInputRoutes.map((route) =>
+    coldRouteControlScenario({
+      id: `${route.id}-emoji-first-ready-open`,
+      newSession: route.id === "new",
+      trigger: ".agent-chat__composer-combobox textarea",
+      input: ":smi",
+      surface: '.emoji-menu[role="listbox"]',
+      content: '[role="option"][aria-selected="true"]',
+      contentText: ":smi",
+      keepsTriggerFocus: true,
+      fixtureOverrides: firstInputFixture,
+      verifyReopened: (page) => verifyFirstInputSelection(page, "😄", route.scope),
+    }),
+  ),
   coldRouteControlScenario({
     id: "chat-context-first-ready-open",
     requiredRequest: "sessions.usage",
