@@ -403,8 +403,8 @@ registerHooks({resolve(specifier, context, nextResolve) {
         }),
       ).toBe(nodePath.join("/repo", "node_modules", "vitest", "vitest.mjs"));
       expect(symlinkSync.mock.calls).toEqual([
-        [modulesDir, nodePath.join(modulesDir, "node_modules"), "junction"],
-        [modulesDir, nodePath.join("/repo", "node_modules"), "junction"],
+        [nodePath.normalize(modulesDir), nodePath.join(modulesDir, "node_modules"), "junction"],
+        [nodePath.normalize(modulesDir), nodePath.join("/repo", "node_modules"), "junction"],
       ]);
       expect(requireResolve).not.toHaveBeenCalled();
     },
@@ -705,42 +705,36 @@ registerHooks({resolve(specifier, context, nextResolve) {
 
   it("keeps unhandled error lines separate across stream EOF", async ({ signal }) => {
     const env = testRunnerFixtureEnv({ OPENCLAW_VITEST_RUNTIME: "node" });
-    // The outer Vitest worker may be Bun. Select native Node for this raw-fd
-    // fixture; the watched process, pipes and EOF handshake remain real.
-    const command = vi
-      .spyOn(testRuntime, "resolveVitestTestCommand")
-      .mockImplementation((args) => ({
-        command: resolveTestNodeExecPath(),
-        args,
-      }));
-    let watched: ReturnType<typeof spawnWatchedVitestProcess>;
-    try {
-      watched = spawnWatchedVitestProcess({
-        pnpmArgs: [
-          "exec",
-          "node",
-          "-e",
-          `const fs = require("node:fs");
+    const watched = spawnWatchedVitestProcess({
+      pnpmArgs: [
+        "exec",
+        "node",
+        "-e",
+        `const fs = require("node:fs");
 fs.writeSync(1, "\\u001b[31m⎯⎯ Unhandled Errors ⎯⎯\\u001b[0m");
-fs.closeSync(1);
-process.stdin.once("data", () => {
-  fs.writeSync(2, [
-    "Vitest caught 1 unhandled error during the test run.",
-    "⎯⎯ Unhandled Rejection ⎯⎯",
-    "TypeError: request failed",
-    'This error originated in "fixture.test.ts" test file.',
-  ].join("\\n"));
-});`,
-        ],
-        spawnParams: { ...resolveVitestSpawnParams(env), stdio: ["pipe", "pipe", "pipe"] },
-        env,
-        homeMode: "hermetic",
-      });
-    } finally {
-      command.mockRestore();
-    }
-    // The forwarder observes stdout's EOF tail before this gate admits stderr.
-    watched.child.stdout!.once("end", () => watched.child.stdin!.end("continue"));
+fs.writeSync(2, [
+  "Vitest caught 1 unhandled error during the test run.",
+  "⎯⎯ Unhandled Rejection ⎯⎯",
+  "TypeError: request failed",
+  'This error originated in "fixture.test.ts" test file.',
+].join("\\n"));`,
+      ],
+      spawnParams: { ...resolveVitestSpawnParams(env), stdio: ["pipe", "pipe", "pipe"] },
+      env,
+      homeMode: "hermetic",
+    });
+    // Windows leaves fd1 open on closeSync(1). Hold the real stderr pipe instead;
+    // child-exit cleanup can resume it, so pause every resume until stdout's EOF.
+    const stdout = watched.child.stdout!;
+    const stderr = watched.child.stderr!;
+    const holdStderr = () => stderr.pause();
+    const releaseStderr = () => {
+      stderr.off("resume", holdStderr);
+      stderr.resume();
+    };
+    stderr.on("resume", holdStderr);
+    stderr.pause();
+    stdout.once("end", releaseStderr);
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       expect((await withinTest(watched.completion, signal)).code).toBe(0);
@@ -748,6 +742,8 @@ process.stdin.once("data", () => {
         "[vitest] UNHANDLED ERRORS (1): fixture.test.ts — TypeError: request failed",
       );
     } finally {
+      stdout.off("end", releaseStderr);
+      releaseStderr();
       watched.teardown();
       forceKillVitestProcessGroup(watched.child);
       log.mockRestore();
