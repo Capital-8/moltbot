@@ -29,6 +29,22 @@ import { getFreePort } from "../test-utils/ports.js";
 // surfacing on unrelated UI PRs.
 const BOOT_BUDGET_MS = 90_000;
 
+async function readTimelineAtReady(port: number, timelinePath: string): Promise<string> {
+  const deadline = Date.now() + BOOT_BUDGET_MS;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/readyz`);
+      if (response.ok) {
+        return await fs.readFile(timelinePath, "utf8");
+      }
+    } catch {
+      // The HTTP listener comes up before the readiness boundary.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Gateway did not become ready within the minimal boot budget");
+}
+
 afterEach(() => {
   resetLogger();
   vi.unstubAllEnvs();
@@ -181,13 +197,27 @@ describe("gateway minimal boot smoke", () => {
         let snapshotVersion = getSkillsSnapshotVersion();
         for (const startup of [1, 2]) {
           await fs.writeFile(timelinePath, "");
-          const server = await startGatewayServer(port, {
+          const pendingServer = startGatewayServer(port, {
             auth: { mode: "token", token },
             bind: "loopback",
             controlUiEnabled: false,
             sidecarStartup: "start",
           });
+          const timelineAtReadiness = readTimelineAtReady(port, timelinePath);
+          const server = await pendingServer;
           try {
+            const readinessEvents = (await timelineAtReadiness)
+              .trim()
+              .split("\n")
+              .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(
+              readinessEvents.findIndex(
+                (event) =>
+                  event.type === "span.end" &&
+                  (event.attributes as { traceName?: string } | undefined)?.traceName ===
+                    "runtime.post-attach",
+              ),
+            ).toBeGreaterThan(-1);
             const nextVersion = getSkillsSnapshotVersion();
             expect(
               nextVersion,

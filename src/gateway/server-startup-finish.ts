@@ -400,6 +400,10 @@ export async function finishGatewayStartup(params: {
       ),
     ),
   );
+  // The post-attach span ends inside startupTrace.measure(), but its timeline
+  // event is batched. Flush it before postAttachSettled can make /readyz green;
+  // performance collectors stop their startup interval at that response.
+  flushDiagnosticsTimeline();
   postAttachSpanSettled = true;
   // Do not publish /readyz while the post-attach startup span is still open.
   // Performance collectors end their startup interval at readiness, so an
