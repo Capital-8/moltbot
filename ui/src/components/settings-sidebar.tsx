@@ -513,7 +513,7 @@ export function renderSettingsSidebar(props: SettingsSidebarProps) {
                   return;
                 }
                 event.preventDefault();
-                if (props.searchQuery) {
+                if (event.currentTarget.value) {
                   props.onSearchQueryChange("");
                 } else {
                   props.onExit();
