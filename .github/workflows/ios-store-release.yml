@@ -67,6 +67,7 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Setup Node environment
+        if: ${{ !inputs.watch_runtime_probe }}
         uses: ./.github/actions/setup-node-env
         with:
           cache-mode: off
@@ -100,10 +101,15 @@ jobs:
           echo "OPENCLAW_WATCH_TRACE_PID=$!" >> "$GITHUB_ENV"
 
       - name: Select Xcode and install pinned native tools
+        env:
+          WATCH_RUNTIME_PROBE: ${{ inputs.watch_runtime_probe }}
         run: |
           set -euo pipefail
           source scripts/lib/swift-toolchain.sh
           select_xcode_toolchain
+          if [[ "$WATCH_RUNTIME_PROBE" == "true" ]]; then
+            exit 0
+          fi
           swift_tools_dir="$RUNNER_TEMP/ios-screenshot-tools"
           ./scripts/install-xcodegen.sh "$swift_tools_dir"
           ./scripts/install-swift-tools.sh "$swift_tools_dir"

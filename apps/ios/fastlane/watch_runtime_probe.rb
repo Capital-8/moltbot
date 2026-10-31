@@ -28,7 +28,12 @@ begin
     .max_by { |entry| Gem::Version.new(entry.fetch("version")) }
   raise "No available Watch runtime" unless runtime
   facts["personalizationHelp"] = command("xcrun", "simctl", "help", "personalization")
-  facts["personalizationOutput"] = command("xcrun", "simctl", "personalization", "personalize", runtime.fetch("identifier"))
+  WatchRuntimeAdmission.wait!
+  images = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j")).values
+  image = images.find { |entry| entry["runtimeIdentifier"] == runtime.fetch("identifier") && entry["state"] == "Ready" }
+  raise "No Ready image for targeted Watch personalization" unless image
+  facts["personalizationTarget"] = image.fetch("identifier")
+  facts["personalizationOutput"] = command("xcrun", "simctl", "personalization", "personalize", image.fetch("identifier"))
   facts["imagesPersonalized"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
   WatchRuntimeAdmission.wait!
   facts["admittedAt"] = Time.now.utc.iso8601
