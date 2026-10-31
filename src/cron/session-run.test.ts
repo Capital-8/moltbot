@@ -6,6 +6,7 @@ import type {
   SessionEventOutcome,
 } from "../auto-reply/reply/session-event-contract.js";
 import type { RestoredGatewayOperatorAuthority } from "../gateway/operator-run-recovery.js";
+import { assertEngineStoreExecutionAllowed } from "../infra/database-engine/admission-scope.js";
 import { makeCronJob } from "./delivery.test-helpers.js";
 import { resolveCronSourceDeliveryPlan } from "./isolated-agent/source-delivery-plan.js";
 import { TEST_SCHEDULED_OCCURRENCE } from "./scheduled-occurrence.test-support.js";
@@ -25,6 +26,9 @@ const fixture = vi.hoisted(() => ({
   delivery:
     vi.fn<typeof import("./isolated-agent/run-delivery-trace.js").resolveCronDeliveryContext>(),
   restore: vi.fn<typeof import("../gateway/cron-operator-source.js").restoreCronOperatorSource>(),
+  scratchRead: vi.fn<typeof import("./scratch-read.js").readCronScratchSnapshot>(),
+  selectPath: vi.fn<typeof import("./store.js").resolveCronJobsStorePathFromConfig>(),
+  selectPathAsync: vi.fn<typeof import("./store.js").resolveCronJobsStorePathFromConfigAsync>(),
 }));
 
 // mock-isolation: Fixed session receipts exercise the Cron owner without invoking a model.
@@ -44,10 +48,23 @@ vi.mock("../gateway/cron-operator-source.js", () => ({
   restoreCronOperatorSource: fixture.restore,
 }));
 // mock-isolation: These receipt/prompt contracts use a job with no saved scratch.
-vi.mock("./scratch-read.js", () => ({ readCronScratchSnapshot: async () => undefined }));
+vi.mock("./scratch-read.js", () => ({ readCronScratchSnapshot: fixture.scratchRead }));
+// mock-isolation: Simulate PostgreSQL's real main-thread guard at the legacy
+// selector and return the worker-owned partition without opening a database.
+vi.mock("./store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./store.js")>()),
+  resolveCronJobsStorePathFromConfig: fixture.selectPath,
+  resolveCronJobsStorePathFromConfigAsync: fixture.selectPathAsync,
+}));
 
 beforeEach(() => {
   vi.resetAllMocks();
+  fixture.scratchRead.mockResolvedValue(undefined);
+  fixture.selectPath.mockImplementation(() => {
+    assertEngineStoreExecutionAllowed();
+    return "/legacy-main-thread-partition";
+  });
+  fixture.selectPathAsync.mockResolvedValue("/worker-selected-partition");
   fixture.capture.mockResolvedValue({
     sessionId: "target-session",
     sessionKey: "agent:main:scheduled",
@@ -183,6 +200,24 @@ describe("scheduled session prompts", () => {
       accepted: Promise.resolve({ ok: true }),
       settled: Promise.resolve({ status: "completed", executionStarted: true, delivered: false }),
     });
+  });
+
+  it("selects absent-config cron scratch through its worker before shared-session execution", async () => {
+    await expect(runCronSessionTurn(input())).resolves.toMatchObject({ status: "ok" });
+    expect(fixture.selectPath).not.toHaveBeenCalled();
+    expect(fixture.selectPathAsync).toHaveBeenCalledWith(fixture.config);
+    expect(fixture.scratchRead.mock.calls[0]?.[0]).toBe("/worker-selected-partition");
+  });
+
+  it("retains the admitted cron partition instead of rereading changed configuration", async () => {
+    fixture.selectPath.mockReturnValue("/changed-config-partition");
+    fixture.selectPathAsync.mockResolvedValue("/changed-config-partition");
+    await expect(
+      runCronSessionTurn({ ...input(), cronStorePath: "/admitted-partition" }),
+    ).resolves.toMatchObject({ status: "ok" });
+    expect(fixture.selectPath).not.toHaveBeenCalled();
+    expect(fixture.selectPathAsync).not.toHaveBeenCalled();
+    expect(fixture.scratchRead.mock.calls[0]?.[0]).toBe("/admitted-partition");
   });
 
   it("submits the job identity and localized current time with the scheduled instructions", async () => {
