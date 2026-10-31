@@ -25,9 +25,9 @@ function presenceHost(navigationView: PresenceHost["navigationView"], contextual
       presenceInstanceId: "self-instance",
       presencePayload: {
         presence: [
-          { user: { id: "mounted", identity: { type: "profile" as const, id: "mounted" } } },
-          { user: { id: "pinned", identity: { type: "profile" as const, id: "pinned" } } },
-          { user: { id: "other" } },
+          { ts: 0, user: { id: "mounted", identity: { type: "profile" as const, id: "mounted" } } },
+          { ts: 0, user: { id: "pinned", identity: { type: "profile" as const, id: "pinned" } } },
+          { ts: 0, user: { id: "other" } },
         ],
       },
     },

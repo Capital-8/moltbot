@@ -11,12 +11,14 @@ export class SidebarChildExpansion {
   constructor(private readonly onChange: () => void) {}
 
   /** Opens a projection pass; a scope change drops state unless a snapshot handoff is pending. */
-  beginPass(scopeChanged: boolean): void {
+  beginPass(scopeChanged: boolean, listLoaded: boolean): void {
     if (scopeChanged && !this.restoredPending) {
       this.modes.clear();
       this.observedChildKeys.clear();
     }
-    this.restoredPending = false;
+    if (listLoaded) {
+      this.restoredPending = false;
+    }
   }
 
   keys(): string[] {

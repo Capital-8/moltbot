@@ -16,6 +16,7 @@ vi.mock("../../components/config-form.render.tsx", async (importOriginal) => {
   return importOriginal<typeof import("../../components/config-form.render.tsx")>();
 });
 
+// mock-isolation: exercise a rejected lazy module import before any real exports are available.
 vi.mock("./security.tsx", async () => {
   throw new Error("Synthetic Security module read failed");
 });
