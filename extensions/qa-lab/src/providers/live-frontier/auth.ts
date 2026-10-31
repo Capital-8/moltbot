@@ -228,15 +228,15 @@ export async function stageQaLiveApiKeyProfiles(params: {
     return next;
   }
   const agentIds = uniqueStrings(params.agentIds ?? QA_LIVE_API_KEY_AGENT_IDS);
-  await Promise.all(
-    agentIds.map((agentId) =>
-      writeQaAuthProfiles({
-        agentId,
-        profiles,
-        stateDir: params.stateDir,
-      }),
-    ),
-  );
+  // Each agent store shares the isolated state database. Stage them serially so
+  // one fixture write cannot revoke another write's SQLite admission.
+  for (const agentId of agentIds) {
+    await writeQaAuthProfiles({
+      agentId,
+      profiles,
+      stateDir: params.stateDir,
+    });
+  }
   return next;
 }
 
