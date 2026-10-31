@@ -234,8 +234,9 @@ and can exceed `1`. See
 
 `sessions.patch` and `sessions.patchMany` calls lasting at least one second add
 an info-level `slow session patch` record even when diagnostics are disabled.
-The message includes total elapsed milliseconds, the method, and fixed phase
-durations, for example `slow session patch 1176ms method=sessions.patch catalog=1100ms response=20ms`.
+The message includes total elapsed milliseconds, the method, target count (at most
+100), up to eight sorted mutation field names (plus an omitted-field count), and fixed phase
+durations, for example `slow session patch 1176ms method=sessions.patch targets=1 fields=unread catalog=1100ms response=20ms`.
 Replacement snapshots use the metadata reader for bounded exact-key selections
 and the maintenance reader for larger or label-owner selections, independently of
 the transcript-history reader. Snapshot time includes worker preparation and reads.
@@ -699,8 +700,10 @@ installation root, with URLs such as `openclaw:src/...`, `openclaw:dist/...`, an
 `openclaw:packages/<name>/src/...` or `openclaw:packages/<name>/dist/...` for
 workspace packages. Paths outside the installation root are not OpenClaw code.
 Profiles label dependency frames as `[dep:<pkg>]` with URL
-`node_modules/<pkg>`, including scoped packages and pnpm layouts; symbols,
-versions, filenames, and absolute paths stay hidden. URLs with query or fragment
+`node_modules/<pkg>`, including scoped packages and pnpm layouts. First-party
+`@openclaw/*` packages retain safe function symbols, including private method
+names such as `#prepare`; third-party symbols stay hidden. Versions, filenames,
+and absolute paths stay hidden for all dependencies. URLs with query or fragment
 markers remain redacted. Frames with script ID `0`,
 an empty URL, and a negative line number use `[native]`, except for known V8
 engine labels such as `(root)`, `(V8 API)`, `(GC)`, and `(PARSER)`. Preserving those
@@ -862,6 +865,11 @@ workers. Retirement requests are asynchronous, skip active work, and keep native
 close/checkpoint operations off the main thread. Active operations keep their
 custody and the usual 30-minute database retention window resumes after use.
 No stored data, database schema, or update procedure changes.
+
+Transcript history and search lanes retain one warm reader for up to five idle
+minutes. Other transcript lanes retire after 90 idle seconds to span minute-spaced
+bursts, keeping their independent request ordering and growing again on demand. Whole-lane idle cleanup
+uses the existing rotation path, so its retirement reason is `rotation`.
 
 When a task pool recreates an idle-retired Worker within five minutes, it keeps
 one replacement warm for five minutes of inactivity. Other slots retain their

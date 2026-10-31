@@ -182,6 +182,11 @@ export async function runEmbeddedAttemptPromptPhase(
 
   let transcriptLeafId: string | null = null;
   try {
+    if (attempt.inputAlreadyDelivered) {
+      runAbortController.signal.throwIfAborted();
+      input.sessionLock.ownedTranscriptWriteContext.assertCommitAllowed?.();
+      return { promptStartedAt, transcriptLeafId };
+    }
     const promptAssembly = await prepareEmbeddedAttemptPromptAssembly({
       attempt,
       activeSession,
@@ -508,6 +513,7 @@ export async function runEmbeddedAttemptPromptPhase(
             }
           : {}),
         onModelRequest: preparedStreamRuntime.cache.onModelRequest,
+        normalizeToolCallIds: preparedStreamRuntime.normalizeToolCallIds,
         images: imageResult.images,
         modelPrompt: promptContext.promptForModel,
         onFinalPromptText: (prompt) => {

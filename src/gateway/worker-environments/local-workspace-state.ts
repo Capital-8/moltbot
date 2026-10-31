@@ -4,7 +4,6 @@ import path from "node:path";
 import type { SandboxConfig } from "../../agents/sandbox/types.js";
 import type { WorktreeAllocationGuard } from "../../agents/worktrees/allocation.js";
 import { requireGit, runGit } from "../../agents/worktrees/git.js";
-import { timeWorktreePreparationPhase } from "../../agents/worktrees/preparation-timing.js";
 import type { WorktreeWorkerAuthority } from "../../agents/worktrees/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -12,6 +11,13 @@ import {
   initializeLocalWorkspaceProjection,
   localWorkspaceProjectionPath,
 } from "./local-workspace-checkout.js";
+import {
+  pendingLocalWorkspaceDirection as pendingDirection,
+  prepareLocalWorkspaceCheckpoint,
+  selectLocalWorkspaceCheckpoint,
+  stageLocalWorkspaceCheckpoint,
+  type LocalWorkspaceSyncTarget as Direction,
+} from "./local-workspace-checkpoint.js";
 import {
   admitLocalWorkspaceSourcePaths,
   captureLocalWorkspaceArchiveBaseline,
@@ -51,11 +57,7 @@ import {
   readStagedWorkerWorkspaceResult,
 } from "./workspace-result-staging.js";
 
-type Direction = "canonical" | "projection";
 const log = createSubsystemLogger("agents/worktrees");
-function pendingDirection(value: string | null): Direction | undefined {
-  return value === "canonical" || value === "projection" ? value : undefined;
-}
 
 export function projectionOperations(
   owner: LocalWorkspaceOwner,
@@ -63,12 +65,13 @@ export function projectionOperations(
   initialRow: LocalWorkspaceProjection | undefined,
 ) {
   const signal = store.signal;
+  const projectionPath = localWorkspaceProjectionPath(owner);
   let row = initialRow;
-  const selectCurrent = (assertCurrent: () => void) => {
+  const selectCurrent = (assertCurrent: (() => void) | undefined) => {
     if (!row) {
       throw new Error("Local workspace binding is missing");
     }
-    assertCurrent();
+    assertCurrent?.();
     if (
       row.worktree_id !== owner.worktree.id ||
       row.agent_id !== owner.agentId ||
@@ -80,22 +83,21 @@ export function projectionOperations(
         "Local sandbox workspace belongs to a different session incarnation; pending edits were preserved",
       );
     }
-    if (
-      row.projection_path !== localWorkspaceProjectionPath(owner) ||
-      store.get()?.revision !== row.revision
-    ) {
+    if (row.projection_path !== projectionPath || store.get()?.revision !== row.revision) {
       throw new Error("Local workspace binding changed");
     }
     return row;
   };
-  const current = () => selectCurrent(() => owner.assertCurrent());
-  const assertCurrent = () => {
-    current();
-  };
+  const current = () => selectCurrent(owner.assertCurrent);
+  // Subprocess input admission requires an undefined result.
+  const assertCurrent = () => void current();
   const workerAuthority: WorktreeWorkerAuthority = {
-    ...owner.workerAuthority,
+    ...store.workerAuthority,
+    predicates: owner.workerAuthority?.predicates ?? store.workerAuthority.predicates,
     assertCurrent: () => {
-      selectCurrent(() => owner.workerAuthority?.assertCurrent?.());
+      selectCurrent(
+        owner.workerAuthority ? owner.workerAuthority.assertCurrent : owner.assertCurrent,
+      );
     },
   };
   const update = async (
@@ -124,8 +126,8 @@ export function projectionOperations(
       ) {
         throw error;
       }
-      // A preparation stalled across GC epochs can lose unaccepted content. Restore
-      // only an exact digest match; divergent files must never replace the merge base.
+      // Repair older missing packs only from a verified baseline or checkpoint;
+      // divergent files must never replace the merge base.
       await repairBaseline();
       return await store.manifest(current(), action);
     }
@@ -289,11 +291,7 @@ export function projectionOperations(
     if (!selected.pending_ref) {
       return;
     }
-    if (!selected.baseline_ref || !pendingDirection(selected.pending_target)) {
-      throw new Error("Local workspace result has no accepted baseline");
-    }
-    const target = pendingDirection(selected.pending_target)!;
-    const refresh = isLocalWorkspaceBaseRefreshRef(selected.pending_ref);
+    const { target, refresh } = selectLocalWorkspaceCheckpoint(selected, selected.pending_ref);
     // Reservation precedes staging. A crash before its Git effect leaves the
     // source bytes untouched and resumes capture into this exact reserved ref.
     if (
@@ -340,17 +338,20 @@ export function projectionOperations(
               assertCurrent,
             })
           : baseline;
-      await workerWorkspaceResultStaging.stageWorkerWorkspaceResult({
-        root: owner.worktree.path,
-        stagingRoot: sourcePath(target),
-        stagedResultRef: selected.pending_ref,
-        baseManifestRef: snapshot?.baseManifestRef ?? stagingBase!.manifestRef,
-        currentManifestRef: snapshot?.currentManifestRef ?? legacy!.manifestRef,
-        baseManifestRaw: snapshot?.baseManifestRaw ?? stagingBase!.rawManifest,
-        currentManifestRaw: snapshot?.currentManifestRaw ?? legacy!.rawManifest,
-        buildCacheInputs: snapshot?.buildCacheInputs ?? (await buildCacheInputs()),
-        assertCurrent,
-      });
+      await stageLocalWorkspaceCheckpoint(
+        {
+          root: owner.worktree.path,
+          stagingRoot: sourcePath(target),
+          stagedResultRef: selected.pending_ref,
+          baseManifestRef: snapshot?.baseManifestRef ?? stagingBase!.manifestRef,
+          currentManifestRef: snapshot?.currentManifestRef ?? legacy!.manifestRef,
+          baseManifestRaw: snapshot?.baseManifestRaw ?? stagingBase!.rawManifest,
+          currentManifestRaw: snapshot?.currentManifestRaw ?? legacy!.rawManifest,
+          buildCacheInputs: snapshot?.buildCacheInputs ?? (await buildCacheInputs()),
+          assertCurrent,
+        },
+        { target, refresh, snapshot, current, signal },
+      );
       current();
     }
     const checkpoint = current().checkpoint_json
@@ -497,7 +498,7 @@ export function projectionOperations(
           session_key: owner.sessionKey,
           session_id: owner.sessionId,
           lifecycle_revision: owner.lifecycleRevision,
-          projection_path: localWorkspaceProjectionPath(owner),
+          projection_path: projectionPath,
           base_commit: baseCommit,
           source_paths_json: sourcePaths,
           baseline_json: null,
@@ -530,12 +531,12 @@ export function projectionOperations(
       });
       await replaceBaseline(initial.rawManifest, initial.manifestRef);
     }
-    await assertLocalWorkspaceDirectory(current().projection_path);
-    if (selected.baseline_ref) {
-      await timeWorktreePreparationPhase("synchronizeCanonical", () => synchronize("canonical"));
-    }
-    await timeWorktreePreparationPhase("synchronizeProjection", () => synchronize("projection"));
-    return current().projection_path;
+    return await prepareLocalWorkspaceCheckpoint({
+      baselineRef: selected.baseline_ref,
+      synchronize,
+      current,
+      signal,
+    });
   };
   return {
     current,
@@ -553,16 +554,17 @@ export function projectionOperations(
         throw new Error("Workspace base refresh requires its own source result");
       }
       await settle();
-      // The host-produced current manifest includes unchanged inputs omitted by its delta tree.
-      // Its producer admits only selected source or already-admitted inputs under cache roots.
+      // The host snapshot admits selected source and retained cache inputs, including unchanged files.
       const snapshot = await readStagedWorkerWorkspaceResult(owner.worktree.path, stagedResultRef);
       const incoming = buildCacheInputPaths(snapshot.current.entries.map((entry) => entry.path));
-      const admitted = parseLocalWorkspaceSourcePaths(current().source_paths_json);
+      const selected = current();
+      const admitted = parseLocalWorkspaceSourcePaths(selected.source_paths_json);
+      const sourcePaths = JSON.stringify([...new Set([...admitted, ...incoming])]);
       // Admission and its pending fence settle together, including after a restart.
       await update({
         pending_ref: stagedResultRef,
         pending_target: "canonical",
-        source_paths_json: JSON.stringify([...new Set([...admitted, ...incoming])]),
+        ...(sourcePaths === selected.source_paths_json ? {} : { source_paths_json: sourcePaths }),
       });
       inputPaths = undefined;
       preparedInputPaths = undefined;
@@ -723,8 +725,6 @@ export function projectionOperations(
       await fs.rm(parent, { recursive: true, force: true });
       await store.delete(current(), owner.workerAuthority);
     },
-    rememberPaused: async (value: string | null) => {
-      await update({ paused_runtimes_json: value });
-    },
+    rememberPaused: (value: string | null) => update({ paused_runtimes_json: value }),
   };
 }

@@ -39,6 +39,58 @@ with the accepted harness IDs. Model Setup stages those permissions on that
 agent in the same verified config commit as the runtime routing and plugin enable.
 Do not write a separate permission store or infer consent from successful login.
 
+## Checklist before you open a provider PR
+
+- **Live listing.** If the vendor has a model-list API, the provider lists the
+  account's models live, so new vendor models need no OpenClaw release. See
+  [live model discovery](/plugins/sdk-provider-plugins/model-catalogs#live-model-discovery).
+  `src/plugins/contracts/provider-live-listing.contract.test.ts` enforces this
+  for bundled hosted providers.
+- **Thinking from catalog data.** Put the profile on the manifest row:
+  `compat.defaultThinkingLevel` makes the row own it, and `thinkingLevelMap`,
+  `compat.supportedReasoningEfforts`, `compat.adaptiveThinking`,
+  `compat.thinkingRequired` and `compat.thinkingLevelLabels` shape the ladder. Do
+  not add a `resolveThinkingProfile` hook for a model its row can describe. Add
+  the row to `src/plugins/contracts/catalog-thinking-profiles.contract.test.ts`.
+  Use `compat.thinkingLevels` when the offered ladder differs from what the map implies.
+- **Live listing needs both halves.** The entry sets `catalog.liveModelDiscovery`
+  and the manifest declares `modelCatalog.discovery: { "<provider>": "refreshable" }`.
+  Without the manifest half, the Gateway never refreshes the provider and only
+  catalog rows appear.
+- **Row IDs match the listing.** Use the ID the vendor's model list returns.
+  `modelIdNormalization` aliases only fold what users type.
+- **Connection-only setup.** Onboarding saves the endpoint and credential through
+  `createProviderConnectionPresetAppliers`. Outside `models.mode: "replace"`, which
+  keeps its documented exception, it never copies catalog rows into config. See
+  [model catalogs](/plugins/sdk-provider-plugins/model-catalogs).
+- **Docs.** Add `docs/providers/<id>.md` and list the provider in alphabetical
+  order on the provider index.
+- **Proof.** Run a real agent turn on an isolated Gateway with a real key before
+  the PR opens. API calls and mocked transports do not replace it. Make that
+  Gateway look like a real install:
+  - Enable the bundled plugins users run alongside yours, with credentials,
+    not only your provider. Other plugins' hooks only show up when they are
+    configured.
+  - Save the key the way users do (the Control UI provider dialog, or
+    `openclaw models auth paste-api-key`), not only through an environment
+    variable.
+  - Set `OPENCLAW_DEBUG_MODEL_TRANSPORT=1` and check that the
+    `[model-fetch] start provider=<id> … url=` line names your vendor's
+    endpoint.
+- **Stay inside your provider.** Core also runs some hooks for providers you do
+  not own:
+  - `normalizeTransport` receives other providers' transports. Return nothing
+    unless the context names your provider or already targets your endpoint.
+    Core ignores another plugin's change that moves a provider to a different
+    origin, and
+    `src/plugins/contracts/provider-transport-scope.contract.test.ts` fails any
+    bundled hook that rewrites a foreign transport.
+  - `augmentModelCatalog` and `resolveExternalAuthProfiles` run as global
+    discovery. Return only catalog rows and auth profiles for providers your
+    plugin owns.
+- **New model for an existing provider.** Add catalog data, not code. Search
+  every provider for the predecessor model ID before adding an exact-ID rule.
+
 ## Import an existing credential during sign-in
 
 An auth method can declare `credentialImport` with a `migrationProviderId`,

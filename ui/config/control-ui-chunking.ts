@@ -33,6 +33,8 @@ const chatVisibleModules = new Set([
   "ui/src/lib/chat/tool-call-input.ts",
   "src/agents/tool-display-name.ts",
   "ui/src/i18n/locales/en-chat-details.ts",
+  "ui/src/i18n/locales/en-chat-permissions.ts",
+  "ui/src/pages/chat/components/chat-details-process-row.tsx",
   "ui/src/pages/chat/components/chat-environment-content.tsx",
 ]);
 
@@ -77,6 +79,37 @@ export function controlUiStableChunkName(id: string): string | undefined {
   const normalized = normalizeModuleId(id);
 
   switch (controlUiBootManifestKey(id)) {
+    case "ui/src/components/sandbox-host.ts":
+    case "ui/src/lib/widget-sandbox-host.ts":
+    case "ui/src/lib/reactive/window-message.ts":
+      // Shared sandbox transport helpers otherwise add a separate HTTP wave to Board.
+      return "widget-sandbox-runtime";
+    case "ui/src/components/modal-dialog.tsx":
+    case "ui/src/components/solid/modal-dialog.tsx":
+    case "ui/src/components/solid/modal-dialog.css":
+    case "ui/src/components/solid/modal-scroll-lock.css":
+      // Dialogs share the existing creation controls without loading the New Session route.
+      return "route-controls-runtime";
+    case "ui/src/pages/chat/chat-view-notices-content.tsx":
+    case "ui/src/pages/chat/chatgpt-usage-limit.tsx":
+      return "chat-notices-runtime";
+    case "ui/src/pages/chat/components/chat-selection-annotation-rows.tsx":
+      return "chat-saved-annotations-runtime";
+    case "ui/src/pages/chat/components/chat-transcript-search-content.tsx":
+      return "chat-search-runtime";
+    case "ui/src/pages/chat/components/chat-composer-plus-menu-content.tsx":
+    case "ui/src/pages/chat/components/chat-composer-plus-menu-body.tsx":
+    case "ui/src/pages/chat/components/chat-composer-plus-menu-frame.tsx":
+    case "ui/src/pages/chat/components/chat-composer-menu-rows.tsx":
+    case "ui/src/pages/chat/components/chat-camera-capture.tsx":
+    case "ui/src/pages/chat/components/chat-attachment-picker-policy.ts":
+    case "ui/src/i18n/locales/en-chat-camera.ts":
+      // Root and subviews share chrome; keep it in the root's compressed chunk.
+      return "chat-composer-plus-menu-content";
+    case "ui/src/pages/chat/chat-composer-capability-host.tsx":
+    case "ui/src/pages/chat/composer-library-session.ts":
+      // Opened composer controls share the preloaded interaction runtime.
+      return "chat-interaction-runtime";
     case "ui/src/pages/chat/components/chat-ci-automation-control.tsx":
     case "ui/src/pages/chat/components/chat-ci-automation.tsx":
     case "ui/src/pages/chat/components/chat-ci-details.tsx":
@@ -101,11 +134,15 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js":
     case "node_modules/@tanstack/virtual-core/dist/esm/utils.js":
       return "virtual-core-runtime";
-    case "ui/src/pages/claws/creator-flow.ts":
-    case "ui/src/pages/claws/draft-navigation.ts":
+    case "ui/src/pages/templates/creator-flow.ts":
+    case "ui/src/i18n/locales/en-template-creator.ts":
+      return "template-creator-runtime";
+    case "ui/src/pages/templates/draft-navigation.ts":
     case "ui/src/i18n/locales/en-agents-home.ts":
-      // Chat and the roster co-load both; Claws accepts the extra virtualizer bytes.
-      return "virtual-core-runtime";
+    case "ui/src/pages/labs/labs-feature-state.ts":
+    case "ui/src/pages/labs/templates-lab-feature.ts":
+      // Draft navigation and its Labs gate belong to the optional template flow.
+      return "template-draft-runtime";
     case "src/shared/dedupe-by-key.ts":
       // Config search shares this helper without loading optional session UI.
       return "control-ui-boot-shared";
@@ -117,9 +154,7 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/app/assistant-media.ts":
     case "ui/src/lib/image-download.ts":
     case "ui/src/lib/download.ts":
-    case "src/shared/markdown-code.ts":
     case "src/shared/html-escape.ts":
-    case "src/shared/shell-quote.ts":
     case "src/utils/message-channel-constants.ts":
     case "src/utils/string-readers.ts":
     case "ui/src/components/file-kind.ts":
@@ -130,8 +165,6 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/lib/sessions/session-archive-reason.ts":
     case "ui/src/lib/sessions/session-message-subscriptions.runtime.ts":
     case "packages/gateway-client/src/session-subscriptions.ts":
-    case "ui/src/pages/labs/labs-feature-state.ts":
-    case "ui/src/pages/labs/claws-lab-feature.ts":
     case "ui/src/i18n/locales/en-session-skill-library.ts":
     case "ui/src/pages/plugins/detail-tabs.ts":
     case "ui/src/components/confirm-dialog.ts":
@@ -159,7 +192,6 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/lib/mcp-app-catalog.ts":
     case "ui/src/i18n/locales/en-mcp-app.ts":
     case "ui/src/components/mcp-app-launch.ts":
-    case "ui/src/components/mcp-app-view-lazy.ts":
     case "ui/src/lib/sessions/session-create-params.ts":
     case "packages/gateway-protocol/src/question-media.ts":
       // Shared catalogs and session parameters must not pull Chat into other routes.
@@ -177,11 +209,31 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/components/solid/connect-command.tsx":
       // Creation fetches these together; keep their compression without a whole route.
       return "route-controls-runtime";
+    case "ui/src/components/solid/tabs.tsx":
+    case "ui/src/lib/tabs.ts":
+    case "ui/src/lib/reactive/shadow-styles.ts":
+    case "ui/src/styles/tabs.css":
+      // Both tab renderers already load the owner, adapter, and generic styles together.
+      return "tabs-runtime";
     case "ui/src/components/solid/hub-page-header.tsx":
     case "ui/src/components/solid/settings-workspace.tsx":
     case "ui/src/components/solid/settings-select.tsx":
       // Only page chrome belongs here; shared controls also serve lazy Chat panels.
       return "route-chrome";
+    case "ui/src/components/config-form.analyze.ts":
+    case "ui/src/components/config-form.shared.ts":
+    case "src/config/sensitive-paths.ts":
+      // Analysis stays independent of the optional editor's value validator.
+      return "config-form-analysis-runtime";
+    case "ui/src/lib/config-form-utils.ts":
+    case "ui/src/i18n/lib/config-hint-translation.ts":
+    case "ui/src/components/config-form.array-items.ts":
+      // Lightweight shape readers must not acquire analysis, validation, or Settings copy.
+      return "config-form-utils-runtime";
+    case "ui/src/components/solid/settings-ui.tsx":
+    case "ui/src/pages/config/settings-section-header.tsx":
+      // Shared controls stay independent of route chrome and optional settings editors.
+      return "settings-controls-runtime";
     case "node_modules/typebox/build/guard/guard.mjs":
     case "node_modules/typebox/build/guard/globals.mjs":
     case "node_modules/typebox/build/guard/index.mjs":
@@ -274,6 +326,9 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/styles/emoji-search-panel.css":
       return "emoji-search-panel";
     case "ui/src/pages/chat/components/chat-composer-emoji-options.tsx":
+    case "ui/src/pages/chat/components/chat-composer-emoji-engine.ts":
+    case "ui/src/pages/chat/components/chat-composer-mention-menu-engine.ts":
+    case "ui/src/components/textarea-token-anchor.ts":
     case "ui/src/pages/chat/components/chat-composer-emoji.tsx":
     case "ui/src/pages/chat/components/chat-composer-mention-menu-options.tsx":
     case "ui/src/pages/chat/components/chat-composer-mention-menu.tsx":
@@ -294,6 +349,10 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/pages/chat/route-entry.ts":
       // Pending New Session previews must render while the Chat route entry waits.
       return "chat-route-entry";
+    case "ui/src/i18n/locales/en-command-palette.ts":
+      return "command-discovery-english";
+    case "ui/src/i18n/locales/en-model-accounts.ts":
+      return "model-account-settings-english";
     case "ui/src/i18n/locales/en-session-organization-shared.ts":
       // Settings, New Session, and Chat share this English copy.
       return "chat-english";
@@ -367,7 +426,7 @@ export function controlUiStableChunkName(id: string): string | undefined {
       return "markdown-streaming-runtime";
     case "ui/src/styles/session-panel-rail.css":
       // Keep normal rail CSS in Chat; other panels import its neutral inline text.
-      return /[?&]inline(?:[=&]|$)/u.test(id) ? "deferred-ui-support" : undefined;
+      return /[?&]inline(?:[=&]|$)/u.test(id) ? "session-panel-rail-inline" : undefined;
     case "ui/src/pages/chat/session-snapshot-database.ts":
       // Warm boot reads while the Gateway connects; the chat boot group made it wait for the whole route.
       return "session-snapshot-database";
@@ -471,6 +530,8 @@ export function createControlUiCodeSplitting(options: { includeBootGroups?: bool
                 modules.add("ui/src/plugins/control-ui-actions.ts");
                 // Both routes read deferred resources; share their existing boot partition.
                 modules.add("node_modules/@solidjs/signals/dist/prod/deferred.js");
+                // Callback-backed leaf owners already share the boot projection runtime.
+                modules.add("ui/src/lib/reactive/callback-owner.ts");
                 // Chat and creation share the same identity-scoped preference owner.
                 modules.add("ui/src/pages/new-session/draft-preference-state.ts");
                 modules.add("ui/src/pages/new-session/preferences.ts");
@@ -478,6 +539,12 @@ export function createControlUiCodeSplitting(options: { includeBootGroups?: bool
                 modules.add("ui/src/lib/platform-label.ts");
                 // Placement and delivery share retries without importing either route's bundle.
                 modules.add("ui/src/pages/chat/chat-outbox-retry.ts");
+                // Creation still uses the catalog; Chat constructs its capability owner on demand.
+                modules.add("ui/src/pages/chat/composer-capability-catalog.ts");
+                modules.add("ui/src/lib/config/mcp-servers.ts");
+                modules.add("src/config/patch-replace-paths.ts");
+                modules.add("src/infra/plain-object.ts");
+                modules.add("src/infra/prototype-keys.ts");
               }
               return {
                 name: `control-ui-boot-${route}`,
@@ -512,6 +579,7 @@ export function createControlUiCodeSplitting(options: { includeBootGroups?: bool
                 styles.add("ui/src/pages/chat/components/chat-pane-mobile-composition.css");
                 styles.add("ui/src/styles/chat/context-breakdown.css");
                 styles.add("ui/src/pages/chat/components/chat-session-activity.css");
+                styles.add("ui/src/pages/chat/components/chat-details-processes.css");
               }
               return {
                 name: `control-ui-boot-${route}-styles`,
