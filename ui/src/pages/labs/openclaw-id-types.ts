@@ -21,6 +21,26 @@ export type OpenClawIdTunnelStatus =
     }
   | { state: "unavailable"; reason: string };
 
+/** One invite as the Gateway lists it to owners. */
+export type OpenClawIdInvite = {
+  inviteId: string;
+  label: string;
+  role: "operator" | "viewer";
+  audience: { kind: "account_id" | "email"; value: string };
+  createdAt: number;
+  expiresAt: number;
+  status: "open" | "pending" | "approved" | "denied" | "expired";
+  pending?: {
+    accountId: string;
+    devicePub: string;
+    peerKey: string;
+    requestedAt: number;
+    decideBy: number;
+    /** Reported by OpenClaw ID; display only. */
+    reported: { email: string | null; displayName: string | null; locationHint: string | null };
+  };
+};
+
 export type OpenClawIdPublication =
   | { state: "published"; ownerAccountId: string | null; snapshotSeq: number }
   | { state: "needs_enrollment_code" }
@@ -39,7 +59,8 @@ export type OpenClawIdStatusResult = {
     rootPub?: string;
     seq?: number;
     ownerDevices?: Array<{ devicePub: string; label: string; peerKeys: string[]; cert: unknown }>;
-    members?: Array<{ accountId: string; role: string; peerKeys: string[] }>;
+    members?: Array<{ accountId: string; role: string; peerKeys: string[]; email?: string | null }>;
+    invites?: OpenClawIdInvite[];
     publication?: OpenClawIdPublication;
   };
   /** How this browser reaches the Gateway: only `local_operator` may link. */

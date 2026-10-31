@@ -17,9 +17,16 @@ import {
   type Ed25519PublicKey,
   type IrohEndpointKey,
   parseStatement,
+  registerInvite,
   type SignedStatement,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
-import { readStoredClaw, writeStoredClaw, type StoredClaw } from "./claw-store.js";
+import {
+  readStoredClaw,
+  writeStoredClaw,
+  type InviteReport,
+  type StoredClaw,
+} from "./claw-store.js";
+import { expirePendingRedemptions } from "./invite-expiry.js";
 
 /** What the local link ceremony signs for: the claw's identity and keys. */
 export type LinkPreparation = {
@@ -51,6 +58,69 @@ export type AuthorityAccepted = {
 };
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+/** Who sent a mailbox redemption, as asserted by OpenClaw ID. */
+export type RedemptionSender = {
+  account_id: string;
+  email: string | null;
+  display_name?: string | null;
+  location_hint?: string | null;
+};
+
+// Consumes expired pending redemptions before a write sees the state, and
+// records them as expired. Returns the record to write from and the owner notices.
+function withExpiredRedemptions(
+  record: StoredClaw & { authority: NonNullable<StoredClaw["authority"]> },
+  now: number,
+): {
+  record: StoredClaw & { authority: NonNullable<StoredClaw["authority"]> };
+  events: AuthorityEvent[];
+} {
+  const swept = expirePendingRedemptions(record.authority, now);
+  if (swept.expired.length === 0) {
+    return { record, events: [] };
+  }
+  let reports = record.invite_reports;
+  for (const inviteId of swept.expired) {
+    reports = resolveReport(reports, inviteId, "expired", now);
+  }
+  return {
+    record: { ...record, authority: swept.state, invite_reports: reports },
+    events: swept.expired.map((ref) => ({
+      type: "notify_owners" as const,
+      event: "redemption_resolved" as const,
+      ref,
+    })),
+  };
+}
+
+// Marks how an invite ended in its report (kept for display).
+function resolveReport(
+  reports: StoredClaw["invite_reports"],
+  inviteId: string,
+  resolution: NonNullable<InviteReport["resolution"]>,
+  now: number,
+): StoredClaw["invite_reports"] {
+  const report = reports?.[inviteId] ?? { email: null, display_name: null, location_hint: null };
+  return { ...reports, [inviteId]: { ...report, resolution, resolved_at: now } };
+}
+
+// The invite an accepted MembershipChange approved or denied, if any.
+function resolvedInvite(
+  input: unknown,
+): { inviteId: string; resolution: "approved" | "denied" } | undefined {
+  const parsed = parseStatement(input, "MembershipChange");
+  if (!parsed.ok) {
+    return undefined;
+  }
+  const target = parsed.statement.body.target;
+  if (target.op === "add" && target.invite_id) {
+    return { inviteId: target.invite_id, resolution: "approved" };
+  }
+  return target.op === "deny_invite"
+    ? { inviteId: target.invite_id, resolution: "denied" }
+    : undefined;
+}
 
 function emptyRecord(clawId: string): StoredClaw {
   return {
@@ -183,38 +253,113 @@ export function createOpenClawIdAuthority(
     /** Applies an owner-signed statement that arrived on `channel`. */
     submit(input: unknown, channel: Channel): Promise<AuthorityAccepted | AuthorityRefusal> {
       return serialize(async () => {
-        const current = await load();
-        if (!current?.authority) {
+        const stored = await load();
+        if (!stored?.authority) {
           return { ok: false, code: "not_linked", detail: "this claw is not linked" };
         }
-        const result = await submitStatement(current.authority, input, {
+        const now = nowSeconds();
+        // Expired redemptions are consumed first, so a late approval cannot admit anyone.
+        const { record: current, events: expiry } = withExpiredRedemptions(
+          { ...stored, authority: stored.authority },
+          now,
+        );
+        const result = await submitStatement(current.authority, input, { channel, now });
+        if (!result.ok) {
+          if (expiry.length > 0) {
+            await commit(current);
+          }
+          return { ok: false, code: result.code, detail: result.detail };
+        }
+        const resolved = resolvedInvite(input);
+        await commit({
+          ...current,
+          authority: result.state,
+          ...(resolved
+            ? {
+                invite_reports: resolveReport(
+                  current.invite_reports,
+                  resolved.inviteId,
+                  resolved.resolution,
+                  now,
+                ),
+              }
+            : {}),
+        });
+        return { ok: true, status: result.status, events: [...expiry, ...result.events] };
+      });
+    },
+
+    /**
+     * Registers an owner-signed InviteCap and its proof key, sent directly by an
+     * owner device (tunnel or loopback, never the mailbox).
+     */
+    registerInvite(
+      input: { cap: unknown; proofKey: Uint8Array },
+      channel: Channel,
+    ): Promise<AuthorityAccepted | AuthorityRefusal> {
+      return serialize(async () => {
+        const stored = await load();
+        if (!stored?.authority) {
+          return { ok: false, code: "not_linked", detail: "this claw is not linked" };
+        }
+        const now = nowSeconds();
+        const { record: current, events } = withExpiredRedemptions(
+          { ...stored, authority: stored.authority },
+          now,
+        );
+        const result = await registerInvite(current.authority, input.cap, input.proofKey, {
           channel,
-          now: nowSeconds(),
+          now,
         });
         if (!result.ok) {
+          if (events.length > 0) {
+            await commit(current);
+          }
           return { ok: false, code: result.code, detail: result.detail };
         }
         await commit({ ...current, authority: result.state });
-        return { ok: true, status: result.status, events: result.events };
+        return { ok: true, status: result.status, events: [...events, ...result.events] };
       });
     },
 
     /** Records an invite redemption from the mailbox as pending (it admits nothing). */
     redeem(
       input: unknown,
-      identity: { account_id: string; email: string | null },
+      sender: RedemptionSender,
     ): Promise<AuthorityAccepted | AuthorityRefusal> {
       return serialize(async () => {
-        const current = await load();
-        if (!current?.authority) {
+        const stored = await load();
+        if (!stored?.authority) {
           return { ok: false, code: "not_linked", detail: "this claw is not linked" };
         }
-        const result = await submitRedemption(current.authority, input, identity, nowSeconds());
+        const now = nowSeconds();
+        const { record: current, events } = withExpiredRedemptions(
+          { ...stored, authority: stored.authority },
+          now,
+        );
+        const identity = { account_id: sender.account_id, email: sender.email };
+        const result = await submitRedemption(current.authority, input, identity, now);
         if (!result.ok) {
+          if (events.length > 0) {
+            await commit(current);
+          }
           return { ok: false, code: result.code, detail: result.detail };
         }
-        await commit({ ...current, authority: result.state });
-        return { ok: true, status: result.status, events: result.events };
+        const inviteId = parseStatement(input, "InviteRedemption");
+        const report: InviteReport = {
+          account_id: sender.account_id,
+          email: sender.email,
+          display_name: sender.display_name ?? null,
+          location_hint: sender.location_hint ?? null,
+        };
+        await commit({
+          ...current,
+          authority: result.state,
+          invite_reports: inviteId.ok
+            ? { ...current.invite_reports, [inviteId.statement.body.invite_id]: report }
+            : current.invite_reports,
+        });
+        return { ok: true, status: result.status, events: [...events, ...result.events] };
       });
     },
 

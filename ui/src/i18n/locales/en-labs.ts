@@ -135,6 +135,31 @@ const enLabs = {
       removeFailed: "Couldn't remove this member",
       noOwnerKey:
         "This browser has no owner device key for this claw. Remove members from an owner device.",
+      invites: {
+        title: "Invite someone",
+        description:
+          "They sign in with OpenClaw ID, then you approve them here. Invites expire after 7 days.",
+        email: "Email address to invite",
+        emailPlaceholder: "name@example.com",
+        role: "Role",
+        operator: "Operator",
+        viewer: "Viewer",
+        create: "Create invite",
+        copy: "Copy invite link",
+        linkTitle: "Invite link for {email}",
+        linkDescription:
+          "Send it to them privately. Anyone with the link can ask to join, and nobody gets in until you approve. Expires {date}.",
+        openDescription: "{role} · waiting to be redeemed · expires {date}",
+        waiting: "Invited",
+        pendingTitle: "{name} wants to join as {role}",
+        pendingDescription: "{email} · {location} · as reported by OpenClaw ID · decide by {date}",
+        unknownLocation: "location unknown",
+        approve: "Approve",
+        deny: "Deny",
+        failed: "Couldn't update invites",
+        noOwnerKey:
+          "This browser has no owner device key for this claw. Manage invites from an owner device.",
+      },
     },
     workerDesktop: {
       title: "Cloud Worker Desktop",

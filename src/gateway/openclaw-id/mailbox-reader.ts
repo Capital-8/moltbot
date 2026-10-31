@@ -7,7 +7,7 @@ import {
   MAILBOX_MAX_WAIT_SECONDS,
   type MailboxMessage,
 } from "../../../packages/openclaw-id-protocol/src/index.js";
-import type { AuthorityAccepted, AuthorityRefusal } from "./authority.js";
+import type { AuthorityAccepted, AuthorityRefusal, RedemptionSender } from "./authority.js";
 import type { DiscoveryClient } from "./discovery-client.js";
 
 const BACKOFF_INITIAL_MS = 5_000;
@@ -18,7 +18,7 @@ export type MailboxSink = {
   submit: (statement: unknown) => Promise<AuthorityAccepted | AuthorityRefusal>;
   redeem: (
     redemption: unknown,
-    identity: { account_id: string; email: string | null },
+    sender: RedemptionSender,
   ) => Promise<AuthorityAccepted | AuthorityRefusal>;
   saveCursor: (cursor: string) => Promise<void>;
 };
@@ -45,6 +45,8 @@ export async function applyMailboxMessage(
       await sink.redeem(payload.redemption, {
         account_id: message.from.account_id,
         email: message.from.email,
+        display_name: message.from.display_name,
+        location_hint: message.location_hint,
       }),
     ];
   }

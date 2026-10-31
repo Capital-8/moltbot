@@ -19,6 +19,11 @@ export type StoredClaw = {
   authority: AuthorityState | null;
   /** The current ServerBinding, signed by R or an owner device. */
   binding: SignedStatement<"ServerBinding"> | null;
+  /**
+   * What OpenClaw ID reported about each invite redemption (display only, never
+   * authority) and how the invite ended, keyed by invite id.
+   */
+  invite_reports?: Record<string, InviteReport>;
   /** Device tokens issued over the tunnel and the device key W each belongs to. */
   token_bindings?: DeviceTokenBinding[];
   /** Discovery publication state (a mirror; never authority). */
@@ -28,6 +33,17 @@ export type StoredClaw = {
     published_snapshot_seq: number;
     mailbox_cursor: string | null;
   };
+};
+
+/** Sender details OpenClaw ID reported for a redemption, and the invite's outcome. */
+export type InviteReport = {
+  /** The redeeming account (from the signed redemption). */
+  account_id?: string;
+  email: string | null;
+  display_name: string | null;
+  location_hint: string | null;
+  resolution?: "approved" | "denied" | "expired";
+  resolved_at?: number;
 };
 
 const RECORD_KEY = "current";

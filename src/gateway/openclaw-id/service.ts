@@ -18,6 +18,7 @@ import type {
   OpenClawIdAuthority,
 } from "./authority.js";
 import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
+import { listInviteViews } from "./invites-view.js";
 import type { PublishOutcome } from "./publisher.js";
 import type { TunnelRuntime, TunnelRuntimeSettings } from "./tunnel-runtime.js";
 import type { TunnelSupervisorStatus } from "./tunnel-supervisor.js";
@@ -273,7 +274,7 @@ export function createOpenClawIdService(params: {
       cursor: record.discovery.mailbox_cursor,
       sink: {
         submit: (statement) => owner.submit(statement, "mailbox"),
-        redeem: (redemption, identity) => owner.redeem(redemption, identity),
+        redeem: (redemption, sender) => owner.redeem(redemption, sender),
         saveCursor: (cursor) => owner.recordDiscovery({ mailbox_cursor: cursor }),
       },
       onApplied: (result) => applyEvents(result.events),
@@ -330,8 +331,14 @@ export function createOpenClawIdService(params: {
               accountId,
               role: member.role,
               peerKeys: member.peer_keys,
+              // Reported by OpenClaw ID when the member joined by invite; display only.
+              email:
+                Object.values(record?.invite_reports ?? {}).find(
+                  (report) => report.account_id === accountId && report.resolution === "approved",
+                )?.email ?? null,
             }))
           : [],
+        invites: listInviteViews(record, Math.floor(Date.now() / 1000)),
         publication: lastPublish,
       };
     },
@@ -394,6 +401,24 @@ export function createOpenClawIdService(params: {
         return refusal("not_direct", "membership changes come from an owner device on this claw");
       }
       const result = await (await getAuthority()).submit(input, channel);
+      if (result.ok) {
+        await applyEvents(result.events);
+      }
+      return result;
+    },
+
+    /**
+     * Registers an owner-signed InviteCap with its proof key. Only directly from an
+     * owner device (tunnel or loopback); Discovery never sees the proof key.
+     */
+    async registerInvite(
+      channel: Channel | undefined,
+      input: { cap: unknown; proofKey: Uint8Array },
+    ): Promise<AuthorityAccepted | AuthorityRefusal> {
+      if (!channel) {
+        return refusal("not_direct", "invites are registered from an owner device on this claw");
+      }
+      const result = await (await getAuthority()).registerInvite(input, channel);
       if (result.ok) {
         await applyEvents(result.events);
       }

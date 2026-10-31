@@ -10,6 +10,7 @@ import { useApplication } from "../../lib/reactive/context.ts";
 import { useGatewayPage } from "../../lib/reactive/gateway-page.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { showMakeReachableDialog } from "./openclaw-id-dialog.tsx";
+import { OpenClawIdInvites } from "./openclaw-id-invites.tsx";
 import { OpenClawIdMembers } from "./openclaw-id-members.tsx";
 import type {
   OpenClawIdLinkPreparation,
@@ -233,6 +234,11 @@ export function OpenClawIdPanel() {
                         </button>
                       </Show>
                     }
+                  />
+                  <OpenClawIdInvites
+                    client={page.client}
+                    link={state().link}
+                    onChanged={() => setRevision((value) => value + 1)}
                   />
                   <OpenClawIdMembers
                     client={page.client}

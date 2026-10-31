@@ -63,7 +63,7 @@ export function OpenClawIdMembers(props: {
         {(member) => (
           <SettingsRow
             nested
-            title={member.accountId}
+            title={member.email ?? member.accountId}
             description={t("labsPage.openclawId.memberDescription", {
               role: member.role,
               devices: String(member.peerKeys.length),
