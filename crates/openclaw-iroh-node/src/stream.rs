@@ -1,6 +1,6 @@
-//! Stream halves. Reads return a Buffer that owns the received bytes; writes copy the caller's
-//! Buffer/Uint8Array once on the JS thread (so JS may reuse it immediately) and then await QUIC flow
-//! control off-thread.
+//! Stream halves. Reads copy the received bytes into a JS-owned Buffer on the JS thread; writes
+//! copy the caller's Buffer/Uint8Array once on the JS thread (so JS may reuse it immediately) and
+//! then await QUIC flow control off-thread.
 
 use std::sync::Arc;
 
@@ -66,8 +66,8 @@ impl RecvStream {
     /// Reads whatever is available (at least 1 byte, at most `max`), gathering every chunk QUIC has
     /// already received so one JS call covers many packets; resolves null at end of stream.
     /// Rejects if the peer reset the stream (message contains the reset code).
-    #[napi]
-    pub async fn read(&self, max: u32) -> Result<Option<Buffer>> {
+    #[napi(ts_return_type = "Promise<Buffer | null>")]
+    pub async fn read(&self, max: u32) -> Result<Option<ReadBytes>> {
         if max == 0 {
             return Err(js_err("max must be > 0"));
         }
@@ -80,12 +80,7 @@ impl RecvStream {
             .read_buf(&mut buf)
             .await
             .map_err(js_err)?;
-        if n == 0 {
-            return Ok(None);
-        }
-        // The Buffer keeps the Vec's allocation alive, so drop unused capacity first.
-        buf.shrink_to_fit();
-        Ok(Some(Buffer::from(buf)))
+        Ok((n > 0).then_some(ReadBytes(buf)))
     }
 
     /// Asks the peer to stop sending, with an application error code.
@@ -96,5 +91,26 @@ impl RecvStream {
             .await
             .stop(VarInt::from_u32(code))
             .map_err(js_err)
+    }
+}
+
+/// Bytes read off the JS thread. Converting them to JS copies them into a JS-owned Buffer and frees
+/// the Rust allocation at once, so read buffers never wait for a GC. (An external Buffer over the
+/// Vec lives until a later GC; under 8 parallel downloads those late frees left glibc's per-thread
+/// arenas holding ~70 MB more RSS.)
+pub struct ReadBytes(Vec<u8>);
+
+impl ToNapiValue for ReadBytes {
+    unsafe fn to_napi_value(env: sys::napi_env, v: Self) -> Result<sys::napi_value> {
+        Ok(BufferSlice::copy_from(&Env::from_raw(env), &v.0)?.raw())
+    }
+}
+
+impl TypeName for ReadBytes {
+    fn type_name() -> &'static str {
+        "Buffer"
+    }
+    fn value_type() -> ValueType {
+        ValueType::Object
     }
 }

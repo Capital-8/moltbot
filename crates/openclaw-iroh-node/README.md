@@ -39,7 +39,16 @@ npm test
   whose `node_modules` holds `@number0/iroh@1.2.0`) and `TUNNEL_TESTSERVER_BIN`.
 - `test/throughput.test.cjs` (opt-in, `IROH_NODE_BENCH=1`, release build) downloads 256 MiB on one
   stream and 8 x 64 MiB in parallel from a peer process and fails below `IROH_NODE_MIN_MBPS`
-  (default 100).
+  (default 100) or when the parallel download grows RSS by more than `IROH_NODE_MAX_GROWTH_MB`
+  (default 80).
+
+## Memory
+
+`RecvStream.read` copies the received bytes into a JS-owned `Buffer` and frees the Rust `Vec` at
+once. V8 already counts external Buffers in `process.memoryUsage().external`, so
+`napi_adjust_external_memory` would only double-count them. The growth came from the Rust side: each
+external Buffer kept its 1 MiB read `Vec` alive until a later GC, and glibc's per-thread arenas
+kept that memory after the frees. Smaller read sizes did not help (measured at 64 and 256 KiB).
 
 `node test/support/measure.cjs --n 5 --cases down:256,streams8:512,conns8:512` prints the same
 measurements (MB/s, peak RSS, RSS growth, CPU seconds per MB) without thresholds.
