@@ -2,7 +2,7 @@ import { asNonNegativeInteger } from "@openclaw/normalization-core/number-coerci
 import { isNonEmptyProtocolString, isProtocolRecord } from "./protocol-value-normalization.js";
 import type { EventFrame, ResponseFrame } from "./schema/frames.js";
 export { GATEWAY_SERVER_CAPS } from "./server-capabilities.js";
-export const MAX_PREAUTH_PAYLOAD_BYTES = 64 * 1024;
+export { MAX_PREAUTH_PAYLOAD_BYTES } from "./payload-limits.js";
 export type {
   ConnectParams,
   ErrorShape,
