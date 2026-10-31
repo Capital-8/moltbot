@@ -6,11 +6,9 @@ type ChangedScope = {
   runAndroid: boolean;
   runWindows: boolean;
   runSkillsPython: boolean;
-  runChangedSmoke: boolean;
   runControlUiI18n: boolean;
   runUiTests: boolean;
 };
-type InstallSmokeScope = { runFastInstallSmoke: boolean; runFullInstallSmoke: boolean };
 type NodeFastScope = {
   runFastOnly: boolean;
   runPluginContracts: boolean;
@@ -43,7 +41,6 @@ export function resolveAllowedGeneratedMixBranch(
 export function hasMlxNativeProofInputs(changedPaths: readonly string[] | null): boolean;
 export function shouldRunNativeI18n(changedPaths: string[] | null | undefined): boolean;
 export function detectNodeFastScope(changedPaths: string[]): NodeFastScope;
-export function detectInstallSmokeScope(changedPaths: string[]): InstallSmokeScope;
 export function listChangedPaths(
   base: string,
   head?: string,
@@ -53,7 +50,6 @@ export function listChangedPaths(
 export function writeGitHubOutput(
   scope: ChangedScope,
   outputPath?: string,
-  installSmokeScope?: InstallSmokeScope,
   nodeFastScope?: NodeFastScope,
   runNativeI18n?: boolean,
   changedPaths?: string[] | null,
