@@ -224,10 +224,6 @@
   border-radius: var(--radius-md);
 }
 
-.memory-import__skeleton::after {
-  animation-duration: 1.4s;
-}
-
 .memory-import__confirm .callout {
   margin-top: 12px;
 }
