@@ -232,10 +232,8 @@ Each Doctor interval verifies its input again. Changed data, intervening commits
 replaced files, and tampered backups still refuse automatic restoration. The
 installed extended-stable updater does not need to contain this repair.
 The private rehearsal also preserves the source's legacy cron partition identity
-before migrating the copied state. When no recorded or current default matches,
-the upgrade selects the moved partition with the most live job definitions,
-using retained activity and then its stable path to break ties. Other partitions
-remain untouched and an explicit `cron.store` setting can still override the default.
+before migrating the copied state. An unmatched historical partition still needs
+an explicit Doctor selection.
 
 Within one database-generation observation, update and Doctor workers reuse a
 verified digest while the file's device, inode, size, and nanosecond birth,
