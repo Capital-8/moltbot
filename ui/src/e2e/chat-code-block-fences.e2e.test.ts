@@ -1,7 +1,8 @@
 import path from "node:path";
 import type { BrowserContextOptions, Locator, Page } from "playwright";
 import { expect, it } from "vitest";
-import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { createControlUiSessionRow } from "../test-helpers/control-ui-session-fixtures.ts";
 import { chatMessage } from "./chat-flow.test-support.ts";
 import { polledAttribute } from "./chat-presentation.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
@@ -56,16 +57,26 @@ suite.define(() => {
     async (lines) => {
       await suite.withPage(desktop, async ({ page }) => {
         const source = "let x;\n".repeat(lines);
-        await installMockGateway(page, {
+        const sessionKey = "agent:main:chat:cached-syntax-12345678";
+        const gateway = await installMockGateway(page, {
+          sessionKey,
+          authMethod: "trusted-proxy",
+          authMode: "trusted-proxy",
+          deferredMethods: ["connect"],
+          sessions: [createControlUiSessionRow(sessionKey, "Cached syntax example", 1)],
           historyMessages: [
             chatMessage("assistant", `\`\`\`ts\n${source}\n\`\`\``, {
               __openclaw: { id: "cached-code", seq: 1 },
             }),
           ],
         });
-        await page.goto(`${suite.server.baseUrl}chat`);
+        await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
+        await gateway.waitForRequest("connect");
+        await gateway.resolveDeferred("connect");
+        await page.waitForFunction(() => window.openclawControlUi?.snapshot().routeReady === true);
         const code = page.locator('.chat-thread [data-entry-id="cached-code"] pre code');
-        await code.locator(".hljs-keyword").waitFor();
+        // Save only after all seven visible lines have their final syntax.
+        await code.locator(".hljs-keyword").nth(6).waitFor();
         const final = await codeColors(code);
         await page.evaluate(
           () =>
@@ -89,6 +100,7 @@ suite.define(() => {
         );
         try {
           await page.reload();
+          await gateway.waitForRequest("connect");
           await code.waitFor();
           const first = await codeColors(code);
           if (process.env.OPENCLAW_CAPTURE_UI_PROOF === "1") {
@@ -99,6 +111,7 @@ suite.define(() => {
           expect(first.colors.length).toBeGreaterThan(0);
           expect(first).toEqual(final);
           release.resolve();
+          await gateway.resolveDeferred("connect");
           await page.waitForFunction(
             () => window.openclawControlUi?.snapshot().routeReady === true,
           );
