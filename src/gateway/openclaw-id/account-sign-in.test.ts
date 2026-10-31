@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createOpenClawIdSignIn } from "./account-sign-in.js";
 
@@ -9,9 +10,12 @@ function jwt(claims: Record<string, unknown>): string {
   return `${part({ alg: "EdDSA" })}.${part(claims)}.sig`;
 }
 
-// A fake issuer and Discovery: metadata, token endpoint and enrollment codes.
+// A fake issuer and Discovery: metadata, token endpoint and enrollment codes. Like a
+// real issuer, the token endpoint remembers the authorization request's nonce and
+// S256 challenge (`authorize`) and redeems the code only with the matching verifier.
 function fakeServices(tokenClaims: (nonce: string) => Record<string, unknown>) {
   let nonce = "";
+  let challenge = "";
   const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/.well-known/openid-configuration")) {
@@ -23,8 +27,10 @@ function fakeServices(tokenClaims: (nonce: string) => Record<string, unknown>) {
     }
     if (url.endsWith("/oauth2/token")) {
       const form = new URLSearchParams(String(init?.body));
-      if (!form.get("code_verifier") || form.get("code") !== "the-code") {
-        return new Response("bad", { status: 400 });
+      const verifier = form.get("code_verifier") ?? "";
+      const derived = createHash("sha256").update(verifier).digest("base64url");
+      if (!verifier || derived !== challenge || form.get("code") !== "the-code") {
+        return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 });
       }
       return Response.json({ id_token: jwt(tokenClaims(nonce)) });
     }
@@ -36,7 +42,14 @@ function fakeServices(tokenClaims: (nonce: string) => Record<string, unknown>) {
     }
     return new Response("not found", { status: 404 });
   });
-  return { fetchImpl, setNonce: (value: string) => (nonce = value) };
+  // Records what the browser's authorization request carried, as the issuer would.
+  const authorize = (authorizationUrl: string) => {
+    const query = new URL(authorizationUrl).searchParams;
+    expect(query.get("code_challenge_method")).toBe("S256");
+    nonce = query.get("nonce") ?? "";
+    challenge = query.get("code_challenge") ?? "";
+  };
+  return { fetchImpl, authorize };
 }
 
 async function begin(signIn: ReturnType<typeof createOpenClawIdSignIn>) {
@@ -68,7 +81,7 @@ describe("createOpenClawIdSignIn", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(REDIRECT);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("state")).toBe(started.state);
-    services.setNonce(url.searchParams.get("nonce") ?? "");
+    services.authorize(started.authorizationUrl);
 
     const done = await signIn.complete({ state: started.state, code: "the-code" });
     expect(done).toMatchObject({
@@ -78,11 +91,39 @@ describe("createOpenClawIdSignIn", () => {
     expect(again).toMatchObject({ ok: false, code: "state_mismatch" });
   });
 
-  it("refuses an ID token with the wrong nonce or audience", async () => {
+  it("sends the verifier that matches the S256 challenge, and fails with another sign-in's", async () => {
+    const services = fakeServices(valid);
+    const signIn = createOpenClawIdSignIn({ fetchImpl: services.fetchImpl, now });
+    const first = await begin(signIn);
+    const second = await begin(signIn);
+    const challenge = (started: { authorizationUrl: string }) =>
+      new URL(started.authorizationUrl).searchParams.get("code_challenge");
+    expect(challenge(first)).not.toBe(challenge(second));
+    // The issuer saw the first request's challenge; the second sign-in's verifier fails it.
+    services.authorize(first.authorizationUrl);
+    expect(await signIn.complete({ state: second.state, code: "the-code" })).toMatchObject({
+      ok: false,
+      code: "token_exchange_failed",
+    });
+    expect(await signIn.complete({ state: first.state, code: "the-code" })).toMatchObject({
+      account: { sub: "acct-1" },
+    });
+  });
+
+  it("refuses an ID token whose nonce is not this sign-in's", async () => {
+    const services = fakeServices((nonce) => ({ ...valid(nonce), nonce: `${nonce}-replayed` }));
+    const signIn = createOpenClawIdSignIn({ fetchImpl: services.fetchImpl, now });
+    const started = await begin(signIn);
+    services.authorize(started.authorizationUrl);
+    const done = await signIn.complete({ state: started.state, code: "the-code" });
+    expect(done).toMatchObject({ ok: false, code: "id_token_invalid" });
+  });
+
+  it("refuses an ID token issued to another client", async () => {
     const services = fakeServices((nonce) => ({ ...valid(nonce), aud: "someone-else" }));
     const signIn = createOpenClawIdSignIn({ fetchImpl: services.fetchImpl, now });
     const started = await begin(signIn);
-    services.setNonce(new URL(started.authorizationUrl).searchParams.get("nonce") ?? "");
+    services.authorize(started.authorizationUrl);
     const done = await signIn.complete({ state: started.state, code: "the-code" });
     expect(done).toMatchObject({ ok: false, code: "id_token_invalid" });
   });
