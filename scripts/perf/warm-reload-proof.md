@@ -56,7 +56,7 @@ Both comparison arms use the same fixture. Audit captured pixels: a computed
 style can settle before an older compositor frame presents plain code.
 This workload also uses archived pinned probe sessions, 97 groups with 102
 section-order entries, category grouping, created sorting, five collapsed
-groups, always-visible empty groups, no previews, and the involving-me filter.
+groups, empty-groups mode `always`, no previews, and the involving-me filter.
 
 `--admission token` retains the native CLI browser-handoff path for diagnosis;
 its chat reload may traverse the public reader and a second document. Fixture

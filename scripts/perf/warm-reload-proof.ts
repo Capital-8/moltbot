@@ -233,6 +233,12 @@ async function readWarmCache(page: Page, sessionKey: string) {
         ),
         snapshots: snapshots.length,
         sidebarSnapshots: sidebar.length,
+        sidebarSections: [...document.querySelectorAll("[data-session-section]")].map(
+          (section) => ({
+            id: section.getAttribute("data-session-section"),
+            collapsed: section.classList.contains("sidebar-recent-sessions__group--collapsed"),
+          }),
+        ),
       };
     } finally {
       database.close();
@@ -835,7 +841,10 @@ try {
                   "openclaw:sidebar:sessions:sort-mode": "created",
                   "openclaw:sidebar:sessions:show-preview": "false",
                   "openclaw:sidebar:sessions:collapsed-sections": JSON.stringify(
-                    Array.from({ length: 5 }, (_, index) => `catalog:Synthetic group ${index + 1}`),
+                    Array.from(
+                      { length: 5 },
+                      (_, index) => `category:Synthetic group ${index + 1}`,
+                    ),
                   ),
                   [`openclaw.control.sidebarSessionOwnerFilter.v1:${scope}:${encodeURIComponent(viewer)}`]:
                     "involving-me",
