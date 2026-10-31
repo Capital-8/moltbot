@@ -91,6 +91,7 @@ function interactiveOwner(content = table) {
   enhanceMarkdownTables(owner);
   cleanups.push(() => releaseMarkdownTables(owner));
   deliverTableResize(viewport);
+  viewport.dispatchEvent(new Event("scroll"));
   return {
     owner,
     shell,
@@ -156,11 +157,13 @@ describe("Markdown table interactions", () => {
   });
 
   it("keeps the table scroll offset across nested and replacement enhancement owners", () => {
+    vi.useFakeTimers();
     const { owner, shell, viewport } = interactiveOwner();
     const inner = query(owner, ".chat-text");
     enhanceMarkdownTables(inner);
     cleanups.push(() => releaseMarkdownTables(inner));
     deliverTableResize(viewport);
+    vi.advanceTimersToNextFrame();
     viewport.scrollLeft = 200;
     viewport.dispatchEvent(new Event("scroll"));
     const masks = () => [
@@ -169,14 +172,17 @@ describe("Markdown table interactions", () => {
     ];
     expect(masks()).toEqual([true, false]);
     deliverTableResize(viewport, 300, 100, 0);
+    vi.advanceTimersToNextFrame();
     expect(masks()).toEqual([true, false]);
     releaseMarkdownTables(inner);
     enhanceMarkdownTables(inner);
     deliverTableResize(viewport);
+    vi.advanceTimersToNextFrame();
     expect(masks()).toEqual([true, false]);
   });
 
   it("updates retained table overflow from resize entries without reading layout", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal("MutationObserver", originalMutationObserver);
     const { owner, shell, viewport } = interactiveOwner(`${table}\n\n${table}`);
     const otherViewport = owner.querySelectorAll(".markdown-table__viewport")[1]!;
@@ -191,9 +197,12 @@ describe("Markdown table interactions", () => {
     expect(changedWidth).not.toHaveBeenCalled();
     expect(otherWidth).not.toHaveBeenCalled();
     deliverTableResize(viewport, 100);
-    expect(shell.classList.contains("markdown-table--can-scroll-right")).toBe(false);
     expect(changedWidth).not.toHaveBeenCalled();
     expect(otherWidth).not.toHaveBeenCalled();
+    expect(shell.classList.contains("markdown-table--can-scroll-right")).toBe(true);
+    vi.advanceTimersToNextFrame();
+    expect(changedWidth).not.toHaveBeenCalled();
+    expect(shell.classList.contains("markdown-table--can-scroll-right")).toBe(false);
 
     changedWidth.mockClear();
     query(shell, ".markdown-table__copy").replaceChildren(document.createElement("span"));
@@ -201,6 +210,25 @@ describe("Markdown table interactions", () => {
     await Promise.resolve();
     expect(changedWidth).not.toHaveBeenCalled();
     expect(otherWidth).not.toHaveBeenCalled();
+  });
+
+  it("retires queued overflow writes on scroll or owner release", () => {
+    vi.useFakeTimers();
+    const { owner, shell, viewport } = interactiveOwner();
+    viewport.scrollLeft = 100;
+    viewport.dispatchEvent(new Event("scroll"));
+    deliverTableResize(viewport);
+    viewport.scrollLeft = 0;
+    viewport.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersToNextFrame();
+    expect(shell.classList.contains("markdown-table--can-scroll-left")).toBe(false);
+
+    viewport.scrollLeft = 100;
+    viewport.dispatchEvent(new Event("scroll"));
+    deliverTableResize(viewport, 100);
+    releaseMarkdownTables(owner);
+    vi.advanceTimersToNextFrame();
+    expect(shell.classList.contains("markdown-table--can-scroll-left")).toBe(true);
   });
 
   it("discovers nested tables in code and releases removed tables even after they are emptied", async () => {

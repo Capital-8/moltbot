@@ -10,6 +10,17 @@ import { transcriptColumnWidth, type ComposerWidthOptions } from "./chat-compose
  */
 export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
   const options = () => props.options();
+  // Callback replacements and transcript row updates do not change edge geometry.
+  const geometry = createMemo(
+    () => ({
+      width: options().chatMessageMaxWidth ?? undefined,
+      transcript: options().getTranscriptElement?.(),
+    }),
+    {
+      equals: (previous, next) =>
+        previous.width === next.width && previous.transcript === next.transcript,
+    },
+  );
   const drag = createPointerDrag();
   let edge: HTMLDivElement | undefined;
   const shell = () => edge?.parentElement;
@@ -77,31 +88,23 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
     edge.setAttribute("aria-valuemin", String(Math.min(minimumWidth, available, renderedWidth)));
     edge.setAttribute("aria-valuemax", String(Math.round(available)));
   };
-  // Callback replacements and transcript row updates do not change edge geometry.
-  const geometry = createMemo(
-    () => {
-      const current = options();
-      return [current.chatMessageMaxWidth, current.getTranscriptElement?.()] as const;
-    },
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] },
-  );
   const schedule = createLayoutMeasurement(
     geometry,
     (next) => {
       if (!next) {
         return;
       }
-      const width = next[0] ?? undefined;
+      const width = next.width;
       if (width !== lastWidth) {
         baseline = width;
         refreshMinimum = true;
       }
       lastWidth = width;
-      measure(next[1]);
+      measure(next.transcript);
     },
     {
       targets: (next) =>
-        [shell(), input(), shell() && region(), next?.[1]].filter((node): node is Element =>
+        [shell(), input(), shell() && region(), next?.transcript].filter((node): node is Element =>
           Boolean(node),
         ),
       changeTiming: "sync",

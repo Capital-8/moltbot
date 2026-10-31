@@ -104,23 +104,38 @@ describe("composer border width control", () => {
     expect(shell.getBoundingClientRect().width).toBe(1081);
   });
 
-  it("avoids synchronous geometry reads for unchanged composer props", async () => {
+  it("measures width changes but skips callback-only updates and uses the latest callback", async () => {
     await page.viewport(1440, 900);
     const f = fixture();
     await settled();
-    const read = vi.spyOn(f.input(), "getBoundingClientRect");
+    const edge = f.edge();
+    const shell = f.input().closest<HTMLElement>(".agent-chat__composer-shell")!;
+    const shellRead = vi.spyOn(shell, "getBoundingClientRect");
+    const inputRead = vi.spyOn(f.input(), "getBoundingClientRect");
     const transcript = f.props.getTranscriptElement?.();
     const style = vi.spyOn(window, "getComputedStyle");
-    f.props.getTranscriptElement = () => transcript ?? null;
+    const onWidthChange = vi.fn(f.onWidthChange);
+    f.props.onComposerWidthChange = onWidthChange;
+    f.props.getTranscriptElement = () =>
+      container.closest(".chat")!.querySelector<HTMLElement>(".chat-thread");
     f.draw();
-    expect(read).not.toHaveBeenCalled();
+    expect(f.edge()).toBe(edge);
+    expect(shellRead).not.toHaveBeenCalled();
+    expect(inputRead).not.toHaveBeenCalled();
     expect(style.mock.calls.some(([element]) => element === transcript)).toBe(false);
-    f.setWidth("900px");
-    expect(read).toHaveBeenCalled();
     await settled();
     f.edge().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-    expect(f.onWidthChange).toHaveBeenCalledWith("880px");
-    read.mockRestore();
+    await settled();
+    expect(onWidthChange).toHaveBeenCalledWith("1061px");
+    expect(f.width()).toBe("1061px");
+    inputRead.mockClear();
+    f.setWidth("900px");
+    expect(inputRead).toHaveBeenCalled();
+    await settled();
+    f.edge().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(onWidthChange).toHaveBeenCalledWith("880px");
+    shellRead.mockRestore();
+    inputRead.mockRestore();
     style.mockRestore();
   });
 

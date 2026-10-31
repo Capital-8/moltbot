@@ -2,6 +2,7 @@ import type { MarkdownIt } from "markdown-it";
 import { escapeHtml } from "../../../src/shared/html-escape.js";
 import { t } from "../i18n/index.ts";
 import { formatUiError, UserFacingError } from "../lib/format-error.ts";
+import { cancelLayout, scheduleLayout } from "../lib/layout-frame.ts";
 import { anchorFromNavigationEvent } from "../lib/navigation-click.ts";
 import { listen } from "../lib/reactive/listener.ts";
 import { showToast } from "../lib/toast.ts";
@@ -58,19 +59,22 @@ export function markdownTableCopyText(table: HTMLTableElement): string {
     .join("\n");
 }
 
-function syncTableOverflow(shell: HTMLElement, bounds: TableBounds): void {
+function measureTableOverflow(shell: HTMLElement, bounds: TableBounds): (() => void) | undefined {
   if (isMarkdownBlockParked(shell)) {
-    return;
+    return undefined;
   }
   if (bounds.viewport === undefined || bounds.table === undefined) {
-    return;
+    return undefined;
   }
-  const overflows = bounds.table - bounds.viewport > 1;
-  shell.classList.toggle("markdown-table--can-scroll-left", overflows && bounds.offset > 1);
-  shell.classList.toggle(
-    "markdown-table--can-scroll-right",
-    overflows && bounds.offset + bounds.viewport < bounds.table - 1,
-  );
+  const { viewport, table, offset } = bounds;
+  const overflows = table - viewport > 1;
+  return () => {
+    shell.classList.toggle("markdown-table--can-scroll-left", overflows && offset > 1);
+    shell.classList.toggle(
+      "markdown-table--can-scroll-right",
+      overflows && offset + viewport < table - 1,
+    );
+  };
 }
 
 function enhanceTableShell(shell: HTMLElement): void {
@@ -98,8 +102,8 @@ export function enhanceMarkdownTables(owner: HTMLElement): TableOwnerState {
   let state = tableOwnerStates.get(owner);
   if (!state) {
     const observedNodes = new Set<HTMLElement>();
+    const pendingOverflow = new Map<HTMLElement, TableBounds>();
     const resizeObserver = new ResizeObserver((entries) => {
-      const shells = new Map<HTMLElement, TableBounds>();
       // Earlier resize subscribers may have dirtied layout. Consume the delivered
       // boxes instead of forcing another layout for scrollWidth/clientWidth.
       for (const entry of entries) {
@@ -115,10 +119,17 @@ export function enhanceMarkdownTables(owner: HTMLElement): TableOwnerState {
           bounds.table = entry.borderBoxSize[0]!.inlineSize;
         }
         tableBounds.set(viewport, bounds);
-        shells.set(shell, bounds);
+        pendingOverflow.set(shell, bounds);
       }
-      for (const [shell, bounds] of shells) {
-        syncTableOverflow(shell, bounds);
+      if (pendingOverflow.size) {
+        // Overflow chrome can affect layout; publish it after resize delivery.
+        scheduleLayout(pendingOverflow, () => {
+          const updates = [...pendingOverflow].map(([shell, bounds]) =>
+            owner.contains(shell) ? measureTableOverflow(shell, bounds) : undefined,
+          );
+          pendingOverflow.clear();
+          return () => updates.forEach((update) => update?.());
+        });
       }
     });
     const syncTables = (shells: Iterable<HTMLElement>) => {
@@ -213,8 +224,9 @@ export function enhanceMarkdownTables(owner: HTMLElement): TableOwnerState {
         const shell = viewport.closest<HTMLElement>(tableShellSelector);
         const bounds = tableBounds.get(viewport);
         if (shell && bounds) {
+          pendingOverflow.delete(shell);
           bounds.offset = viewport.scrollLeft;
-          syncTableOverflow(shell, bounds);
+          measureTableOverflow(shell, bounds)?.();
         }
       },
       { capture: true, passive: true },
@@ -224,6 +236,8 @@ export function enhanceMarkdownTables(owner: HTMLElement): TableOwnerState {
         stopScroll();
         mutationObserver.disconnect();
         resizeObserver.disconnect();
+        cancelLayout(pendingOverflow);
+        pendingOverflow.clear();
       },
     };
     tableOwnerStates.set(owner, state);
