@@ -214,12 +214,7 @@ describe("CronService failure alerts", () => {
 
         expect(enqueueSessionEvent).toHaveBeenCalledExactlyOnceWith(
           expect.stringContaining('Automation "work-owned failure" failed 1 times'),
-          {
-            agentId: "work",
-            sessionKey,
-            contextKey: `cron:${job.id}:failure-alert`,
-            jobId: job.id,
-          },
+          { agentId: "work", sessionKey, contextKey: `cron:${job.id}:failure-alert` },
         );
         expect(requestHeartbeat).not.toHaveBeenCalled();
       },

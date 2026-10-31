@@ -80,9 +80,7 @@ describe.skipIf(process.platform === "win32")("package-swap refusal reports", ()
       );
       expect(report.body).toContain(`Reason code: ${reason}`);
       if (!failure.startsWith("untyped")) {
-        expect(report.body).toMatch(
-          new RegExp(String.raw`Failing check package-swap \(${reason}\) at src/\S+:\d+:\d+\n`),
-        );
+        expect(report.body).toContain(`Failing check package-swap (${reason})\n`);
       } else {
         expect(report.body).toContain("[redacted-diagnostic]");
       }

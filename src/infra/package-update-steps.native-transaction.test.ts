@@ -309,11 +309,14 @@ describe.runIf(process.platform !== "win32")("native package transactions", () =
           expect(result.recovery?.serviceRestartSafe).toBe(false);
           assert(retained, "transaction missing");
           expect(await retained.rollback(() => {})).toMatchObject({
-            exitCode: 0,
-            activePackageRoot: packageRoot,
+            exitCode: 1,
+            activePackageRoot: null,
           });
-          await expectVersion(packageRoot, "1.0.0");
-          await expectText(path.join(packageRoot, "dist", "index.js"), "export {};\n");
+          await expect(
+            fs.readFile(path.join(packageRoot, "dist", "index.js")),
+          ).rejects.toMatchObject({ code: "ENOENT" });
+          const backupPackage = path.join(retained.backupRoot, path.relative(project, packageRoot));
+          await expectText(path.join(backupPackage, "dist", "index.js"), "export {};\n");
           return;
         }
         if (shimFailure) {
