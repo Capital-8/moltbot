@@ -10,8 +10,16 @@ import { transcriptColumnWidth, type ComposerWidthOptions } from "./chat-compose
  */
 export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
   const options = () => props.options();
-  const savedWidth = createMemo(() => options().chatMessageMaxWidth);
-  const transcriptElement = createMemo(() => options().getTranscriptElement?.() ?? null);
+  const geometry = createMemo(
+    () => ({
+      width: options().chatMessageMaxWidth ?? undefined,
+      transcript: options().getTranscriptElement?.(),
+    }),
+    {
+      equals: (previous, next) =>
+        previous.width === next.width && previous.transcript === next.transcript,
+    },
+  );
   const drag = createPointerDrag();
   let edge: HTMLDivElement | undefined;
   const shell = () => edge?.parentElement;
@@ -81,15 +89,13 @@ export function ResizeEdge(props: { options: () => ComposerWidthOptions }) {
     edge.setAttribute("aria-valuemax", String(Math.round(available)));
   };
   const schedule = createLayoutMeasurement(
-    () => {
-      // Callback identity does not change geometry; commits still read the current callback.
-      return { chatMessageMaxWidth: savedWidth(), transcriptElement: transcriptElement() };
-    },
+    // Streaming replaces callbacks without changing the geometry to measure.
+    geometry,
     (next) => {
       if (!next) {
         return;
       }
-      const width = next.chatMessageMaxWidth ?? undefined;
+      const width = next.width;
       if (width !== lastWidth) {
         baseline = width;
         refreshMinimum = true;
