@@ -20,7 +20,8 @@ import {
 } from "./chat-commands.ts";
 import { clearChatHistory } from "./chat-history-actions.ts";
 import { setChatError } from "./chat-history-state.ts";
-import { publishChatSessionProjectionMessages } from "./history-merge.ts";
+import { boundChatLocalOutput } from "./chat-history-window.ts";
+import { reduceChatSessionProjection } from "./history-merge.ts";
 import { scheduleChatScroll } from "./scroll.ts";
 
 function isChatCommandModelCacheOwnerCurrent(
@@ -186,12 +187,12 @@ export async function dispatchCapturedChatSlashCommand(
 }
 
 function injectCommandResult(host: ChatCommandHost, content: string) {
-  publishChatSessionProjectionMessages(host, [
-    ...host.chatMessages,
-    {
+  reduceChatSessionProjection(host, {
+    type: "localOutput",
+    message: boundChatLocalOutput({
       role: "system",
       content,
       timestamp: Date.now(),
-    },
-  ]);
+    }),
+  });
 }

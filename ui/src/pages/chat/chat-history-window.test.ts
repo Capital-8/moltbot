@@ -1,5 +1,6 @@
 import { createSessionProjection, reduceSessionProjection } from "@openclaw/gateway-client/browser";
 import { expect, it } from "vitest";
+import { t } from "../../i18n/index.ts";
 import { nativeHistoryMessageSourceIdentity } from "../../lib/chat/history-message-identity.ts";
 import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
 import { admitChatHistoryPages, prepareChatHistoryPages } from "./chat-history-snapshot.ts";
@@ -9,9 +10,15 @@ import {
   prepareChatHistoryPacket,
   projectResidentChatHistory,
   selectChatHistoryResidency,
+  boundChatLocalOutput,
+  CHAT_RESIDENT_WEIGHT_TARGET,
 } from "./chat-history-window.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
-import { getChatSessionProjection, publishChatSessionProjection } from "./history-merge.ts";
+import {
+  getChatSessionProjection,
+  publishChatSessionProjection,
+  reduceChatSessionProjection,
+} from "./history-merge.ts";
 
 it("keeps an indivisible source group above the entry target", () => {
   const messages = Array.from({ length: 401 }, (_, index) => ({
@@ -57,6 +64,172 @@ const durable = (seq: number) => ({
   role: "user",
   content: `source-${seq}`,
   __openclaw: { id: `source-${seq}`, seq },
+});
+
+it("rejects around coverage that cannot coexist with the newest charged local output", () => {
+  const host = makeChatHost();
+  const held = durable(1);
+  admitChatHistoryPages(host, [{ messages: [held] }], "around");
+  const output = { role: "system", content: "x".repeat(CHAT_RESIDENT_WEIGHT_TARGET - 128 * 1024) };
+  reduceChatSessionProjection(host, { type: "localOutput", message: output });
+  const before = host.chatMessages;
+  const coverage = host.chatHistoryPagination;
+  const messages = [2, 3].map((seq) => ({ ...durable(seq), content: "y".repeat(80 * 1024) }));
+  const packet = prepareChatHistoryPacket(messages, { hasMore: false });
+  expect(packet.boundedPacket).toBe(true);
+  const result = { messages, packet };
+
+  expect(prepareChatHistoryPages(host, [result], "around").fits).toBe(false);
+  expect(() => admitChatHistoryPages(host, [result], "around")).toThrow(
+    t("chat.thread.historyCapacity"),
+  );
+  expect(host.chatMessages).toBe(before);
+  expect(host.chatMessages).toEqual([held, output]);
+  expect(host.chatHistoryPagination).toBe(coverage);
+});
+
+it.each(["count", "weight"] as const)(
+  "retains only the final atomic source beside charged local output under %s pressure",
+  (pressure) => {
+    const messages = Array.from({ length: pressure === "count" ? 400 : 1 }, (_, fragment) => ({
+      ...durable(1),
+      content: `fragment-${fragment}`,
+    }));
+    const output = boundChatLocalOutput({
+      role: "system",
+      content: pressure === "weight" ? "x".repeat(CHAT_RESIDENT_WEIGHT_TARGET) : "command result",
+    });
+    const pagination = { hasMore: false as const };
+    const result = selectChatHistoryResidency(
+      [...messages, output],
+      { ...pagination, segments: [prepareChatHistorySegment(messages, pagination)] },
+      "tail",
+      undefined,
+      [output],
+    );
+    expect(result.withinBudget).toBe(true);
+    expect(result.messages).toEqual([...messages, output]);
+    expect(result.pagination.intrinsicSource).toBeUndefined();
+    expect(result.pagination.segments?.[0]?.sources).toEqual(["id:source-1"]);
+  },
+);
+
+it.each(["sole source", "keyed reader", "unkeyed reader packet"] as const)(
+  "does not lend the %s pair's unavoidable capacity to older local outcomes",
+  (owner) => {
+    const messages = Array.from({ length: 400 }, (_, fragment) => ({
+      role: "assistant",
+      content: `fragment-${fragment}`,
+      __openclaw:
+        owner === "unkeyed reader packet"
+          ? { seq: fragment < 200 ? 1 : 2 }
+          : { id: "source-1", seq: 1 },
+    }));
+    const outputs = Array.from({ length: 400 }, (_, index) => ({
+      role: "system",
+      content: `command-${index}`,
+    }));
+    const pagination = { hasMore: false as const };
+    const packet = prepareChatHistoryPacket(messages, pagination);
+    expect(packet.boundedPacket).toBe(true);
+    const result = selectChatHistoryResidency(
+      [...messages, ...outputs],
+      { ...pagination, segments: [packet] },
+      "tail",
+      owner === "sole source" ? undefined : owner === "keyed reader" ? "id:source-1" : "seq:1",
+      outputs,
+    );
+    expect(result.withinBudget).toBe(true);
+    expect(result.messages).toEqual([...messages, outputs.at(-1)]);
+    expect(result.pagination.segments?.[0]?.sources).toEqual(packet.sources);
+    expect(result.pagination.intrinsicSource).toBeUndefined();
+  },
+);
+
+it("clips escaped and multibyte local output at the existing serialized weight target", () => {
+  const content = '\\"\n😀'.repeat(700_000);
+  const output = boundChatLocalOutput({ role: "system", content, timestamp: 1 });
+  expect(output.content.endsWith("…")).toBe(true);
+  expect(output.content.isWellFormed()).toBe(true);
+  expect(JSON.stringify([output]).length).toBeLessThanOrEqual(CHAT_RESIDENT_WEIGHT_TARGET);
+  expect(boundChatLocalOutput({ content: "ordinary result" }).content).toBe("ordinary result");
+});
+
+it("keeps only the actual indivisible reader source beside charged local output", () => {
+  const reader = {
+    ...durable(1),
+    content: "r".repeat(2 * 1024 * 1024),
+    __openclaw: { id: "reader", seq: 1 },
+  };
+  const neighbor = durable(2);
+  const olderOutput = { role: "system", content: "o".repeat(2 * 1024 * 1024) };
+  const output = { role: "system", content: "l".repeat(2 * 1024 * 1024) };
+  const pagination = {
+    hasMore: true as const,
+    olderCursor: "older",
+    hasNewer: true as const,
+    newerCursor: "newer",
+  };
+  const packet = prepareChatHistorySegment([reader, neighbor], pagination, "newer");
+  const admitted = selectChatHistoryResidency(
+    [reader, neighbor, olderOutput, output],
+    { ...pagination, segments: [packet] },
+    "tail",
+    "id:reader",
+    [olderOutput, output],
+  );
+  expect(admitted.messages).toEqual([reader, neighbor, output]);
+  expect(admitted.withinBudget).toBe(true);
+  expect(admitted.pagination.intrinsicSource).toBeUndefined();
+  expect(admitted.pagination.segments?.[0]?.sources).toEqual(["id:reader", "id:source-2"]);
+  const moved = selectChatHistoryResidency(
+    admitted.messages,
+    admitted.pagination,
+    "tail",
+    "id:source-2",
+    [output],
+  );
+  expect(moved.messages).toEqual([neighbor, output]);
+  expect(moved.pagination).toMatchObject({ needsBoundary: true });
+});
+
+it("keeps only the original bounded unkeyed reader packet beside local output", () => {
+  const messages = Array.from({ length: 400 }, (_, index) => ({
+    role: "assistant",
+    content: `fragment-${index}`,
+    __openclaw: { seq: index < 200 ? 1 : 2 },
+  }));
+  const pagination = { hasMore: true as const, olderCursor: "opaque-before" };
+  const packet = prepareChatHistoryPacket(messages, pagination, "opaque-after");
+  expect(packet.boundedPacket).toBe(true);
+  const output = { role: "system", content: "local result" };
+  const admitted = selectChatHistoryResidency(
+    [...messages, output],
+    { ...pagination, segments: [packet] },
+    "tail",
+    "seq:2",
+    [output],
+  );
+  expect(admitted.messages).toEqual([...messages, output]);
+  expect(admitted.withinBudget).toBe(true);
+  expect(admitted.pagination).toMatchObject({
+    olderCursor: "opaque-before",
+    newerCursor: "opaque-after",
+  });
+  expect(admitted.pagination.segments).toEqual([packet]);
+  const next = durable(3);
+  const moved = selectChatHistoryResidency(
+    [...admitted.messages, next],
+    {
+      ...admitted.pagination,
+      segments: [packet, prepareChatHistorySegment([next], { hasMore: true })],
+    },
+    "newer",
+    "id:source-3",
+    [output],
+  );
+  expect(moved.messages).toEqual([output, next]);
+  expect(moved.pagination.segments).toHaveLength(1);
 });
 
 it("charges ordinary neighbors independently of an admitted intrinsic source group", () => {

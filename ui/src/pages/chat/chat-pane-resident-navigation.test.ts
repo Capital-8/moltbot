@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { collectGarbageForTest } from "../../test-helpers/garbage-collection.ts";
 import "./chat-pane.tsx";
+import { dispatchChatSlashCommand } from "./chat-commands.ts";
 import { readChatTranscriptAttachmentSource } from "./chat-history-state.ts";
 import { loadChatHistory, reloadChatHistoryWindow } from "./chat-history.ts";
 import type { PaneAttachmentCatalog } from "./chat-pane-attachment-catalog.ts";
@@ -479,6 +480,36 @@ it("does not advance a rejected held page and retries its exact edge after the r
   expect(state.chatHistoryPagination).toMatchObject({ olderCursor: "before-240" });
   expect(await pane.loadOlderMessages(false)).toBe(true);
   expect(requests.at(-1)).toMatchObject({ cursor: "before-240", limit: 80 });
+});
+
+it("collects an evicted local command outcome while the same pane and newest output stay alive", async () => {
+  const { pane, state } = residentPane();
+  await loadChatHistory(state, { deferBranches: true });
+  const firstOutput = async () => {
+    expect(await dispatchChatSlashCommand(state, "help", "")).toBe("completed");
+    return {
+      output: new WeakRef(state.chatMessages.at(-1) as object),
+      control: new WeakRef({ unowned: true }),
+    };
+  };
+  const references = await firstOutput();
+  await collectGarbageForTest();
+  expect(isAlive(references.control)).toBe(false);
+  expect(isAlive(references.output)).toBe(true);
+
+  for (let index = 0; index < 400; index++) {
+    expect(await dispatchChatSlashCommand(state, "help", "")).toBe("completed");
+  }
+  await collectGarbageForTest();
+  expect(isAlive(references.output)).toBe(false);
+  expect(state.chatMessages).toHaveLength(400);
+  expect(state.chatMessages.at(-1)).toMatchObject({ role: "system", content: expect.any(String) });
+  expect(
+    getChatSessionProjection(state).entries.some(
+      (entry) => entry.localOutput && entry.message === state.chatMessages.at(-1),
+    ),
+  ).toBe(true);
+  expect(pane.state).toBe(state);
 });
 
 it("collects retired concrete bodies and dormant projections while the pane and an error pin stay alive", async () => {

@@ -39,6 +39,7 @@ import {
   getChatSessionProjection,
   publishChatSessionProjection,
   publishChatSessionProjectionMessages,
+  readChatLocalOutputs,
 } from "./history-merge.ts";
 import type { ChatHistoryRunObservation } from "./run-lifecycle.ts";
 import {
@@ -332,6 +333,7 @@ export function prepareChatHistoryPages(
   state: Pick<ChatState, "chatMessages" | "chatHistoryPagination" | "readTranscriptAnchorSource">,
   results: readonly ChatHistoryResult[],
   direction: "older" | "newer" | "around",
+  localOutputs: readonly unknown[] = readChatLocalOutputs(state),
 ) {
   const previous = state.chatMessages;
   const previousPagination = state.chatHistoryPagination;
@@ -389,7 +391,7 @@ export function prepareChatHistoryPages(
     );
     messages = next;
   }
-  const resident = selectChatHistoryResidency(messages, coverage, movement, reader);
+  const resident = selectChatHistoryResidency(messages, coverage, movement, reader, localOutputs);
   const retained = new Set(resident.pagination.segments?.flatMap((segment) => segment.sources));
   // Incoming sources and the actual reader bridge must survive together.
   return {
@@ -433,14 +435,23 @@ export function admitChatHistoryPages(
   }
   const previous = state.chatMessages;
   const previousPagination = state.chatHistoryPagination;
-  const prepared = prepareChatHistoryPages(state, results, direction);
+  const localOutputs = readChatLocalOutputs(state);
+  const prepared = prepareChatHistoryPages(state, results, direction, localOutputs);
+  if (!prepared.fits) {
+    // Around navigation cannot retire a required target after accepting its
+    // coverage or receipts; its existing caller surfaces this capacity reason.
+    if (direction === "around") {
+      throw new Error(t("chat.thread.historyCapacity"));
+    }
+    return false;
+  }
   state.chatHistoryPagination = prepared.pagination;
   if (direction === "around") {
     publishChatSessionProjection(
       state,
       reduceSessionProjection(projection, {
         type: "residencyChanged",
-        messages: prepared.messages,
+        messages: [...prepared.messages, ...localOutputs],
       }),
       { acceptedRunIds },
     );

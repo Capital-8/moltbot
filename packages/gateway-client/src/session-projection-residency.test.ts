@@ -17,6 +17,24 @@ import {
 const admit = (state: SessionProjectionState, messages: readonly unknown[] = []) =>
   reduceSessionProjection(state, { type: "residencyChanged", messages });
 
+it("preserves explicit local output on refresh but lets residency and reset retire it", () => {
+  const output = { role: "system", content: "command result" };
+  const before = savedUser("before", "before", 1);
+  const after = savedUser("after", "after", 2);
+  let state = reduceSessionProjection(projection([before]), {
+    type: "localOutput",
+    message: output,
+  });
+  state = reduceSessionProjection(state, { type: "snapshotLoaded", messages: [before, after] });
+  expect(state.messages).toEqual([before, output, after]);
+  expect(state.entries[1]).toMatchObject({ localOutput: true, live: false, pending: false });
+  state = reduceSessionProjection(state, { type: "snapshotLoaded", messages: state.messages });
+  expect(state.messages).toEqual([before, output, after]);
+  const retired = admit(state, [before, after]);
+  expect(retired.messages).toEqual([before, after]);
+  expect(reduceSessionProjection(state, { type: "sessionReset" }).messages).toEqual([]);
+});
+
 it("releases a settled durable primary while preserving payload-free replay facts", () => {
   const message = savedReply("large body ".repeat(2_000), "primary", 1, { runId: "run-1" });
   let state = terminal(projection(), { message });

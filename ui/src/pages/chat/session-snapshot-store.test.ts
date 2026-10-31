@@ -611,14 +611,22 @@ describe("persistent chat session snapshots", () => {
     expect(await new SessionSnapshotStore().read(privateKey)).toBeNull();
   });
 
-  it.each(["direct", "prewarmed"])("discards the previous projection (%s)", async (mode) => {
-    await persist(writer, sessionKey, snapshot("current"));
-    await putRawRecord(envelope(sessionKey, snapshot("old"), 10));
-    if (mode === "prewarmed") {
-      void prewarmChatSnapshot(sessionKey);
-    }
-    expect(await new SessionSnapshotStore().read(sessionKey)).toBeNull();
-  });
+  it.each([
+    { mode: "direct", projectionVersion: 1 },
+    { mode: "prewarmed", projectionVersion: 1 },
+    { mode: "direct", projectionVersion: 10 },
+    { mode: "prewarmed", projectionVersion: 10 },
+  ])(
+    "discards the previous projection ($mode, version $projectionVersion)",
+    async ({ mode, projectionVersion }) => {
+      await persist(writer, sessionKey, snapshot("current"));
+      await putRawRecord(envelope(sessionKey, snapshot("old"), projectionVersion));
+      if (mode === "prewarmed") {
+        void prewarmChatSnapshot(sessionKey);
+      }
+      expect(await new SessionSnapshotStore().read(sessionKey)).toBeNull();
+    },
+  );
 
   it("purges all legacy unscoped history rather than adopting an unknown account", async () => {
     const privateKey = "agent:main:dashboard:incognito-old";
@@ -771,24 +779,32 @@ describe("persistent chat session snapshots", () => {
     },
   );
 
-  it.each([1, 7])("upgrades schema v%s without retaining obsolete transcripts", async (version) => {
-    const names = version === 1 ? [SNAPSHOTS] : [SNAPSHOTS, METADATA, SIDEBAR];
-    const database = await openDatabase(version, names);
-    const transaction = database.transaction(names, "readwrite");
-    const record = { sessionKey, payload: "retained" };
-    for (const name of names) {
-      transaction.objectStore(name).put(record);
-    }
-    await transactionDone(transaction);
-    database.close();
-    const reader = new SessionSnapshotStore();
-    await (version === 1 ? reader.delete(sessionKey) : reader.loadSavedAtIndex());
-    expect(await readRawRecord(sessionKey)).toBeUndefined();
-    expect(await readRawRecord(sessionKey, METADATA)).toBeUndefined();
-    if (version === 7) {
-      expect(await readRawRecord(sessionKey, SIDEBAR)).toEqual(record);
-    }
-  });
+  it.each([1, 4, 7])(
+    "upgrades schema v%s without retaining obsolete transcripts",
+    async (version) => {
+      const names =
+        version === 1
+          ? [SNAPSHOTS]
+          : version === 4
+            ? [SNAPSHOTS, METADATA]
+            : [SNAPSHOTS, METADATA, SIDEBAR];
+      const database = await openDatabase(version, names);
+      const transaction = database.transaction(names, "readwrite");
+      const record = { sessionKey, payload: "retained" };
+      for (const name of names) {
+        transaction.objectStore(name).put(record);
+      }
+      await transactionDone(transaction);
+      database.close();
+      const reader = new SessionSnapshotStore();
+      await (version === 1 ? reader.delete(sessionKey) : reader.loadSavedAtIndex());
+      expect(await readRawRecord(sessionKey)).toBeUndefined();
+      expect(await readRawRecord(sessionKey, METADATA)).toBeUndefined();
+      if (version === 7) {
+        expect(await readRawRecord(sessionKey, SIDEBAR)).toEqual(record);
+      }
+    },
+  );
 
   it.each(["all", "session"] as const)(
     "broadcasts %s invalidation without clearing unrelated peer memory",

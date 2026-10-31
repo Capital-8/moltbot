@@ -93,11 +93,11 @@ export abstract class ChatPaneHistoryPackets extends ChatPaneSnapshotHydration {
     let sparse = 0;
     try {
       let selector = chatHistoryPageSelector(state, direction);
-      if (!readerIntent && "messageId" in selector) {
+      if (!selector || (!readerIntent && "messageId" in selector)) {
         return false;
       }
       for (let packet = 0; packet < (readerIntent ? MAX_RESIDENT_SEGMENTS : 1); packet++) {
-        const requestedCursor = "cursor" in selector ? selector.cursor : "";
+        const requestedCursor: string = "cursor" in selector ? selector.cursor : "";
         const boundary =
           "messageId" in selector
             ? nativeHistoryMessageSourceIdentity(
@@ -151,6 +151,9 @@ export abstract class ChatPaneHistoryPackets extends ChatPaneSnapshotHydration {
             break;
           }
           selector = chatHistoryPageSelector(state, direction);
+          if (!selector) {
+            break;
+          }
           continue;
         }
         const cursor = direction === "older" ? next.hasMore && next.olderCursor : next.newerCursor;

@@ -6,6 +6,7 @@ import {
   nativeHistoryMessageSourceIdentity,
   nativeHistoryMessageSourceId,
 } from "../../lib/chat/history-message-identity.ts";
+import { clampText } from "../../lib/format.ts";
 import type {
   ChatHistoryCursor,
   ChatHistoryPagination,
@@ -159,6 +160,25 @@ function messageWeight(message: unknown): number {
     return weight;
   }
   return JSON.stringify([message]).length - 1;
+}
+
+/** Local text can be clipped; it must never borrow the intrinsic native-source exemption. */
+export function boundChatLocalOutput<T extends { content: string }>(message: T): T {
+  if (messageWeight(message) + 1 <= CHAT_RESIDENT_WEIGHT_TARGET) {
+    return message;
+  }
+  let low = 0;
+  let high = message.content.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = { ...message, content: clampText(message.content, middle) };
+    if (messageWeight(candidate) + 1 <= CHAT_RESIDENT_WEIGHT_TARGET) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return { ...message, content: clampText(message.content, low) };
 }
 
 function sourceGroups(messages: readonly unknown[]) {
@@ -376,14 +396,33 @@ export function selectChatHistoryResidency(
   pagination: ChatHistoryPagination,
   direction: "older" | "newer" | "tail" = "tail",
   readerSource?: string | null,
+  localOutputs: readonly unknown[] = [],
 ): { messages: readonly unknown[]; pagination: ChatHistoryPagination; withinBudget: boolean } {
-  if (!pagination.segments?.length) {
+  if (!pagination.segments?.length && !localOutputs.length) {
     return { messages, pagination, withinBudget: true };
   }
-  const segments = [...pagination.segments];
+  const segments = [
+    ...(pagination.segments?.length
+      ? pagination.segments
+      : [prepareChatHistorySegment(messages, pagination, pagination.newerCursor)]),
+  ];
   const protectsReader = (segment: ChatHistorySegment) =>
     readerSource != null && segment.sources.includes(readerSource);
   const groups = sourceGroups(messages);
+  const newestOutput = localOutputs.at(-1);
+  const localCount = localOutputs.length ? 1 : 0;
+  const localWeight = localOutputs.length ? messageWeight(newestOutput) : 0;
+  const readerGroup = groups.get(readerSource ?? "");
+  // One actual indivisible reader source can coexist with the newest charged
+  // local outcome. Neither grants neighboring rows or older outputs a pin.
+  const readerException =
+    intrinsicGroup(readerGroup) ||
+    Boolean(
+      localCount &&
+      readerGroup &&
+      (readerGroup.count + localCount > CHAT_RESIDENT_ENTRY_TARGET ||
+        readerGroup.weight + localWeight + 1 > CHAT_RESIDENT_WEIGHT_TARGET),
+    );
   const intrinsicSource = intrinsicGroup(groups.get(pagination.intrinsicSource ?? ""))
     ? pagination.intrinsicSource
     : undefined;
@@ -396,7 +435,7 @@ export function selectChatHistoryResidency(
   const packetCost = readerPacket?.sources.reduce(
     (cost, source) => {
       const group = groups.get(source);
-      if (source !== intrinsicSource && !(source === readerSource && intrinsicGroup(group))) {
+      if (source !== intrinsicSource && !(source === readerSource && readerException)) {
         cost.count += group?.count ?? 0;
         cost.weight += group?.weight ?? 0;
       }
@@ -406,19 +445,21 @@ export function selectChatHistoryResidency(
   );
   const packetException =
     packetCost &&
-    (packetCost.count > CHAT_RESIDENT_ENTRY_TARGET ||
-      packetCost.weight > CHAT_RESIDENT_WEIGHT_TARGET)
+    (packetCost.count + localCount > CHAT_RESIDENT_ENTRY_TARGET ||
+      packetCost.weight + localWeight > CHAT_RESIDENT_WEIGHT_TARGET)
       ? new Set(readerPacket!.sources)
       : null;
   const sources = () => new Set(segments.flatMap((segment) => segment.sources));
-  const withinBudget = () => {
-    let count = 0;
-    let weight = 1;
+  let localOutputSource: string | undefined;
+  const cost = () => {
+    let count = localCount;
+    let weight = 1 + localWeight;
     for (const source of sources()) {
       const group = groups.get(source);
       if (
         source === intrinsicSource ||
-        (source === readerSource && intrinsicGroup(group)) ||
+        source === localOutputSource ||
+        (source === readerSource && readerException) ||
         (segments.includes(readerPacket!) && packetException?.has(source))
       ) {
         continue;
@@ -426,6 +467,10 @@ export function selectChatHistoryResidency(
       count += group?.count ?? 0;
       weight += group?.weight ?? 0;
     }
+    return { count, weight };
+  };
+  const withinBudget = () => {
+    const { count, weight } = cost();
     return (
       segments.length <= MAX_RESIDENT_SEGMENTS &&
       count <= CHAT_RESIDENT_ENTRY_TARGET &&
@@ -487,6 +532,13 @@ export function selectChatHistoryResidency(
     const fromRight =
       direction === "older" || (direction === "tail" && protectsReader(segments[0]!));
     if (!trimEnd(fromRight) && !trimEnd(!fromRight)) {
+      const remaining = sources();
+      // The final indivisible source and newest charged local outcome must
+      // both remain observable. This grants no packet or neighboring source exemption.
+      if (localCount && !localOutputSource && remaining.size === 1) {
+        localOutputSource = remaining.values().next().value;
+        continue;
+      }
       break;
     }
     trimmed = true;
@@ -494,9 +546,33 @@ export function selectChatHistoryResidency(
   const first = segments[0]!;
   const last = segments[segments.length - 1]!;
   const retained = sources();
+  const admittedOutputs = new Set(localOutputs.length ? [newestOutput] : []);
+  const outputCost = cost();
+  const localPair = Boolean(
+    localOutputSource ||
+    (readerException && !intrinsicGroup(readerGroup)) ||
+    (packetException &&
+      packetCost!.count <= CHAT_RESIDENT_ENTRY_TARGET &&
+      packetCost!.weight <= CHAT_RESIDENT_WEIGHT_TARGET),
+  );
+  // Older outcomes use only spare ordinary capacity. They cannot block a new
+  // page or spend an exemption needed only for the newest outcome/source pair.
+  for (let index = localOutputs.length - 2; !localPair && index >= 0; index--) {
+    const output = localOutputs[index]!;
+    const weight = messageWeight(output);
+    if (
+      outputCost.count + 1 > CHAT_RESIDENT_ENTRY_TARGET ||
+      outputCost.weight + weight > CHAT_RESIDENT_WEIGHT_TARGET
+    ) {
+      continue;
+    }
+    admittedOutputs.add(output);
+    outputCost.count += 1;
+    outputCost.weight += weight;
+  }
   const admitted = messages.filter((message) => {
     const source = nativeHistoryMessageSourceIdentity(message);
-    return source !== null && retained.has(source);
+    return admittedOutputs.has(message) || (source !== null && retained.has(source));
   });
   const nextPagination: ChatHistoryPagination = {
     ...(first.hasOlder
@@ -547,8 +623,8 @@ export function chatHistoryWindowBoundary(
   return source
     ? messages.find((message) => nativeHistoryMessageSourceIdentity(message) === source)
     : direction === "older"
-      ? messages[0]
-      : messages.at(-1);
+      ? messages.find((message) => nativeHistoryMessageSourceId(message) !== null)
+      : messages.findLast((message) => nativeHistoryMessageSourceId(message) !== null);
 }
 
 /** Publication shares the page admission policy while retaining live/run pins. */
@@ -559,7 +635,13 @@ export function projectResidentChatHistory(
   pinnedRunId?: string | null,
 ) {
   const coverage = admitResidentLiveSources(pagination, projection);
-  const admitted = selectChatHistoryResidency(projection.messages, coverage, "tail", readerSource);
+  const admitted = selectChatHistoryResidency(
+    projection.messages,
+    coverage,
+    "tail",
+    readerSource,
+    projection.entries.filter((entry) => entry.localOutput).map((entry) => entry.message),
+  );
   return {
     projection: reduceSessionProjection(projection, {
       type: "residencyChanged",

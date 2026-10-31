@@ -11,6 +11,7 @@ import {
 } from "../../lib/gateway-errors.ts";
 import { isSessionRunStateActive } from "../../lib/session-run-state.ts";
 import { subscribeToSharedRequest } from "../../lib/shared-request-subscription.ts";
+import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
 import {
   captureChatHistoryRun,
   chatHistoryRequestParams,
@@ -184,6 +185,7 @@ export async function hydrateChatHistory(
       return undefined;
     }
     const cursorReset = isHistoryCursor(response) && response.kind === "reset";
+    let heldGapPagination: ChatHistoryPagination | undefined;
     if (cursorReset) {
       clearHistoryCursor(state, sessionKey, requestAgentId);
       response = await request();
@@ -195,7 +197,7 @@ export async function hydrateChatHistory(
     // its start; a window reset asks for a fresh window instead.
     if (cursorReset && !isHistoryCursor(response) && !requests.windowReset?.isCurrent()) {
       const { fillHeldHistoryGap } = await import("./chat-history-held-gap.ts");
-      response = await fillHeldHistoryGap(
+      const filled = await fillHeldHistoryGap(
         state,
         client,
         sessionKey,
@@ -204,6 +206,8 @@ export async function hydrateChatHistory(
         isCurrent,
         read.signal,
       );
+      response = filled.result;
+      heldGapPagination = filled.pagination;
       if (!isCurrent()) {
         return undefined;
       }
@@ -338,7 +342,8 @@ export async function hydrateChatHistory(
       : null;
     const authoritativeMessages = reconciledHistory?.messages ?? visibleMessages;
     state.chatHistoryPagination =
-      reconciledHistory && previousPagination.hasNewer
+      heldGapPagination ??
+      (reconciledHistory && previousPagination.hasNewer
         ? previousPagination
         : extendChatHistoryWindow(
             previousPagination,
@@ -349,7 +354,7 @@ export async function hydrateChatHistory(
             "tail",
             reconciledHistory?.retainedCoverage ? reconciledHistory.pagination : undefined,
             prepareChatHistoryPacket(visibleMessages, nextPagination, res.newerCursor),
-          );
+          ));
     const scope = readChatSessionProjectionScope(state, {
       sessionKey,
       agentId: requestAgentId,

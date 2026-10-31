@@ -26,6 +26,7 @@ import type {
 import type { ChatHistoryCursor, ChatHistoryPagination } from "./chat-history-pagination.ts";
 import { trimmedChatHistoryPagination } from "./chat-history-pagination.ts";
 import { prepareChatHistorySegment, selectChatHistoryResidency } from "./chat-history-window.ts";
+import { withoutChatLocalOutputs } from "./chat-local-outputs.ts";
 import type { ChatSessionStateSnapshot } from "./chat-session-state-snapshot.ts";
 import type { ChatHistoryState, ChatTranscriptMetadata } from "./chat-transcript-metadata.ts";
 import { createTranscriptMemo } from "./components/chat-transcript-memo.ts";
@@ -33,6 +34,7 @@ import {
   getChatSessionProjection,
   readChatSessionProjectionScope,
   reduceChatSessionProjection,
+  readChatLocalOutputs,
 } from "./history-merge.ts";
 import { getSessionCacheValue, setSessionCacheValue } from "./session-cache.ts";
 import type { ChatDetailsSnapshot } from "./session-details-snapshot-schema.ts";
@@ -523,6 +525,9 @@ export function cacheChatSessionSnapshot(
   target: ChatMessageCacheTarget,
   incoming: ChatSessionSnapshot,
 ): void {
+  // Pane-local outcomes have no replay authority in any cache target. Read the
+  // existing projection only; cache writes must never initialize a display owner.
+  incoming = withoutChatLocalOutputs(incoming, readChatLocalOutputs(host));
   const cacheKey = resolveChatSnapshotKey(host, target);
   const existing = getSessionCacheValue(cache, cacheKey);
   const retained =

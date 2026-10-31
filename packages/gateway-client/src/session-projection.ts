@@ -123,6 +123,7 @@ export type SessionProjectionEvent = ScopedSessionProjectionEvent &
         options?: SessionProjectionSnapshotOptions;
       }
     | { type: "residencyChanged"; messages: readonly unknown[]; pinnedRunIds?: readonly string[] }
+    | { type: "localOutput"; message: unknown }
     | ({
         type: "messagePersisted";
         message: unknown;
@@ -311,9 +312,17 @@ export function reconcileSessionProjectionSnapshot(
   const runs: Record<string, SessionProjectionRun> = { ...state.runs };
   for (const current of state.entries) {
     if (
-      (!current.live && !current.pending) ||
+      (!current.live && !current.pending && !current.localOutput) ||
       options.shouldIncludeMessage?.(current.message) === false
     ) {
+      continue;
+    }
+    if (current.localOutput) {
+      const existing = entries.findIndex((entry) => entry.message === current.message);
+      entries =
+        existing < 0
+          ? insertEntry(entries, current, runs)
+          : entries.toSpliced(existing, 1, current);
       continue;
     }
     const matches = entries.filter((entry) => entryMatches(entry, current, true));
@@ -551,6 +560,15 @@ export function reduceSessionProjection(
     return state;
   }
   switch (event.type) {
+    case "localOutput": {
+      // Retain placement, not a fabricated durable sequence, across refreshes.
+      const afterSequence = state.entries.findLast((entry) => entry.identity?.sequence != null)
+        ?.identity?.sequence;
+      return withEntries(state, [
+        ...state.entries,
+        { ...createEntry(event.message), localOutput: true, afterSequence },
+      ]);
+    }
     case "residencyChanged": {
       const admitted = new Set(event.messages);
       const pinnedRuns = new Set(event.pinnedRunIds);

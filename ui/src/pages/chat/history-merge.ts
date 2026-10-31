@@ -35,6 +35,7 @@ import {
   projectResidentChatHistory,
   publishResidentChatMessages,
 } from "./chat-history-window.ts";
+import { chatLocalOutputMessages } from "./chat-local-outputs.ts";
 import { matchesCompactionOperation } from "./chat-progress.ts";
 import { reconcileChatReasoning, type ChatReasoningHost } from "./chat-reasoning.ts";
 import { persistedSteerTargetRunId } from "./stream-causal-boundary.ts";
@@ -276,6 +277,11 @@ export function getChatRunProjection(owner: object, runId: string) {
   return chatSessionProjections.get(owner)?.projection?.runs[runId];
 }
 
+/** Read existing custody without initializing or publishing during tentative admission. */
+export function readChatLocalOutputs(owner: object): readonly unknown[] {
+  return chatLocalOutputMessages(chatSessionProjections.get(owner)?.projection?.entries);
+}
+
 export function getChatRunOwner(owner: object): string | undefined {
   return chatSessionProjections.get(owner)?.runId;
 }
@@ -355,12 +361,13 @@ export function publishChatSessionProjection(
       ? owner.readTranscriptAnchorSource?.()
       : null;
   if (
-    owner.chatHistoryPagination?.segments &&
+    (owner.chatHistoryPagination?.segments ||
+      projection.entries.some((entry) => entry.localOutput)) &&
     (previous?.messages !== projection.messages || current?.readerSource !== readerSource)
   ) {
     const admitted = projectResidentChatHistory(
       projection,
-      owner.chatHistoryPagination,
+      owner.chatHistoryPagination ?? { hasMore: false },
       readerSource,
       owner.lastLocalTerminalReconcile?.runId,
     );

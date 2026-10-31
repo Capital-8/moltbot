@@ -9,6 +9,8 @@ import { handleChatGatewayEvent } from "./chat-gateway.ts";
 import { rewindChatHistory, switchChatHistoryBranch } from "./chat-history-actions.ts";
 import { loadOlderChatHistoryPage, requestChatSessionSnapshot } from "./chat-history-request.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
+import { beginHistoryRequest } from "./chat-history-state.ts";
+import { CHAT_RESIDENT_WEIGHT_TARGET, prepareChatHistoryPacket } from "./chat-history-window.ts";
 import {
   activeHistory as emptyActiveHistory,
   createState,
@@ -18,7 +20,11 @@ import { loadChatHistory, type ChatEventPayload } from "./chat-history.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
 import type { ChatState } from "./chat-state-contract.ts";
 import { ChatAttachmentReadLifecycle } from "./components/chat-attachment-reads.ts";
-import { getChatSessionProjection, publishChatSessionProjection } from "./history-merge.ts";
+import {
+  getChatSessionProjection,
+  publishChatSessionProjection,
+  reduceChatSessionProjection,
+} from "./history-merge.ts";
 import { handleChatDraftChange } from "./input-history.ts";
 import { reconcileChatRunFromSessionRow, reconcileChatRunLifecycle } from "./run-lifecycle.ts";
 import {
@@ -348,20 +354,25 @@ describe("full tail after a long live turn", () => {
 
   async function loadAfterLiveTurn(
     tail: ChatHistoryResult,
-    older: () => Promise<ChatHistoryResult>,
+    older: (cursor: string) => Promise<ChatHistoryResult>,
     {
       cursorReset = true,
       initialEnd = 1,
       previousLeaf,
+      captureState,
+      beforeRefresh,
     }: {
       cursorReset?: boolean;
       initialEnd?: number;
       previousLeaf?: string;
+      captureState?: (state: TestState) => void;
+      beforeRefresh?: (state: TestState) => void;
     } = {},
   ) {
     const state = createState(tail);
     state.currentSessionId = "session";
     state.chatDisplayedLeafEntryId = undefined;
+    captureState?.(state);
     const pages: ChatHistoryResult[] = [
       {
         messages: transcript.slice(0, initialEnd),
@@ -375,8 +386,8 @@ describe("full tail after a long live turn", () => {
       .spyOn(state.client!, "request")
       .mockImplementation(async (_method, params) => {
         const cursor = (params as { cursor?: string }).cursor;
-        if (cursor === "older:tail") {
-          return older();
+        if (cursor?.startsWith("older:")) {
+          return older(cursor);
         }
         // Stop persists an aborted reply, so the delta cursor resets to a bounded tail.
         return cursor === "before-stop" && cursorReset ? { kind: "reset" } : pages.shift();
@@ -391,6 +402,7 @@ describe("full tail after a long live turn", () => {
     for (const row of [call(2), call(4), call(6)]) {
       publishLive(state, row, scope);
     }
+    beforeRefresh?.(state);
     await loadChatHistory(state);
     return { state, request };
   }
@@ -415,7 +427,10 @@ describe("full tail after a long live turn", () => {
       expect.anything(),
     );
     expect(state.chatMessages).toEqual(transcript);
-    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+    const { segments, ...edges } = state.chatHistoryPagination;
+    expect(edges).toEqual({ hasMore: false, totalMessages: 7 });
+    expect(segments).toHaveLength(2);
+    expect(segments?.every((packet) => packet.boundedPacket)).toBe(true);
   });
 
   it("restores the held prefix when Stop advances the leaf within the prior read", async () => {
@@ -428,7 +443,9 @@ describe("full tail after a long live turn", () => {
     );
     expect(state.chatMessages).toEqual(transcript);
     expect(older).toHaveBeenCalledOnce();
-    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+    const { segments, ...edges } = state.chatHistoryPagination;
+    expect(edges).toEqual({ hasMore: false, totalMessages: 7 });
+    expect(segments).toHaveLength(2);
   });
 
   it("keeps the retryable boundary when the gap read fails", async () => {
@@ -436,13 +453,225 @@ describe("full tail after a long live turn", () => {
       throw new Error("offline");
     });
     expect(state.chatMessages).not.toContainEqual(prompt);
-    expect(state.chatHistoryPagination).toEqual({
+    const { segments, ...edges } = state.chatHistoryPagination;
+    expect(edges).toEqual({
       hasMore: true,
       olderCursor: "older:tail",
       nextOffset: 5,
       totalMessages: 7,
     });
+    expect(segments).toHaveLength(1);
     expect(state.lastError).toBeNull();
+  });
+
+  it("keeps each fresh gap response's provenance instead of certifying an aggregate packet", async () => {
+    const older = vi.fn(async (cursor: string): Promise<ChatHistoryResult> =>
+      cursor === "older:tail"
+        ? {
+            messages: transcript.slice(2, 4),
+            hasMore: true,
+            olderCursor: "older:head",
+            nextOffset: 5,
+            totalMessages: 7,
+            sessionInfo,
+          }
+        : { messages: transcript.slice(0, 2), totalMessages: 7, sessionInfo },
+    );
+    const { state, request } = await loadAfterLiveTurn(tailFrom(4), older);
+
+    expect(state.chatMessages).toEqual(transcript);
+    expect(older.mock.calls).toEqual([["older:tail"], ["older:head"]]);
+    const segments = state.chatHistoryPagination.segments;
+    // All seven rows would fit one certificate; only the three actual RPCs own one each.
+    expect(segments?.map((packet) => packet.sources)).toEqual([
+      ["id:prompt", "id:call-2"],
+      ["id:result-3", "id:call-4"],
+      ["id:result-5", "id:call-6", "id:call-7"],
+    ]);
+    expect(segments?.every((packet) => packet.boundedPacket)).toBe(true);
+    for (const [method, params] of request.mock.calls) {
+      if ((params as { cursor?: string }).cursor?.startsWith("older:")) {
+        expect(method).toBe("chat.history");
+        expect(params).toMatchObject({ limit: 80, maxBytes: 256 * 1024 });
+      }
+    }
+  });
+
+  it("keeps the fresh contiguous prefix and retry boundary when a later gap packet fails", async () => {
+    const { state } = await loadAfterLiveTurn(tailFrom(4), async (cursor) => {
+      if (cursor === "older:head") {
+        throw new Error("offline");
+      }
+      return {
+        messages: transcript.slice(2, 4),
+        hasMore: true,
+        olderCursor: "older:head",
+        nextOffset: 5,
+        totalMessages: 7,
+        sessionInfo,
+      };
+    });
+
+    expect(state.chatMessages).toEqual(transcript.slice(2));
+    expect(state.chatHistoryPagination).toMatchObject({
+      hasMore: true,
+      olderCursor: "older:head",
+      nextOffset: 5,
+      totalMessages: 7,
+    });
+    expect(state.chatHistoryPagination.segments).toHaveLength(2);
+    expect(state.lastError).toBeNull();
+  });
+
+  it.each(["selection", "claim"] as const)(
+    "discards a held Stop-gap response after its %s retires",
+    async (retirement) => {
+      const entered = createDeferred<void>();
+      const pending = createDeferred<ChatHistoryResult>();
+      let current: TestState | undefined;
+      const reply = {
+        messages: transcript.slice(2, 4),
+        hasMore: true,
+        olderCursor: "older:head",
+        nextOffset: 5,
+        totalMessages: 7,
+        sessionInfo,
+      };
+      const loading = loadAfterLiveTurn(
+        tailFrom(4),
+        async () => {
+          entered.resolve();
+          return pending.promise;
+        },
+        { captureState: (state) => (current = state) },
+      );
+      await entered.promise;
+      if (!current) {
+        throw new Error("expected the held hydration owner");
+      }
+      const messages = current.chatMessages;
+      const pagination = current.chatHistoryPagination;
+      if (retirement === "selection") {
+        current.sessionKey = "replacement";
+      } else {
+        beginHistoryRequest(current, current.client!, current.connectionEpoch, current.sessionKey);
+      }
+      pending.resolve(reply);
+      const { state, request } = await loading;
+
+      expect(state.chatMessages).toBe(messages);
+      expect(state.chatHistoryPagination).toBe(pagination);
+      expect(
+        request.mock.calls.filter(([, params]) =>
+          (params as { cursor?: string }).cursor?.startsWith("older:"),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("keeps the fresh tail's lazy edge when a bounded gap packet cannot fit beside it", async () => {
+    const tail = { ...tailFrom(4, 83), messages: [81, 82, 83].map(call) };
+    const gap = Array.from({ length: 80 }, (_, index) =>
+      Array.from({ length: 5 }, (_, fragment) =>
+        message("assistant", `gap ${index + 1} fragment ${fragment}`, {
+          id: `gap-${index + 1}`,
+          seq: index + 1,
+        }),
+      ),
+    ).flat();
+    expect(Buffer.byteLength(JSON.stringify(gap))).toBeLessThanOrEqual(256 * 1024);
+    const older = vi.fn(async () => ({ messages: gap, totalMessages: 83, sessionInfo }));
+    const { state, request } = await loadAfterLiveTurn(tail, older);
+
+    expect(state.chatMessages).toEqual(tail.messages);
+    expect(state.chatMessages.length).toBeLessThanOrEqual(400);
+    expect(state.chatHistoryPagination).toMatchObject({
+      hasMore: true,
+      olderCursor: "older:tail",
+      nextOffset: 3,
+      totalMessages: 83,
+    });
+    expect(state.chatHistoryPagination.segments).toHaveLength(1);
+    expect(state.chatHistoryPagination.segments?.[0]?.sources).toEqual([
+      "id:call-81",
+      "id:call-82",
+      "id:call-83",
+    ]);
+    expect(older).toHaveBeenCalledOnce();
+    expect(request.mock.calls.at(-1)?.[1]).toMatchObject({ limit: 80, maxBytes: 256 * 1024 });
+    expect(state.lastError).toBeNull();
+  });
+
+  it("reserves local output when a Stop-gap packet would otherwise evict the accepted tail", async () => {
+    const tail = { ...tailFrom(4, 83), messages: [81, 82, 83].map(call) };
+    const output = {
+      role: "system",
+      content: "x".repeat(CHAT_RESIDENT_WEIGHT_TARGET - 128 * 1024),
+    };
+    const gap = Array.from({ length: 80 }, (_, index) =>
+      message("assistant", "g".repeat(2 * 1024), { id: `gap-${index + 1}`, seq: index + 1 }),
+    );
+    expect(Buffer.byteLength(JSON.stringify(gap))).toBeLessThanOrEqual(256 * 1024);
+    expect(prepareChatHistoryPacket(gap, { hasMore: false }).boundedPacket).toBe(true);
+    const older = vi.fn(async () => ({ messages: gap, totalMessages: 83, sessionInfo }));
+    const { state } = await loadAfterLiveTurn(tail, older, {
+      beforeRefresh: (current) =>
+        reduceChatSessionProjection(current, { type: "localOutput", message: output }),
+    });
+
+    expect(state.chatMessages).toEqual([output, ...tail.messages]);
+    expect(JSON.stringify(state.chatMessages).length).toBeLessThanOrEqual(
+      CHAT_RESIDENT_WEIGHT_TARGET,
+    );
+    expect(state.chatHistoryPagination).toMatchObject({
+      hasMore: true,
+      olderCursor: "older:tail",
+      nextOffset: 3,
+      totalMessages: 83,
+    });
+    expect(state.chatHistoryPagination.segments?.map((packet) => packet.sources)).toEqual([
+      ["id:call-81", "id:call-82", "id:call-83"],
+    ]);
+    expect(state.chatHistoryPagination.segments?.[0]?.boundedPacket).toBe(true);
+    expect(older).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a detached head and its reader when Stop resets the tail cursor", async () => {
+    const state = createState(tailFrom(4));
+    state.currentSessionId = "session";
+    state.chatDisplayedLeafEntryId = undefined;
+    const head = {
+      messages: transcript.slice(0, 2),
+      newerCursor: "newer:head",
+      totalMessages: 7,
+      deltaCursor: "before-stop",
+      sessionInfo: { ...sessionInfo, hasActiveRun: true },
+    };
+    const request = vi.spyOn(state.client!, "request").mockResolvedValueOnce(head);
+    await loadChatHistory(state);
+    expect(state.chatHistoryPagination).toMatchObject({
+      hasMore: false,
+      hasNewer: true,
+      newerCursor: "newer:head",
+    });
+    const held = state.chatMessages;
+    const coverage = state.chatHistoryPagination;
+    const reader = vi.fn(() => "id:prompt");
+    state.readTranscriptAnchorSource = reader;
+    request
+      .mockResolvedValueOnce({ kind: "reset" })
+      .mockResolvedValueOnce(tailFrom(4))
+      .mockResolvedValueOnce({ messages: transcript.slice(0, 4), totalMessages: 7, sessionInfo });
+
+    await loadChatHistory(state);
+
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request.mock.calls[1]?.[1]).toMatchObject({ cursor: "before-stop" });
+    expect(state.chatMessages).toEqual(held);
+    expect(state.chatMessages[0]).toBe(held[0]);
+    expect(state.chatHistoryPagination).toStrictEqual(coverage);
+    expect(state.readTranscriptAnchorSource).toBe(reader);
+    expect(state.readTranscriptAnchorSource()).toBe("id:prompt");
   });
 
   it.each([

@@ -18,6 +18,10 @@ export function insertSessionProjectionEntry(
   if (sequence !== undefined && sequence !== null && nextIndex < 0) {
     nextIndex = entries.length;
   }
+  if (incoming.localOutput && incoming.afterSequence != null) {
+    const after = incoming.afterSequence;
+    nextIndex = entries.findIndex((entry) => (entry.identity?.sequence ?? -1) > after);
+  }
   if (incoming.identity?.role === "user" && incoming.identity.runId) {
     const runId = incoming.identity.runId;
     const terminalMessage = runs?.[runId]?.message;

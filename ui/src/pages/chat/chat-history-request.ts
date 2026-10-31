@@ -374,8 +374,11 @@ export function chatHistoryPageSelector(
     return null;
   }
   const needsBoundary =
-    direction === "older" ? pagination.needsBoundary : pagination.needsNewerBoundary;
-  const cursor = direction === "older" ? pagination.olderCursor : pagination.newerCursor;
+    direction === "older"
+      ? pagination.hasMore && pagination.needsBoundary
+      : pagination.needsNewerBoundary;
+  const cursor =
+    direction === "older" ? pagination.hasMore && pagination.olderCursor : pagination.newerCursor;
   if (!needsBoundary && cursor) {
     return { cursor };
   }

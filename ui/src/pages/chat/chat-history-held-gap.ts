@@ -1,22 +1,19 @@
-import { prependUniqueNativeMessages } from "../../lib/chat/history-message-identity.ts";
+import { visibleChatHistoryMessages } from "../../lib/chat/message-visibility.ts";
 import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
-import {
-  CHAT_HISTORY_OLDER_PAGE_LIMIT,
-  requestOlderChatHistoryPage,
-} from "./chat-history-request.ts";
+import { CHAT_HISTORY_REQUEST_LIMIT } from "./chat-history-request-params.ts";
+import { requestOlderChatHistoryPage } from "./chat-history-request.ts";
 import {
   type ChatHistoryResult,
   historySessionId,
+  prepareChatHistoryPages,
   resolveChatHistoryPagination,
 } from "./chat-history-snapshot.ts";
+import { MAX_RESIDENT_SEGMENTS, prepareChatHistoryPacket } from "./chat-history-window.ts";
 import type { ChatState } from "./chat-state-contract.ts";
+import { readChatLocalOutputs } from "./history-merge.ts";
 
-/**
- * Older cursor for the rows between a transcript this pane holds from its start
- * and a bounded tail that no longer reaches it. The older page and the tail are
- * both server rows, so filling the gap never trusts held live rows. Gaps larger
- * than one older page keep the lazy boundary.
- */
+/** A Stop reset may cut a transcript held from its start. Only fresh server
+ * packets can refill it; larger gaps keep their lazy, authoritative boundary. */
 function heldHistoryGapCursor(options: {
   result: ChatHistoryResult;
   previousMessages: unknown[];
@@ -31,6 +28,7 @@ function heldHistoryGapCursor(options: {
     next.totalMessages === undefined ||
     options.result.windowReset === true ||
     options.previousPagination.hasMore ||
+    options.previousPagination.hasNewer ||
     options.previousMessages.length === 0 ||
     !options.previousSessionId ||
     options.previousSessionId !== historySessionId(options.result)
@@ -38,16 +36,13 @@ function heldHistoryGapCursor(options: {
     return null;
   }
   const rowsBeforeTail = next.totalMessages - next.nextOffset;
-  // A cursor reset may advance the leaf, invalidating even a fully held prefix.
-  return rowsBeforeTail <= CHAT_HISTORY_OLDER_PAGE_LIMIT ? next.olderCursor : null;
+  return rowsBeforeTail <= CHAT_HISTORY_REQUEST_LIMIT * MAX_RESIDENT_SEGMENTS
+    ? next.olderCursor
+    : null;
 }
 
-/**
- * Stop persists an interrupted reply, so its delta cursor resets to a bounded
- * tail. Read the gap to the start this pane already shows before publishing,
- * so held rows never become earlier history. A failed read keeps the tail and
- * its retryable boundary.
- */
+/** Reuse hydration's request claim and the resident admission budget. Coverage
+ * stays separate: concatenated rows must never earn one wire-packet certificate. */
 export async function fillHeldHistoryGap<Tail extends ChatHistoryResult>(
   state: ChatState,
   client: NonNullable<ChatState["client"]>,
@@ -56,31 +51,84 @@ export async function fillHeldHistoryGap<Tail extends ChatHistoryResult>(
   tail: Tail,
   isCurrent: () => boolean,
   signal: AbortSignal,
-): Promise<Tail> {
-  const cursor = heldHistoryGapCursor({
+): Promise<{ result: Tail; pagination?: ChatHistoryPagination }> {
+  let cursor = heldHistoryGapCursor({
     result: tail,
     previousMessages: state.chatMessages,
     previousPagination: state.chatHistoryPagination,
     previousSessionId: state.currentSessionId ?? null,
   });
-  const older = cursor
-    ? await requestOlderChatHistoryPage(
-        client,
-        sessionKey,
-        requestAgentId,
-        { cursor },
-        isCurrent,
-        signal,
-      ).catch(() => undefined)
-    : undefined;
-  if (!older || older.windowReset || historySessionId(older) !== historySessionId(tail)) {
-    return tail;
+  if (!cursor) {
+    return { result: tail };
   }
-  return {
-    ...tail,
-    messages: prependUniqueNativeMessages(older.messages ?? [], tail.messages ?? []),
-    hasMore: older.hasMore,
-    olderCursor: older.olderCursor,
-    nextOffset: older.nextOffset,
-  };
+  const messages = visibleChatHistoryMessages(tail.messages ?? []);
+  const pagination = resolveChatHistoryPagination(tail);
+  let prepared = prepareChatHistoryPages(
+    { chatMessages: [], chatHistoryPagination: { hasMore: false } },
+    [
+      {
+        ...tail,
+        messages,
+        packet: prepareChatHistoryPacket(messages, pagination, tail.newerCursor),
+      },
+    ],
+    "around",
+    readChatLocalOutputs(state),
+  );
+  let result = tail;
+  if (!prepared.fits) {
+    return { result };
+  }
+  for (let attempt = 0; cursor && attempt < MAX_RESIDENT_SEGMENTS; attempt++) {
+    const older = await requestOlderChatHistoryPage(
+      client,
+      sessionKey,
+      requestAgentId,
+      { cursor },
+      isCurrent,
+      signal,
+    ).catch(() => undefined);
+    if (
+      !isCurrent() ||
+      signal.aborted ||
+      !older ||
+      older.windowReset ||
+      historySessionId(older) !== historySessionId(tail)
+    ) {
+      break;
+    }
+    const next = prepareChatHistoryPages(
+      {
+        chatMessages: prepared.messages,
+        chatHistoryPagination: prepared.pagination,
+        readTranscriptAnchorSource: state.readTranscriptAnchorSource,
+      },
+      [older],
+      "older",
+      readChatLocalOutputs(state),
+    );
+    const retained = new Set(next.pagination.segments?.flatMap((segment) => segment.sources));
+    // Refilling cannot evict its fresh tail or an already accepted gap packet.
+    // A non-fitting next packet leaves the last accepted edge available lazily.
+    if (
+      !next.fits ||
+      prepared.pagination.segments?.some((segment) =>
+        segment.sources.some((source) => !retained.has(source)),
+      ) ||
+      (next.pagination.hasMore && next.pagination.olderCursor === cursor)
+    ) {
+      break;
+    }
+    prepared = next;
+    result = {
+      ...tail,
+      messages: next.messages,
+      packet: undefined,
+      hasMore: next.pagination.hasMore,
+      olderCursor: next.pagination.hasMore ? next.pagination.olderCursor : undefined,
+      nextOffset: next.pagination.hasMore ? next.pagination.nextOffset : undefined,
+    };
+    cursor = next.pagination.hasMore ? (next.pagination.olderCursor ?? null) : null;
+  }
+  return result === tail ? { result } : { result, pagination: prepared.pagination };
 }

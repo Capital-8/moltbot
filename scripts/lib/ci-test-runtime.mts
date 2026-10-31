@@ -112,6 +112,7 @@ const nodeRequiredFiles = new Set([
   "src/gateway/session-database-retention.test.ts",
   "ui/src/components/desktop/desktop-mobile-keyboard-retention.test.ts",
   "ui/src/pages/chat/chat-pane-retention.test.ts",
+  "ui/src/pages/chat/chat-pane-resident-navigation.test.ts",
   "ui/src/pages/chat/chat-thread-retention.test.ts",
   "ui/src/pages/chat/components/chat-transcript-layout-retention.test.ts",
   "ui/src/pages/chat/session-message-cache-retention.test.ts",
