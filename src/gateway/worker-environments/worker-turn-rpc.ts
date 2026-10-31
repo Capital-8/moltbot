@@ -5,10 +5,7 @@ import type {
   WorkerProtocolCloseReason,
   WorkerTranscriptCommitParams,
 } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
-import type {
-  WorkerGatewayToolCancelParams,
-  WorkerGatewayToolInvokeParams,
-} from "../../../packages/gateway-protocol/src/schema/worker-gateway-tool.js";
+import type * as toolRpc from "../../../packages/gateway-protocol/src/schema/worker-gateway-tool.js";
 import type {
   WorkerInferenceCancelParams,
   WorkerInferenceStartParams,
@@ -24,6 +21,7 @@ import {
 } from "./admission.js";
 import { workerInferencePlacement } from "./inference-placement.js";
 import type { WorkerInferenceSink } from "./inference.js";
+import { sameWorkerSessionTurnClaim } from "./placement-record.js";
 import {
   acknowledgeWorkerTurnFinishing,
   getWorkerTurnToolSurface,
@@ -40,11 +38,19 @@ import { refreshWorkerGitHubBinding } from "./worker-turn-github-rpc.js";
 import type * as rpc from "./worker-turn-rpc.types.js";
 import {
   captureWorkerTurnLiveEventOwner,
-  processTurnBinding,
-  matchesTurnBinding,
   isWorkerTerminalLiveEvent,
   prepareWorkerTurnAdmittedLiveEvent,
 } from "./worker-turn-run-owner.js";
+
+const processTurnBinding = ({ turnClaim, credentialHash }: WorkerConnectionIdentity) =>
+  turnClaim ? { turnClaim, credentialHash } : undefined;
+
+const matchesTurnBinding = (
+  left: rpc.WorkerProcessTurnBinding,
+  right: rpc.WorkerProcessTurnBinding,
+): boolean =>
+  sameWorkerSessionTurnClaim(left.turnClaim, right.turnClaim) &&
+  safeEqualSecret(left.credentialHash, right.credentialHash);
 
 class WorkerTranscriptAuthorityError extends Error {
   constructor(readonly outcome: Exclude<rpc.WorkerTranscriptCommitServiceResult, { ok: true }>) {
@@ -387,7 +393,7 @@ export function createWorkerTurnRpc(options: rpc.WorkerTurnRpcOptions) {
     withToolSurface(identity, (runtime) => runtime.getSurface(identity));
   const invokeGatewayTool = (
     identity: WorkerConnectionIdentity,
-    request: WorkerGatewayToolInvokeParams,
+    request: toolRpc.WorkerGatewayToolInvokeParams,
     sink: WorkerGatewayToolSink,
     signal?: AbortSignal,
   ) =>
@@ -397,7 +403,7 @@ export function createWorkerTurnRpc(options: rpc.WorkerTurnRpcOptions) {
     });
   const cancelGatewayTool = (
     identity: WorkerConnectionIdentity,
-    request: WorkerGatewayToolCancelParams,
+    request: toolRpc.WorkerGatewayToolCancelParams,
   ) => withToolSurface(identity, (runtime) => runtime.cancel(request));
 
   const refreshGitHubBinding = (identity: WorkerConnectionIdentity, generation?: number) =>

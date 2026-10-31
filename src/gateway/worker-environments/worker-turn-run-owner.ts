@@ -24,7 +24,6 @@ import {
   markDiagnosticRunProgress,
 } from "../../logging/diagnostic-run-activity.js";
 import { getGatewayRestartDrainSignal } from "../../process/gateway-work-admission.js";
-import { safeEqualSecret } from "../../security/secret-equal.js";
 import {
   registerReplyOperationSuccessorBarrier,
   stopReplyOperationForRestart,
@@ -43,7 +42,6 @@ import { sameWorkerSessionTurnClaim } from "./placement-record.js";
 import type { WorkerSessionPlacementStore, WorkerSessionTurnClaim } from "./placement-store.js";
 import { assertWorkerTurnLiveEventInputAdmitted } from "./placement-turn-claim-events.js";
 import { boundedWorkerError } from "./worker-error.js";
-import type { WorkerProcessTurnBinding } from "./worker-turn-rpc.types.js";
 
 export type ActiveWorkerTurn = {
   claim: WorkerSessionTurnClaim;
@@ -391,13 +389,3 @@ export function captureWorkerTurnLiveEventOwner(
   }
   return owner;
 }
-
-export const processTurnBinding = ({ turnClaim, credentialHash }: WorkerConnectionIdentity) =>
-  turnClaim ? { turnClaim, credentialHash } : undefined;
-
-export const matchesTurnBinding = (
-  left: WorkerProcessTurnBinding,
-  right: WorkerProcessTurnBinding,
-): boolean =>
-  sameWorkerSessionTurnClaim(left.turnClaim, right.turnClaim) &&
-  safeEqualSecret(left.credentialHash, right.credentialHash);
