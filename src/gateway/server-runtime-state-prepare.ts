@@ -4,6 +4,7 @@ import { listLoadedChannelPluginsForRegistry } from "../channels/plugins/registr
 import type { ChannelId } from "../channels/plugins/types.public.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import { getRuntimeConfig } from "../config/io.js";
+import { resolveStateDir } from "../config/state-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { loadOrCreateProcessDeviceIdentityAsync } from "../infra/device-identity-async.js";
 import { readDevicePairingNodeSnapshot } from "../infra/device-pairing-store-readonly.js";
@@ -118,11 +119,6 @@ export async function prepareGatewayKernelState(params: {
   ).createHostDesktopService({
     getConfig: () => getRuntimeConfig().desktop?.host,
     registry: desktopSessionRegistry,
-  });
-  // Inert until the Labs switch is on; the switch is reconciled after ready.
-  const openclawIdService = createOpenClawIdService({
-    getConfig: () => getRuntimeConfig().gateway?.openclawId,
-    log: log.child("openclaw-id"),
   });
   const gatewayComputerService = (
     await startupTrace.measure(
@@ -512,6 +508,13 @@ export async function prepareGatewayKernelState(params: {
     }),
   );
   const transportBridge = createGatewayTransportBridge();
+  // Inert until the Labs switch is on; the switch is reconciled after ready.
+  const openclawIdService = createOpenClawIdService({
+    getConfig: () => getRuntimeConfig().gateway?.openclawId,
+    getStateDir: () => resolveStateDir(),
+    getGatewayServer: () => transportBridge.current()?.httpServer,
+    log: log.child("openclaw-id"),
+  });
   const presencePublisher = createPresencePublisher({
     scheduler,
     broadcast: connectionState.broadcast,

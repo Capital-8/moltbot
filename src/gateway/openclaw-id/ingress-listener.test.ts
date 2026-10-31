@@ -1,0 +1,155 @@
+import fs from "node:fs";
+import http, { type IncomingMessage } from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import WebSocket, { WebSocketServer } from "ws";
+import { syntheticPeerAddress } from "../../../packages/openclaw-id-protocol/src/index.js";
+import { prepareGatewayIngressAttribution } from "../ingress-attribution.js";
+import { isLocalDirectRequest } from "../net.js";
+import {
+  startOpenClawIdIngressListener,
+  type OpenClawIdIngressListener,
+} from "./ingress-listener.js";
+
+const PEER_KEY = `iroh:${"ab".repeat(32)}`;
+
+type Seen = {
+  req: IncomingMessage;
+  attribution: ReturnType<typeof prepareGatewayIngressAttribution>;
+};
+
+let dir: string | undefined;
+let started: OpenClawIdIngressListener | undefined;
+let gateway: http.Server | undefined;
+
+afterEach(async () => {
+  await started?.close();
+  gateway?.close();
+  if (dir) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  started = gateway = dir = undefined;
+});
+
+// A stand-in for the Gateway's primary listener: records how the ingress
+// attribution owner classifies each request it receives.
+async function setup() {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocid-ingress-"));
+  const seen: Seen[] = [];
+  gateway = http.createServer((req, res) => {
+    seen.push({ req, attribution: prepareGatewayIngressAttribution({ req }) });
+    res.end("gateway");
+  });
+  const wss = new WebSocketServer({ noServer: true });
+  gateway.on("upgrade", (req, socket, head) => {
+    seen.push({ req, attribution: prepareGatewayIngressAttribution({ req }) });
+    wss.handleUpgrade(req, socket, head, (ws) => ws.close(1000, "ok"));
+  });
+  const log = { warn: vi.fn() };
+  started = await startOpenClawIdIngressListener({
+    socketPath: path.join(dir, "openclaw-id", "ingress.sock"),
+    gatewayServer: () => gateway,
+    log,
+  });
+  return { seen, log, listener: started };
+}
+
+function request(socketPath: string, headers: Record<string, string>) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = http.request({ socketPath, path: "/claw/", headers }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("OpenClaw ID ingress listener", () => {
+  it("listens on a socket only the Gateway user can open", async () => {
+    const { listener } = await setup();
+    if (process.platform !== "win32") {
+      expect(fs.statSync(listener.socketPath).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(path.dirname(listener.socketPath)).mode & 0o777).toBe(0o700);
+    }
+    expect(listener.proxyToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("marks relayed requests as tunnel traffic with the authenticated peer key, never as loopback", async () => {
+    const { seen, listener } = await setup();
+    const response = await request(listener.socketPath, {
+      "x-openclaw-id-proxy-token": listener.proxyToken,
+      "x-openclaw-id-peer-key": PEER_KEY,
+      "x-forwarded-for": "fd69:726f:6800::1",
+    });
+    expect(response).toEqual({ status: 200, body: "gateway" });
+    const { req, attribution } = seen[0]!;
+    expect(attribution).toMatchObject({
+      kind: "openclaw-id-tunnel",
+      peerKey: PEER_KEY,
+      clientIp: await syntheticPeerAddress(PEER_KEY),
+      rateLimit: { subject: { key: `openclaw-id:${PEER_KEY}` } },
+    });
+    expect(isLocalDirectRequest(req)).toBe(false);
+    // The contract headers never reach Gateway handlers or anything they forward to.
+    expect(req.headers["x-openclaw-id-proxy-token"]).toBeUndefined();
+    expect(req.headers["x-openclaw-id-peer-key"]).toBeUndefined();
+    expect(req.rawHeaders.map((name) => name.toLowerCase())).not.toContain(
+      "x-openclaw-id-proxy-token",
+    );
+  });
+
+  it.each<[string, (token: string) => Record<string, string>]>([
+    ["no token", () => ({ "x-openclaw-id-peer-key": PEER_KEY })],
+    [
+      "a wrong token",
+      () => ({ "x-openclaw-id-proxy-token": "x".repeat(43), "x-openclaw-id-peer-key": PEER_KEY }),
+    ],
+    ["no peer key", (token) => ({ "x-openclaw-id-proxy-token": token })],
+    [
+      "a malformed peer key",
+      (token) => ({ "x-openclaw-id-proxy-token": token, "x-openclaw-id-peer-key": "iroh:ZZ" }),
+    ],
+  ])("refuses a request with %s before the Gateway sees it", async (_label, headers) => {
+    const { seen, listener, log } = await setup();
+    const response = await request(listener.socketPath, headers(listener.proxyToken));
+    expect(response.status).toBe(403);
+    expect(seen).toHaveLength(0);
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it("marks relayed WebSocket upgrades and refuses forged ones", async () => {
+    const { seen, listener } = await setup();
+    const open = (headers: Record<string, string>) =>
+      new Promise<number>((resolve) => {
+        const ws = new WebSocket(`ws+unix:${listener.socketPath}:/`, { headers });
+        ws.on("close", (code) => resolve(code));
+        ws.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        ws.on("error", () => {});
+      });
+    expect(
+      await open({ "x-openclaw-id-proxy-token": "forged", "x-openclaw-id-peer-key": PEER_KEY }),
+    ).toBe(403);
+    expect(seen).toHaveLength(0);
+    expect(
+      await open({
+        "x-openclaw-id-proxy-token": listener.proxyToken,
+        "x-openclaw-id-peer-key": PEER_KEY,
+      }),
+    ).toBe(1000);
+    expect(seen[0]!.attribution.kind).toBe("openclaw-id-tunnel");
+  });
+
+  it("issues a new proxy token each time it starts", async () => {
+    const first = (await setup()).listener.proxyToken;
+    await started!.close();
+    started = await startOpenClawIdIngressListener({
+      socketPath: path.join(dir!, "openclaw-id", "ingress.sock"),
+      gatewayServer: () => gateway,
+      log: { warn: vi.fn() },
+    });
+    expect(started.proxyToken).not.toBe(first);
+  });
+});

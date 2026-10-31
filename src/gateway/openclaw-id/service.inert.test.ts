@@ -72,7 +72,12 @@ describe("OpenClaw ID with the Labs switch off", () => {
       },
     ],
   ])("starts no child, opens no sockets and calls no service when %s", async (_label, config) => {
-    const service = createOpenClawIdService({ getConfig: () => config, log });
+    const service = createOpenClawIdService({
+      getConfig: () => config,
+      getStateDir: () => "/nonexistent/openclaw-id-inert-test",
+      getGatewayServer: () => undefined,
+      log,
+    });
 
     await service.reconcileRuntimePolicy();
     expect(service.status()).toEqual({ state: "off" });
@@ -85,7 +90,12 @@ describe("OpenClaw ID with the Labs switch off", () => {
 
   it("returns to inert after the switch turns off again", async () => {
     let config: GatewayOpenClawIdConfig | undefined = { enabled: true };
-    const service = createOpenClawIdService({ getConfig: () => config, log });
+    const service = createOpenClawIdService({
+      getConfig: () => config,
+      getStateDir: () => "/nonexistent/openclaw-id-inert-test",
+      getGatewayServer: () => undefined,
+      log,
+    });
     await service.reconcileRuntimePolicy();
     vi.clearAllMocks();
 

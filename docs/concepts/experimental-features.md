@@ -318,6 +318,26 @@ access**, or in config:
 No service URL has a production default yet; the Gateway reports
 `unconfigured` until `relayUrl` is set. Changes apply without a restart.
 
+### How the tunnel reaches the Gateway
+
+- The Gateway supervises one **tunnel child** process. The child owns the iroh
+  endpoint key (`<state dir>/openclaw-id/endpoint.key`, mode 0600, created on
+  first start and never regenerated; a new key re-links every device). It runs
+  at a lower CPU priority, restarts with a 1 to 30 second backoff, is restarted
+  gracefully above 512 MB RSS, and stops with SIGTERM then SIGKILL after 2
+  seconds. If the iroh binding cannot load on this platform, the Gateway reports
+  remote access unavailable and keeps running.
+- The child admits a device only if the Gateway's membership lists the
+  device's endpoint key, and checks that before accepting any stream. Until a
+  claw is linked, nobody is admitted.
+- The child proxies each stream to a private Gateway ingress: a Unix socket
+  only the Gateway's user can open, plus a per-boot proxy token it receives over
+  the supervisor's IPC channel. It strips client forwarding and identity headers
+  and passes the device key it authenticated in the QUIC handshake.
+- Requests that come through this ingress are always treated as relayed, never
+  as direct loopback, even though they arrive on the local host. Linking a claw
+  and other root ceremonies are allowed only on direct loopback.
+
 ## Local model lean mode
 
 Lean mode is an advanced troubleshooting override, configured outside Labs.

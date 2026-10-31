@@ -31,7 +31,21 @@ export type GatewayTailscaleIngressEndpoint = {
 export type GatewayIngressTransport =
   | { kind: "ordinary" }
   | { kind: "remote-forwarded"; context: RemoteControlUiIngressContext }
-  | { kind: "managed-tailscale"; mode: GatewayTailscaleIngressMode };
+  | { kind: "managed-tailscale"; mode: GatewayTailscaleIngressMode }
+  | OpenClawIdTunnelIngressTransport;
+
+/**
+ * A request relayed by the supervised OpenClaw ID tunnel child. Only the
+ * private ingress listener assigns it, after checking the per-boot proxy token;
+ * the peer key comes from the QUIC handshake, never from a client header.
+ */
+export type OpenClawIdTunnelIngressTransport = {
+  kind: "openclaw-id-tunnel";
+  /** Authenticated device endpoint key W, `iroh:<hex>`. */
+  peerKey: string;
+  /** Synthetic per-device address; never loopback. */
+  clientIp: string;
+};
 
 export type VerifiedTailscaleIngressIdentity = {
   login: string;
@@ -65,6 +79,7 @@ export type GatewayIngressAttribution =
       verifyIdentity: () => Promise<VerifiedTailscaleIngressIdentity | undefined>;
     })
   | (AttributedGatewayIngress & { kind: "tailscale-funnel" })
+  | (AttributedGatewayIngress & { kind: "openclaw-id-tunnel"; peerKey: string })
   | {
       kind: "unattributable-proxy";
       reason: typeof PROXY_ATTRIBUTION_REQUIRED_REASON;
@@ -96,7 +111,10 @@ export function markGatewayIngressTransport(
         existing.context !== transport.context) ||
       (existing.kind === "managed-tailscale" &&
         transport.kind === "managed-tailscale" &&
-        existing.mode !== transport.mode)
+        existing.mode !== transport.mode) ||
+      (existing.kind === "openclaw-id-tunnel" &&
+        transport.kind === "openclaw-id-tunnel" &&
+        existing.peerKey !== transport.peerKey)
     ) {
       throw new Error("Gateway ingress transport was already assigned");
     }
@@ -260,6 +278,19 @@ function resolveGatewayIngressAttribution(params: {
       clientIp: remoteAddress,
       rateLimit: Object.freeze({
         subject: Object.freeze({ key: `remote-control-ui:${transport.context.pluginId}` }),
+        resetOnSuccess: true as const,
+      }),
+    });
+  }
+
+  if (transport.kind === "openclaw-id-tunnel") {
+    // Relayed traffic is never direct loopback, whatever the socket says.
+    return Object.freeze({
+      kind: "openclaw-id-tunnel",
+      clientIp: transport.clientIp,
+      peerKey: transport.peerKey,
+      rateLimit: Object.freeze({
+        subject: Object.freeze({ key: `openclaw-id:${transport.peerKey}` }),
         resetOnSuccess: true as const,
       }),
     });
