@@ -1,0 +1,992 @@
+{
+  "fallbackDetailKeys": [
+    "command",
+    "path",
+    "url",
+    "targetUrl",
+    "targetId",
+    "ref",
+    "element",
+    "node",
+    "nodeId",
+    "id",
+    "requestId",
+    "to",
+    "channelId",
+    "guildId",
+    "userId",
+    "name",
+    "query",
+    "pattern",
+    "messageId"
+  ],
+  "tools": {
+    "bash": {
+      "detailKeys": [
+        "command"
+      ]
+    },
+    "computer": {
+      "detailKeys": [
+        "action",
+        "coordinate",
+        "text",
+        "node",
+        "nodeId",
+        "screenIndex"
+      ]
+    },
+    "mobile_ui": {
+      "detailKeys": [
+        "action",
+        "mobileAction",
+        "snapshotId",
+        "node",
+        "nodeId"
+      ]
+    },
+    "screen": {
+      "detailKeys": [
+        "action",
+        "sessionKey",
+        "dock"
+      ]
+    },
+    "theme": {
+      "detailKeys": [
+        "action",
+        "id",
+        "mode"
+      ]
+    },
+    "terminal": {
+      "detailKeys": [
+        "action",
+        "sessionId",
+        "command",
+        "cwd"
+      ]
+    },
+    "portal": {
+      "detailKeys": [
+        "action",
+        "port",
+        "id",
+        "title",
+        "path"
+      ]
+    },
+    "process": {
+      "detailKeys": [
+        "sessionId"
+      ]
+    },
+    "gateway_process": {
+      "detailKeys": [
+        "action",
+        "sessionId"
+      ]
+    },
+    "read": {
+      "detailKeys": [
+        "path"
+      ]
+    },
+    "write": {
+      "detailKeys": [
+        "path"
+      ]
+    },
+    "edit": {
+      "detailKeys": [
+        "path"
+      ]
+    },
+    "personal_instructions": {
+      "detailKeys": [
+        "action",
+        "agentId"
+      ],
+      "actions": {
+        "get": {
+          "detailKeys": [
+            "agentId"
+          ]
+        },
+        "set": {
+          "detailKeys": [
+            "agentId"
+          ]
+        }
+      }
+    },
+    "attach": {
+      "detailKeys": [
+        "path",
+        "url",
+        "fileName"
+      ]
+    },
+    "api": {
+      "detailKeys": [
+        "url",
+        "endpoint",
+        "path",
+        "method",
+        "name"
+      ]
+    },
+    "browser": {
+      "actions": {
+        "open": {
+          "detailKeys": [
+            "targetUrl"
+          ]
+        },
+        "focus": {
+          "detailKeys": [
+            "targetId"
+          ]
+        },
+        "close": {
+          "detailKeys": [
+            "targetId"
+          ]
+        },
+        "snapshot": {
+          "detailKeys": [
+            "targetUrl",
+            "targetId",
+            "ref",
+            "element",
+            "format"
+          ]
+        },
+        "screenshot": {
+          "detailKeys": [
+            "targetUrl",
+            "targetId",
+            "ref",
+            "element"
+          ]
+        },
+        "navigate": {
+          "detailKeys": [
+            "targetUrl",
+            "targetId"
+          ]
+        },
+        "console": {
+          "detailKeys": [
+            "level",
+            "targetId"
+          ]
+        },
+        "pdf": {
+          "detailKeys": [
+            "targetId"
+          ]
+        },
+        "upload": {
+          "detailKeys": [
+            "paths",
+            "ref",
+            "inputRef",
+            "element",
+            "targetId"
+          ]
+        },
+        "dialog": {
+          "detailKeys": [
+            "accept",
+            "promptText",
+            "targetId"
+          ]
+        },
+        "act": {
+          "detailKeys": [
+            "request.kind",
+            "request.ref",
+            "request.selector",
+            "request.text",
+            "request.value"
+          ]
+        }
+      }
+    },
+    "canvas": {
+      "actions": {
+        "present": {
+          "detailKeys": [
+            "target",
+            "node",
+            "nodeId"
+          ]
+        },
+        "hide": {
+          "detailKeys": [
+            "node",
+            "nodeId"
+          ]
+        },
+        "navigate": {
+          "detailKeys": [
+            "url",
+            "node",
+            "nodeId"
+          ]
+        }
+      }
+    },
+    "dashboard": {
+      "detailKeys": [
+        "action",
+        "tabId",
+        "name",
+        "title"
+      ]
+    },
+    "nodes": {
+      "actions": {
+        "describe": {
+          "detailKeys": [
+            "node",
+            "nodeId"
+          ]
+        },
+        "approve": {
+          "detailKeys": [
+            "requestId"
+          ]
+        },
+        "reject": {
+          "detailKeys": [
+            "requestId"
+          ]
+        },
+        "notify": {
+          "detailKeys": [
+            "node",
+            "nodeId",
+            "title",
+            "body"
+          ]
+        },
+        "camera_snap": {
+          "detailKeys": [
+            "node",
+            "nodeId",
+            "facing",
+            "deviceId"
+          ]
+        },
+        "camera_list": {
+          "detailKeys": [
+            "node",
+            "nodeId"
+          ]
+        },
+        "camera_clip": {
+          "detailKeys": [
+            "node",
+            "nodeId",
+            "facing",
+            "duration",
+            "durationMs"
+          ]
+        },
+        "camera_ptz": {
+          "detailKeys": [
+            "ptzOperation",
+            "node",
+            "nodeId",
+            "deviceId"
+          ]
+        },
+        "screen_record": {
+          "detailKeys": [
+            "node",
+            "nodeId",
+            "duration",
+            "durationMs",
+            "fps",
+            "screenIndex"
+          ]
+        },
+        "screen_snapshot": {
+          "detailKeys": [
+            "node",
+            "nodeId",
+            "screenIndex",
+            "maxWidth"
+          ]
+        }
+      }
+    },
+    "cron": {
+      "actions": {
+        "add": {
+          "detailKeys": [
+            "job.name",
+            "job.id",
+            "job.schedule",
+            "job.cron"
+          ]
+        },
+        "update": {
+          "detailKeys": [
+            "id"
+          ]
+        },
+        "remove": {
+          "detailKeys": [
+            "id"
+          ]
+        },
+        "run": {
+          "detailKeys": [
+            "id"
+          ]
+        },
+        "runs": {
+          "detailKeys": [
+            "id"
+          ]
+        },
+        "wake": {
+          "detailKeys": [
+            "text",
+            "mode"
+          ]
+        }
+      }
+    },
+    "get_goal": {
+      "detailKeys": []
+    },
+    "create_goal": {
+      "detailKeys": [
+        "objective",
+        "token_budget"
+      ]
+    },
+    "update_goal": {
+      "detailKeys": [
+        "status"
+      ]
+    },
+    "ask_user": {
+      "detailKeys": [
+        "questions.0.question"
+      ]
+    },
+    "secrets": {
+      "detailKeys": [
+        "action",
+        "name",
+        "kind"
+      ]
+    },
+    "suggest_task": {
+      "detailKeys": [
+        "title",
+        "tldr",
+        "cwd"
+      ]
+    },
+    "dismiss_task": {
+      "detailKeys": [
+        "task_id",
+        "reason"
+      ]
+    },
+    "skill_workshop": {
+      "detailKeys": [
+        "action",
+        "name",
+        "proposal_id"
+      ]
+    },
+    "openclaw": {
+      "detailKeys": [
+        "action",
+        "path",
+        "model"
+      ]
+    },
+    "gateway": {
+      "detailKeys": [
+        "action",
+        "path"
+      ]
+    },
+    "plugins": {
+      "detailKeys": [
+        "action",
+        "pluginId",
+        "packageName",
+        "query"
+      ]
+    },
+    "exec": {
+      "detailKeys": [
+        "command"
+      ]
+    },
+    "tool_call": {
+      "detailKeys": []
+    },
+    "dispatch_action": {
+      "detailKeys": []
+    },
+    "tool_call_update": {
+      "detailKeys": []
+    },
+    "session_status": {
+      "detailKeys": [
+        "sessionKey",
+        "model"
+      ]
+    },
+    "github_publish": {
+      "detailKeys": [
+        "title"
+      ]
+    },
+    "github_identity_status": {
+      "detailKeys": []
+    },
+    "sessions": {
+      "actions": {
+        "patch": {
+          "detailKeys": [
+            "sessionKey",
+            "label",
+            "pinned",
+            "archived",
+            "model",
+            "thinkingLevel"
+          ]
+        },
+        "group_set": {
+          "detailKeys": [
+            "names"
+          ]
+        },
+        "group_rename": {
+          "detailKeys": [
+            "name",
+            "to"
+          ]
+        },
+        "group_delete": {
+          "detailKeys": [
+            "name"
+          ]
+        }
+      }
+    },
+    "sessions_create": {
+      "detailKeys": [
+        "label",
+        "agentId",
+        "cwd",
+        "group"
+      ]
+    },
+    "sessions_list": {
+      "detailKeys": [
+        "kinds",
+        "label",
+        "agentId",
+        "search",
+        "limit",
+        "activeMinutes",
+        "includeDerivedTitles",
+        "includeLastMessage",
+        "messageLimit"
+      ]
+    },
+    "conversations_list": {
+      "detailKeys": [
+        "channel",
+        "limit"
+      ]
+    },
+    "conversations_send": {
+      "detailKeys": [
+        "conversationRef"
+      ]
+    },
+    "conversations_turn": {
+      "detailKeys": [
+        "conversationRef",
+        "timeoutSeconds"
+      ]
+    },
+    "sessions_send": {
+      "detailKeys": [
+        "label",
+        "sessionKey",
+        "agentId",
+        "timeoutSeconds"
+      ]
+    },
+    "sessions_history": {
+      "detailKeys": [
+        "sessionKey",
+        "limit",
+        "includeTools"
+      ]
+    },
+    "sessions_search": {
+      "detailKeys": [
+        "query",
+        "sessionKey",
+        "limit"
+      ]
+    },
+    "transcripts": {
+      "actions": {
+        "start": {
+          "detailKeys": [
+            "sessionId",
+            "title",
+            "providerId",
+            "accountId",
+            "guildId",
+            "channelId",
+            "meetingUrl"
+          ]
+        },
+        "stop": {
+          "detailKeys": [
+            "sessionId"
+          ]
+        },
+        "import": {
+          "detailKeys": [
+            "sessionId",
+            "title",
+            "providerId",
+            "meetingUrl",
+            "speakerLabel"
+          ]
+        },
+        "summarize": {
+          "detailKeys": [
+            "sessionId"
+          ]
+        }
+      }
+    },
+    "sessions_spawn": {
+      "detailKeys": [
+        "label",
+        "taskName",
+        "agentId",
+        "model",
+        "thinking",
+        "runTimeoutSeconds",
+        "cleanup"
+      ]
+    },
+    "agents_wait": {
+      "detailKeys": [
+        "ids",
+        "timeoutSeconds"
+      ]
+    },
+    "structured_output": {
+      "detailKeys": [
+        "result"
+      ]
+    },
+    "subagents": {
+      "actions": {
+        "list": {
+          "detailKeys": [
+            "recentMinutes"
+          ]
+        },
+        "kill": {
+          "detailKeys": [
+            "target"
+          ]
+        },
+        "steer": {
+          "detailKeys": [
+            "target"
+          ]
+        }
+      }
+    },
+    "agents_list": {
+      "detailKeys": []
+    },
+    "memory_search": {
+      "detailKeys": [
+        "query"
+      ]
+    },
+    "memory_get": {
+      "detailKeys": [
+        "path",
+        "from",
+        "lines"
+      ]
+    },
+    "skills_search": {
+      "detailKeys": [
+        "query"
+      ]
+    },
+    "skills_read": {
+      "detailKeys": [
+        "name"
+      ]
+    },
+    "web_search": {
+      "detailKeys": [
+        "query",
+        "count"
+      ]
+    },
+    "web_fetch": {
+      "detailKeys": [
+        "url",
+        "extractMode",
+        "maxChars"
+      ]
+    },
+    "code_execution": {
+      "detailKeys": [
+        "task"
+      ]
+    },
+    "decision_evaluate": {
+      "detailKeys": []
+    },
+    "message": {
+      "actions": {
+        "send": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "media",
+            "replyTo",
+            "threadId"
+          ]
+        },
+        "poll": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "pollQuestion"
+          ]
+        },
+        "react": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "messageId",
+            "emoji",
+            "remove"
+          ]
+        },
+        "reactions": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "messageId",
+            "limit"
+          ]
+        },
+        "read": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "limit"
+          ]
+        },
+        "edit": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "messageId"
+          ]
+        },
+        "delete": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "messageId"
+          ]
+        },
+        "pin": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "messageId"
+          ]
+        },
+        "unpin": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "messageId"
+          ]
+        },
+        "list-pins": {
+          "detailKeys": [
+            "provider",
+            "to"
+          ]
+        },
+        "permissions": {
+          "detailKeys": [
+            "provider",
+            "channelId",
+            "to"
+          ]
+        },
+        "thread-create": {
+          "detailKeys": [
+            "provider",
+            "channelId",
+            "threadName"
+          ]
+        },
+        "thread-list": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "channelId"
+          ]
+        },
+        "thread-reply": {
+          "detailKeys": [
+            "provider",
+            "channelId",
+            "messageId"
+          ]
+        },
+        "search": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "query"
+          ]
+        },
+        "sticker": {
+          "detailKeys": [
+            "provider",
+            "to",
+            "stickerId"
+          ]
+        },
+        "member-info": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId"
+          ]
+        },
+        "role-info": {
+          "detailKeys": [
+            "provider",
+            "guildId"
+          ]
+        },
+        "emoji-list": {
+          "detailKeys": [
+            "provider",
+            "guildId"
+          ]
+        },
+        "emoji-upload": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "emojiName"
+          ]
+        },
+        "sticker-upload": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "stickerName"
+          ]
+        },
+        "role-add": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId",
+            "roleId"
+          ]
+        },
+        "role-remove": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId",
+            "roleId"
+          ]
+        },
+        "channel-info": {
+          "detailKeys": [
+            "provider",
+            "channelId"
+          ]
+        },
+        "channel-list": {
+          "detailKeys": [
+            "provider",
+            "guildId"
+          ]
+        },
+        "voice-status": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId"
+          ]
+        },
+        "event-list": {
+          "detailKeys": [
+            "provider",
+            "guildId"
+          ]
+        },
+        "event-create": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "eventName"
+          ]
+        },
+        "timeout": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId"
+          ]
+        },
+        "kick": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId"
+          ]
+        },
+        "ban": {
+          "detailKeys": [
+            "provider",
+            "guildId",
+            "userId"
+          ]
+        }
+      }
+    },
+    "apply_patch": {
+      "detailKeys": []
+    },
+    "image": {
+      "detailKeys": [
+        "path",
+        "paths",
+        "url",
+        "urls",
+        "prompt",
+        "model"
+      ]
+    },
+    "view_image": {
+      "detailKeys": [
+        "path",
+        "paths",
+        "url",
+        "urls",
+        "prompt",
+        "model"
+      ]
+    },
+    "image_generate": {
+      "actions": {
+        "generate": {
+          "detailKeys": [
+            "prompt",
+            "model",
+            "count",
+            "resolution",
+            "aspectRatio"
+          ]
+        },
+        "list": {
+          "detailKeys": [
+            "provider",
+            "model"
+          ]
+        }
+      }
+    },
+    "music_generate": {
+      "actions": {
+        "generate": {
+          "detailKeys": [
+            "prompt",
+            "model",
+            "durationSeconds",
+            "format",
+            "instrumental"
+          ]
+        },
+        "list": {
+          "detailKeys": [
+            "provider",
+            "model"
+          ]
+        }
+      }
+    },
+    "video_generate": {
+      "actions": {
+        "generate": {
+          "detailKeys": [
+            "prompt",
+            "model",
+            "durationSeconds",
+            "resolution",
+            "aspectRatio",
+            "audio",
+            "watermark"
+          ]
+        },
+        "list": {
+          "detailKeys": [
+            "provider",
+            "model"
+          ]
+        }
+      }
+    },
+    "pdf": {
+      "detailKeys": [
+        "path",
+        "paths",
+        "url",
+        "urls",
+        "prompt",
+        "pageRange",
+        "model"
+      ]
+    },
+    "tts": {
+      "detailKeys": [
+        "text",
+        "channel"
+      ]
+    }
+  }
+}

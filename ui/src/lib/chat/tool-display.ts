@@ -1,11 +1,11 @@
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import SHARED_TOOL_DISPLAY_JSON from "../../../../apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/tool-display.json" with { type: "json" };
 import { unwrapToolCallForDisplay } from "../../../../src/agents/tool-display-call.js";
 import {
   resolveToolDetailForArgs,
   type ToolDisplaySpec,
 } from "../../../../src/agents/tool-display-common.js";
 import type { ToolDetailMode } from "../../../../src/agents/tool-display-exec.js";
+import TOOL_DISPLAY_DETAILS from "./tool-display-details.generated.json" with { type: "json" };
 import { resolveToolDisplayIdentity } from "./tool-display-identity.ts";
 
 type ToolDisplay = {
@@ -15,8 +15,8 @@ type ToolDisplay = {
   detail?: string;
 };
 
-const FALLBACK = SHARED_TOOL_DISPLAY_JSON.fallback;
-const TOOL_MAP: Record<string, ToolDisplaySpec> = SHARED_TOOL_DISPLAY_JSON.tools;
+const TOOL_MAP: Readonly<Record<string, Pick<ToolDisplaySpec, "detailKeys" | "actions">>> =
+  TOOL_DISPLAY_DETAILS.tools;
 
 function shortenHomeInString(input: string): string {
   // Browser-safe home shortening: avoid importing Node-only helpers (keeps Vite builds working in Docker/CI).
@@ -33,12 +33,12 @@ export function resolveToolDisplay(params: {
   const call = unwrapToolCallForDisplay({ name: params.name, args: params.args });
   const { name, label, icon } = resolveToolDisplayIdentity(call.name);
   const key = normalizeLowercaseStringOrEmpty(name);
-  const spec = TOOL_MAP[key];
+  const spec = Object.hasOwn(TOOL_MAP, key) ? TOOL_MAP[key] : undefined;
   let detail = resolveToolDetailForArgs({
     toolKey: key,
     args: call.args,
     spec,
-    fallbackDetailKeys: FALLBACK.detailKeys,
+    fallbackDetailKeys: TOOL_DISPLAY_DETAILS.fallbackDetailKeys,
     detailMode: "first",
     toolDetailMode: params.detailMode,
     detailCoerce: { includeFalsy: true },

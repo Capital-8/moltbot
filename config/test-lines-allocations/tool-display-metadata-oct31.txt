@@ -1,0 +1,2 @@
+# Canonical identity parity, sparse detail semantics, and generated-snapshot CI routing.
+54

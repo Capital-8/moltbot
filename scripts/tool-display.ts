@@ -29,39 +29,53 @@ if (!shouldCheck && !shouldWrite) {
   process.exit(1);
 }
 
-const expected = serializeToolDisplayConfig();
+const outputs = [
+  { path: outputPath, expected: serializeToolDisplayConfig() },
+  {
+    path: path.join(repoRoot, "ui/src/lib/chat/tool-display-identity.generated.json"),
+    expected: serializeToolDisplayIdentity(),
+  },
+  {
+    path: path.join(repoRoot, "ui/src/lib/chat/tool-display-details.generated.json"),
+    expected: serializeToolDisplayDetails(),
+  },
+];
 ensureCoreToolCoverage();
 
-if (shouldWrite) {
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, expected);
-  process.stdout.write(`wrote ${path.relative(repoRoot, outputPath)}\n`);
-  process.exit(0);
+for (const output of outputs) {
+  if (shouldWrite) {
+    fs.mkdirSync(path.dirname(output.path), { recursive: true });
+    fs.writeFileSync(output.path, output.expected);
+    process.stdout.write(`wrote ${path.relative(repoRoot, output.path)}\n`);
+    continue;
+  }
+
+  if (!fs.existsSync(path.dirname(output.path))) {
+    process.stdout.write(
+      `skip tool-display snapshot check; missing ${path.relative(repoRoot, path.dirname(output.path))}\n`,
+    );
+    continue;
+  }
+
+  if (!fs.existsSync(output.path)) {
+    console.error(
+      `missing generated snapshot: ${path.relative(repoRoot, output.path)}\nrun: pnpm tool-display:write`,
+    );
+    process.exit(1);
+  }
+
+  const actual = fs.readFileSync(output.path, "utf8");
+  if (actual !== output.expected) {
+    console.error(
+      `tool-display snapshot is stale: ${path.relative(repoRoot, output.path)}\nrun: pnpm tool-display:write`,
+    );
+    process.exit(1);
+  }
 }
 
-if (!fs.existsSync(path.dirname(outputPath))) {
-  process.stdout.write(
-    `skip tool-display snapshot check; missing ${path.relative(repoRoot, path.dirname(outputPath))}\n`,
-  );
-  process.exit(0);
+if (!shouldWrite) {
+  process.stdout.write("tool-display snapshots are up to date\n");
 }
-
-if (!fs.existsSync(outputPath)) {
-  console.error(
-    `missing generated snapshot: ${path.relative(repoRoot, outputPath)}\nrun: pnpm tool-display:write`,
-  );
-  process.exit(1);
-}
-
-const actual = fs.readFileSync(outputPath, "utf8");
-if (actual !== expected) {
-  console.error(
-    `tool-display snapshot is stale: ${path.relative(repoRoot, outputPath)}\nrun: pnpm tool-display:write`,
-  );
-  process.exit(1);
-}
-
-process.stdout.write("tool-display snapshot is up to date\n");
 
 function ensureCoreToolCoverage() {
   const toolNames = new Set<string>();
@@ -108,4 +122,44 @@ function serializeToolDisplayConfig(config: ToolDisplayConfig = TOOL_DISPLAY_CON
     "}",
     "",
   ].join("\n");
+}
+
+function serializeToolDisplayIdentity(config: ToolDisplayConfig = TOOL_DISPLAY_CONFIG): string {
+  return `${JSON.stringify(
+    {
+      fallbackIcon: config.fallback.icon,
+      tools: Object.fromEntries(
+        Object.entries(config.tools).map(([name, spec]) => [
+          name,
+          { icon: spec.icon, label: spec.label ?? spec.title },
+        ]),
+      ),
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function serializeToolDisplayDetails(config: ToolDisplayConfig = TOOL_DISPLAY_CONFIG): string {
+  const tools = Object.fromEntries(
+    Object.entries(config.tools).flatMap(([name, spec]) => {
+      // Browser details only read keys; action labels stay in the native catalog.
+      const actions = Object.entries(spec.actions ?? {}).flatMap(([action, { detailKeys }]) =>
+        detailKeys === undefined ? [] : [[action, { detailKeys }]],
+      );
+      if (spec.detailKeys === undefined && actions.length === 0) {
+        return [];
+      }
+      return [
+        [
+          name,
+          {
+            detailKeys: spec.detailKeys,
+            actions: actions.length ? Object.fromEntries(actions) : undefined,
+          },
+        ],
+      ];
+    }),
+  );
+  return `${JSON.stringify({ fallbackDetailKeys: config.fallback.detailKeys, tools }, null, 2)}\n`;
 }

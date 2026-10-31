@@ -1,0 +1,297 @@
+{
+  "fallbackIcon": "puzzle",
+  "tools": {
+    "bash": {
+      "icon": "squareTerminal",
+      "label": "Bash"
+    },
+    "computer": {
+      "icon": "monitor",
+      "label": "Computer"
+    },
+    "mobile_ui": {
+      "icon": "monitorSmartphone",
+      "label": "Mobile UI"
+    },
+    "screen": {
+      "icon": "monitor",
+      "label": "Screen"
+    },
+    "theme": {
+      "icon": "palette",
+      "label": "Theme"
+    },
+    "terminal": {
+      "icon": "squareTerminal",
+      "label": "Terminal"
+    },
+    "portal": {
+      "icon": "globe",
+      "label": "Portal"
+    },
+    "process": {
+      "icon": "squareTerminal",
+      "label": "Process"
+    },
+    "gateway_process": {
+      "icon": "squareTerminal",
+      "label": "Background Shell"
+    },
+    "read": {
+      "icon": "fileText",
+      "label": "Read"
+    },
+    "write": {
+      "icon": "edit",
+      "label": "Write"
+    },
+    "edit": {
+      "icon": "penLine",
+      "label": "Edit"
+    },
+    "personal_instructions": {
+      "icon": "penLine",
+      "label": "Personal Instructions"
+    },
+    "presence": {
+      "icon": "radio",
+      "label": "Presence"
+    },
+    "attach": {
+      "icon": "paperclip",
+      "label": "Attach"
+    },
+    "api": {
+      "icon": "globe",
+      "label": "API"
+    },
+    "browser": {
+      "icon": "globe",
+      "label": "Browser"
+    },
+    "canvas": {
+      "icon": "image",
+      "label": "Canvas"
+    },
+    "dashboard": {
+      "icon": "layoutDashboard",
+      "label": "Dashboard"
+    },
+    "nodes": {
+      "icon": "monitorSmartphone",
+      "label": "Nodes"
+    },
+    "cron": {
+      "icon": "calendarClock",
+      "label": "Cron"
+    },
+    "get_goal": {
+      "icon": "target",
+      "label": "Get Goal"
+    },
+    "create_goal": {
+      "icon": "target",
+      "label": "Create Goal"
+    },
+    "update_goal": {
+      "icon": "target",
+      "label": "Update Goal"
+    },
+    "progress_card": {
+      "icon": "listChecks",
+      "label": "Progress Card"
+    },
+    "ask_user": {
+      "icon": "shieldQuestion",
+      "label": "Ask User"
+    },
+    "secrets": {
+      "icon": "key",
+      "label": "Secrets"
+    },
+    "suggest_task": {
+      "icon": "spark",
+      "label": "Suggest Task"
+    },
+    "dismiss_task": {
+      "icon": "trash",
+      "label": "Dismiss Task"
+    },
+    "skill_workshop": {
+      "icon": "wrench",
+      "label": "Skill Workshop"
+    },
+    "openclaw": {
+      "icon": "claw",
+      "label": "OpenClaw"
+    },
+    "gateway": {
+      "icon": "plug",
+      "label": "Gateway"
+    },
+    "plugins": {
+      "icon": "puzzle",
+      "label": "Plugins"
+    },
+    "exec": {
+      "icon": "squareTerminal",
+      "label": "Exec"
+    },
+    "tool_call": {
+      "icon": "wrench",
+      "label": "Tool Call"
+    },
+    "dispatch_action": {
+      "icon": "wrench",
+      "label": "Tool Call"
+    },
+    "tool_call_update": {
+      "icon": "wrench",
+      "label": "Tool Call"
+    },
+    "session_status": {
+      "icon": "barChart",
+      "label": "Session Status"
+    },
+    "github_publish": {
+      "icon": "github",
+      "label": "GitHub Publish"
+    },
+    "github_identity_status": {
+      "icon": "settings",
+      "label": "GitHub Identity Status"
+    },
+    "sessions": {
+      "icon": "layers",
+      "label": "Session Settings"
+    },
+    "sessions_create": {
+      "icon": "layers",
+      "label": "New session"
+    },
+    "sessions_list": {
+      "icon": "layers",
+      "label": "Sessions"
+    },
+    "conversations_list": {
+      "icon": "messageSquare",
+      "label": "Conversations"
+    },
+    "conversations_send": {
+      "icon": "send",
+      "label": "Conversation Send"
+    },
+    "conversations_turn": {
+      "icon": "arrowLeftRight",
+      "label": "Conversation Turn"
+    },
+    "sessions_send": {
+      "icon": "send",
+      "label": "Session Send"
+    },
+    "sessions_history": {
+      "icon": "fileText",
+      "label": "Session History"
+    },
+    "sessions_search": {
+      "icon": "search",
+      "label": "Session Search"
+    },
+    "transcripts": {
+      "icon": "mic",
+      "label": "Transcripts"
+    },
+    "sessions_spawn": {
+      "icon": "bot",
+      "label": "Sub-agent"
+    },
+    "agents_wait": {
+      "icon": "clock",
+      "label": "Wait for Agents"
+    },
+    "structured_output": {
+      "icon": "fileText",
+      "label": "Structured Output"
+    },
+    "subagents": {
+      "icon": "users",
+      "label": "Subagents"
+    },
+    "agents_list": {
+      "icon": "users",
+      "label": "Agents"
+    },
+    "memory_search": {
+      "icon": "search",
+      "label": "Memory Search"
+    },
+    "memory_get": {
+      "icon": "brain",
+      "label": "Memory Get"
+    },
+    "skills_search": {
+      "icon": "search",
+      "label": "Skill Search"
+    },
+    "skills_read": {
+      "icon": "fileText",
+      "label": "Skill Read"
+    },
+    "web_search": {
+      "icon": "search",
+      "label": "Web Search"
+    },
+    "web_fetch": {
+      "icon": "globe",
+      "label": "Web Fetch"
+    },
+    "code_execution": {
+      "icon": "braces",
+      "label": "Code Execution"
+    },
+    "decision_evaluate": {
+      "icon": "shieldCheck",
+      "label": "Decision Evaluation"
+    },
+    "message": {
+      "icon": "mail",
+      "label": "Message"
+    },
+    "apply_patch": {
+      "icon": "fileDiff",
+      "label": "Apply Patch"
+    },
+    "image": {
+      "icon": "image",
+      "label": "Image"
+    },
+    "view_image": {
+      "icon": "image",
+      "label": "View Image"
+    },
+    "image_generate": {
+      "icon": "image",
+      "label": "Image Generation"
+    },
+    "music_generate": {
+      "icon": "music",
+      "label": "Music Generation"
+    },
+    "video_generate": {
+      "icon": "play",
+      "label": "Video Generation"
+    },
+    "pdf": {
+      "icon": "fileText",
+      "label": "PDF"
+    },
+    "sessions_yield": {
+      "icon": "pause",
+      "label": "Yield"
+    },
+    "tts": {
+      "icon": "audioLines",
+      "label": "TTS"
+    }
+  }
+}

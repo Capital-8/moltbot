@@ -19,6 +19,8 @@ it.each(
       checkTasks: expect.arrayContaining(["bundled-channel-config-metadata"]),
     },
     [`${kit}/OpenClawKit/Resources/tool-display.json`]: { checkTasks: ["guards"] },
+    "ui/src/lib/chat/tool-display-identity.generated.json": { checkTasks: ["guards"] },
+    "ui/src/lib/chat/tool-display-details.generated.json": { checkTasks: ["guards"] },
     "docs/providers/new-provider.md": { fastTasks: [], baselineRatchets: true },
     "docs/.generated/sqlite-session-transcript-schema-baseline.sha256": {
       additionalGroups: ["source-contracts"],

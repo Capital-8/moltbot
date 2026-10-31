@@ -57,6 +57,34 @@ describe("tool display", () => {
       detail: "with AKIDABCDEFGHIJKLMNOP1234567890",
     },
     {
+      name: "action-specific keys before fallback keys",
+      params: {
+        name: "browser",
+        args: { action: "open", command: "not selected", targetUrl: "https://example.test" },
+      },
+      detail: "with https://example.test",
+    },
+    {
+      name: "label-only actions retaining fallback keys",
+      params: { name: "browser", args: { action: "status", path: "/workspace/status" } },
+      detail: "with /workspace/status",
+    },
+    {
+      name: "tools without detail metadata retaining fallback keys",
+      params: { name: "presence", args: { path: "/workspace/presence" } },
+      detail: "with /workspace/presence",
+    },
+    {
+      name: "explicitly empty detail keys suppressing fallback",
+      params: { name: "tool_call", args: { command: "not selected" } },
+      detail: undefined,
+    },
+    {
+      name: "prototype-named unknown-tool fallback",
+      params: { name: "__proto__", args: { path: "/workspace/prototype" } },
+      detail: "with /workspace/prototype",
+    },
+    {
       name: "raw command detail",
       params: {
         name: "exec",

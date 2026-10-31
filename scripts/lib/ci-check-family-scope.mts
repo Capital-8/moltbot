@@ -96,8 +96,11 @@ export function resolveCiCheckFamilyScope(changedPaths: readonly string[]): CiCh
   const nativeSchema = paths.includes(
     "apps/shared/OpenClawKit/Sources/OpenClawNativeState/OpenClawNativeStateSQLite.swift",
   );
-  const toolDisplaySnapshot = paths.includes(
-    "apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/tool-display.json",
+  const toolDisplaySnapshot = paths.some(
+    (path) =>
+      path === "apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/tool-display.json" ||
+      path === "ui/src/lib/chat/tool-display-identity.generated.json" ||
+      path === "ui/src/lib/chat/tool-display-details.generated.json",
   );
   const nativeStorage = matches(/^apps\/macos\/Sources\/OpenClaw\/.*\.swift$/u);
   const schemaBaseline = paths.includes(
