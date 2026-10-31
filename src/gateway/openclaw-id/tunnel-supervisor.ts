@@ -66,6 +66,8 @@ export type TunnelSupervisorStatus =
       endpointKey: string;
       relayUrl: string;
       relayOnline: boolean;
+      /** The relay's reason when it refused this claw's endpoint; null otherwise. */
+      relayDenied: string | null;
       connections: number;
       restarts: number;
     }
@@ -211,6 +213,7 @@ export function createTunnelSupervisor(params: {
           endpointKey: message.endpointKey,
           relayUrl: message.relayUrl,
           relayOnline: false,
+          relayDenied: null,
           connections: 0,
           restarts,
         });
@@ -235,6 +238,7 @@ export function createTunnelSupervisor(params: {
         setStatus({
           ...status,
           relayOnline: message.relayOnline,
+          relayDenied: message.relayDenied ?? null,
           connections: message.connections,
         });
       }

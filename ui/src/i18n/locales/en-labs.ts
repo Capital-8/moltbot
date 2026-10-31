@@ -135,6 +135,9 @@ const enLabs = {
       removeFailed: "Couldn't remove this member",
       noOwnerKey:
         "This browser has no owner device key for this claw. Remove members from an owner device.",
+      relayDenied: "Relay refused this claw",
+      relayDeniedHint:
+        "The relay only admits claws published to OpenClaw ID. Once this claw is published with an enrollment code, it connects on its own.",
       unavailableRetry:
         "Remote access needs the iroh binding for this platform. The Gateway checks again every minute.",
       invites: {

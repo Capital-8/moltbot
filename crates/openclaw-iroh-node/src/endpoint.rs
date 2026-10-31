@@ -3,11 +3,12 @@
 use std::{str::FromStr, sync::Arc};
 
 use iroh::{
-    Endpoint as IrohEndpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
-    endpoint::presets,
+    Endpoint as IrohEndpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, Watcher,
+    endpoint::{RelayStatus, presets},
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use tokio::sync::{Mutex, watch};
 
 use crate::{conn::Connection, js_err};
 
@@ -68,6 +69,48 @@ pub struct ConnectOptions {
     pub direct_addrs: Option<Vec<String>>,
 }
 
+/// Connection state of one home relay.
+#[napi(object)]
+#[derive(Clone)]
+pub struct HomeRelayStatus {
+    /// Relay URL.
+    pub url: String,
+    /// True while attached to the relay.
+    pub connected: bool,
+    /// Most recent connection error, for display only.
+    pub last_error: Option<String>,
+    /// Set when the relay refused this endpoint's admission; retrying will not help
+    /// until the relay's access policy changes.
+    pub auth_denied_reason: Option<String>,
+}
+
+fn home_relay_statuses(list: Vec<RelayStatus>) -> Vec<HomeRelayStatus> {
+    list.iter()
+        .map(|status| HomeRelayStatus {
+            url: status.url().to_string(),
+            connected: status.is_connected(),
+            last_error: status.last_error().map(|error| format!("{error:#}")),
+            auth_denied_reason: status.auth_denied_reason().map(ToOwned::to_owned),
+        })
+        .collect()
+}
+
+/// Follows home relay status changes; see `Endpoint.watchHomeRelay`.
+#[napi]
+pub struct HomeRelayWatcher(Mutex<watch::Receiver<Vec<HomeRelayStatus>>>);
+
+#[napi]
+impl HomeRelayWatcher {
+    /// Resolves with the status: at once on the first call, then after each change.
+    /// Resolves null once the endpoint is gone.
+    #[napi]
+    pub async fn next(&self) -> Option<Vec<HomeRelayStatus>> {
+        let mut rx = self.0.lock().await;
+        rx.changed().await.ok()?;
+        Some(rx.borrow_and_update().clone())
+    }
+}
+
 /// A bound iroh endpoint.
 #[napi]
 pub struct Endpoint(Arc<IrohEndpoint>);
@@ -94,6 +137,28 @@ impl Endpoint {
     #[napi]
     pub async fn online(&self) {
         self.0.online().await;
+    }
+
+    /// Current status of each home relay (empty before one is selected).
+    #[napi]
+    pub fn home_relay_status(&self) -> Vec<HomeRelayStatus> {
+        home_relay_statuses(self.0.home_relay_status().get())
+    }
+
+    /// Starts following home relay status, including a relay-side admission denial.
+    #[napi]
+    pub async fn watch_home_relay(&self) -> HomeRelayWatcher {
+        let mut source = self.0.home_relay_status();
+        let (tx, mut rx) = watch::channel(home_relay_statuses(source.get()));
+        rx.mark_changed();
+        tokio::spawn(async move {
+            while let Ok(list) = source.updated().await {
+                if tx.send(home_relay_statuses(list)).is_err() {
+                    break;
+                }
+            }
+        });
+        HomeRelayWatcher(Mutex::new(rx))
     }
 
     /// Waits for the next incoming connection and completes its handshake.

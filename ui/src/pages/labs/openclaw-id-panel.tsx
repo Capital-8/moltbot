@@ -40,6 +40,9 @@ function tunnelPresentation(status: OpenClawIdStatusResult["status"]): {
   const tunnel: OpenClawIdTunnelStatus = status.tunnel;
   switch (tunnel.state) {
     case "running":
+      if (tunnel.relayDenied) {
+        return { kind: "danger", label: t("labsPage.openclawId.relayDenied") };
+      }
       return tunnel.relayOnline
         ? {
             kind: "ok",
@@ -66,6 +69,9 @@ function tunnelHint(status: OpenClawIdStatusResult["status"]): string | undefine
     return undefined;
   }
   const tunnel = status.tunnel;
+  if (tunnel.state === "running" && tunnel.relayDenied) {
+    return t("labsPage.openclawId.relayDeniedHint");
+  }
   if (tunnel.state === "unavailable" && tunnel.retryInMs !== undefined) {
     return t("labsPage.openclawId.unavailableRetry");
   }

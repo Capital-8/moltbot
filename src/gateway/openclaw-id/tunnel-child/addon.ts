@@ -30,11 +30,25 @@ export type IrohConnection = {
   rttMs(): number | null;
 };
 
+/** Connection state of one home relay. */
+export type IrohHomeRelayStatus = {
+  url: string;
+  connected: boolean;
+  lastError?: string | null;
+  /** Set when the relay refused this endpoint's admission. */
+  authDeniedReason?: string | null;
+};
+
+/** Follows home relay status: the first `next` resolves at once, later ones on change. */
+export type IrohHomeRelayWatcher = { next(): Promise<IrohHomeRelayStatus[] | null> };
+
 /** A bound endpoint. */
 export type IrohEndpoint = {
   id(): string;
   boundSockets(): string[];
   online(): Promise<void>;
+  /** Missing from bindings built before relay status was exposed. */
+  watchHomeRelay?(): Promise<IrohHomeRelayWatcher>;
   accept(): Promise<IrohConnection | null>;
   close(): Promise<void>;
 };

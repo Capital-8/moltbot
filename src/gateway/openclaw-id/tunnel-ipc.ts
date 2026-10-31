@@ -48,8 +48,16 @@ export type TunnelReadyMessage = {
 /** Answer to `ping`, with the child's resident set size. */
 export type TunnelPongMessage = { type: "pong"; id: number; rssBytes: number };
 
-/** Relay attachment and live connection counts. */
-export type TunnelStateMessage = { type: "state"; relayOnline: boolean; connections: number };
+/**
+ * Relay attachment and live connection counts. `relayDenied` carries the relay's
+ * reason when it refused this claw's endpoint (not yet admitted by Discovery).
+ */
+export type TunnelStateMessage = {
+  type: "state";
+  relayOnline: boolean;
+  connections: number;
+  relayDenied?: string | null;
+};
 
 /** Child -> Gateway. */
 export type TunnelToGatewayMessage = TunnelReadyMessage | TunnelPongMessage | TunnelStateMessage;
@@ -79,7 +87,12 @@ export function parseTunnelToGatewayMessage(value: unknown): TunnelToGatewayMess
         : undefined;
     case "state":
       return typeof message.relayOnline === "boolean" && typeof message.connections === "number"
-        ? { type: "state", relayOnline: message.relayOnline, connections: message.connections }
+        ? {
+            type: "state",
+            relayOnline: message.relayOnline,
+            connections: message.connections,
+            relayDenied: typeof message.relayDenied === "string" ? message.relayDenied : null,
+          }
         : undefined;
     default:
       return undefined;

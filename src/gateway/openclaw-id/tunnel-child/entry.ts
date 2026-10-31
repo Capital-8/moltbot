@@ -9,8 +9,9 @@ import {
   type TunnelStartMessage,
   type TunnelToGatewayMessage,
 } from "../tunnel-ipc.js";
-import { loadIrohBinding, type IrohBinding } from "./addon.js";
+import { loadIrohBinding, type IrohBinding, type IrohEndpoint } from "./addon.js";
 import { KeyFileRefusedError, loadOrCreateEndpointKey, logFingerprint } from "./keyfile.js";
+import { nextRelayState, type RelayState } from "./relay-state.js";
 import { IngressServer, TUNNEL_ALPN_BYTES } from "./server.js";
 
 function log(message: string): void {
@@ -48,13 +49,22 @@ async function serve(
     proxyToken: start.ingress.proxyToken,
     forwardedProto: start.forwardedProto,
     log,
-    onConnectionsChanged: (connections) => send({ type: "state", relayOnline, connections }),
+    onConnectionsChanged: (connections) =>
+      send({ type: "state", relayOnline, connections, relayDenied }),
   });
   let relayOnline = false;
-  void endpoint.online().then(() => {
-    relayOnline = true;
-    log("relay online");
-    send({ type: "state", relayOnline, connections: server.connectionCount() });
+  let relayDenied: string | null = null;
+  const report = () =>
+    send({ type: "state", relayOnline, connections: server.connectionCount(), relayDenied });
+  followHomeRelay(endpoint, ({ online, denied }) => {
+    if (denied !== null && relayDenied === null) {
+      log(`relay refused this endpoint: ${denied}`);
+    } else if (online && !relayOnline) {
+      log("relay online");
+    }
+    relayOnline = online;
+    relayDenied = denied;
+    report();
   });
 
   const handle = (message: GatewayToTunnelMessage) => {
@@ -77,6 +87,25 @@ async function serve(
     keyCreated: created,
   });
   await server.run();
+}
+
+// Reports relay attachment and relay-side admission denials as they change.
+// Bindings without the relay watcher only report coming online.
+function followHomeRelay(endpoint: IrohEndpoint, onChange: (state: RelayState) => void): void {
+  if (!endpoint.watchHomeRelay) {
+    void endpoint.online().then(() => onChange({ online: true, denied: null }));
+    return;
+  }
+  void endpoint.watchHomeRelay().then(async (watcher) => {
+    let state: RelayState = { online: false, denied: null };
+    for (let list = await watcher.next(); list; list = await watcher.next()) {
+      const next = nextRelayState(state, list);
+      if (next.online !== state.online || next.denied !== state.denied) {
+        state = next;
+        onChange(state);
+      }
+    }
+  });
 }
 
 // SIGTERM/SIGINT: close connections with `shutdown` and the endpoint, then exit 0.

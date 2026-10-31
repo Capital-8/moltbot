@@ -837,6 +837,7 @@ module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __n
 module.exports = nativeBinding
 module.exports.Connection = nativeBinding.Connection
 module.exports.Endpoint = nativeBinding.Endpoint
+module.exports.HomeRelayWatcher = nativeBinding.HomeRelayWatcher
 module.exports.RecvStream = nativeBinding.RecvStream
 module.exports.SendStream = nativeBinding.SendStream
 module.exports.bind = nativeBinding.bind

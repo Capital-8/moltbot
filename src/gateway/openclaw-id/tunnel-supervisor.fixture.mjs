@@ -30,7 +30,11 @@ process.on("message", (message) => {
       relayUrl: message.relayUrl,
       keyCreated: true,
     });
-    process.send({ type: "state", relayOnline: true, connections: 2 });
+    process.send(
+      mode === "denied"
+        ? { type: "state", relayOnline: false, connections: 0, relayDenied: "not authorized" }
+        : { type: "state", relayOnline: true, connections: 2 },
+    );
     return;
   }
   if (message.type === "membership") {

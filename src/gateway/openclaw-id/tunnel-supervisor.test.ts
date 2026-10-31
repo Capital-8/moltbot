@@ -80,12 +80,28 @@ describe("tunnel child supervisor", () => {
       expect.objectContaining({ endpointKey: `iroh:${"ab".repeat(32)}`, keyCreated: true }),
     );
     await vi.waitFor(() =>
-      expect(supervisor.status()).toMatchObject({ relayOnline: true, connections: 2 }),
+      expect(supervisor.status()).toMatchObject({
+        relayOnline: true,
+        relayDenied: null,
+        connections: 2,
+      }),
     );
     await vi.waitFor(() =>
       expect(log.info).toHaveBeenCalledWith(
         "tunnel: fake child up relay=https://relay.example.test/",
       ),
+    );
+  });
+
+  it("reports a relay admission denial as its own status", async () => {
+    const { supervisor } = setup("denied");
+    supervisor.start();
+    await vi.waitFor(() =>
+      expect(supervisor.status()).toMatchObject({
+        state: "running",
+        relayOnline: false,
+        relayDenied: "not authorized",
+      }),
     );
   });
 

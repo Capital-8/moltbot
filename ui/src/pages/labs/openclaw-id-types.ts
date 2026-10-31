@@ -9,6 +9,8 @@ export type OpenClawIdTunnelStatus =
       endpointKey: string;
       relayUrl: string;
       relayOnline: boolean;
+      /** The relay's reason when it refused this claw (not yet admitted by Discovery). */
+      relayDenied?: string | null;
       connections: number;
       restarts: number;
     }

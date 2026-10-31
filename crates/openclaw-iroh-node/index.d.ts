@@ -37,6 +37,10 @@ export declare class Endpoint {
   boundSockets(): Array<string>
   /** Resolves once the endpoint is attached to its home relay. */
   online(): Promise<void>
+  /** Current status of each home relay (empty before one is selected). */
+  homeRelayStatus(): Array<HomeRelayStatus>
+  /** Starts following home relay status, including a relay-side admission denial. */
+  watchHomeRelay(): Promise<HomeRelayWatcher>
   /**
    * Waits for the next incoming connection and completes its handshake.
    * Resolves null once the endpoint is closed. A failed handshake rejects; call again.
@@ -46,6 +50,15 @@ export declare class Endpoint {
   connect(endpointId: string, alpn: Uint8Array, opts?: ConnectOptions | undefined | null): Promise<Connection>
   /** Closes all connections and the endpoint. */
   close(): Promise<void>
+}
+
+/** Follows home relay status changes; see `Endpoint.watchHomeRelay`. */
+export declare class HomeRelayWatcher {
+  /**
+   * Resolves with the status: at once on the first call, then after each change.
+   * Resolves null once the endpoint is gone.
+   */
+  next(): Promise<Array<HomeRelayStatus> | null>
 }
 
 /** Receiving half of a bidirectional stream. */
@@ -103,4 +116,19 @@ export interface ConnectOptions {
   relayUrl?: string
   /** Known direct UDP addresses (`host:port`) of the remote endpoint. */
   directAddrs?: Array<string>
+}
+
+/** Connection state of one home relay. */
+export interface HomeRelayStatus {
+  /** Relay URL. */
+  url: string
+  /** True while attached to the relay. */
+  connected: boolean
+  /** Most recent connection error, for display only. */
+  lastError?: string
+  /**
+   * Set when the relay refused this endpoint's admission; retrying will not help
+   * until the relay's access policy changes.
+   */
+  authDeniedReason?: string
 }
