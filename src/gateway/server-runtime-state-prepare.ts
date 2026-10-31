@@ -422,6 +422,7 @@ export async function prepareGatewayKernelState(params: {
   });
   const startupState = {
     sidecarsReady: minimalTestGateway,
+    postAttachSettled: false,
     pendingReason: "startup-sidecars",
     dispatchReady: false,
   };
@@ -457,7 +458,10 @@ export async function prepareGatewayKernelState(params: {
   channelManager.setAutostartSuppression(opts.channelAutostartSuppression ?? null);
   const sidecarStartup = opts.sidecarStartup ?? "start";
   const isGatewayStartupPending = () =>
-    (!startupState.dispatchReady || !startupState.sidecarsReady) && !lifecycle.closePreludeStarted;
+    (!startupState.dispatchReady ||
+      !startupState.sidecarsReady ||
+      !startupState.postAttachSettled) &&
+    !lifecycle.closePreludeStarted;
   const startupCheckerDeps = {
     startedAt: serverStartedAt,
     getStartupPending: isGatewayStartupPending,

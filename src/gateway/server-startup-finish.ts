@@ -397,6 +397,11 @@ export async function finishGatewayStartup(params: {
     ),
   );
   postAttachSpanSettled = true;
+  // Do not publish /readyz while the post-attach startup span is still open.
+  // Performance collectors end their startup interval at readiness, so an
+  // earlier response loses the span's terminal CPU sample and reports
+  // incomplete product evidence even though startup settles moments later.
+  startupState.postAttachSettled = true;
   if (postAttachSidecarsReady && sidecarStartup !== "defer") {
     kernel.markSidecarsReady();
   }

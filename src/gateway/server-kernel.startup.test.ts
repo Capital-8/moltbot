@@ -140,6 +140,7 @@ describe("Gateway startup", () => {
             kernel = await startup;
             expect(events).toEqual(["shutdown prepared", "queued task", "core startup"]);
             expect(kernel.startupState.dispatchReady).toBe(false);
+            expect(kernel.startupState.postAttachSettled).toBe(false);
             expect(kernel.lifecycle.closePreludeStarted).toBe(false);
           }
         },
