@@ -24,7 +24,7 @@ import { admitChatHistoryPages } from "./chat-history-snapshot.ts";
 import { commitCurrentChatHistorySnapshot } from "./chat-history-snapshot.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
 import { getChatSessionProjection, reduceChatSessionProjection } from "./history-merge.ts";
-import { readChatSessionSnapshot } from "./session-message-cache.ts";
+import { readChatSessionSnapshot, type ChatMessageCache } from "./session-message-cache.ts";
 
 const commandByName = (name: string) => SLASH_COMMANDS.find((entry) => entry.name === name);
 const commandResult = (name: string) => ({ commands: [remoteCommand(name, name)] });
@@ -199,7 +199,9 @@ describe("local command loading", () => {
     const initial = saved(2);
     const newer = saved(3);
     const older = saved(1);
+    const chatMessagesBySession: ChatMessageCache = new Map();
     const host = makeChatHost({
+      chatMessagesBySession,
       currentSessionId: "session-1",
       renderLifecycle: { afterCommit: () => () => undefined },
       requestHandlers: {
@@ -235,7 +237,7 @@ describe("local command loading", () => {
     ]);
     commitCurrentChatHistorySnapshot(host);
     expect(
-      readChatSessionSnapshot(host.chatMessagesBySession, host, { sessionKey: host.sessionKey })
+      readChatSessionSnapshot(chatMessagesBySession, host, { sessionKey: host.sessionKey })
         ?.messages,
     ).toEqual([newer]);
     reduceChatSessionProjection(host, { type: "sessionReset" });
