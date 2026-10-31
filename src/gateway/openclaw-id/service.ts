@@ -538,6 +538,57 @@ export function createOpenClawIdService(params: {
     }
   };
 
+  // Owner-only link state (see the service's linkStatus).
+  const ownerLinkStatus = async () => {
+    if (!isOpenClawIdEnabled(params.getConfig())) {
+      return { linked: false as const, publication: undefined };
+    }
+    const record = await (await getAuthority()).load();
+    const state = record?.authority;
+    const { isOwnerDeviceActive } =
+      await import("../../../packages/openclaw-id-protocol/src/index.js");
+    return {
+      linked: Boolean(state),
+      clawId: record?.claw_id,
+      hostname: record?.hostname ?? undefined,
+      rootPub: state?.anchor.root_pub,
+      rootEpoch: state?.anchor.root_epoch,
+      // Conflicting root rotations: remote root changes wait for owner-key regeneration.
+      frozen: state?.frozen ?? false,
+      seq: state?.seq,
+      // Revoked, expired and earlier-epoch devices stay in the record but are no longer owners.
+      ownerDevices: state
+        ? Object.values(state.owner_devices)
+            .filter((device) => isOwnerDeviceActive(state, device, Math.floor(Date.now() / 1000)))
+            .map((device) => ({
+              devicePub: device.cert.body.device_pub,
+              label: device.cert.body.label,
+              peerKeys: device.cert.body.peer_keys,
+              // Public and signed: owner devices need it as the chain of their own changes.
+              cert: device.cert,
+            }))
+        : [],
+      members: state ? await describeMembers(state.members, record?.invite_reports) : [],
+      invites: listInviteViews(record, Math.floor(Date.now() / 1000)),
+      // After a restart, the last publication recorded with the claw stands in.
+      publication:
+        (lastPublish?.state === "failed"
+          ? { ...lastPublish, retryAt: publicationRetry.nextRetryAt() }
+          : lastPublish?.state === "published"
+            ? { ...lastPublish, refreshAt: publicationRetry.nextRefreshAt() }
+            : lastPublish) ??
+        (record?.discovery.owner_account_id
+          ? {
+              state: "published" as const,
+              ownerAccountId: record.discovery.owner_account_id,
+              snapshotSeq: record.discovery.published_snapshot_seq,
+              snapshotIssuedAt: record.discovery.published_snapshot_at ?? 0,
+              revocationsPublished: record.discovery.published_revocations ?? 0,
+            }
+          : undefined),
+    };
+  };
+
   return {
     /** Connects removal side effects owned by the Gateway's connection and run owners (loaded on first use). */
     bindEffects(load: () => Promise<OpenClawIdEffects>): void {
@@ -555,56 +606,58 @@ export function createOpenClawIdService(params: {
       return status;
     },
 
-    /** Link state for the Control UI: identity, pinned root and membership summary. */
-    async linkStatus() {
+    /**
+     * Whether a Gateway client may read and manage people: the direct-loopback
+     * operator (who already holds the Gateway token and runs the root ceremonies),
+     * or a tunnel client whose authenticated device key belongs to an owner device
+     * that is active right now (current epoch, unexpired, unrevoked). Members and
+     * every other client are refused; a scope alone is never enough.
+     */
+    async isOwnerClient(
+      channel: Exclude<Channel, "mailbox"> | undefined,
+      peerKey: string | undefined,
+    ): Promise<boolean> {
       if (!isOpenClawIdEnabled(params.getConfig())) {
-        return { linked: false as const, publication: undefined };
+        return false;
+      }
+      if (channel === "local_operator") {
+        return true;
+      }
+      if (channel !== "tunnel" || !peerKey) {
+        return false;
+      }
+      return (await (await getAuthority()).resolvePeer(peerKey))?.kind === "owner";
+    },
+
+    /**
+     * What any admitted client may read about the link: whether the claw is linked,
+     * its address and pinned owner key (both public). No people, devices, activity
+     * or publication account; those are owner-only (`linkStatus`).
+     */
+    async linkSummary() {
+      if (!isOpenClawIdEnabled(params.getConfig())) {
+        return { linked: false as const };
       }
       const record = await (await getAuthority()).load();
       const state = record?.authority;
-      const { isOwnerDeviceActive } =
-        await import("../../../packages/openclaw-id-protocol/src/index.js");
+      if (!record || !state) {
+        return { linked: false as const };
+      }
       return {
-        linked: Boolean(state),
-        clawId: record?.claw_id,
-        hostname: record?.hostname ?? undefined,
-        rootPub: state?.anchor.root_pub,
-        rootEpoch: state?.anchor.root_epoch,
-        // Conflicting root rotations: remote root changes wait for owner-key regeneration.
-        frozen: state?.frozen ?? false,
-        seq: state?.seq,
-        // Revoked, expired and earlier-epoch devices stay in the record but are no longer owners.
-        ownerDevices: state
-          ? Object.values(state.owner_devices)
-              .filter((device) => isOwnerDeviceActive(state, device, Math.floor(Date.now() / 1000)))
-              .map((device) => ({
-                devicePub: device.cert.body.device_pub,
-                label: device.cert.body.label,
-                peerKeys: device.cert.body.peer_keys,
-                // Public and signed: owner devices need it as the chain of their own changes.
-                cert: device.cert,
-              }))
-          : [],
-        members: state ? await describeMembers(state.members, record?.invite_reports) : [],
-        invites: listInviteViews(record, Math.floor(Date.now() / 1000)),
-        // After a restart, the last publication recorded with the claw stands in.
-        publication:
-          (lastPublish?.state === "failed"
-            ? { ...lastPublish, retryAt: publicationRetry.nextRetryAt() }
-            : lastPublish?.state === "published"
-              ? { ...lastPublish, refreshAt: publicationRetry.nextRefreshAt() }
-              : lastPublish) ??
-          (record?.discovery.owner_account_id
-            ? {
-                state: "published" as const,
-                ownerAccountId: record.discovery.owner_account_id,
-                snapshotSeq: record.discovery.published_snapshot_seq,
-                snapshotIssuedAt: record.discovery.published_snapshot_at ?? 0,
-                revocationsPublished: record.discovery.published_revocations ?? 0,
-              }
-            : undefined),
+        linked: true as const,
+        clawId: record.claw_id,
+        hostname: record.hostname ?? undefined,
+        rootPub: state.anchor.root_pub,
+        rootEpoch: state.anchor.root_epoch,
       };
     },
+
+    /**
+     * Owner-only link state for the People page and owner devices: identity, pinned
+     * root, seq, active owner devices, members with their activity, invites and the
+     * publication. Callers must check `isOwnerClient` first.
+     */
+    linkStatus: ownerLinkStatus,
 
     /**
      * Step 1 of "Make reachable": the claw identity, keys and the address for the

@@ -12,6 +12,7 @@ import {
   UNADVERTISED_OBSERVATION,
 } from "./core-descriptor-options.js";
 import type { CoreGatewayMethodSpecRow } from "./core-descriptor-types.js";
+import { OPENCLAW_ID_METHOD_SPECS } from "./openclaw-id-descriptors.js";
 import { cronListShareKey, modelsListShareKey, operatorReadShareKey } from "./read-share-keys.js";
 
 // Canonical append-only method table; derived lookup and dispatch policy lives in core-method-policy.ts.
@@ -754,6 +755,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ],
   ["sessions.files.preview", "sessions-files", "operator.read", "2026.10"],
   ["sessions.files.preview.release", "sessions-files", "operator.read", "2026.10"],
-  ["openclawId.status", "openclaw-id", "operator.read", "2026.10"],
-  ["openclawId.authority", "openclaw-id", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
+  ...OPENCLAW_ID_METHOD_SPECS,
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

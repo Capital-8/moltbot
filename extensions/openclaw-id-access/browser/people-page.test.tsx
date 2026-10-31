@@ -38,6 +38,7 @@ function linked(overrides: Partial<StatusResult["link"]> = {}): StatusResult {
   return {
     status: { state: "on" },
     channel: "tunnel",
+    owner: true,
     link: {
       linked: true,
       clawId: "claw-1",
@@ -58,9 +59,15 @@ function linked(overrides: Partial<StatusResult["link"]> = {}): StatusResult {
 // Activates the plugin, mounts its page and returns the host's request spy.
 // Activation reads the status once (the flag gate) before the page reads its own.
 function hostFor(statuses: StatusResult[], submitResult: unknown = {}) {
+  // openclawId.people answers with the link of the status last read (owner only).
+  let last: StatusResult | undefined;
   const request = vi.fn(async (method: string) => {
     if (method === "openclawId.status") {
-      return statuses.length > 1 ? statuses.shift() : statuses[0];
+      last = statuses.length > 1 ? statuses.shift() : statuses[0];
+      return { ...last, link: { linked: last!.link.linked, hostname: last!.link.hostname } };
+    }
+    if (method === "openclawId.people") {
+      return { link: last!.link };
     }
     return submitResult;
   });
@@ -207,6 +214,17 @@ describe("People page", () => {
     await vi.waitFor(() =>
       expect(container.textContent).toContain("Bob removed · 1 connection closed · 1 run stopped"),
     );
+  });
+
+  it("shows no people to a client that is not an owner, and never asks for them", async () => {
+    const { container, request } = await mountPage([{ ...linked(), owner: false }]);
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain(
+        "Only an owner device of this claw can see who has access.",
+      ),
+    );
+    expect(request).not.toHaveBeenCalledWith("openclawId.people", {});
+    expect(container.textContent).not.toContain("member@example.test");
   });
 
   it("is read-only in a browser that is not an owner device", async () => {

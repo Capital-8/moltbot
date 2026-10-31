@@ -129,7 +129,9 @@ function reachabilityEntries(status: OpenClawIdStatusResult): MenuEntry[] {
       ),
       infoLine("address", `https://${host}`),
       infoLine("encrypted", t("openclawId.encrypted")),
-      renderSidebarMenuAction(DEVICES, t("openclawId.yourDevices"), "key"),
+      ...(status.owner
+        ? [renderSidebarMenuAction(DEVICES, t("openclawId.yourDevices"), "key")]
+        : []),
     ];
   }
   const blocker = makeReachableBlocker(status);
@@ -145,7 +147,8 @@ function reachabilityEntries(status: OpenClawIdStatusResult): MenuEntry[] {
  * Menu entries for the OpenClaw ID section; empty while the flag is off.
  * Signed out: local operator, Sign in, "conversations stay on this computer".
  * Signed in: the account. Then Make reachable, or once linked the address and
- * transport and Your devices; People (the openclaw-id-access plugin page);
+ * transport and Your devices; People (the openclaw-id-access plugin page), both
+ * only for an owner (loopback operator or owner device);
  * Sign out. Unlink is not offered yet (OCF-281 needs a Discovery endpoint).
  */
 export function openClawIdMenuEntries(status: OpenClawIdStatusResult | null): MenuEntry[] {
@@ -156,7 +159,8 @@ export function openClawIdMenuEntries(status: OpenClawIdStatusResult | null): Me
     titleLine("title", t("openclawId.menuTitle")),
     ...accountEntries(status),
     ...reachabilityEntries(status),
-    renderSidebarMenuAction(PEOPLE, t("openclawId.people"), "users"),
+    // People and Your devices are owner-only (openclawId.people refuses others).
+    ...(status.owner ? [renderSidebarMenuAction(PEOPLE, t("openclawId.people"), "users")] : []),
     ...(openClawIdAccount()
       ? [renderSidebarMenuAction(SIGN_OUT, t("openclawId.signOut"), "x")]
       : []),

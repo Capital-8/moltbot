@@ -14,17 +14,17 @@ import {
   signOwnerDeviceRevocation,
   thisOwnerDevice,
 } from "../../lib/openclaw-id/owner-devices.ts";
-import type { OpenClawIdOwnerDevice, OpenClawIdStatusResult } from "../../lib/openclaw-id/types.ts";
+import type { OpenClawIdOwnerDevice, OpenClawIdPeopleLink } from "../../lib/openclaw-id/types.ts";
 import { registerEnglishCatalog, t } from "../../lib/reactive/i18n.ts";
 import { withPromiseModalHost } from "../promise-modal-host.ts";
 
 registerEnglishCatalog(registerOpenClawIdDialogsEnglish);
 
-type Link = OpenClawIdStatusResult["link"];
+type Link = OpenClawIdPeopleLink;
 
-// Reads the current link state (devices change after every revocation).
+// Reads the owner-only link state (devices change after every revocation).
 async function readLink(client: GatewayBrowserClient): Promise<Link> {
-  return (await client.request<OpenClawIdStatusResult>("openclawId.status", {})).link;
+  return (await client.request<{ link: Link }>("openclawId.people", {})).link;
 }
 
 // The owner key's display fingerprint, as printed on the recovery kit.

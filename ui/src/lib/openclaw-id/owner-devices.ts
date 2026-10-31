@@ -12,7 +12,7 @@ import {
   type SignedStatement,
 } from "../../../../packages/openclaw-id-protocol/src/index.ts";
 import { loadOwnerDeviceSigner } from "./device-key.ts";
-import type { OpenClawIdOwnerDevice, OpenClawIdStatusResult } from "./types.ts";
+import type { OpenClawIdOwnerDevice, OpenClawIdPeopleLink } from "./types.ts";
 
 /** Raised when this browser holds no active owner device key for the claw. */
 export class NotAnOwnerDeviceError extends Error {
@@ -23,7 +23,7 @@ export class NotAnOwnerDeviceError extends Error {
 
 /** The listed owner device this browser signs as, or undefined. */
 export async function thisOwnerDevice(
-  link: OpenClawIdStatusResult["link"],
+  link: OpenClawIdPeopleLink,
 ): Promise<OpenClawIdOwnerDevice | undefined> {
   const signer = link.clawId ? await loadOwnerDeviceSigner(link.clawId) : undefined;
   const devicePub = signer ? formatEd25519PublicKey(signer.publicKey) : undefined;
@@ -52,7 +52,7 @@ export function devicesApprovedBy(
  * revoked devices' connections.
  */
 export async function signOwnerDeviceRevocation(
-  link: OpenClawIdStatusResult["link"],
+  link: OpenClawIdPeopleLink,
   target: OpenClawIdOwnerDevice,
 ): Promise<SignedStatement<"Revocation">> {
   const signer = link.clawId ? await loadOwnerDeviceSigner(link.clawId) : undefined;

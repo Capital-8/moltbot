@@ -14,17 +14,18 @@ export type OpenClawIdStatusResult = {
     /** The tunnel child while on; `relayOnline` once its outbound relay connection is up. */
     tunnel?: { state: string; relayOnline?: boolean };
   };
+  /** The same public summary for every client; owner data is in `openclawId.people`. */
   link: {
     linked: boolean;
     clawId?: string;
     hostname?: string;
     rootPub?: string;
     rootEpoch?: number;
-    /** Active owner devices only; revoked ones are not listed. */
-    ownerDevices?: OpenClawIdOwnerDevice[];
   };
   /** How this browser reaches the Gateway: only `local_operator` may link or sign in. */
   channel: "local_operator" | "tunnel" | null;
+  /** Whether `openclawId.people` answers this client (loopback operator or an owner device). */
+  owner?: boolean;
   services: {
     issuerUrl: string | null;
     discoveryUrl: string | null;
@@ -34,7 +35,14 @@ export type OpenClawIdStatusResult = {
   };
 };
 
-/** An active owner device as `openclawId.status` lists it. */
+/** Owner-only link state (`openclawId.people` result `link`). */
+export type OpenClawIdPeopleLink = OpenClawIdStatusResult["link"] & {
+  seq?: number;
+  /** Active owner devices only; revoked and expired ones are not listed. */
+  ownerDevices?: OpenClawIdOwnerDevice[];
+};
+
+/** An active owner device as `openclawId.people` lists it. */
 export type OpenClawIdOwnerDevice = {
   devicePub: string;
   label: string;

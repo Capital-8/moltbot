@@ -1,13 +1,18 @@
 // OpenClaw ID remote access methods. The root ceremonies (the link ceremony "Make
 // reachable" and owner-key regeneration) run only for a direct-loopback client;
 // relayed clients can read status and send owner-signed membership changes, which
-// the authority verifies itself.
+// the authority verifies itself. Status is the same small summary for every client;
+// people, devices and activity come only from openclawId.people, for an owner.
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import type { Ed25519PublicKey } from "../../../packages/openclaw-id-protocol/src/index.js";
 import { isEd25519PublicKey } from "../../../packages/openclaw-id-protocol/src/index.js";
 import { createOpenClawIdSignIn } from "../openclaw-id/account-sign-in.js";
-import { resolveOpenClawIdClientChannel } from "../openclaw-id/channel.js";
+import {
+  resolveOpenClawIdClientChannel,
+  resolveOpenClawIdClientPeerKey,
+} from "../openclaw-id/channel.js";
+import type { OpenClawIdService } from "../openclaw-id/service.js";
 import { decodeInviteProofKey } from "../openclaw-id/tunnel-api.js";
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 
@@ -35,6 +40,21 @@ function refuse(opts: GatewayRequestHandlerOptions, result: { code: string; deta
 
 function optionalCode(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// Whether the calling client is an owner (see OpenClawIdService.isOwnerClient).
+async function isOwnerCaller(service: OpenClawIdService, opts: GatewayRequestHandlerOptions) {
+  return await service.isOwnerClient(
+    resolveOpenClawIdClientChannel(opts.client),
+    resolveOpenClawIdClientPeerKey(opts.client),
+  );
+}
+
+// Link state after a write: the owner view for an owner, otherwise the summary.
+async function linkAfterWrite(service: OpenClawIdService, opts: GatewayRequestHandlerOptions) {
+  return (await isOwnerCaller(service, opts))
+    ? await service.linkStatus()
+    : await service.linkSummary();
 }
 
 // Pending Control UI sign-ins live only in this process, for ten minutes each.
@@ -125,8 +145,10 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
     const config = opts.context.getRuntimeConfig().gateway?.openclawId;
     opts.respond(true, {
       status: service.status(),
-      link: await service.linkStatus(),
+      link: await service.linkSummary(),
       channel: resolveOpenClawIdClientChannel(opts.client) ?? null,
+      // Whether openclawId.people will answer this client.
+      owner: await isOwnerCaller(service, opts),
       services: {
         issuerUrl: config?.issuerUrl ?? null,
         discoveryUrl: config?.discoveryUrl ?? null,
@@ -134,6 +156,22 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
         clientId: config?.clientId ?? null,
       },
     });
+  },
+
+  // Owner-only link state: active owner devices, members with their activity,
+  // invites and the publication. Answers the direct-loopback operator and a tunnel
+  // client whose device key is an active owner device right now; members and any
+  // other client are refused even with the method's scope.
+  "openclawId.people": async (opts) => {
+    const service = requireService(opts);
+    if (!service) {
+      return;
+    }
+    if (!(await isOwnerCaller(service, opts))) {
+      refuse(opts, { code: "not_owner", detail: "only an owner device of this claw sees people" });
+      return;
+    }
+    opts.respond(true, { link: await service.linkStatus() });
   },
 
   // Writes to the membership authority, by action:
@@ -206,7 +244,7 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
         status: result.status,
         // What a removal cut (connections closed, runs stopped); absent otherwise.
         removal: result.removal ?? null,
-        link: await service.linkStatus(),
+        link: await linkAfterWrite(service, opts),
       });
       return;
     }
@@ -221,7 +259,7 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
         refuse(opts, result);
         return;
       }
-      opts.respond(true, { status: result.status, link: await service.linkStatus() });
+      opts.respond(true, { status: result.status, link: await linkAfterWrite(service, opts) });
       return;
     }
     if (params.action === "prepare_regeneration") {

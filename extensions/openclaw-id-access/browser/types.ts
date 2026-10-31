@@ -52,7 +52,10 @@ export type Invite = {
   };
 };
 
-/** The claw's link state (`openclawId.status` result `link`). */
+/**
+ * The claw's link state: `openclawId.status` returns only linked, clawId, hostname,
+ * rootPub and rootEpoch; `openclawId.people` (owner only) returns all of it.
+ */
 export type Link = {
   linked: boolean;
   clawId?: string;
@@ -74,4 +77,6 @@ export type StatusResult = {
   status: { state: "off" | "unconfigured" | "on" | "failed" };
   link: Link;
   channel: "local_operator" | "tunnel" | null;
+  /** Whether `openclawId.people` answers this client (loopback operator or an owner device). */
+  owner?: boolean;
 };

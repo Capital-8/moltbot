@@ -2,7 +2,8 @@
 // The People page: invite someone, approve or deny their request, see who is
 // active and what they are running, and remove members. Every change is a
 // statement this browser's owner device signs and sends straight to the
-// Gateway (openclawId.authority); everything shown is read from the Gateway.
+// Gateway (openclawId.authority); everything shown is read from the Gateway
+// (openclawId.people, which answers only an owner).
 // Owner devices and the recovery kit live in the account menu, not here.
 import {
   displayFingerprint,
@@ -59,10 +60,18 @@ export function PeoplePage(props: { host: ControlUiHost }) {
   const [error, setError] = createSignal<string | null>(null);
   const [notice, setNotice] = createSignal<string | null>(null);
 
-  // Reads link state and which listed owner device (if any) is this browser.
+  // Reads link state (the owner view when this client is an owner) and which
+  // listed owner device, if any, is this browser.
   const refresh = async () => {
     try {
-      const next = await host.request<StatusResult>("openclawId.status", {});
+      const summary = await host.request<StatusResult>("openclawId.status", {});
+      const next =
+        summary.owner && summary.link.linked
+          ? {
+              ...summary,
+              link: (await host.request<{ link: Link }>("openclawId.people", {})).link,
+            }
+          : summary;
       const own = await thisOwnerDevice(next.link).catch(() => undefined);
       setOwnDevicePub(own?.devicePub ?? null);
       setFingerprints(await pendingFingerprints(next.link.invites ?? []));
@@ -149,38 +158,47 @@ export function PeoplePage(props: { host: ControlUiHost }) {
                 </p>
               }
             >
-              <Show when={!ownDevicePub()}>
-                <div class="callout info" role="note">
-                  This browser is not an owner device for this claw, so it can only view people. Use
-                  an owner device to invite, approve or remove.
-                </div>
+              <Show
+                when={current().owner}
+                fallback={
+                  <p class="ocid-access__empty">
+                    Only an owner device of this claw can see who has access.
+                  </p>
+                }
+              >
+                <Show when={!ownDevicePub()}>
+                  <div class="callout info" role="note">
+                    This browser is not an owner device for this claw, so it can only view people.
+                    Use an owner device to invite, approve or remove.
+                  </div>
+                </Show>
+                <PendingRequests
+                  invites={(current().link.invites ?? []).filter((i) => i.status === "pending")}
+                  fingerprints={fingerprints()}
+                  disabled={!canManage()}
+                  locale={host.locale}
+                  onDecide={(invite, approve) =>
+                    void run((link) => decideInvite(host.request, link, invite, approve))
+                  }
+                />
+                <Members
+                  members={current().link.members ?? []}
+                  invites={current().link.invites ?? []}
+                  ownerDevices={current().link.ownerDevices?.length ?? 0}
+                  disabled={!canManage()}
+                  locale={host.locale}
+                  nowMs={nowMs()}
+                  sessionTitle={sessionTitleFrom(host)}
+                  onRemove={remove}
+                />
+                <InviteForm
+                  disabled={!canManage()}
+                  locale={host.locale}
+                  onCreate={(email, role: MemberRole) =>
+                    run((link) => createInvite(host.request, link, email, role))
+                  }
+                />
               </Show>
-              <PendingRequests
-                invites={(current().link.invites ?? []).filter((i) => i.status === "pending")}
-                fingerprints={fingerprints()}
-                disabled={!canManage()}
-                locale={host.locale}
-                onDecide={(invite, approve) =>
-                  void run((link) => decideInvite(host.request, link, invite, approve))
-                }
-              />
-              <Members
-                members={current().link.members ?? []}
-                invites={current().link.invites ?? []}
-                ownerDevices={current().link.ownerDevices?.length ?? 0}
-                disabled={!canManage()}
-                locale={host.locale}
-                nowMs={nowMs()}
-                sessionTitle={sessionTitleFrom(host)}
-                onRemove={remove}
-              />
-              <InviteForm
-                disabled={!canManage()}
-                locale={host.locale}
-                onCreate={(email, role: MemberRole) =>
-                  run((link) => createInvite(host.request, link, email, role))
-                }
-              />
             </Show>
           </Show>
         )}

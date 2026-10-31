@@ -12,6 +12,7 @@ function status(overrides: Partial<OpenClawIdStatusResult> = {}): OpenClawIdStat
     status: { state: "on" },
     link: { linked: false },
     channel: "local_operator",
+    owner: true,
     services: {
       issuerUrl: "https://issuer.example.test/api/auth",
       discoveryUrl: "https://discovery.example.test",
@@ -84,6 +85,15 @@ describe("OpenClaw ID account menu", () => {
     expect(entries.find((row) => row.label === "Sign in with OpenClaw ID")?.disabled).toBe(true);
     expect(entries.find((row) => row.label === "Make reachable")?.disabled).toBe(true);
     expect(entries.find((row) => row.label === "People")?.disabled).toBeFalsy();
+  });
+
+  it("offers People and Your devices only to an owner", () => {
+    const linked = { linked: true, hostname: "studio-e61zr.crabd.xyz" };
+    const member = labels(menu(status({ channel: "tunnel", owner: false, link: linked })));
+    expect(member).not.toContain("People");
+    expect(member).not.toContain("Your devices");
+    const owner = labels(menu(status({ channel: "tunnel", owner: true, link: linked })));
+    expect(owner).toEqual(expect.arrayContaining(["People", "Your devices"]));
   });
 
   it("signs in through the popup and shows the account until sign-out", async () => {
