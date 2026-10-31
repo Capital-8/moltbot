@@ -257,8 +257,17 @@ export function createChatSendReplyDispatch(params: {
         params.abortSignal,
         (current) => {
           assertRoutingCurrent(getRuntimeConfig());
+          if (
+            !isInspectionCurrent() ||
+            current.session?.sessionId !== admission.sessionId ||
+            current.session.lifecycleRevision !== lifecycleRevision ||
+            !current.watermark
+          ) {
+            decision = "missing";
+            return;
+          }
           const currentAnchors = new Map(current.anchors.map((anchor) => [anchor.entryId, anchor]));
-          // A transcript changed during visibility preparation is retried by the existing missing outcome.
+          // Keep custody pending until visibility and anchors describe the same transcript.
           if (
             current.watermark?.generation !== prepared.watermark?.generation ||
             current.watermark?.maxSeq !== prepared.watermark?.maxSeq ||
@@ -266,19 +275,9 @@ export function createChatSendReplyDispatch(params: {
               sameTranscriptEntryAnchor(anchor, currentAnchors.get(anchor.entryId)),
             )
           ) {
-            decision = "missing";
             return;
           }
           const facts = { ...current, tail: prepared.tail };
-          if (
-            !isInspectionCurrent() ||
-            facts.session?.sessionId !== admission.sessionId ||
-            facts.session.lifecycleRevision !== lifecycleRevision ||
-            !facts.watermark
-          ) {
-            decision = "missing";
-            return;
-          }
           const input = facts.anchors.find((anchor) => anchor.entryId === admission.entryId);
           if (!input || input.rawSeq !== admission.rawSeq) {
             decision = "missing";
@@ -311,8 +310,8 @@ export function createChatSendReplyDispatch(params: {
               inputId: latestInput.entryId,
               messageId: row.entryId,
               afterSeq: transcriptStart.afterSeq,
-              watermark: facts.watermark,
-              currentWatermark: facts.watermark,
+              watermark: current.watermark,
+              currentWatermark: current.watermark,
             });
             if (selected !== undefined) {
               decision = selected;

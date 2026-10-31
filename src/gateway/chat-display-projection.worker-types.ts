@@ -4,7 +4,6 @@ import type {
   prepareChatHistoryRecoveryFacts,
   projectChatDisplayMessagesWithState,
 } from "./chat-display-projection.core.js";
-import type { projectChatSendReplyContextBody } from "./server-methods/chat-send-reply-context.js";
 
 type ChatDisplayWorkerOptions = Omit<
   ChatDisplayProjectionOptions,
@@ -37,7 +36,7 @@ export type ChatTextWorkerResult =
   | { kind: "recovery"; value: unknown[] }
   | { kind: "recovery-facts"; value: ReturnType<typeof prepareChatHistoryRecoveryFacts> }
   | { kind: "tts-supplement-marker"; value: { textSha256: string } }
-  | { kind: "reply-context"; value: ReturnType<typeof projectChatSendReplyContextBody> }
+  | { kind: "reply-context"; value: { body: string; assistant: boolean } | undefined }
   | { kind: "media-sources"; value: string[] }
   | { kind: "delivery-directives"; value: DeliveryDirectiveMessage };
 

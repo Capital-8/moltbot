@@ -62,7 +62,7 @@ it("distinguishes committed source replies from terminal deliveries", async () =
   });
 });
 
-it("rejects a reply snapshot changed while display visibility is prepared", async () => {
+it("keeps delivery pending when its snapshot changes while display visibility is prepared", async () => {
   await withOpenClawTestState({ label: "chat-delivery-visibility-snapshot" }, async () => {
     const { dispatch, append } = await createReplyTranscriptFixture();
     dispatch.captureAgentTranscriptStart();
@@ -76,7 +76,7 @@ it("rejects a reply snapshot changed while display visibility is prepared", asyn
       });
     expect(await dispatch.resolveReplyDeliveryFacts()).toEqual({
       source: "missing",
-      terminal: "missing",
+      terminal: "pending",
     });
     expect(preparation).toHaveBeenCalledOnce();
   });
