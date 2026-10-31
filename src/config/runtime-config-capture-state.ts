@@ -16,14 +16,23 @@ export function getRuntimeConfigCapture(
   return config ? captures.get(config) : undefined;
 }
 
+const pinnedSources = new WeakMap<OpenClawConfig, OpenClawConfig>();
+
 /**
- * Pin the authored source of a published runtime config without cloning it, so later
- * readers project this generation instead of a newer source snapshot.
+ * Record the authored source of a published runtime config without cloning it, so later
+ * projection uses this generation instead of a newer source snapshot. Unlike a capture,
+ * the config stays mutable: callers that need an isolated pair still capture it.
  */
 export function pinRuntimeConfigSource(config: OpenClawConfig, source: OpenClawConfig): void {
-  if (!captures.has(config)) {
-    captures.set(config, { source, origin: config });
+  if (!pinnedSources.has(config)) {
+    pinnedSources.set(config, source);
   }
+}
+
+export function getPinnedRuntimeConfigSource(
+  config: OpenClawConfig | undefined,
+): OpenClawConfig | undefined {
+  return config ? pinnedSources.get(config) : undefined;
 }
 
 /** Freeze a selected runtime/source pair before its publication owner yields. */

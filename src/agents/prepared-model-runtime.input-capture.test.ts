@@ -3,7 +3,10 @@ import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
 } from "../config/runtime-snapshot.js";
-import { projectConfigOntoRuntimeSourceSnapshot } from "../config/runtime-source-projection.js";
+import {
+  captureRuntimeConfig,
+  projectConfigOntoRuntimeSourceSnapshot,
+} from "../config/runtime-source-projection.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizePreparedModelRuntimeInput } from "./prepared-model-runtime.owner.js";
 
@@ -31,5 +34,12 @@ it("keeps the admitted authored source after a newer config generation publishes
   );
   expect(
     projectConfigOntoRuntimeSourceSnapshot(input.config).plugins?.entries?.secretful?.config,
+  ).toEqual({ apiKey: ref });
+  // A rebuild still captures an isolated pair: later edits to the admitted object stay out.
+  const captured = captureRuntimeConfig(input.config);
+  expect(captured).not.toBe(admitted);
+  expect(Object.isFrozen(captured)).toBe(true);
+  expect(
+    projectConfigOntoRuntimeSourceSnapshot(captured).plugins?.entries?.secretful?.config,
   ).toEqual({ apiKey: ref });
 });
