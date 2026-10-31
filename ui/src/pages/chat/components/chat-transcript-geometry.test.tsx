@@ -2,6 +2,7 @@
 
 import { expectDefined } from "@openclaw/normalization-core";
 import { Virtualizer } from "@tanstack/virtual-core";
+import { createRoot } from "solid-js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   handleMarkdownCodeBlockClick,
@@ -34,6 +35,10 @@ import {
 } from "./chat-transcript-fixture.test-support.tsx";
 import { readConnectedTranscriptRows } from "./chat-transcript-geometry.ts";
 import { TranscriptLayoutOwner } from "./chat-transcript-layout-owner.ts";
+import { ChatTranscriptRenderer } from "./chat-transcript-layout-solid.tsx";
+import { mountedVirtualizer, scheduledCallbacks } from "./chat-transcript-layout.test-support.ts";
+import type { TranscriptLayoutProps } from "./chat-transcript-layout.ts";
+import { createTranscriptMessageElements } from "./chat-transcript-message-elements.ts";
 import { TranscriptRowRefs } from "./chat-transcript-row-refs.ts";
 import {
   flushDeferredRowPrune,
@@ -63,6 +68,94 @@ function railState(viewport: HTMLElement) {
 
 beforeEach(installTranscriptDomMocks);
 afterEach(resetTranscriptTestDom);
+
+it("samples the viewport only for admitted row footprints without replacing keyed rows", () => {
+  createRoot((disposeCache) => {
+    const scheduled = scheduledCallbacks(true);
+    const cache: ChatMessageCache = new Map();
+    const host = { assistantAgentId: "main", currentSessionId: "physical-session" };
+    const target = { sessionKey: "agent:main:row-footprints" };
+    cacheChatSessionSnapshot(cache, host, target, {
+      messages: [],
+      sessionId: host.currentSessionId,
+      pagination: { hasMore: false },
+    });
+    const widgetLayout = createChatWidgetLayout()(cache, host, target);
+    const props = threadProps("row-footprints", target.sessionKey, [], { widgetLayout });
+    const layout = new TranscriptLayoutOwner(() => {});
+    layout.configureRows(props, "gutter", false);
+    layout.rows = [{ key: "row", revision: "revision" }];
+    layout.rowWidth = 768;
+    layout.paneWidth = 1100;
+    const mounted = mountedVirtualizer(layout);
+    const virtualizer = mounted.instance;
+    const container = virtualizer.scrollElement!;
+    const renderer = new ChatTranscriptRenderer();
+    const messageElements = createTranscriptMessageElements(() => undefined);
+    const snapshot: TranscriptLayoutProps = {
+      messageElements,
+      rows: [{ kind: "content", key: "row", content: "Synthetic retained row" }],
+      getContent: () => "Synthetic retained row",
+      virtualizer,
+      overlay: null,
+      header: null,
+      scrollElementRef: () => {},
+      captureInteractionResize: () => {},
+      measureRowRefFor: () => (element) =>
+        virtualizer.measureElement(element instanceof HTMLElement ? element : null),
+      measureRows: false,
+      initialPositionPending: () => false,
+      layout,
+      headerHeight: 0,
+      presented: true,
+      onCommit: () => {},
+    };
+    const previousHeight = Object.getOwnPropertyDescriptor(window, "innerHeight")!;
+    let viewportHeight = window.innerHeight;
+    const readHeight = vi.fn(() => viewportHeight);
+    Object.defineProperty(window, "innerHeight", { configurable: true, get: readHeight });
+    const redraw = () => {
+      container.append(renderer.render({ ...snapshot }));
+      renderer.connect();
+      flush();
+      return requireElement(container, ".chat-virtual-row");
+    };
+    try {
+      const row = redraw();
+      expect(row.style.minHeight).toBe("0px");
+      expect(readHeight).not.toHaveBeenCalled();
+
+      // Persist through the real owner so the cache key includes its current geometry.
+      virtualizer.measureElement(row);
+      virtualizer.resizeItem(0, 300);
+      layout.persistRows(virtualizer, false);
+      scheduled.takeFrame()();
+      scheduled.takeIdle()();
+      readHeight.mockClear();
+      expect(redraw()).toBe(row);
+      expect(row.style.minHeight).toBe("0px");
+      expect(readHeight).not.toHaveBeenCalled();
+
+      // A fresh admission sees the saved footprint; the retained admission did not.
+      props.widgetLayout = createChatWidgetLayout()(cache, host, target);
+      layout.configureRows(props, "gutter", false);
+      expect(redraw()).toBe(row);
+      expect(row.style.minHeight).toBe("300px");
+      expect(readHeight).toHaveBeenCalled();
+
+      viewportHeight -= 200;
+      expect(redraw()).toBe(row);
+      expect(row.style.minHeight).toBe("0px");
+    } finally {
+      renderer.dispose();
+      layout.disconnect();
+      mounted.dispose();
+      messageElements.dispose();
+      disposeCache();
+      Object.defineProperty(window, "innerHeight", previousHeight);
+    }
+  });
+});
 
 it("reserves only the matching width and appearance, including text scale, width policy and recovery", () => {
   const context = createInitializationContext();

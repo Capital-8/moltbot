@@ -79,6 +79,10 @@ function TranscriptRows(props: {
   });
   const rowMinimum = createMemo(() => {
     const layout = props.snapshot.layout;
+    // First-visit rows have no admitted footprint to reserve.
+    if (!layout.rowLayout?.readRows()) {
+      return () => 0;
+    }
     // Share the viewport sample instead of reading it between each row's style writes.
     const viewportHeight = window.innerHeight;
     return (index: number) => layout.rowMinimum(index, viewportHeight);
