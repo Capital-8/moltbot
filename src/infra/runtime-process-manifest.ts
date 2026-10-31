@@ -50,6 +50,7 @@ export function createRuntimeProcessEntrypoints(currentModuleUrl: string) {
       "infra/database-engine/port-command.entry.worker",
     ),
     systemCaWarmup: runtimeProcessEntrypoint("gateway/system-ca-warmup.worker"),
+    openclawIdTunnel: runtimeProcessEntrypoint("gateway/openclaw-id/tunnel-child/entry"),
     shutdownHardExit: loaderFreeEntrypoint("cli/gateway-cli/shutdown-hard-exit.worker"),
     packageIntegrityHasher: runtimeProcessEntrypoint(
       "infra/package-update-integrity-hasher.worker",

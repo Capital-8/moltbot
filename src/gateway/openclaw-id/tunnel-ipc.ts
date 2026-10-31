@@ -40,6 +40,8 @@ export type TunnelReadyMessage = {
   /** K_srv, `iroh:<64 hex>`. */
   endpointKey: string;
   relayUrl: string;
+  /** Local UDP sockets (`host:port`) for direct dialing on the same host or LAN. */
+  directAddrs: string[];
   keyCreated: boolean;
 };
 
@@ -65,6 +67,9 @@ export function parseTunnelToGatewayMessage(value: unknown): TunnelToGatewayMess
             type: "ready",
             endpointKey: message.endpointKey,
             relayUrl: message.relayUrl,
+            directAddrs: Array.isArray(message.directAddrs)
+              ? message.directAddrs.filter((addr): addr is string => typeof addr === "string")
+              : [],
             keyCreated: message.keyCreated === true,
           }
         : undefined;
