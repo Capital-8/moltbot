@@ -133,8 +133,10 @@ it.each(["direct", "lifecycle", "agent"])("shares %s envelopes", async (producer
     setRuntimeConfigSnapshot(cfg);
     const owner = ensureProfileForEmail("row-delta-owner@example.test");
     const viewer = ensureProfileForEmail("row-delta-viewer@example.test");
+    const otherViewer = ensureProfileForEmail("row-delta-other-viewer@example.test");
     setUserProfileRole(owner.id, "view");
     setUserProfileRole(viewer.id, "view");
+    setUserProfileRole(otherViewer.id, "view");
     const key = "agent:main:row-delta-audiences";
     const write = (label: string) =>
       replaceSessionEntrySync(
@@ -159,7 +161,7 @@ it.each(["direct", "lifecycle", "agent"])("shares %s envelopes", async (producer
     const peers = [0, 1].flatMap((copy) =>
       ["current", "stale"].flatMap((baseline) =>
         ["delta", "refs", "legacy"].flatMap((capability) =>
-          [owner, viewer].map((profile) => {
+          [owner, viewer, otherViewer].map((profile) => {
             const id = `${copy}-${baseline}-${capability}-${profile.id}`;
             const peer = createSessionRowEventPeer(profile, id, 1);
             peer.client.connect.caps =
@@ -396,7 +398,7 @@ it.each(["direct", "lifecycle", "agent"])("shares %s envelopes", async (producer
       const beforeRevocation = peers.map((peer) => peer.send.mock.calls.length);
       peers[0]!.send.mockImplementationOnce(() => {
         for (const peer of peers) {
-          if (peer.profile === viewer) {
+          if (peer.profile !== owner) {
             peer.client.connect.scopes = [];
           }
         }
@@ -417,14 +419,14 @@ it.each(["direct", "lifecycle", "agent"])("shares %s envelopes", async (producer
       expect(envelopeEnumerations).toBe(0);
       // Interleaved histories and audiences share only synchronous copy scratch space.
       expect(envelopeTuples.size).toBe(envelopeMaxFields);
-      // A producer-owned envelope is filtered once per authority, even with divergent baselines.
+      // Distinct viewer principals with equal output share filtering across divergent baselines.
       expect(filteredEnvelopes).toBe(2);
       // Field names are indexed once per audience, not inserted into a Set per history.
       expect(fieldNameInsertions).toBe(0);
       // Index construction must not stage a tuple for every field before inserting it.
       expect(stagedFieldIndexTuples).toBe(0);
-      // Row changes retain connection keys; only four unprimed legacy sockets need encoding.
-      expect(sharingKeyEncodings).toBe(4);
+      // Row changes retain connection keys; only six unprimed legacy sockets need encoding.
+      expect(sharingKeyEncodings).toBe(6);
       // Four authority/baseline groups share row planning across both delta capabilities.
       expect(rowEncodings).toBeLessThanOrEqual(16);
       // Two wire capabilities per group, plus one legacy envelope per authority.

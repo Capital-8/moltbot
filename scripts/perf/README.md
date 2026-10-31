@@ -2668,7 +2668,23 @@ commas; nested session fields describe the full row or patch's `set` object.
 `initialFullFrame` includes setup/warmup and estimates a numeric field-reference
 encoding using matching envelope/full-row fields. This estimate is a diagnostic,
 not a measured candidate result. No message content or row values are retained
-in these size reports. Wire compression and transport headers are not measured.
+in these size reports. These fields do not measure wire compression or transport headers.
+
+For a separate source diagnostic, add `--session-wire-counts --entry src/entry.ts`
+and, for memory-soak, `--retained-profile-ms 0`. `sessionWireCounts.submitted`
+records bounded per-connection/event socket submissions: decompressed bytes,
+post-codec payload bytes (excluding headers), and frame bytes including the
+2/4/10-byte WebSocket header. These exclude TCP/TLS overhead and are not delivery
+acknowledgments. Unsupported codec sizes increment `unavailableWireFrames`;
+overflow fails capture rather than silently reporting partial totals.
+`received` records per-client decompressed bytes and numeric full/patch/legacy/
+omitted-row, ancestor row/reference, field-reference, sidebar-array, and message-body
+counts before client reconstruction. No payload contents are retained. The
+connection ID is the current connection at the end of the window; receipts and
+submissions have separate capture edges. This observer uses the selected
+`--session-projection-source` overlay and can combine with
+`--session-projection-counts`, but must remain separate from timing, CPU, and heap
+profiles. Do not use its instrumented timings as an A/B acceptance result.
 
 Pass the same future `--start-at <epoch-ms>` to both sides of a concurrent pair.
 The barrier runs after readiness, warmup, and event drain, and fails if its
@@ -4510,14 +4526,15 @@ normalizing the whole-window profile by delivered session events.
 
 For session-projection comparisons from one installed checkout, add
 `--entry src/entry.ts --session-projection-source <directory>` to both arms.
-The directory must contain all ten coherent owner files:
+The directory must contain all twelve coherent owner files:
 `server-broadcast.ts`, `session-event-projection.ts`, `session-row-presentation.ts`,
-`session-sharing-read.ts`, `session-utils-list.ts`, `session-row-placement-projection.ts`,
+`session-row-child-activity.ts`, `session-sharing-read.ts`, `session-sharing-policy.ts`,
+`session-utils-list.ts`, `session-row-placement-projection.ts`,
 `session-ancestor-references.ts`,
 `server-connection-state.ts`, `server-methods/sessions-read.ts`, and
 `server-methods/sessions-read-by-key.ts`. Put their original
 revision's files in a baseline directory and use `--session-projection-source
-src/gateway` for the candidate. The preload reads all ten before Gateway startup
+src/gateway` for the candidate. The preload reads all twelve before Gateway startup
 and fails on a missing file; it substitutes raw TypeScript while retaining canonical
 module URLs, relative imports, and source line numbers. The report records the
 resolved `sessionProjectionSource`. It also loads the canonical broadcaster as

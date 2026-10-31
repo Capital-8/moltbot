@@ -147,6 +147,7 @@ import {
   writePluginFixtures,
   writeGatewayAuthorityCountsPreload,
 } from "../lib/gateway-bench-runtime.ts";
+import { sessionPayloadShape } from "../lib/gateway-bench-session-wire.ts";
 import { createGatewayWsClient } from "../lib/gateway-ws-client.ts";
 import { parseStrictIntegerOption } from "../lib/strict-integer-option.ts";
 import { TEAM_STRESS_PLUGIN_IDS } from "./team-shape-stress-fixture.ts";
@@ -166,6 +167,7 @@ const { values } = parseArgs({
     diagnostics: { type: "boolean", default: false },
     "broadcast-timing": { type: "boolean", default: false },
     "session-projection-counts": { type: "boolean", default: false },
+    "session-wire-counts": { type: "boolean", default: false },
     "session-projection-source": { type: "string" },
     "disable-inlining": { type: "boolean", default: false },
     "transport-counts": { type: "boolean", default: false },
@@ -994,9 +996,9 @@ if (
 ) {
   throw new Error("--session-projection-source requires --entry src/entry.ts");
 }
-if (values["session-projection-counts"]) {
+if (values["session-projection-counts"] || values["session-wire-counts"]) {
   if (path.resolve(values.entry) !== path.resolve("src/entry.ts")) {
-    throw new Error("--session-projection-counts requires --entry src/entry.ts");
+    throw new Error("Session projection/wire counting requires --entry src/entry.ts");
   }
   if (
     values.allocations ||
@@ -1010,7 +1012,7 @@ if (values["session-projection-counts"]) {
     (soakScenario && retainedProfileMs > 0)
   ) {
     throw new Error(
-      "--session-projection-counts needs a separate pass without profiling or timing",
+      "Session projection/wire counting needs a separate pass without profiling or timing",
     );
   }
 }
@@ -3176,6 +3178,11 @@ type FrameSizes = {
 const representativeFrames = new Map<string, FrameSizes>();
 let initialFullFrame: FrameSizes | undefined;
 const perClientCounters: Map<string, number>[] = [];
+const clientConnectionIds: string[] = [];
+const perClientWireReceipts: Map<
+  string,
+  { frames: number; decompressedBytes: number; shape: Record<string, number> }
+>[] = [];
 let measuring = false;
 let teamStressStartedAt: number | undefined;
 let teamStressTelemetryActive = false;
@@ -3367,6 +3374,7 @@ const env = {
     ? { OPENCLAW_PERF_FSYNC_DELAY_MS: process.env.OPENCLAW_PERF_FSYNC_DELAY_MS }
     : {}),
   ...(values["session-projection-counts"] ? { OPENCLAW_BENCH_SESSION_PROJECTION_COUNTS: "1" } : {}),
+  ...(values["session-wire-counts"] ? { OPENCLAW_BENCH_SESSION_WIRE_COUNTS: "1" } : {}),
   ...(values["disable-inlining"] ? { OPENCLAW_BENCH_DISABLE_INLINING: "1" } : {}),
   ...(sessionProjectionSource
     ? { OPENCLAW_BENCH_SESSION_PROJECTION_SOURCE: sessionProjectionSource }
@@ -5358,6 +5366,22 @@ async function connectClient(index: number) {
         counters.set(event.event, (counters.get(event.event) ?? 0) + 1);
         clientCounters.set(event.event, (clientCounters.get(event.event) ?? 0) + 1);
         eventBytes.set(event.event, (eventBytes.get(event.event) ?? 0) + receivedFrameBytes);
+        if (values["session-wire-counts"]) {
+          const receipts = (perClientWireReceipts[index] ??= new Map());
+          const name = receipts.has(event.event) || receipts.size < 64 ? event.event : "other";
+          let receipt = receipts.get(name);
+          if (!receipt) {
+            receipt = { frames: 0, decompressedBytes: 0, shape: {} };
+            receipts.set(name, receipt);
+          }
+          receipt.frames++;
+          receipt.decompressedBytes += receivedFrameBytes;
+          if (event.event === "sessions.changed" || event.event === "session.message") {
+            for (const [field, count] of Object.entries(sessionPayloadShape(payload))) {
+              receipt.shape[field] = (receipt.shape[field] ?? 0) + count;
+            }
+          }
+        }
         const attribution = prepareSessionEventMetrics(event.event, payload, [], undefined)?.("");
         if (attribution) {
           const delivery =
@@ -5415,6 +5439,7 @@ async function connectClient(index: number) {
   ) {
     throw new Error("connect did not return a valid hello snapshot");
   }
+  clientConnectionIds[index] = hello.server.connId;
   if (
     client.ws.extensions.includes("permessage-deflate") !== (proxyViewers || trustedProxyScenario)
   ) {
@@ -6792,6 +6817,9 @@ try {
     eventBytes.clear();
     sessionEventSizes.clear();
     representativeFrames.clear();
+    for (const receipts of perClientWireReceipts) {
+      receipts?.clear();
+    }
     for (const counts of perClientCounters) {
       counts.clear();
     }
@@ -6817,6 +6845,7 @@ try {
       values.diagnostics ||
       values["transport-counts"] ||
       values["session-projection-counts"] ||
+      values["session-wire-counts"] ||
       values["config-capture-counts"]
         ? await startGatewayDiagnostics(gateway, `round-${round}`)
         : undefined;
@@ -7320,6 +7349,15 @@ try {
     const diagnostics = finishGatewayDiagnostics
       ? { gateway: await finishGatewayDiagnostics(), controller: finishControllerDiagnostics?.() }
       : undefined;
+    const sessionWire = diagnostics?.gateway.sessionWire;
+    if (
+      values["session-wire-counts"] &&
+      (!sessionWire?.groups.length || sessionWire.droppedFrames)
+    ) {
+      throw new Error(
+        "Session wire capture is missing or exceeded its bounded recipient/event budget",
+      );
+    }
     const broadcastTimings = (allocation?.diagnostics ?? diagnostics?.gateway)?.groups.filter(
       (group) => group.channel === "openclaw.benchmark.broadcast",
     );
@@ -7603,6 +7641,20 @@ try {
           }
         : {}),
       perClientEventCounts: perClientCounters.map((counts) => Object.fromEntries(counts)),
+      ...(values["session-wire-counts"]
+        ? {
+            sessionWireCounts: {
+              submitted: sessionWire,
+              receivedScope:
+                "controller WS message receipts after decompression; row forms before reconstruction; 64 event names per client then other; connection ID is the current connection at window end",
+              received: perClientWireReceipts.map((receipts, client) => ({
+                client,
+                recipient: clientConnectionIds[client],
+                events: Object.fromEntries(receipts),
+              })),
+            },
+          }
+        : {}),
       peakStreams,
       peakPrimaryStreams,
       primaryStreamRequests,
@@ -8355,6 +8407,7 @@ try {
     broadcastTiming: values["broadcast-timing"],
     workerAttribution: process.env.OPENCLAW_BENCH_WORKER_ATTRIBUTION === "1",
     sessionProjectionCounts: values["session-projection-counts"],
+    sessionWireCounts: values["session-wire-counts"],
     sessionProjectionSource,
     inliningDisabled: values["disable-inlining"],
     transportCounts: values["transport-counts"],

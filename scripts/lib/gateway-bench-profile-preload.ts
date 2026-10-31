@@ -73,15 +73,18 @@ if (isMainThread) {
   const workerAttribution = process.env.OPENCLAW_BENCH_WORKER_ATTRIBUTION === "1";
   const workerAttributionSourceHooks = new Set<string>();
   const sessionProjectionCounts = process.env.OPENCLAW_BENCH_SESSION_PROJECTION_COUNTS === "1";
+  const sessionWireCounts = process.env.OPENCLAW_BENCH_SESSION_WIRE_COUNTS === "1";
   const sessionProjectionSource = process.env.OPENCLAW_BENCH_SESSION_PROJECTION_SOURCE;
   const historySource = process.env.OPENCLAW_BENCH_HISTORY_SOURCE;
   const retainToolContext = process.env.OPENCLAW_BENCH_RETAIN_TOOL_CONTEXT === "1";
   const toolExecutionSource = process.env.OPENCLAW_BENCH_TOOL_EXECUTION_SOURCE;
   let broadcastTimingInstalled = false;
   let sessionProjectionCountsInstalled = false;
+  let sessionWireCountsInstalled = false;
   if (
     broadcastTiming ||
     sessionProjectionCounts ||
+    sessionWireCounts ||
     sessionProjectionSource ||
     workerAttribution ||
     historySource ||
@@ -98,7 +101,9 @@ if (isMainThread) {
         "server-broadcast.ts",
         "session-event-projection.ts",
         "session-row-presentation.ts",
+        "session-row-child-activity.ts",
         "session-sharing-read.ts",
+        "session-sharing-policy.ts",
         "session-utils-list.ts",
         "session-row-placement-projection.ts",
         "session-ancestor-references.ts",
@@ -226,8 +231,9 @@ ${source.replace(
     const audiences = new Map<`,
             ],
             [
-              "      if (!audience) {",
-              `      if (!audience) {
+              "\n      if (!audience) {",
+              `
+      if (!audience) {
         benchmarkSessionProjectionChannel.publish({ operation: event, audienceCacheMisses: 1 });`,
             ],
             [
@@ -268,6 +274,24 @@ ${source}`;
           return loaded;
         }
         let source = projectionSource ?? readFileSync(new URL(url), "utf8");
+        if (sessionWireCounts) {
+          const anchor =
+            "        const wireBytes = state.socket.send(frame, { binary: false }, sent);";
+          if (source.split(anchor).length !== 2) {
+            throw new Error("Session wire source anchor changed; update the benchmark observer");
+          }
+          source = `import { channel as benchmarkWireChannel } from "node:diagnostics_channel";
+const benchmarkSessionWireChannel = benchmarkWireChannel("openclaw.benchmark.session-wire");
+${source.replace(
+  anchor,
+  `${anchor}
+        if (benchmarkSessionWireChannel.hasSubscribers) {
+          benchmarkSessionWireChannel.publish({ recipient: c.connId, event, bytes: frame.byteLength, wireBytes });
+        }`,
+)}
+`;
+          sessionWireCountsInstalled = true;
+        }
         // Native source preserves the broadcaster's name in allocation profiles without a timer.
         if (!broadcastTiming) {
           return { ...loaded, format: "module-typescript", source };
@@ -534,6 +558,10 @@ ${source}`;
       message.action === "start"
     ) {
       reply("Session projection owner was not loaded; count attribution is unavailable");
+      return;
+    }
+    if (sessionWireCounts && !sessionWireCountsInstalled && message.action === "start") {
+      reply("Session wire owner was not loaded; submission attribution is unavailable");
       return;
     }
     if (message.kind === "diagnostics") {

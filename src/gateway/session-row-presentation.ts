@@ -147,6 +147,126 @@ export function shareSidebarSessionRows(
   return shared;
 }
 
+/** Display facts belong to one synchronous publication; recipient authority stays live. */
+function prepareSessionRowRuntime(
+  projection: SessionRowReadView,
+  now: number,
+  projectRun: VisibleActiveSessionRunProjector | undefined,
+  publicationRows?: ReturnType<PublicationView>["rows"],
+) {
+  const { cfg, rowContext } = projection.state;
+  const subagentRuns = rowContext.subagentRuns.atTime(now);
+  const preparedRowContext = { ...rowContext, subagentRuns };
+  const runState = (
+    key: string,
+    source: Pick<records.MaterializedRow["materialized"]["source"], "entry" | "parsedKey">,
+  ) => projectPreparedSessionRunState(key, source, now, preparedRowContext);
+  const active = (
+    record: Pick<records.MaterializedRow, "key" | "entry" | "agentId" | "storeTarget">,
+  ) =>
+    projectRun?.({
+      storePath: record.storeTarget.storePath,
+      requestedKey: record.key,
+      canonicalKey: record.key,
+      sessionId: record.entry.sessionId,
+      agentId: record.agentId,
+      defaultAgentId: tryResolveSessionCompatibilityOwnerAgentId(cfg, record.key),
+    });
+  let facts: unknown[] = [];
+  const prepare = (record: records.MaterializedRow) => {
+    const run = active(record);
+    const preparedFacts = record.facts?.present();
+    const childOwnerSessionKeys = resolveSessionChildOwners({
+      key: record.key,
+      entry: record.entry,
+      parsedKey: record.materialized.source.parsedKey,
+      now,
+      subagentRuns,
+    });
+    const childActivity = projection.readChildActivity(record, now);
+    let published = publicationRows?.get(record.materialized);
+    if (publicationRows) {
+      const liveModel = resolveProjectedAgentRunModel({
+        agentId: record.agentId,
+        sessionId: record.entry.sessionId,
+        index: rowContext.projectedAgentRuns,
+      });
+      const temporal = runState(record.key, record.materialized.source);
+      facts[0] = record.fallbackModel;
+      facts[1] = liveModel?.provider;
+      facts[2] = liveModel?.model;
+      facts[3] = liveModel === null;
+      facts[4] = childOwnerSessionKeys;
+      facts[5] = temporal.subagentRun?.model;
+      facts[6] = temporal.subagentOwner;
+      facts[7] = temporal.fields.status;
+      facts[8] = temporal.fields.lastRunError;
+      facts[9] = temporal.fields.suppressErrorNotice;
+      facts[10] = temporal.fields.subagentRunState;
+      facts[11] = temporal.fields.hasActiveSubagentRun;
+      facts[12] = temporal.fields.startedAt;
+      facts[13] = temporal.fields.endedAt;
+      facts[14] = temporal.fields.runtimeMs;
+      // Transient owners can cycle without publishing a row; retire the earlier sample.
+      facts[15] = run?.active;
+      facts[16] = run?.status;
+      facts[17] = preparedFacts;
+      facts[18] =
+        sessionTitleRequests.get({
+          storePath: record.storeTarget.storePath,
+          sessionKey: record.key,
+          sessionId: record.entry.sessionId,
+        }) !== undefined;
+      facts[19] = resolveActiveSessionAgentStatus(record.entry.agentStatus, now);
+      // Active budgeted goals can stamp budgetLimitedAt from enriched usage at this clock.
+      facts[20] =
+        record.entry.goal?.status === "active" && record.entry.goal.tokenBudget !== undefined
+          ? now
+          : undefined;
+      facts[21] = run?.runIds?.length;
+      // A changed child fact retires timestamped views even when the aggregate stays equal.
+      facts[22] = childActivity.revision;
+      facts[23] = resolveGatewaySessionBackgroundProcessCount({
+        cfg,
+        key: record.key,
+        agentId: record.agentId,
+        sessionId: record.entry.sessionId,
+      });
+      facts.length = 24;
+      if (run?.runIds) {
+        for (const id of run.runIds) {
+          facts.push(id);
+        }
+      }
+      if (!sameFacts(published?.facts, facts)) {
+        published = { facts, views: new Map(), target: toProjectedSessionSharingTarget(record) };
+        publicationRows.set(record.materialized, published);
+        facts = [];
+      }
+    }
+    return { run, preparedFacts, childOwnerSessionKeys, childActivity, published };
+  };
+  const rows = publicationRows
+    ? new WeakMap<records.MaterializedRow["materialized"], ReturnType<typeof prepare>>()
+    : undefined;
+  return {
+    cfg,
+    source: rowContext,
+    projectRun,
+    rowContext: preparedRowContext,
+    subagentRuns,
+    active,
+    read(record: records.MaterializedRow) {
+      let value = rows?.get(record.materialized);
+      if (!value) {
+        value = prepare(record);
+        rows?.set(record.materialized, value);
+      }
+      return value;
+    },
+  };
+}
+
 /** Sharing decisions remain recipient-local; only their identical presented results are reused. */
 export function prepareSessionRowPublication(
   projection: SessionRowProjection,
@@ -154,9 +274,10 @@ export function prepareSessionRowPublication(
   read: SessionRowReadView = projection,
 ) {
   const view = prepareSessionRowPublicationView(projection);
+  let runtime: ReturnType<typeof prepareSessionRowRuntime> | undefined;
+  let factsRevision: number | undefined;
   return (client?: GatewayClient | null, projectRun?: VisibleActiveSessionRunProjector) => {
     const recipient = prepareSessionRowRecipient(read, client, view);
-    let presentation: ReturnType<typeof prepareProjectedSessionPresentation> | undefined;
     return {
       getAudienceKey() {
         // Fixed-domain prefixes keep the opaque sharing key intact without re-encoding it.
@@ -164,13 +285,29 @@ export function prepareSessionRowPublication(
       },
       // Event fanout needs display structures only on an audience miss, after live authority.
       getPresentation() {
-        return (presentation ??= prepareProjectedSessionPresentation(
+        if (
+          !runtime ||
+          factsRevision !== recipient.publicationState?.factsRevision ||
+          runtime.cfg !== recipient.cfg ||
+          runtime.source !== recipient.rowContext ||
+          runtime.projectRun !== projectRun
+        ) {
+          runtime = prepareSessionRowRuntime(
+            read,
+            now,
+            projectRun,
+            recipient.publicationState?.rows,
+          );
+          factsRevision = recipient.publicationState?.factsRevision;
+        }
+        return prepareProjectedSessionPresentation(
           read,
           client,
           now,
           projectRun,
           recipient,
-        ));
+          runtime,
+        );
       },
     };
   };
@@ -206,6 +343,7 @@ export function prepareProjectedSessionPresentation(
   now = Date.now(),
   projectRun?: VisibleActiveSessionRunProjector,
   recipient = prepareSessionRowRecipient(projection, client),
+  runtime = prepareSessionRowRuntime(projection, now, projectRun, recipient.publicationState?.rows),
 ) {
   const { cfg, policyConfig, rowContext, presentFastMode, publicationState, sharing } = recipient;
   const entryFilter = client === undefined ? undefined : sharing.entryFilter;
@@ -213,24 +351,7 @@ export function prepareProjectedSessionPresentation(
     client === undefined
       ? undefined
       : prepareOperatorModelPresentation({ cfg, policyConfig, client });
-  const publicationRows = publicationState?.rows;
-  const subagentRuns = rowContext.subagentRuns.atTime(now);
-  const preparedRowContext = { ...rowContext, subagentRuns };
-  const runState = (
-    key: string,
-    source: Pick<records.MaterializedRow["materialized"]["source"], "entry" | "parsedKey">,
-  ) => projectPreparedSessionRunState(key, source, now, preparedRowContext);
-  const active = (
-    record: Pick<records.MaterializedRow, "key" | "entry" | "agentId" | "storeTarget">,
-  ) =>
-    projectRun?.({
-      storePath: record.storeTarget.storePath,
-      requestedKey: record.key,
-      canonicalKey: record.key,
-      sessionId: record.entry.sessionId,
-      agentId: record.agentId,
-      defaultAgentId: tryResolveSessionCompatibilityOwnerAgentId(cfg, record.key),
-    });
+  const { subagentRuns, rowContext: preparedRowContext, active } = runtime;
   const target = (query: records.Lookup) => {
     const record = projection.describe(query);
     return record ? toProjectedSessionSharingTarget(record) : null;
@@ -309,21 +430,18 @@ export function prepareProjectedSessionPresentation(
     return key;
   };
   // One synchronous presenter compares many rows; only changed facts become retained snapshots.
-  let facts: unknown[] = [];
   let recipientFacts: unknown[] = [];
   const present = (
     record: records.MaterializedRow,
     options: PresentationOptions,
   ): GatewaySessionRow | null => {
-    const run = active(record);
-    const preparedFacts = record.facts?.present();
-    const childOwnerSessionKeys = resolveSessionChildOwners({
-      key: record.key,
-      entry: record.entry,
-      parsedKey: record.materialized.source.parsedKey,
-      now,
-      subagentRuns,
-    });
+    const {
+      run,
+      preparedFacts,
+      childOwnerSessionKeys,
+      childActivity: unfiltered,
+      published,
+    } = runtime.read(record);
     const fullRow = options.rowMode !== "sidebar" && options.rowMode !== "dashboard";
     const sourceSwarm = fullRow ? record.materialized.row.swarm : undefined;
     const visibility =
@@ -374,75 +492,14 @@ export function prepareProjectedSessionPresentation(
       }
       excludedSwarmKeys = excluded.size ? excluded : undefined;
     }
-    const childActivity = projection.readChildActivity(
-      record,
-      now,
-      excludedChildKeys,
-      options.excludedChildKeys ? {} : visibility?.revision,
-    );
-    // Writers replace materialized facts; only live run, placement and clock facts need
-    // comparison here. These witnesses never grant disclosure to another recipient.
-    let published = publicationRows?.get(record.materialized);
-    if (publicationRows) {
-      const liveModel = resolveProjectedAgentRunModel({
-        agentId: record.agentId,
-        sessionId: record.entry.sessionId,
-        index: rowContext.projectedAgentRuns,
-      });
-      const temporal = runState(record.key, record.materialized.source);
-      // Overwrite before truncating: clearing length first discards V8's backing storage.
-      facts[0] = record.fallbackModel;
-      facts[1] = liveModel?.provider;
-      facts[2] = liveModel?.model;
-      facts[3] = liveModel === null;
-      facts[4] = childOwnerSessionKeys;
-      facts[5] = temporal.subagentRun?.model;
-      facts[6] = temporal.subagentOwner;
-      facts[7] = temporal.fields.status;
-      facts[8] = temporal.fields.lastRunError;
-      facts[9] = temporal.fields.suppressErrorNotice;
-      facts[10] = temporal.fields.subagentRunState;
-      facts[11] = temporal.fields.hasActiveSubagentRun;
-      facts[12] = temporal.fields.startedAt;
-      facts[13] = temporal.fields.endedAt;
-      facts[14] = temporal.fields.runtimeMs;
-      // Transient owners can cycle without publishing a row; retire the earlier sample.
-      facts[15] = run?.active;
-      facts[16] = run?.status;
-      facts[17] = preparedFacts;
-      facts[18] =
-        sessionTitleRequests.get({
-          storePath: record.storeTarget.storePath,
-          sessionKey: record.key,
-          sessionId: record.entry.sessionId,
-        }) !== undefined;
-      facts[19] = resolveActiveSessionAgentStatus(record.entry.agentStatus, now);
-      // Active budgeted goals can stamp budgetLimitedAt from enriched usage at this clock.
-      facts[20] =
-        record.entry.goal?.status === "active" && record.entry.goal.tokenBudget !== undefined
-          ? now
-          : undefined;
-      facts[21] = run?.runIds?.length;
-      // A changed child fact retires timestamped views even when the aggregate stays equal.
-      facts[22] = childActivity.revision;
-      facts[23] = resolveGatewaySessionBackgroundProcessCount({
-        cfg,
-        key: record.key,
-        agentId: record.agentId,
-        sessionId: record.entry.sessionId,
-      });
-      facts.length = 24;
-      if (run?.runIds) {
-        for (const id of run.runIds) {
-          facts.push(id);
-        }
-      }
-      if (!sameFacts(published?.facts, facts)) {
-        published = { facts, views: new Map(), target: toProjectedSessionSharingTarget(record) };
-        publicationRows.set(record.materialized, published);
-        facts = [];
-      }
-    }
+    const childActivity = excludedChildKeys
+      ? projection.readChildActivity(
+          record,
+          now,
+          excludedChildKeys,
+          options.excludedChildKeys ? {} : visibility?.revision,
+        )
+      : unfiltered;
     const views = published?.views;
     const value = published?.target ?? toProjectedSessionSharingTarget(record);
     const recipientView = client === undefined ? undefined : viewer(value, options.rowMode);

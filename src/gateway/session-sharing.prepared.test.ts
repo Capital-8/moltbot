@@ -118,23 +118,35 @@ it("uses fresh prepared caller, alias, role, and membership facts without queryi
     const cfg = rolePolicyConfig();
     const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
     const exec = vi.spyOn(DatabaseSync.prototype, "exec");
-    for (const [aliases, sessionCap, member, expectedRole, visible] of [
-      [new Set([owner.id, oldOwner.id]), undefined, false, "owner", true],
-      [new Set([owner.id]), undefined, false, "viewer", true],
-      [new Set([owner.id]), undefined, true, "member", true],
-      [new Set([owner.id]), "write", false, "member", true],
-      [new Set([owner.id]), "none", true, "viewer", false],
-      [new Set([owner.id]), "invited", false, "viewer", false],
-      [new Set([owner.id]), "invited", true, "member", true],
+    for (const [aliases, sessionCap, member, expectedRole, visible, membershipReads] of [
+      [new Set([owner.id, oldOwner.id]), undefined, false, "owner", true, 0],
+      [new Set([owner.id]), undefined, false, "viewer", true, 1],
+      [new Set([owner.id]), undefined, true, "member", true, 1],
+      [new Set([owner.id]), "write", false, "member", true, 0],
+      [new Set([owner.id]), "none", true, "viewer", false, 0],
+      [new Set([owner.id]), "invited", false, "viewer", false, 1],
+      [new Set([owner.id]), "invited", true, "member", true, 1],
     ] as const) {
-      const sharing = prepareSessionSharing(
-        { cfg, client },
-        { aliases, sessionCap, isMember: () => member },
-      );
+      const isMember = vi.fn(() => member);
+      const sharing = prepareSessionSharing({ cfg, client }, { aliases, sessionCap, isMember });
       expect(sharing.roleForTarget(target)).toBe(expectedRole);
+      expect(isMember).toHaveBeenCalledTimes(membershipReads);
+      if (membershipReads && member) {
+        expect(sharing.roleForTarget(target, false)).toBe("viewer");
+        expect(isMember).toHaveBeenCalledTimes(membershipReads);
+      }
       expect(sharing.canReadTarget(target)).toBe(visible);
       expect(sharing.authorizeTarget(target) === null).toBe(visible);
     }
+    client.connect.scopes!.push("operator.admin");
+    const adminMembership = vi.fn(() => false);
+    const admin = prepareSessionSharing(
+      { cfg, client },
+      { aliases: new Set([owner.id]), sessionCap: "none", isMember: adminMembership },
+    );
+    expect(admin.roleForTarget(target)).toBe("admin");
+    expect(adminMembership).not.toHaveBeenCalled();
+    client.connect.scopes!.pop();
     client.authenticatedUserProfile!.profileId = oldOwner.id;
     const fresh = prepareSessionSharing(
       { cfg, client },

@@ -2,6 +2,7 @@ import { channel } from "node:diagnostics_channel";
 import { expectDefined } from "@openclaw/normalization-core/expect";
 import { expect, it } from "vitest";
 import { startGatewayBenchDiagnostics } from "../../scripts/lib/gateway-bench-diagnostics.js";
+import { sessionPayloadShape } from "../../scripts/lib/gateway-bench-session-wire.js";
 
 it("aggregates captured work with bounded memory and drops content-bearing fields", () => {
   const source = channel("openclaw.session.write");
@@ -182,4 +183,96 @@ it("retains sparse projection counts separately for each published event", () =>
     ]);
     expect(result.collectionErrors).toBe(0);
   }
+});
+
+it("separates submitted codec bytes by recipient and reports unavailable sizes without inventing bytes", () => {
+  const source = channel("openclaw.benchmark.session-wire");
+  source.publish({
+    recipient: "outside-window",
+    event: "sessions.changed",
+    bytes: 1,
+    wireBytes: 1,
+  });
+  const finish = startGatewayBenchDiagnostics();
+  source.publish({ recipient: "a", event: "sessions.changed", bytes: 1000, wireBytes: 100 });
+  source.publish({ recipient: "a", event: "sessions.changed", bytes: 2000, wireBytes: 126 });
+  source.publish({ recipient: "b", event: "session.message", bytes: 70000, wireBytes: 65536 });
+  source.publish({ recipient: "b", event: "session.message", bytes: 2000 });
+  const result = finish();
+  source.publish({ recipient: "a", event: "sessions.changed", bytes: 999, wireBytes: 999 });
+  expect(result.sessionWire).toMatchObject({
+    droppedFrames: 0,
+    groups: [
+      {
+        recipient: "a",
+        event: "sessions.changed",
+        frames: 2,
+        decompressedBytes: 3000,
+        submittedPayloadBytes: 226,
+        submittedFrameBytes: 232,
+        unavailableWireFrames: 0,
+      },
+      {
+        recipient: "b",
+        event: "session.message",
+        frames: 2,
+        decompressedBytes: 72000,
+        submittedPayloadBytes: 65536,
+        submittedFrameBytes: 65546,
+        unavailableWireFrames: 1,
+      },
+    ],
+  });
+});
+
+it("bounds wire capture cardinality and counts row forms without retaining payload contents", () => {
+  const source = channel("openclaw.benchmark.session-wire");
+  const finish = startGatewayBenchDiagnostics();
+  for (let index = 0; index < 2049; index++) {
+    source.publish({ recipient: String(index), event: "sessions.changed", bytes: 1, wireBytes: 1 });
+  }
+  const result = finish();
+  expect(result.sessionWire?.groups).toHaveLength(2048);
+  expect(result.sessionWire?.droppedFrames).toBe(1);
+  const payload = {
+    session: {
+      key: "child",
+      base: 1,
+      version: 2,
+      set: { title: "private", status: "running" },
+      remove: ["old"],
+    },
+    ancestorSessions: [
+      { key: "parent", version: 1, full: { title: "private parent" } },
+      { key: "root", base: 1, version: 2, set: {}, remove: [] },
+      { key: "legacy", title: "private legacy" },
+    ],
+    ancestorSessionRefs: [{ key: "another" }],
+    sessionFieldRefs: [0, 2],
+    message: { content: "private body" },
+  };
+  expect(sessionPayloadShape(payload)).toEqual({
+    fullRows: 0,
+    patchRows: 1,
+    legacyRows: 0,
+    omittedRows: 0,
+    patchSetFields: 2,
+    patchRemovedFields: 1,
+    ancestorRows: 3,
+    ancestorFullRows: 1,
+    ancestorPatchRows: 1,
+    ancestorLegacyRows: 1,
+    ancestorReferences: 1,
+    sessionFieldReferences: 2,
+    sidebarRows: 0,
+    messageBodies: 1,
+  });
+  expect(sessionPayloadShape({ session: { full: { title: "full" } } })).toMatchObject({
+    fullRows: 1,
+    patchRows: 0,
+  });
+  expect(sessionPayloadShape({ sessions: [{}, {}] })).toMatchObject({
+    omittedRows: 1,
+    sidebarRows: 2,
+  });
 });

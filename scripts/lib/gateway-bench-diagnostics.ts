@@ -9,6 +9,7 @@ import {
 } from "node:perf_hooks";
 import { getHeapSpaceStatistics } from "node:v8";
 import { isRecord } from "../../packages/normalization-core/src/record-coerce.ts";
+import { startSessionWireCapture } from "./gateway-bench-session-wire.ts";
 
 const CHANNELS = [
   "openclaw.redaction",
@@ -124,6 +125,7 @@ function summarizeMetrics(metrics: Record<string, Metric>) {
 
 /** Bounded numeric aggregates for the benchmark's main isolate; profiles cover workers. */
 export function startGatewayBenchDiagnostics() {
+  const finishSessionWire = startSessionWireCapture();
   // Heap capacity and process age expose GC phase differences without forcing collection.
   const heapSpacesBefore = getHeapSpaceStatistics();
   const uptimeBefore = process.uptime();
@@ -260,6 +262,7 @@ export function startGatewayBenchDiagnostics() {
   const observer = new PerformanceObserver((list) => collectGc(list.getEntries()));
   observer.observe({ entryTypes: ["gc"] });
   return () => {
+    const sessionWire = finishSessionWire();
     const endedAt = performance.now();
     const uptimeAfter = process.uptime();
     eventLoopDelay.disable();
@@ -271,6 +274,7 @@ export function startGatewayBenchDiagnostics() {
     const heapSpacesAfter = getHeapSpaceStatistics();
     return {
       scope: "main-isolate",
+      ...(sessionWire.groups.length || sessionWire.droppedFrames ? { sessionWire } : {}),
       runtime: {
         node: process.versions.node,
         v8: process.versions.v8,

@@ -752,16 +752,22 @@ it("reuses unchanged run presentation and refreshes follow-up activity and row r
       expect(initialState.fields.hasActiveSubagentRun).not.toBe(true);
       await list();
       expect(states.mock.results.at(-1)?.value).toBe(activeState);
-      const snapshot = () =>
-        prepareSessionRowPublication(projection, Date.now())()
-          .getPresentation()
-          .snapshot({ agentId: "main", key: parent }).row;
+      const snapshot = (publication = prepareSessionRowPublication(projection, Date.now())) =>
+        publication().getPresentation().snapshot({ agentId: "main", key: parent }).row;
       const visible = { hasActiveSubagentRun: true, childSessions: [key, sibling] };
       expect(snapshot()).toMatchObject({ ...visible, snapshotAt: Date.now() });
+      const publication = prepareSessionRowPublication(projection, Date.now());
+      expect(snapshot(publication)).toMatchObject({ ...visible, snapshotAt: Date.now() });
+      const runtimeReads = states.mock.calls.length;
+      expect(snapshot(publication)).toMatchObject(visible);
+      expect(states).toHaveBeenCalledTimes(runtimeReads);
       // One contribution ends while the visible aggregate stays active: its timestamp still advances.
       releaseAgentRunContext(sibling, siblingClaim);
       clock.mockReturnValue(Date.now() + 1_000);
       expect(snapshot()).toMatchObject({ ...visible, snapshotAt: Date.now() });
+      const changedRuntimeReads = states.mock.calls.length;
+      expect(snapshot(publication)).toMatchObject(visible);
+      expect(states).toHaveBeenCalledTimes(changedRuntimeReads + 1);
       seedRow(key, { ...entry, sessionId: "replacement-session", updatedAt: 2 });
       expect(await active()).not.toBe(true);
     } finally {

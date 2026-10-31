@@ -290,14 +290,14 @@ export function resolveSessionSharingRole(
 }
 
 /** Caller facts belong to one synchronous read; prepare again after yielding. */
-export function prepareSessionSharingRole(
+export function prepareSessionSharingRole<
+  Target extends Pick<SessionSharingTarget, "canonicalKey" | "entry">,
+>(
   params: Pick<SessionSharingRoleParams, "cfg" | "client">,
   preparedCap?: { value: ReturnType<typeof operatorSessionCap> },
   isCreator?: ReturnType<typeof prepareSessionCreatorProfile>,
-): (
-  target: Pick<SessionSharingTarget, "canonicalKey" | "entry">,
-  isMember?: boolean,
-) => SessionSharingRole {
+  readMembership?: (target: Target) => boolean | undefined,
+): (target: Target, isMember?: boolean) => SessionSharingRole {
   if (isGatewayAdmin(params.client)) {
     return () => "admin";
   }
@@ -331,6 +331,7 @@ export function prepareSessionSharingRole(
     if (sessionCap === "none") {
       return "viewer";
     }
+    isMember ??= readMembership?.(target);
     if (isMember === undefined) {
       throw new SessionMutationFactsUnavailableError();
     }

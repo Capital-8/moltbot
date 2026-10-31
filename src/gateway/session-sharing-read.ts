@@ -119,12 +119,13 @@ export function prepareSessionSharing(
     ? prepared.sessionCap
     : params.cfg && operatorSessionCap(params.client, params.cfg);
   const cap = { value: sessionCap };
-  const resolveRole = prepareSessionSharingRole(params, cap, isCreator);
-  const roleForTarget = (target: SessionSharingTarget, isMember?: boolean) =>
-    resolveRole(
-      target,
-      isMember ?? (prepared && Boolean(identity && prepared.isMember(target, identity.id))),
-    );
+  const roleForTarget = prepareSessionSharingRole(
+    params,
+    cap,
+    isCreator,
+    (target: SessionSharingTarget) =>
+      prepared && Boolean(identity && prepared.isMember(target, identity.id)),
+  );
   const entryFilter = createSessionListEntryFilter(params, isCreator, { sessionCap });
   return {
     identity,

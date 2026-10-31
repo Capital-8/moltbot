@@ -49,6 +49,17 @@ type PublicationDelivery = {
   delivered: (client: GatewayClient) => void;
 };
 
+type PublicationAudience = {
+  row: GatewaySessionRow;
+  rowFields?: string[];
+  rowFieldIndices?: Map<string, number>;
+  envelope?: PublicationEnvelope;
+  ancestors: ReturnType<typeof prepareSessionAncestor>[] | undefined;
+  hiddenAncestors: Array<{ key: string; histories: Map<object, object> }>;
+  ancestorInvalidations: Map<object, object> | undefined;
+  deliveries: [WeakMap<object, PublicationDelivery>, WeakMap<object, PublicationDelivery>];
+};
+
 /** Stable producer fields retain their order around the two history-owned ancestor fields. */
 function prepareEnvelopeSerialization(
   payload: Record<string, unknown>,
@@ -176,19 +187,8 @@ export function prepareSessionEventProjection(
     const ancestors = prepared ? prepared.ancestors : projection.ancestorRows(record, read);
     const enrichment = { includeDerivedTitles: true, includeLastMessage: true };
     const ancestorRevision = randomUUID();
-    const audiences = new Map<
-      string,
-      {
-        row: GatewaySessionRow;
-        rowFields?: string[];
-        rowFieldIndices?: Map<string, number>;
-        envelope?: PublicationEnvelope;
-        ancestors: ReturnType<typeof prepareSessionAncestor>[] | undefined;
-        hiddenAncestors: Array<{ key: string; histories: Map<object, object> }>;
-        ancestorInvalidations: Map<object, object> | undefined;
-        deliveries: [WeakMap<object, PublicationDelivery>, WeakMap<object, PublicationDelivery>];
-      }
-    >();
+    const audiences = new Map<string, PublicationAudience>();
+    const outputs = new Map<GatewaySessionRow, PublicationAudience[]>();
     const diff = createSessionRowDeltaDiffer();
     const envelopeFields: [string, unknown][] = [];
     let revision = projection.state.revision;
@@ -206,6 +206,7 @@ export function prepareSessionEventProjection(
       const currentAccessRevision = readGatewayAccessRevision();
       if (revision !== projection.state.revision || accessRevision !== currentAccessRevision) {
         audiences.clear();
+        outputs.clear();
         revision = projection.state.revision;
         accessRevision = currentAccessRevision;
       }
@@ -235,13 +236,35 @@ export function prepareSessionEventProjection(
               return presented ? [prepareSessionAncestor(presented)] : [];
             })
           : undefined;
-        audience = {
-          row,
-          ancestors: ancestorRows,
-          hiddenAncestors,
-          ancestorInvalidations: ancestorRows ? undefined : new Map(),
-          deliveries: [new WeakMap(), new WeakMap()],
-        };
+        const variants = outputs.get(row);
+        // Live authorization precedes grouping; immutable output, not principal identity,
+        // owns wire preparation. Different ancestor visibility or order stays separate.
+        audience = variants?.find(
+          (candidate) =>
+            (candidate.ancestors === ancestorRows ||
+              (candidate.ancestors !== undefined &&
+                ancestorRows !== undefined &&
+                candidate.ancestors.length === ancestorRows.length &&
+                candidate.ancestors.every((value, index) => value === ancestorRows[index]))) &&
+            candidate.hiddenAncestors.length === hiddenAncestors.length &&
+            candidate.hiddenAncestors.every(
+              (value, index) => value.key === hiddenAncestors[index]!.key,
+            ),
+        );
+        if (!audience) {
+          audience = {
+            row,
+            ancestors: ancestorRows,
+            hiddenAncestors,
+            ancestorInvalidations: ancestorRows ? undefined : new Map(),
+            deliveries: [new WeakMap(), new WeakMap()],
+          };
+          if (variants) {
+            variants.push(audience);
+          } else {
+            outputs.set(row, [audience]);
+          }
+        }
         audiences.set(audienceKey, audience);
       }
       const rowDeltas = hasGatewayClientCap(
