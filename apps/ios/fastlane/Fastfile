@@ -9,6 +9,7 @@ require "digest/md5"
 require "time"
 require "rubygems/version"
 require_relative "screenshot_diagnostics"
+require_relative "watch_runtime_admission"
 require_relative "testflight"
 
 default_platform(:ios)
@@ -339,9 +340,10 @@ def create_watch_screenshot_simulator(name)
     template = resolve_simulator_device(name)
     if template
       begin
+        WatchRuntimeAdmission.wait!(template.fetch("runtime")) if ENV["CI"] == "true"
         return [template, create_screenshot_simulator(template)]
       rescue StandardError => error
-        raise unless ENV["CI"] == "true" && error.message.include?("runtime path not found")
+        raise unless ENV["CI"] == "true" && (error.is_a?(WatchRuntimeAdmission::Unavailable) || error.message.include?("runtime path not found"))
         reason = error.message
       end
     else

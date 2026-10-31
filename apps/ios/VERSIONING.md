@@ -179,7 +179,13 @@ when it disappears during the phone or tablet captures. The repair replaces only
 the selected Watch runtime's registered image, or installs it if absent, and logs
 runtime availability, image state, and mounted-path existence without filesystem
 paths. Local runs leave runtime installation to the operator. Boot and capture
-failures still stop the lane without retrying screenshots.
+failures still stop the lane without retrying screenshots. Before creating the
+Watch simulator, CI waits up to two minutes for pending Watch runtime cleanup:
+each installed Watch runtime must have one `Ready` registration, an actual mount,
+and an existing runtime bundle. When a mounted, ready replacement exists, CI
+retires only its unmounted `Unusable` registrations and keeps their shared asset.
+`Deleting` registrations remain owned by CoreSimulator. The lane does not boot a
+simulator on a volume it is still removing.
 
 Registrations already marked `Deleting` are left to CoreSimulator and excluded
 from repair candidates. More than one remaining registration still stops the
