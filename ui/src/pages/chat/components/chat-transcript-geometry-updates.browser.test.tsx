@@ -460,7 +460,9 @@ it("parks retained rows without layout and restores their resized geometry and n
       stopReason: "stop",
       content: source,
     }),
-    ...geometryMessages(222).map((message, index) => ({ ...message, timestamp: 400 + index })),
+    ...geometryMessages(222).map((message, index) =>
+      Object.assign({}, message, { timestamp: 400 + index }),
+    ),
   ];
   const { host, viewport, session, virtualizer } = await mountPane(
     false,
