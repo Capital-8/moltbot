@@ -4235,8 +4235,7 @@ describe("gateway Gmail hot reload handlers", () => {
     "joins admitted config restart %s after managed shutdown starts",
     async (outcome) => {
       vi.useFakeTimers();
-      const { clock, scheduler } = createConfigReloadTestClock();
-      const harness = await createManagedRestartSequenceHarness({ scheduler });
+      const harness = await createManagedRestartSequenceHarness();
       const { promise: preflightStarted, resolve: markPreflightStarted } = createDeferred();
       const { promise: preflightBlocked, resolve: releasePreflight } = createDeferred();
       harness.activateRuntimeSecrets.prepareSnapshot.mockImplementationOnce(async ({ config }) => {
@@ -4254,7 +4253,7 @@ describe("gateway Gmail hot reload handlers", () => {
         expect(harness.reloader.isConfigReloadSettled()).toBe(true);
         harness.writeConfig(harness.deferredConfig, "shutdown-restart", 1);
         expect(harness.reloader.isConfigReloadSettled()).toBe(false);
-        await clock.wake();
+        await vi.advanceTimersByTimeAsync(0);
         await preflightStarted;
         expect(harness.reloader.isConfigReloadSettled()).toBe(false);
 
@@ -4262,6 +4261,7 @@ describe("gateway Gmail hot reload handlers", () => {
         const stopPromise = harness.reloader.stop().then(() => {
           stopped = true;
         });
+        await vi.advanceTimersByTimeAsync(0);
         expect(stopped).toBe(false);
         expect(harness.reloader.isConfigReloadSettled()).toBe(false);
         releasePreflight?.();
