@@ -577,7 +577,7 @@ const unrelatedArgs = [
     const project = (consumer = source) =>
       compile(new Map([[consumerPath, consumer]]))
         .split("\n")
-        .filter((line) => line.endsWith('from "../src/tts/tts.js";'))
+        .filter((line) => line.endsWith('from "../src/plugin-sdk/tts-runtime.js";'))
         .join("\n");
     const members = [
       "buildTtsSystemPromptHintAsync",
