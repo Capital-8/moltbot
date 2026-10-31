@@ -424,6 +424,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/placement-session-tool-operations.worker.test.ts",
   "src/gateway/worker-environments/placement-startup-concurrency.test.ts",
   "src/gateway/worker-environments/placement-store-terminal.test.ts",
+  "src/gateway/worker-environments/placement-repository-disk-recovery.test.ts",
   "src/gateway/worker-environments/placement-store.activation.test.ts",
   "src/gateway/worker-environments/placement-store.move.test.ts",
   "src/gateway/worker-environments/placement-store.redispatch.test.ts",
