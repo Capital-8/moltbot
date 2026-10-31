@@ -397,7 +397,7 @@ export async function runCopilotExecution(context: {
     }
     sessionRef.current = session;
     if (settledToolFinalization) {
-      await denyCopilotIsolatedSessionRemote(session);
+      await denyCopilotIsolatedSessionRemote(session, params.abortSignal);
     }
     sdkSessionId =
       readNonEmptyString(session.sessionId) ??

@@ -1,4 +1,5 @@
 import type { SessionConfig } from "@github/copilot-sdk";
+import { racePromiseWithAbortSignal } from "openclaw/plugin-sdk/agent-harness-attempt-runtime";
 
 const COPILOT_ISOLATED_EXCLUDED_TOOLS = ["builtin:*", "mcp:*", "custom:*"] as const;
 
@@ -43,14 +44,17 @@ export type CopilotRemoteDenySession = {
  *
  * SDK 1.0.26 removed the create/resume `remoteSession` option; the session's
  * `remote.disable` RPC is the remaining explicit runtime deny. Failure rejects
- * the turn instead of sending its prompt with remote state unconfirmed.
+ * the turn instead of sending its prompt with remote state unconfirmed. The
+ * caller's abort signal bounds a wedged RPC; the caller owns session cleanup.
  */
 export async function denyCopilotIsolatedSessionRemote(
   session: CopilotRemoteDenySession,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const remote = session.rpc?.remote;
-  if (!remote?.disable) {
+  const disable = remote?.disable?.bind(remote);
+  if (!disable) {
     throw new Error("[copilot] isolated session cannot disable remote export and steering");
   }
-  await remote.disable();
+  await racePromiseWithAbortSignal(disable, abortSignal);
 }

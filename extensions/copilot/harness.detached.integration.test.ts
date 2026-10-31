@@ -36,6 +36,7 @@ const transport = vi.hoisted(() => ({
   egress: [] as string[],
   remoteSteerable: [] as (boolean | undefined)[],
   remoteDisableError: undefined as Error | undefined,
+  remoteDisableHangs: false,
 }));
 
 // Only provider I/O is synthetic. The registered harness, pool, SDK stdio runtime,
@@ -69,7 +70,15 @@ vi.mock("./src/sdk-loader.js", async (importOriginal) => {
         };
       const observeRemoteDeny = (session: CopilotSession) => {
         const disable = session.rpc.remote.disable;
+        const disconnect = session.disconnect.bind(session);
+        session.disconnect = async () => {
+          transport.egress.push("disconnect");
+          await disconnect();
+        };
         session.rpc.remote.disable = async () => {
+          if (transport.remoteDisableHangs) {
+            return new Promise<void>(() => {});
+          }
           await disable();
           if (transport.remoteDisableError) {
             throw transport.remoteDisableError;
@@ -113,6 +122,7 @@ afterEach(async () => {
   transport.egress = [];
   transport.remoteSteerable = [];
   transport.remoteDisableError = undefined;
+  transport.remoteDisableHangs = false;
   transport.reply = undefined;
   clearRuntimeConfigSnapshot();
   vi.restoreAllMocks();
@@ -293,21 +303,22 @@ async function remoteDenyTurns() {
   } as const;
   const { hostCapabilities: _hostCapabilities, ...attempt } = params;
   return {
-    complete: () =>
+    complete: (extra: { timeoutMs?: number } = {}) =>
       registered.runIsolatedCompletionV2?.({
         ...isolated,
+        ...extra,
         provider: params.provider,
         modelId: params.modelId,
         authorization: { ...isolated.authorization, model: params.model, auth },
         agentDir: directory,
         workspaceDir: directory,
       }),
-    finalize: async () => {
+    finalize: async (abortSignal?: AbortSignal) => {
       const settledAttempt = await run();
       expect(settledAttempt.terminal.kind).toBe("ok");
       transport.egress = [];
       return registered.finalizeSettledTurn?.({
-        attempt: { ...attempt, runId: "fixture-finalize", prompt: "Finish" },
+        attempt: { ...attempt, abortSignal, runId: "fixture-finalize", prompt: "Finish" },
         settledAttempt,
       });
     },
@@ -318,18 +329,28 @@ it("disables remote export through the real runtime before isolated turns reach 
   const turns = await remoteDenyTurns();
   const reply = await turns.complete();
   expect(reply?.assistant.content).toEqual([{ type: "text", text: "OK" }]);
-  expect(transport.egress).toEqual(["remote.disable", "provider"]);
+  expect(transport.egress).toEqual(["remote.disable", "provider", "disconnect"]);
   expect(transport.remoteSteerable).toEqual([false]);
   const final = await turns.finalize();
   expect(final?.assistant.content).toEqual([{ type: "text", text: "OK" }]);
-  expect(transport.egress).toEqual(["remote.disable", "provider"]);
+  expect(transport.egress).toEqual(["remote.disable", "provider", "disconnect"]);
 });
 
 it("fails isolated turns closed when the real runtime cannot confirm the remote deny", async () => {
   const turns = await remoteDenyTurns();
   transport.remoteDisableError = new Error("remote disable refused");
   await expect(turns.complete()).rejects.toThrow("remote disable refused");
-  expect(transport.egress).toEqual([]);
+  expect(transport.egress).toEqual(["disconnect"]);
   await expect(turns.finalize()).rejects.toThrow("did not complete successfully");
-  expect(transport.egress).toEqual([]);
+  expect(transport.egress).toEqual(["disconnect"]);
+});
+
+it("bounds a wedged remote deny by each isolated turn's deadline and abort", async () => {
+  const turns = await remoteDenyTurns();
+  transport.remoteDisableHangs = true;
+  await expect(turns.complete({ timeoutMs: 200 })).rejects.toThrow("timed out after 200ms");
+  await vi.waitFor(() => expect(transport.egress).toEqual(["disconnect"]));
+  const finalized = turns.finalize(AbortSignal.timeout(2_000));
+  await expect(finalized).rejects.toThrow("did not complete successfully");
+  expect(transport.egress).toEqual(["disconnect"]);
 });
