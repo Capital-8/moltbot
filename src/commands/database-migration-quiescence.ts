@@ -1,10 +1,7 @@
 import fs from "node:fs";
-import {
-  GATEWAY_CLIENT_MODES,
-  GATEWAY_CLIENT_NAMES,
-} from "../../packages/gateway-protocol/src/client-info.js";
 import { createConfigIO } from "../config/io.js";
 import { resolveGatewayAuthForConfig } from "../gateway/auth-resolve.js";
+import { resolveReadOnlyLocalGatewayAuth } from "../gateway/call-device-auth.js";
 import { callGateway } from "../gateway/call.js";
 import { resolveIdentityPathViaExistingAncestorSync } from "../infra/boundary-path.js";
 import { readGatewayLockProcessStartTime } from "../infra/gateway-lock-process.js";
@@ -164,6 +161,11 @@ export async function withGatewayMigrationQuiescence<T>(options: {
     if (!credentials) {
       throw new Error("Migration requires private local backend shared authentication.");
     }
+    const controlAuth = await resolveReadOnlyLocalGatewayAuth({
+      auth: credentials,
+      authNone: false,
+      env,
+    });
     const rpc = <R>(method: string, params: unknown) =>
       callGateway<R>({
         method,
@@ -172,13 +174,7 @@ export async function withGatewayMigrationQuiescence<T>(options: {
         configPath: paths.configPath,
         localPortOverride: owner.port,
         ignoreEnvUrlOverride: true,
-        ...credentials,
-        skipImplicitAuth: true,
-        deviceIdentity: null,
-        sharedStateMode: "read-only",
-        clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
-        mode: GATEWAY_CLIENT_MODES.BACKEND,
-        requireLocalBackendSharedAuth: true,
+        ...controlAuth,
         scopes: ["operator.admin"],
         timeoutMs: RPC_TIMEOUT_MS,
         signal: controller.signal,

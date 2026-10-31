@@ -378,14 +378,7 @@ async function createBackupArchiveInScope(
   const onlyConfig = Boolean(opts.onlyConfig);
   const includeWorkspace = onlyConfig ? false : (opts.includeWorkspace ?? true);
   const excludeWorktreeTemplates = !onlyConfig && Boolean(opts.excludeWorktreeTemplates);
-  const plan =
-    preparedPlan ??
-    (await resolveBackupPlanFromDisk({
-      includeWorkspace,
-      excludeWorktreeTemplates,
-      onlyConfig,
-      nowMs,
-    }));
+  const plan = preparedPlan ?? (await resolveBackupPlanFromDisk({ ...opts, nowMs }));
   if (!preparedPlan && opts.localCompanion) {
     companionPolicy.assertLocalCompanionSelection(plan.databaseSelection, onlyConfig);
     return withDatabaseEngineSelection(plan.databaseSelection, () =>

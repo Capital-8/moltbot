@@ -21,9 +21,28 @@ import {
   createDatabaseMigrationCapture,
   restoreDatabaseMigrationCapture,
 } from "./database-migration-capture.js";
+import { createDatabaseMigrationFilesystemBackup } from "./database-migration-filesystem-backup.js";
 import { createTestRuntime } from "./test-runtime-config-helpers.js";
 
 describe("exact database migration capture", () => {
+  it("creates and verifies the filesystem base through the isolated archive producer", async () => {
+    await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
+      const config = { plugins: { enabled: false } };
+      await state.writeConfig(config);
+      openOpenClawStateDatabase({ env: state.env });
+      await closeOpenClawStateDatabaseAsync();
+      const output = state.path("isolated-filesystem.tar.gz");
+      await createDatabaseMigrationFilesystemBackup({
+        output,
+        stateDir: state.stateDir,
+        config,
+        env: state.env,
+        signal: new AbortController().signal,
+      });
+      expect((await fs.stat(output)).size).toBeGreaterThan(0);
+    });
+  });
+
   it("restores exact delivery and fixed-local data over a full private filesystem base", async () => {
     await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
       await state.writeConfig({ plugins: { enabled: false } });

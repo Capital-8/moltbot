@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveGatewayCallDeviceAuth } from "../gateway/call-device-auth.js";
 import type { CallGatewayOptions } from "../gateway/call.js";
 import type { GatewayMigrationQuiescenceScope } from "./database-migration-quiescence.js";
 
@@ -14,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   alive: vi.fn(),
   start: vi.fn(),
+  workerUrl: undefined as URL | undefined,
 }));
 // mock-isolation: fixed external RPC/config/process observations; the production
 // lease owner, timers, filesystem witness and linked cancellation run unchanged.
@@ -30,8 +33,28 @@ vi.mock("../infra/gateway-lock.js", () => ({
 vi.mock("../infra/gateway-lock-process.js", () => ({
   readGatewayLockProcessStartTime: mocks.start,
 }));
-vi.mock("../shared/pid-alive.js", () => ({ isPidAlive: mocks.alive }));
+vi.mock("../shared/pid-alive.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/pid-alive.js")>();
+  return {
+    ...actual,
+    isPidAlive: (pid: number) => (pid === 1234 ? mocks.alive(pid) : actual.isPidAlive(pid)),
+  };
+});
 
+// Only the external child executable is a fixture. The production subprocess
+// launcher, cancellation/join, lease controller and capture caller run unchanged.
+vi.mock("../infra/runtime-worker-url.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../infra/runtime-worker-url.js")>();
+  return {
+    ...actual,
+    resolveRuntimeWorkerUrl: (...args: Parameters<typeof actual.resolveRuntimeWorkerUrl>) =>
+      mocks.workerUrl ?? actual.resolveRuntimeWorkerUrl(...args),
+    resolveRuntimeWorkerArgv: (...args: Parameters<typeof actual.resolveRuntimeWorkerArgv>) =>
+      mocks.workerUrl ? [fileURLToPath(mocks.workerUrl)] : actual.resolveRuntimeWorkerArgv(...args),
+  };
+});
+
+import { createDatabaseMigrationFilesystemBackup } from "./database-migration-filesystem-backup.js";
 import { withGatewayMigrationQuiescence } from "./database-migration-quiescence.js";
 
 let directory: string;
@@ -74,6 +97,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-29T00:00:00Z"));
   vi.resetAllMocks();
+  mocks.workerUrl = undefined;
   directory = fs.mkdtempSync(path.join(os.tmpdir(), "migration-quiescence-"));
   ownerPath = path.join(directory, "owner.lock");
   const configPath = path.join(directory, "openclaw.json");
@@ -108,6 +132,74 @@ afterEach(() => {
 });
 
 describe("borrowed Gateway migration quiescence", () => {
+  it("keeps renewal responsive during a synchronously blocked archive child", async () => {
+    const readyPath = path.join(directory, "archive-child.ready");
+    const releasePath = path.join(directory, "archive-child.release");
+    const output = path.join(directory, "filesystem.tar.gz");
+    const script = path.join(directory, "blocked-archive.mjs");
+    fs.writeFileSync(
+      script,
+      `import fs from 'node:fs';
+let input='';
+for await (const chunk of process.stdin) input+=chunk;
+const request=JSON.parse(input);
+fs.writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));
+const deadline=Date.now()+10000;
+// Deliberately blocks this child's event loop, like synchronous SQLite/NFS.
+while (!fs.existsSync(${JSON.stringify(releasePath)})) {
+  if (Date.now()>=deadline) process.exit(2);
+}
+fs.writeFileSync(request.output, 'private archive fixture');
+process.stdout.write(JSON.stringify({archivePath:request.output,verified:true}));
+`,
+    );
+    mocks.workerUrl = pathToFileURL(script);
+    const ready = Promise.withResolvers<void>();
+    const watcher = fs.watch(directory, () => {
+      if (fs.existsSync(readyPath)) {
+        ready.resolve();
+      }
+    });
+    try {
+      const operation = run(async (scope) => {
+        const capture = createDatabaseMigrationFilesystemBackup({
+          output,
+          stateDir: directory,
+          config: {},
+          env: process.env,
+          signal: scope.signal,
+        });
+        // Observe rejection immediately while the test drives the controller.
+        const settled = capture.then(
+          () => ({ ok: true as const }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+        await Promise.race([
+          ready.promise,
+          settled.then((result) => {
+            if (!result.ok) {
+              throw result.error;
+            }
+            throw new Error("Archive fixture exited before its blocking phase");
+          }),
+        ]);
+        await vi.advanceTimersByTimeAsync(130_000);
+        scope.assertCurrent();
+        expect(
+          mocks.rpc.mock.calls.filter(([call]) => call.method === "gateway.suspend.prepare").length,
+        ).toBeGreaterThanOrEqual(5);
+        fs.writeFileSync(releasePath, "release");
+        expect(await settled).toEqual({ ok: true });
+        await scope.revalidate();
+        expect(fs.readFileSync(output, "utf8")).toBe("private archive fixture");
+      });
+      await operation;
+    } finally {
+      fs.writeFileSync(releasePath, "release");
+      watcher.close();
+    }
+  });
+
   it("renews only the existing suspension, keeps source inputs unchanged and exposes latest expiry", async () => {
     const bytes = fs.readFileSync(ownerPath);
     const before = fs.statSync(ownerPath, { bigint: true });
@@ -142,7 +234,7 @@ describe("borrowed Gateway migration quiescence", () => {
         deviceIdentity: null,
         skipImplicitAuth: true,
         sharedStateMode: "read-only",
-        requireLocalBackendSharedAuth: true,
+        requireLocalBackendSharedAuth: false,
       });
       expect(call.params).toEqual(
         call.method === "gateway.suspend.status"
@@ -150,6 +242,39 @@ describe("borrowed Gateway migration quiescence", () => {
           : { requestId, drain: false, terminalPolicy: "preserve" },
       );
     }
+  });
+
+  it("uses the existing read-only client boundary for trusted-proxy backend password", async () => {
+    mocks.config.mockResolvedValue({
+      valid: true,
+      config: { gateway: { mode: "local", auth: { mode: "trusted-proxy" } } },
+    });
+    mocks.auth.mockReturnValue({
+      mode: "trusted-proxy",
+      password: "synthetic-private-shared-password",
+    });
+    mocks.rpc.mockImplementation(async (options: CallGatewayOptions) => {
+      options.assertDispatchCurrent?.();
+      const client = await resolveGatewayCallDeviceAuth({
+        opts: options,
+        url: `ws://127.0.0.1:${owner.port}`,
+        authMode: "trusted-proxy",
+        isImplicitLocalTarget: true,
+        token: options.token,
+        password: options.password,
+      });
+      expect(client.deviceIdentity).toBeNull();
+      expect(options).toMatchObject({
+        clientName: "cli",
+        mode: "cli",
+        sharedStateMode: "read-only",
+        skipImplicitAuth: true,
+        password: "synthetic-private-shared-password",
+      });
+      return options.method === "gateway.suspend.status" ? status() : prepared();
+    });
+    await run(async (scope) => scope.assertCurrent());
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
   });
 
   it.each([

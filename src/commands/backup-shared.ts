@@ -197,6 +197,7 @@ async function resolveBackupPlanFromPaths(params: {
   configCapture?: BackupConfigCapture;
   includeWorkspace?: boolean;
   excludeWorktreeTemplates?: boolean;
+  localCompanion?: boolean;
   worktreeRoot?: string;
   onlyConfig?: boolean;
   skillDiscoveryLimits?: ResolvedSkillDiscoveryLimits;
@@ -261,6 +262,7 @@ async function resolveBackupPlanFromPaths(params: {
     agentRoots,
     pluginResources: params.pluginInventory?.resources ?? [],
     pluginRoots: params.pluginInventory?.pluginRoots ?? [],
+    localCompanion: params.localCompanion,
     onlyConfig,
   });
 
@@ -575,6 +577,7 @@ export async function resolveBackupPlanFromDisk(
   params: {
     includeWorkspace?: boolean;
     excludeWorktreeTemplates?: boolean;
+    localCompanion?: boolean;
     onlyConfig?: boolean;
     nowMs?: number;
   } = {},
@@ -604,6 +607,7 @@ export async function resolveBackupPlanFromDisk(
 async function resolveBackupPlanFromState(params: {
   includeWorkspace?: boolean;
   excludeWorktreeTemplates?: boolean;
+  localCompanion?: boolean;
   onlyConfig?: boolean;
   nowMs?: number;
 }) {
@@ -679,6 +683,7 @@ async function resolveBackupPlanFromState(params: {
     configCapture,
     includeWorkspace,
     excludeWorktreeTemplates: params.excludeWorktreeTemplates,
+    localCompanion: params.localCompanion,
     worktreeRoot: discoverySnapshot.config.worktreeRoot
       ? resolveUserPath(discoverySnapshot.config.worktreeRoot)
       : undefined,

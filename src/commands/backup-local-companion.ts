@@ -5,7 +5,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import * as tar from "tar";
 import { resolvePortableArchivePathKey } from "../infra/backup-archive-path-policy.js";
 import { readEngineAnchor } from "../infra/database-engine/open.js";
-import { listDatabaseEngineStores } from "../infra/database-engine/registry.js";
+import { isPostgresCompanionSelection } from "../infra/database-engine/registry.js";
 import type { DatabaseEngineSelection } from "../infra/database-engine/types.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
 import { SQLITE_SIDECAR_SUFFIXES } from "../infra/sqlite-files.js";
@@ -25,13 +25,7 @@ export function assertLocalCompanionSelection(
   selection: DatabaseEngineSelection | undefined,
   onlyConfig: boolean,
 ): asserts selection is DatabaseEngineSelection {
-  if (
-    onlyConfig ||
-    !selection?.postgres ||
-    listDatabaseEngineStores().some(
-      (store) => store.postgres && selection.effectiveEngines[store.id] !== "postgres",
-    )
-  ) {
+  if (onlyConfig || !isPostgresCompanionSelection(selection)) {
     throw new Error(
       "Local companion capture requires PostgreSQL for all portable database families.",
     );

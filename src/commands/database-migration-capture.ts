@@ -8,7 +8,6 @@ import { runWithLocalStateOwner } from "../cli/local-state-owner.js";
 import { readConfigFileSnapshotForWrite } from "../config/io.js";
 import { resolveConfigPath, resolveStateDir } from "../config/paths.js";
 import { resolveBackupConfigCapture } from "../infra/backup-config-capture.js";
-import { createBackupArchive } from "../infra/backup-create.js";
 import { readClientCredentialFileIdentity } from "../infra/client-credential-receipt.js";
 import { rebindRehearsalClientCredentials } from "../infra/client-credential-restore.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
@@ -23,6 +22,7 @@ import { withArtifactPreservingStateReads } from "../state/artifact-preserving-s
 import { backupRestoreCommand } from "./backup-restore.js";
 import { buildBackupArchivePath } from "./backup-shared.js";
 import { prepareBackupArchive } from "./backup-verify.js";
+import { createDatabaseMigrationFilesystemBackup } from "./database-migration-filesystem-backup.js";
 import { withGatewayMigrationQuiescence } from "./database-migration-quiescence.js";
 import { assertDoctorSqliteMaintenancePathsNotAliased } from "./doctor-sqlite-maintenance-lock.js";
 
@@ -227,11 +227,14 @@ export async function createDatabaseMigrationCapture(options: {
     if (!preparedBase) {
       // The SQLite-only exact owner has admitted every physical store before
       // ordinary archive traversal. Both images share this same suspension.
-      await createBackupArchive({
+      // SQLite integrity and NFS publication can block for longer than the
+      // suspension TTL. Keep that work out of the renewal controller's event loop.
+      await createDatabaseMigrationFilesystemBackup({
         output: base,
-        verify: true,
+        stateDir,
+        config: configuration.snapshot.config,
+        env,
         signal,
-        preserveSourceArtifacts: true,
       });
       await revalidate();
     }
