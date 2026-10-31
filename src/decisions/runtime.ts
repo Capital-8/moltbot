@@ -27,10 +27,10 @@ import { logDecisionEvaluation } from "./diagnostics.js";
 import type { DecisionEvaluateOptions, DecisionEvaluateOptionsV2 } from "./execution-types.js";
 import type { DecisionOutcomeV2 } from "./host-outcomes.js";
 import type { DecisionOutcome } from "./host-outcomes.js";
+import { validateDecisionBatchV2 } from "./input-validation.js";
 import type { DecisionProviderHost, PreparedDecisionBilling } from "./provider-host.js";
 import type { DecisionBatchV2 } from "./types-v2.js";
 import type { DecisionBatch } from "./types.js";
-import { validateDecisionBatchV2 } from "./validation-v2.js";
 import { validateDecisionBatch } from "./validation.js";
 
 /** Core calls carry their owner's abort signal; plugin callers additionally bind their exact instance. */
