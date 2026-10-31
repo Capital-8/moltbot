@@ -198,6 +198,9 @@ export async function prepareSettledUpdateCommandResult(
     state.pendingResult,
     state.failure,
     state.terminalRecord,
+    assertCurrent && params.opts.run?.executorFence
+      ? { runId: params.opts.run.runId, fence: params.opts.run.executorFence }
+      : undefined,
   );
   assertCurrent?.();
   const result = completeUpdateCommandResult(params, settled.result);

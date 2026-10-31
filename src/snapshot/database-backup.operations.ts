@@ -20,6 +20,12 @@ import { copyFileHandle } from "../infra/file-descriptor.js";
 import { quoteSqliteIdentifier as quote } from "../infra/sqlite-schema-sql.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import {
+  PLUGIN_COHORT_RECOVERY_KEY_PREFIX,
+  type PluginCohortRecoveryBinding,
+} from "../infra/update-plugin-cohort-schema.js";
+import { UPDATE_RECOVERY_KEY_PREFIX } from "../infra/update-run-recovery-keys.js";
+import { decodePluginCohortRecoveryPairRows } from "../infra/update-run-recovery-store.js";
+import {
   captureDatabaseArtifact,
   exportPostgresBackup,
   restorePostgresBackup,
@@ -133,6 +139,7 @@ export async function preparePostgresRestoreInWorker(params: {
   expectedSource?: { storeId: string; namespace: string };
   pluginOwners?: DatabasePortPluginOwners;
   preserveUpdateHistory?: boolean;
+  pluginCohortRecovery?: PluginCohortRecoveryBinding;
   assertCurrent: () => void;
 }) {
   const manifest = await verifyMatchedPostgresBackup(
@@ -174,13 +181,68 @@ export async function preparePostgresRestoreInWorker(params: {
           catalog.filter((fact) => fact.table === table.name),
           expected,
         );
+        if (params.pluginCohortRecovery) {
+          const machineStateSchema = [descriptor, ...(descriptor.fragments ?? [])].find((schema) =>
+            schema.tables.some((entry) => entry.name === "config_machine_state"),
+          );
+          if (!machineStateSchema) {
+            throw new Error("PostgreSQL rollback cannot preserve plugin cohort recovery storage.");
+          }
+          assertPostgresCatalog(
+            catalog.filter((fact) => fact.table === "config_machine_state"),
+            machineStateSchema.expectedCatalog.filter(
+              (fact) => fact.table === "config_machine_state",
+            ),
+          );
+        }
         const columns = table.columns.map(({ name }) => quote(name)).join(", ");
+        const binding = params.pluginCohortRecovery;
+        const keys = binding
+          ? [
+              UPDATE_RECOVERY_KEY_PREFIX + binding.runId,
+              PLUGIN_COHORT_RECOVERY_KEY_PREFIX + binding.runId,
+            ]
+          : [];
+        params.assertCurrent();
         await client.query("BEGIN; SET LOCAL synchronous_commit = on");
         try {
+          if (binding) {
+            const sourceRows = await client.query<{ state_key: string; value_json: string }>(
+              `SELECT state_key,value_json FROM ${quote(source)}.config_machine_state WHERE state_key = ANY($1::text[]) FOR SHARE`,
+              [keys],
+            );
+            if (!decodePluginCohortRecoveryPairRows(sourceRows.rows, binding)) {
+              throw new Error("PostgreSQL rollback lost its live plugin cohort recovery pair.");
+            }
+          }
+          params.assertCurrent();
           await client.query(`DELETE FROM ${quote(namespace)}.update_runs`);
+          params.assertCurrent();
           await client.query(
             `INSERT INTO ${quote(namespace)}.update_runs (${columns}) SELECT ${columns} FROM ${quote(source)}.update_runs`,
           );
+          if (binding) {
+            params.assertCurrent();
+            await client.query(
+              `DELETE FROM ${quote(namespace)}.config_machine_state WHERE state_key = ANY($1::text[])`,
+              [keys],
+            );
+            params.assertCurrent();
+            await client.query(
+              `INSERT INTO ${quote(namespace)}.config_machine_state (state_key,value_json,updated_at_ms) SELECT state_key,value_json,updated_at_ms FROM ${quote(source)}.config_machine_state WHERE state_key = ANY($1::text[])`,
+              [keys],
+            );
+            const restoredRows = await client.query<{ state_key: string; value_json: string }>(
+              `SELECT state_key,value_json FROM ${quote(namespace)}.config_machine_state WHERE state_key = ANY($1::text[]) FOR SHARE`,
+              [keys],
+            );
+            if (!decodePluginCohortRecoveryPairRows(restoredRows.rows, binding)) {
+              throw new Error(
+                "PostgreSQL rollback did not preserve its plugin cohort recovery pair.",
+              );
+            }
+          }
+          params.assertCurrent();
           await client.query("COMMIT");
         } catch (error) {
           await client.query("ROLLBACK");

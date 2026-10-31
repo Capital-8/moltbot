@@ -189,6 +189,7 @@ export async function restoreFailedUpdateDatabases(params: {
   assertCurrent: () => void;
   assertRollbackSafe?: () => Promise<void>;
   progress?: Progress;
+  pluginCohortRecovery?: { runId: string; transactionId: string };
 }): Promise<boolean> {
   const assertCurrent = params.assertCurrent;
   const startedAt = Date.now();

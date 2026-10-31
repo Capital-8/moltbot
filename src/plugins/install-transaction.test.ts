@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement } from "../../test/helpers/promise.js";
+import { pluginCohortPublicationContext } from "../infra/update-plugin-cohort-context.js";
 import {
   attachPluginInstallTransaction,
   copyPluginInstallTransactionRequest,
@@ -9,6 +10,7 @@ import {
   settlePluginInstallTransactions,
   withPluginInstallTransactions,
   type PluginInstallTransaction,
+  type PluginCohortInstallObserver,
 } from "./install-transaction.js";
 import {
   createPluginUpdateTransactionState,
@@ -16,6 +18,10 @@ import {
 } from "./update-summary.js";
 
 const repairPeerLinks = vi.hoisted(() => vi.fn());
+const createCohortPublication = vi.hoisted(() => vi.fn());
+vi.mock("./update-cohort-recovery.js", () => ({
+  createPluginCohortPublication: createCohortPublication,
+}));
 vi.mock("./plugin-peer-link.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./plugin-peer-link.js")>()),
   repairInstalledOpenClawHostLinks: repairPeerLinks,
@@ -94,6 +100,60 @@ it.each([false, true])("commits after publication (cleanupFails=%s)", async (cle
   expect(transaction.commit).toHaveBeenCalledOnce();
   expect(transaction.rollback).not.toHaveBeenCalled();
 });
+
+it.each(["commit", "rollback", "refusal"] as const)(
+  "uses the bound Doctor cohort observer while retaining local %s ownership",
+  async (outcome) => {
+    const refusal = new Error("original Doctor owner retired");
+    const owner = authority(refusal);
+    const transaction = makeTransaction();
+    const observer: PluginCohortInstallObserver = {
+      forceFreshGeneration: true,
+      beforeManagedNpmPublish: async () => {},
+    };
+    createCohortPublication.mockReturnValue({ observer });
+    const context = {
+      runId: "fixture-update",
+      transactionId: "fixture-transaction",
+      installKey: "/fixture/core",
+      env: { OPENCLAW_STATE_DIR: "/fixture/state" },
+      assertCurrent: () => owner.assertCurrent(),
+    };
+    const failedPublication = new Error("Doctor index publication failed");
+    const operation = pluginCohortPublicationContext.run(context, () =>
+      install(async (owned) => {
+        const request = resolvePluginInstallTransactionRequest(owned);
+        expect(request?.cohort).toBe(observer);
+        expect(request?.cohort?.deferRecordPublication).toBeUndefined();
+        retainTransaction(owned, transaction);
+        if (outcome === "rollback") {
+          throw failedPublication;
+        }
+        if (outcome === "refusal") {
+          owner.active = false;
+        }
+      }),
+    );
+    if (outcome === "commit") {
+      await operation;
+      expect(transaction.commit).toHaveBeenCalledOnce();
+      expect(transaction.rollback).not.toHaveBeenCalled();
+    } else if (outcome === "rollback") {
+      await expect(operation).rejects.toBe(failedPublication);
+      expect(transaction.rollback).toHaveBeenCalledOnce();
+      expect(transaction.commit).not.toHaveBeenCalled();
+    } else {
+      await expect(operation).rejects.toBe(refusal);
+      expect(transaction.rollback).not.toHaveBeenCalled();
+      expect(transaction.commit).not.toHaveBeenCalled();
+    }
+    expect(createCohortPublication).toHaveBeenCalledWith({
+      runId: context.runId,
+      env: context.env,
+      fence: { assertCurrent: expect.any(Function) },
+    });
+  },
+);
 
 it.each([false, true])("rolls back in reverse order (rollbackFails=%s)", async (rollbackFails) => {
   const settled: string[] = [];

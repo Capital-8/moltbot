@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
+import type { DB } from "../state/openclaw-state-db.generated.js";
+import { getOpenClawStateFeatureSchemaSql } from "../state/openclaw-state-feature-schema.js";
 import { sha256File } from "./directory-durability.js";
+import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
 import { copySqliteFile } from "./sqlite-file-copy.js";
 import { assertSqliteIntegrity } from "./sqlite-integrity.js";
@@ -12,7 +15,11 @@ import {
 import { quoteSqliteIdentifier } from "./sqlite-schema-sql.js";
 import { readSqliteUserVersion } from "./sqlite-user-version.js";
 import type { UpdateDatabaseBackup } from "./update-database-backup.js";
+import type { PluginCohortRecoveryBinding } from "./update-plugin-cohort-schema.js";
+import { readPluginCohortRecoveryPairRows } from "./update-run-recovery-store.js";
 import { updateRunLedgerSchema } from "./update-run-write.js";
+
+const cohortStorageSchema = getOpenClawStateFeatureSchemaSql("config_machine_state");
 
 /** Runs only in the inspection child; the parent keeps native exclusion until publication. */
 export async function prepareUpdateDatabaseRestoreSourceInProcess(params: {
@@ -20,6 +27,7 @@ export async function prepareUpdateDatabaseRestoreSourceInProcess(params: {
   currentPath: string;
   targetPath: string;
   stagingRoot: string;
+  pluginCohortRecovery?: PluginCohortRecoveryBinding;
 }): Promise<{ sha256: string; sizeBytes: number; userVersion: number }> {
   // Copy the physical family: opening the live database would contend with the parent's exclusion.
   const snapshot = await prepareSqliteReadOnlyCopyInProcess(params.currentPath, params.stagingRoot);
@@ -68,6 +76,29 @@ export async function prepareUpdateDatabaseRestoreSourceInProcess(params: {
             target.exec("DELETE FROM update_runs");
             for (const row of rows.iterate()) {
               insert.run(row.restore_rowid!, ...columns.map((column) => row[column]!));
+            }
+            if (params.pluginCohortRecovery) {
+              assertSqliteSchemaContains(current, params.currentPath, cohortStorageSchema);
+              assertSqliteSchemaContains(target, params.targetPath, cohortStorageSchema);
+              const binding = params.pluginCohortRecovery;
+              const retained = readPluginCohortRecoveryPairRows(current, binding);
+              // Validate the baseline's named pair too; never replace another transaction.
+              const baseline = readPluginCohortRecoveryPairRows(target, binding);
+              if (retained.length || baseline.length) {
+                const keys = [...new Set([...retained, ...baseline].map((row) => row.state_key))];
+                const state = getNodeSqliteKysely<Pick<DB, "config_machine_state">>(target);
+                executeSqliteQuerySync(
+                  target,
+                  state.deleteFrom("config_machine_state").where("state_key", "in", keys),
+                );
+                if (retained.length) {
+                  // Exact opaque row copy, alongside raw history, before the output is hashed.
+                  executeSqliteQuerySync(
+                    target,
+                    state.insertInto("config_machine_state").values(retained),
+                  );
+                }
+              }
             }
             target.exec("COMMIT");
           } catch (error) {

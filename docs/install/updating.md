@@ -1228,6 +1228,18 @@ warning while allowing the update to finish. Run `openclaw completion --write-st
 to refresh it manually. Unverified process cleanup still blocks finalization;
 the updater does not report success while owned work may remain active.
 
+### npm plugin rollback
+
+Updaters with plugin-cohort recovery keep the previous npm plugin artifacts,
+installation records, and matching settings until candidate activation is verified.
+If activation fails, rollback restores that cohort before restarting the previous
+Gateway. Backups precede plugin maintenance. After an interrupted update,
+`openclaw update repair` resumes the recorded plugin settlement under current
+ownership. It preserves later independent changes; conflicting records, settings,
+or artifacts leave recovery unfinished instead of overwriting those changes or
+reporting the old Gateway ready. The updater performing the operation must contain
+this support; installing a newer candidate does not add it to an older parent.
+
 ### Package-publication recovery
 
 Supported POSIX npm updates print a recovery command using the selected external

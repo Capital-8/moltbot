@@ -12,6 +12,8 @@ import {
   withDaemonRuntimePinStore,
 } from "../daemon/runtime-pin-store.js";
 import { recordBackupRunOutcome } from "../state/backup-run-records.js";
+import { writeConfigMachineState } from "../state/config-machine-state-write.js";
+import { readConfigMachineState } from "../state/config-machine-state.js";
 import { stateNativeProcessEntrypoints } from "../state/native-process-runtime.test-support.js";
 import { closeOpenClawAgentDatabasesAsync } from "../state/openclaw-agent-db-lifecycle.js";
 import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
@@ -38,12 +40,14 @@ import {
 } from "./update-candidate-state.js";
 import { createUpdateDatabaseBackupInProcess } from "./update-database-backup.js";
 import { restoreUpdateDatabaseBackup } from "./update-database-restore.js";
+import { createRetainedUpdateRecovery } from "./update-retained-recovery.test-support.js";
 import {
   createUpdateRun,
   getUpdateRun,
   recordUpdateRunPhase,
   recordUpdateRunStep,
 } from "./update-run-ledger.js";
+import { readPluginCohortRecoveryPairRows } from "./update-run-recovery-store.js";
 import { finishUpdateRun } from "./update-run-write.js";
 
 async function createRestoreFixture(
@@ -133,6 +137,50 @@ function withFixture(run: (fixture: RestoreFixture) => Promise<void>, linked = f
     async (state) => run(await createRestoreFixture(state, linked)),
   );
 }
+
+it("preserves only the named plugin cohort recovery pair alongside current history", async () => {
+  await withFixture(async (fixture) => {
+    const options = { env: fixture.state.env };
+    const runtime = {
+      root: fixture.state.home,
+      nodePath: process.execPath,
+      version: "2026.10.9",
+      buildId: "fixture",
+    };
+    // Synthetic retained storage, not a serving or restoration receipt.
+    const reservation = createRetainedUpdateRecovery(
+      { runId: fixture.run.runId, from: runtime, to: runtime },
+      options,
+    );
+    const binding = { runId: reservation.runId, transactionId: reservation.transactionId };
+    writeConfigMachineState(
+      "update.pluginCohort." + binding.runId,
+      {
+        ...binding,
+        revision: 0,
+        disposition: "rollback",
+        installKey: fixture.state.home,
+        priorArtifacts: [],
+        artifacts: [],
+        publications: [],
+        settledPublications: 0,
+      },
+      options,
+    );
+    writeConfigMachineState("fixture.unrelated-candidate-state", { retain: false }, options);
+    const retainedRows = readPluginCohortRecoveryPairRows(fixture.shared.db, binding);
+    await restoreUpdateDatabaseBackup({
+      backup: fixture.backup,
+      runId: fixture.run.runId,
+      env: fixture.state.env,
+      assertCurrent() {},
+      pluginCohortRecovery: binding,
+    });
+    const restored = openOpenClawStateDatabase(options);
+    expect(readPluginCohortRecoveryPairRows(restored.db, binding)).toEqual(retainedRows);
+    expect(readConfigMachineState("fixture.unrelated-candidate-state", options)).toBeUndefined();
+  });
+});
 
 it("captures and restores exact local daemon intent with its independent schema", async () => {
   await withOpenClawTestState(
