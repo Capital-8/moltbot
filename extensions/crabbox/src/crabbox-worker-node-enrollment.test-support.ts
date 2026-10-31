@@ -10,6 +10,10 @@ import {
 } from "openclaw/plugin-sdk/test-fixtures";
 import * as tar from "tar";
 import { expect } from "vitest";
+import {
+  readCrabboxRuntimeInstallation,
+  type CrabboxRuntimeInstallationIdentity,
+} from "../cli-runtime-api.js";
 import type {
   CrabboxWorkerNodeEnrollment,
   CrabboxWorkerNodeRuntimePreparation,
@@ -168,10 +172,19 @@ if (args[0] === "--version") {
   return fs.readFileSync(archive);
 }
 
-export async function expectSetupPhases(result: Promise<{ code: number | null; output: string }>) {
+export async function expectSetupPhases(
+  result: Promise<{ code: number | null; output: string }>,
+  installation?: CrabboxRuntimeInstallationIdentity,
+) {
   const completed = await result;
   expect(completed.code).toBe(0);
-  const lines = completed.output.trim().split("\n");
+  if (installation) {
+    readCrabboxRuntimeInstallation(completed.output, installation);
+  }
+  const lines = completed.output
+    .trim()
+    .split("\n")
+    .filter((line) => !installation || !line.startsWith("openclaw.runtime-installed:"));
   // Successful bootstrap emits only the bounded diagnostics consumed by the Gateway.
   for (const line of lines) {
     expect(line).toMatch(
@@ -199,4 +212,26 @@ export async function runtimeManifestSha256(archive: Buffer): Promise<string | u
   });
   await pipeline(Readable.from([archive]), parser).catch(() => undefined);
   return digest;
+}
+
+export function expectFailure(
+  result: { code: number | null; output: string },
+  diagnosis: string | RegExp,
+) {
+  expect(result).toMatchObject({
+    code: 1,
+    output:
+      typeof diagnosis === "string"
+        ? expect.stringContaining(diagnosis)
+        : expect.stringMatching(diagnosis),
+  });
+}
+export function expectAbsent(...files: string[]) {
+  for (const file of files) {
+    expect(fs.existsSync(file), file).toBe(false);
+  }
+}
+export function expectPrivate(launch: object) {
+  expect(launch).not.toHaveProperty("token");
+  expect(launch).not.toHaveProperty("setupCode");
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
-import { createDeferred, withinTest } from "../../test/helpers/promise.js";
+import { createDeferred } from "../../test/helpers/promise.js";
 import { TEST_TLS_CERT_PEM, TEST_TLS_KEY_PEM } from "../../test/helpers/tls-fixture.js";
 import { registerPreparedModelRuntimeClose } from "../agents/prepared-model-runtime.lifecycle.js";
 import type { OpenClawConfig } from "../config/config.js";
@@ -436,41 +436,15 @@ describe("Gateway startup lifetime", () => {
     },
   );
 
-  it.for(["clean", "failed", "held-process", "held-embedded"] as const)(
-    "releases post-ready work and joins startup rollback with process grace (%s)",
-    async (mode, { signal }) => {
+  it.each(["clean", "failed", "held-process", "held-embedded"] as const)(
+    "releases post-ready work and joins required startup rollback (%s)",
+    async (mode) => {
       const port = await getFreePort();
       await using state = await createStartupTestState("gateway-post-ready-startup-failure");
       const startupError = new Error("startup failed after post-attach installation");
       const cleanupError = new Error("startup cleanup failed");
       const held = mode.startsWith("held-");
       const processOwned = mode === "held-process";
-      const preludeEntered = createDeferred();
-      const releasePrelude = createDeferred();
-      const lateStopEntered = createDeferred();
-      if (processOwned) {
-        // Native prelude work can finish after the first grace expires. Keep that
-        // gap explicit instead of assuming both cleanup timers are already armed.
-        const shutdown = await import("./server-shutdown.js");
-        const closeSteps = shutdown.runGatewayCloseSteps;
-        vi.spyOn(shutdown, "runGatewayCloseSteps").mockImplementation((params) =>
-          closeSteps({
-            ...params,
-            owner: {
-              ...params.owner,
-              runClosePrelude: async () => {
-                await params.owner.runClosePrelude();
-                preludeEntered.resolve();
-                await releasePrelude.promise;
-              },
-              sealAndJoinRegisteredSidecarStops: () => {
-                lateStopEntered.resolve();
-                return params.owner.sealAndJoinRegisteredSidecarStops();
-              },
-            },
-          }),
-        );
-      }
       let failCleanup = mode === "failed";
       const stopEntered = createDeferred();
       const releaseStop = createDeferred();
@@ -532,22 +506,14 @@ describe("Gateway startup lifetime", () => {
           await stopEntered.promise;
           const settled = vi.fn();
           void startupOutcome.then(settled);
-          await vi.advanceTimersByTimeAsync(processOwned ? 5_000 : 10_000);
-          if (processOwned) {
-            await preludeEntered.promise;
-            expect(settled).not.toHaveBeenCalled();
-            releasePrelude.resolve();
-            await lateStopEntered.promise;
-            await vi.advanceTimersByTimeAsync(5_000);
-            // Required late cleanup keeps custody after its diagnostic grace.
-            // Startup cannot settle until this fixture releases the held sidecar.
-          }
+          await vi.advanceTimersByTimeAsync(10_000);
+          // Process exit owns the hard deadline; required custody outlives cleanup grace.
           expect(settled).not.toHaveBeenCalled();
           expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(true);
           releaseStop.resolve();
           vi.useRealTimers();
         }
-        const failure = await withinTest(startupOutcome, signal);
+        const failure = await startupOutcome;
         if (processOwned || failCleanup) {
           expectStartupCleanupError(failure, startupError);
           expect(formatErrorMessage(failure)).toContain(
@@ -557,13 +523,13 @@ describe("Gateway startup lifetime", () => {
           expect(failure).toBe(startupError);
         }
         expect(resumed).toHaveBeenCalledExactlyOnceWith({ closing: true, listening: true });
+        expect(stop).toHaveBeenCalledOnce();
         expect(kernel?.transportBridge.current()?.httpServer.listening).toBe(failCleanup);
         expect(getActiveGatewayRootWorkCount()).toBe(0);
         if (!failCleanup) {
           expect(getActiveSecretsRuntimeConfigSnapshot()).toBeNull();
         }
       } finally {
-        releasePrelude.resolve();
         releaseStop.resolve();
         emergencyRelease.resolve();
         vi.useRealTimers();

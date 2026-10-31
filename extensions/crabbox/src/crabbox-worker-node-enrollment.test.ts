@@ -27,6 +27,9 @@ import {
 import {
   createNodeBootstrapFixture,
   createNodePackageFixture,
+  expectAbsent,
+  expectFailure,
+  expectPrivate,
   expectSetupPhases,
   readLaunch,
   runtimeManifestSha256,
@@ -76,27 +79,6 @@ const desktopEnvironment = (runtimeDir = "/run/fixture") => ({
   DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/fixture/bus",
   ...(runtimeDir ? { XDG_RUNTIME_DIR: runtimeDir } : {}),
 });
-function expectFailure(
-  result: { code: number | null; output: string },
-  diagnosis: string | RegExp,
-) {
-  expect(result).toMatchObject({
-    code: 1,
-    output:
-      typeof diagnosis === "string"
-        ? expect.stringContaining(diagnosis)
-        : expect.stringMatching(diagnosis),
-  });
-}
-function expectAbsent(...files: string[]) {
-  for (const file of files) {
-    expect(fs.existsSync(file), file).toBe(false);
-  }
-}
-function expectPrivate(launch: object) {
-  expect(launch).not.toHaveProperty("token");
-  expect(launch).not.toHaveProperty("setupCode");
-}
 
 const packageFixture = (build: string, postinstall = "") =>
   createNodePackageFixture((prefix) => tempDirs.make(prefix), build, receipts, postinstall);
@@ -414,11 +396,25 @@ describe.skipIf(process.platform === "win32")("source node bootstrap", () => {
     );
     const served = await serveArtifact(bytes);
     const worker = await serveArtifact(Buffer.from("verified-worker-archive"));
+    const manifestSha256 = await runtimeManifestSha256(bytes);
+    if (!manifestSha256) {
+      throw new Error("Fixture runtime manifest is missing");
+    }
     const bootstrap = {
       ...served.nodeBootstrap,
       install: "bundle" as const,
       buildId: "fixture-runtime-build",
-      manifestSha256: await runtimeManifestSha256(bytes),
+      manifestSha256,
+    };
+    const { url: _nodeUrl, token: _nodeToken, install: _install, ...nodeIdentity } = bootstrap;
+    const {
+      sha256,
+      bytes: workerSize,
+      packageRelativePath,
+    } = workerBundleFor(worker.nodeBootstrap);
+    const identity = {
+      nodeBootstrap: nodeIdentity,
+      workerBundle: { sha256, bytes: workerSize, packageRelativePath },
     };
     const { home, stateDir } = testHome();
     const retained = await servePackage("retained-npm-runtime");
@@ -432,13 +428,13 @@ describe.skipIf(process.platform === "win32")("source node bootstrap", () => {
     );
     const prepare = () =>
       enroll(home, bootstrap, undefined, true, workerBundleFor(worker.nodeBootstrap));
-    await expectSetupPhases(prepare());
+    await expectSetupPhases(prepare(), identity);
     expect(readText(home, "npm-calls")).toBe(npmCalls);
     expectAbsent(path.join(runtimePackage(home, bootstrap.sha256), "installed.json"), stateDir);
     expect(
       readText(runtimePackage(home, bootstrap.sha256), "node_modules/runtime-fixture/index.js"),
     ).toContain("2026.8.1");
-    await expectSetupPhases(prepare());
+    await expectSetupPhases(prepare(), identity);
     expect(served.authorizations).toHaveLength(1);
     expect(worker.authorizations).toHaveLength(2);
     const failed = await enroll(
