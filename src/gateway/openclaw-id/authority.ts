@@ -290,7 +290,12 @@ export function createOpenClawIdAuthority(
               }
             : {}),
         });
-        return { ok: true, status: result.status, events: [...expiry, ...result.events] };
+        const reconnect = roleChangeDisconnects(current.authority, result.state);
+        return {
+          ok: true,
+          status: result.status,
+          events: [...expiry, ...result.events, ...reconnect],
+        };
       });
     },
 
@@ -500,6 +505,16 @@ export function createOpenClawIdAuthority(
 }
 
 export type OpenClawIdAuthority = ReturnType<typeof createOpenClawIdAuthority>;
+
+// A member whose role changed reconnects, so their Gateway connections pick up the
+// new role's scope ceiling instead of keeping the one granted at connect.
+function roleChangeDisconnects(before: AuthorityState, after: AuthorityState): AuthorityEvent[] {
+  const peerKeys = Object.entries(after.members).flatMap(([accountId, member]) => {
+    const previous = before.members[accountId];
+    return previous && previous.role !== member.role ? member.peer_keys : [];
+  });
+  return peerKeys.length > 0 ? [{ type: "disconnect", peer_keys: peerKeys }] : [];
+}
 
 // Every candidate key that passes the protocol's admission rule.
 async function listAdmitted(state: AuthorityState): Promise<IrohEndpointKey[]> {
