@@ -21,6 +21,32 @@ describe("Comfy provider discovery compatibility", () => {
       for (const testCase of [
         { name: "local without credentials", config: { [capability]: workflow }, configured: true },
         {
+          name: "shared fallback with an empty selected section",
+          config: {
+            ...workflow,
+            image: workflow,
+            music: workflow,
+            video: workflow,
+            [capability]: {},
+          },
+          configured: true,
+        },
+        {
+          name: "selected section overrides the shared prompt",
+          config: { ...workflow, promptNodeId: "", [capability]: workflow },
+          configured: true,
+        },
+        {
+          name: "selected blank prompt overrides the shared prompt",
+          config: { ...workflow, [capability]: { promptNodeId: "" } },
+          configured: false,
+        },
+        {
+          name: "sibling workflows do not configure the selected capability",
+          config: { image: workflow, music: workflow, video: workflow, [capability]: {} },
+          configured: false,
+        },
+        {
           name: "cloud without workflow",
           config: { mode: "cloud" },
           providerKey: "comfy-provider-key",

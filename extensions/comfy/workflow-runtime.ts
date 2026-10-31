@@ -126,12 +126,8 @@ function getComfyCapabilityConfig(
   config: ComfyProviderConfig,
   capability: ComfyCapability,
 ): ComfyProviderConfig {
-  const shared = { ...config };
-  delete shared.image;
-  delete shared.video;
-  delete shared.music;
   const nested = config[capability];
-  return isRecord(nested) ? { ...shared, ...nested } : shared;
+  return isRecord(nested) ? { ...config, ...nested } : { ...config };
 }
 
 function resolveComfyMode(config: ComfyProviderConfig): ComfyMode {

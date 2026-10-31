@@ -389,26 +389,55 @@ it("uploads reference images for local edit workflows", async () => {
   });
 });
 
-it("uses cloud endpoints, auth headers, and partner-node extra_data", async () => {
-  vi.stubEnv("COMFY_API_KEY", "stale-env-key");
-  mockComfyProviderApiKey("profile-key");
-  installRealComfyFetchGuard({ dns: {} });
+it.each(["shared-only", "selected-image-overlay"] as const)(
+  "uses cloud endpoints, auth headers, and partner-node extra_data (%s)",
+  async (configuration) => {
+    vi.stubEnv("COMFY_API_KEY", "stale-env-key");
+    mockComfyProviderApiKey("profile-key");
+    installRealComfyFetchGuard({ dns: {} });
 
-  const result = await generateImage({ mode: "cloud" }, "cloud workflow prompt");
+    const selectedWorkflow = testWorkflowConfig();
+    const config = {
+      mode: "cloud",
+      headers: { "X-Comfy-Projection": "original" },
+      video: {
+        workflow: { video: { inputs: { text: "unused video workflow" } } },
+        promptNodeId: "video",
+      },
+      music: {
+        workflow: { music: { inputs: { text: "unused music workflow" } } },
+        promptNodeId: "music",
+      },
+      ...(configuration === "shared-only"
+        ? selectedWorkflow
+        : {
+            workflow: { shared: { inputs: { text: "unused shared workflow" } } },
+            promptNodeId: "shared",
+            outputNodeId: "9",
+            image: selectedWorkflow,
+          }),
+    };
+    const pending = generateImage({}, "cloud workflow prompt", { cfg: buildComfyConfig(config) });
+    config.headers = { "X-Comfy-Projection": "changed" };
+    config.promptNodeId = "missing";
+    selectedWorkflow.promptNodeId = "missing";
+    const result = await pending;
 
-  const submitRequest = fetchRequest(1);
-  expect(submitRequest.url).toBe("https://cloud.comfy.org/api/prompt");
-  const submitHeaders = new Headers(submitRequest?.init?.headers);
-  expect(submitHeaders.get("x-api-key")).toBe("profile-key");
-  expect(parseJsonBody(1)).toEqual({
-    prompt: workflow("cloud workflow prompt"),
-    extra_data: { api_key_comfy_org: "profile-key" },
-  });
+    const submitRequest = fetchRequest(1);
+    expect(submitRequest.url).toBe("https://cloud.comfy.org/api/prompt");
+    const submitHeaders = new Headers(submitRequest?.init?.headers);
+    expect(submitHeaders.get("x-api-key")).toBe("profile-key");
+    expect(submitHeaders.get("x-comfy-projection")).toBe("original");
+    expect(parseJsonBody(1)).toEqual({
+      prompt: { "6": { inputs: { text: "cloud workflow prompt" } }, "9": { inputs: {} } },
+      extra_data: { api_key_comfy_org: "profile-key" },
+    });
 
-  expect([2, 3, 4].map((call) => fetchRequest(call).url)).toEqual([
-    "https://cloud.comfy.org/api/job/job/status",
-    "https://cloud.comfy.org/api/history_v2/job",
-    "https://cloud.comfy.org/api/view?filename=generated.png&subfolder=&type=output",
-  ]);
-  expect(result.metadata).toEqual({ promptId: "job", outputNodeIds: ["9"] });
-});
+    expect([2, 3, 4].map((call) => fetchRequest(call).url)).toEqual([
+      "https://cloud.comfy.org/api/job/job/status",
+      "https://cloud.comfy.org/api/history_v2/job",
+      "https://cloud.comfy.org/api/view?filename=generated.png&subfolder=&type=output",
+    ]);
+    expect(result.metadata).toEqual({ promptId: "job", outputNodeIds: ["9"] });
+  },
+);
