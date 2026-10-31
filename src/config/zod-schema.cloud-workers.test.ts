@@ -59,7 +59,7 @@ describe("OpenClawSchema cloudWorkers config", () => {
     ]) {
       expect(
         OpenClawSchema.parse(cloudProfile({ workspaceDurability })).cloudWorkers?.profiles
-          ?.development.workspaceDurability,
+          ?.development?.workspaceDurability,
       ).toEqual(workspaceDurability);
     }
     for (const computeWindowSeconds of [undefined, 0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER]) {
