@@ -30,11 +30,11 @@ begin
     .max_by { |entry| Gem::Version.new(entry.fetch("version")) }
   raise "No available Watch runtime" unless runtime
   WatchRuntimeAdmission.wait!
-  package_root = Dir.mktmpdir("openclaw-watch-universal-", ENV.fetch("RUNNER_TEMP"))
+  package_root = Dir.mktmpdir("openclaw-watch-arm64-", ENV.fetch("RUNNER_TEMP"))
   facts["downloadOutput"] = command("xcodebuild", "-downloadPlatform", "watchOS", "-buildVersion", runtime.fetch("version"),
-    "-architectureVariant", "universal", "-exportPath", package_root)
+    "-architectureVariant", "arm64", "-exportPath", package_root)
   packages = Dir[File.join(package_root, "**", "*.dmg")]
-  raise "Expected one exported universal Watch runtime package, found #{packages.length}" unless packages.one?
+  raise "Expected one exported arm64 Watch runtime package, found #{packages.length}" unless packages.one?
   facts["packageName"] = File.basename(packages.first)
   facts["packageBytes"] = File.size(packages.first)
   WatchRuntimeAdmission.wait!
@@ -42,8 +42,26 @@ begin
   image = images.find { |entry| entry["runtimeIdentifier"] == runtime.fetch("identifier") && entry["state"] == "Ready" }
   raise "No Ready Watch image to replace" unless image
   facts["retiredImage"] = image.fetch("identifier")
-  facts["deleteOutput"] = command("xcrun", "simctl", "runtime", "delete", image.fetch("identifier"))
-  facts["assetRetired"] = !File.exist?(image.fetch("path"))
+  retired_path = image.fetch("path")
+  facts["deletions"] = []
+  2.times do |attempt|
+    stdout, stderr, status = Open3.capture3("xcrun", "simctl", "runtime", "delete", image.fetch("identifier"))
+    facts.fetch("deletions") << { "image" => image.fetch("identifier"), "stdout" => stdout, "stderr" => stderr, "status" => status.exitstatus }
+    break if status.success?
+    detail = stdout + stderr
+    unless attempt.zero? && detail.include?("domain=com.apple.CoreSimulator.simdiskimaged.SimDiskImageError, code=30)") &&
+      detail.include?("Removed the runtime, but did not reclaim its MobileAsset")
+      raise "Watch runtime deletion failed: #{detail.strip}"
+    end
+    # Follow the existing repair owner's single recovery for incomplete asset reclamation.
+    facts["scanOutput"] = command("xcrun", "simctl", "runtime", "scan-and-mount")
+    WatchRuntimeAdmission.wait!
+    images = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j")).values
+      .select { |entry| entry["runtimeIdentifier"] == runtime.fetch("identifier") && entry["state"] != "Deleting" }
+    raise "Expected one Watch image after scan, found #{images.length}" unless images.one?
+    image = images.first
+  end
+  facts["assetRetired"] = !File.exist?(retired_path)
   raise "Broken Watch asset remains after supported runtime deletion" unless facts.fetch("assetRetired")
   facts["importOutput"] = command("xcodebuild", "-importPlatform", packages.first)
   facts["imagesImported"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
