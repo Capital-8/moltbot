@@ -516,6 +516,40 @@ describe("parseMessageWithAttachments validation errors", () => {
 });
 
 describe("attachment validation", () => {
+  it("rejects a mixed batch over its decoded total before preparing or storing files", async () => {
+    const imageBytes = Buffer.from(PNG_1x1, "base64").length;
+    const documentBytes = Buffer.from("%PDF-1.4\n").length;
+    const supportsImages = vi.fn(async () => true);
+    await expect(
+      parseMessageWithAttachments("compare", [pdfAttachment(), pngAttachment()], {
+        maxBytes: 1024,
+        maxTotalBytes: imageBytes + documentBytes - 1,
+        supportsImages,
+      }),
+    ).rejects.toThrow(/total attachment size exceeds.*bytes/i);
+    expect(supportsImages).not.toHaveBeenCalled();
+    expect(saveMediaBufferMock).not.toHaveBeenCalled();
+  });
+
+  it("admits the exact total and counts repeated data-URL attachments separately", async () => {
+    const content = "data:application/pdf;base64," + Buffer.from("%PDF-1.4\n").toString("base64");
+    const attachment = pdfAttachment({ content });
+    const bytes = Buffer.from("%PDF-1.4\n").length;
+    const parsed = await parseMessageWithAttachments("read", [attachment, attachment], {
+      maxBytes: bytes,
+      maxTotalBytes: bytes * 2,
+    });
+    expect(parsed.offloadedRefs).toHaveLength(2);
+    saveMediaBufferMock.mockClear();
+    await expect(
+      parseMessageWithAttachments("read", [attachment, attachment], {
+        maxBytes: bytes,
+        maxTotalBytes: bytes * 2 - 1,
+      }),
+    ).rejects.toThrow(/total attachment size exceeds/i);
+    expect(saveMediaBufferMock).not.toHaveBeenCalled();
+  });
+
   it("reports compute saturation as retryable without writing media", async () => {
     const capacity = getWorkerComputeCapacity();
     expect(capacity.admit(DEFAULT_WORKER_PENDING_BYTES)).toBe(true);

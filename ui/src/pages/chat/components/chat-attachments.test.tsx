@@ -38,6 +38,18 @@ it("memoizes each advertised policy and derives the default decoded frame budget
   });
   expect(resolveChatAttachmentLimits(undefined)).toBeUndefined();
   expect(resolveChatAttachmentLimits({ maxPayload: policy.maxPayload })).toBeUndefined();
+  expect(
+    resolveChatAttachmentLimits({
+      ...policy,
+      attachments: { ...policy.attachments, maxTotalBytes: 1024 },
+    })?.maxBatchBytes,
+  ).toBe(1024);
+  expect(
+    resolveChatAttachmentLimits({
+      ...policy,
+      attachments: { ...policy.attachments, maxTotalBytes: 50 * 1024 * 1024 },
+    })?.maxBatchBytes,
+  ).toBe(19_464_192);
 });
 
 it("counts restored payload bytes when size metadata is absent or invalid", () => {

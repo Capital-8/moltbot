@@ -33,7 +33,10 @@ export function resolveChatAttachmentLimits(
   if (!limits) {
     limits = {
       ...policy.attachments,
-      maxBatchBytes: resolveChatAttachmentFrameBudgetBytes(policy.maxPayload ?? Infinity),
+      maxBatchBytes: Math.min(
+        policy.attachments.maxTotalBytes ?? Infinity,
+        resolveChatAttachmentFrameBudgetBytes(policy.maxPayload ?? Infinity),
+      ),
     };
     limitsByPolicy.set(policy, limits);
   }
