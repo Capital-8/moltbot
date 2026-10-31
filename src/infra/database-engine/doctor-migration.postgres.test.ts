@@ -378,7 +378,7 @@ describe.skipIf(!connection)("Doctor PostgreSQL version migration", () => {
         }
       `);
       expect((await runDoctor()).warnings).toEqual([]);
-      expect(admit(stateEngineSchema)?.version).toBe(36);
+      expect(admit(stateEngineSchema)?.version).toBe(stateEngineSchema.version);
       expect(
         (
           await client.query(`SELECT schema_version, origin, package_integrity

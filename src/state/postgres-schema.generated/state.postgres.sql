@@ -1094,6 +1094,7 @@ CREATE TABLE "worker_environments" (
   "preparation_consumed_at_ms" bigint,
   "provision_operation_id" text COLLATE "C" NOT NULL,
   "lease_id" text COLLATE "C",
+  "resource_receipt_json" text COLLATE "C",
   "node_setup_id" text COLLATE "C",
   "node_device_id" text COLLATE "C",
   "ssh_host" text COLLATE "C",

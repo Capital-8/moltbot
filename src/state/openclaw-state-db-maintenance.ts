@@ -33,6 +33,7 @@ import {
   DOCTOR_OWNED_STATE_TABLES,
   OPENCLAW_STATE_SCHEMA_VERSION,
   MEETING_TRANSCRIPT_START_TIME_SCHEMA_VERSION,
+  STATE_MIGRATION_VERSIONS,
 } from "./openclaw-state-db-contract.js";
 import { migrateCronDeliveryAttemptState } from "./openclaw-state-db-cron-delivery-migration.js";
 import * as cronIdentity from "./openclaw-state-db-cron-identity-migration.js";
@@ -82,6 +83,7 @@ import {
   withLegacyTemplateStateSchema,
   withLegacyTemplateStateCompatibility,
 } from "./openclaw-state-db-schema-v36-template-names.js";
+import { stateWorkerResourceReceiptMigration } from "./openclaw-state-db-schema-v37-resource-receipts.js";
 import {
   assertSupportedStateSchemaVersion,
   readStateSchemaContentVersion,
@@ -194,9 +196,6 @@ export function prepareStateDatabaseSchemaRepair(
   };
 }
 
-const STATE_MIGRATION_VERSIONS = [
-  5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-] as const;
 type OpenClawStateMigrationVersion = (typeof STATE_MIGRATION_VERSIONS)[number];
 
 /** Require canonical shared-state ownership without requiring the latest schema. */
@@ -546,6 +545,7 @@ export const versionedStateMigrations = [
   cronIdentity.stateCronIdentityMigration,
   stateLocalWorkspaceCasMigration,
   stateTemplateNamesMigration,
+  stateWorkerResourceReceiptMigration,
 ] as const;
 
 /** Recent version migrations own only their tables; Doctor owns unrelated historical repair. */
@@ -570,6 +570,7 @@ export function migrateBoundedStateSchema(
     cronIdentity.stateCronIdentityMigration,
     stateLocalWorkspaceCasMigration,
     stateTemplateNamesMigration,
+    stateWorkerResourceReceiptMigration,
   ];
   const pending = migrations.filter(({ version }) => version > previousVersion);
   // An undeclared destination keeps the legacy full runner and full-backup requirement.

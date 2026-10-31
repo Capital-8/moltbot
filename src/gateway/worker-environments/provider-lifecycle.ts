@@ -1,5 +1,4 @@
 import type { WorkerEnvironmentStartStatus } from "../../../packages/gateway-protocol/src/schema/environments.js";
-import type { WorkerAdmissionHandshake } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
 import {
   WorkerProviderError,
   type WorkerExecutionMode,
@@ -7,6 +6,10 @@ import {
   type WorkerNodeRuntimeIdentity,
   type WorkerProvider,
 } from "../../plugins/types.js";
+import {
+  requireWorkerResourceReceipt,
+  assertWorkerResourceReceiptMatch,
+} from "../../plugins/worker-resource-receipt.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
 import { sameWorkerBuild } from "../../worker/worker-build-identity.js";
 import { SessionMutationAuthorizationChangedError } from "../session-mutation-authorization-error.js";
@@ -28,6 +31,7 @@ import { createWorkerProviderOwnerLifecycle } from "./provider-owner-lifecycle.j
 import { prepareWorkerProviderProject } from "./provider-project-preparation.js";
 import { createWorkerProvisionCancellation } from "./provider-provisioning-cancellation.js";
 import { createWorkerRuntimeRefresher } from "./provider-runtime-refresh.js";
+import { createWorkerSshBootstrap } from "./provider-ssh-bootstrap.js";
 import {
   requireProviderOperationTimeoutMs,
   requireWorkerLease,
@@ -43,7 +47,7 @@ const ORPHANED_LEASE_ERROR = "Worker provider no longer recognizes the lease";
 export function createWorkerProviderLifecycle(
   options: WorkerProviderLifecycleOptions & { ownerSignal: AbortSignal },
 ) {
-  const { store, callBootstrap, callProvider, move, saveError } = options;
+  const { store, callProvider, move, saveError } = options;
   const now = options.now ?? Date.now;
   const startStatuses = new Map<
     string,
@@ -107,47 +111,12 @@ export function createWorkerProviderLifecycle(
     identityResolverFor,
   });
 
-  const finishBootstrap = async (
-    record: WorkerEnvironmentRecord,
-    provider: WorkerProvider,
-    installation: WorkerInstallationArtifact,
-    cancellation?: ReturnType<typeof createWorkerProvisionCancellation>,
-  ) => {
-    if (record.state !== "bootstrapping" || !record.leaseId || !record.sshEndpoint) {
-      throw serviceError("invalid_state", "Worker bootstrap requires a provisioned SSH lease");
-    }
-    const { leaseId, sshEndpoint } = record;
-    let receipt: WorkerAdmissionHandshake;
-    try {
-      receipt = await callBootstrap(installation, (signal) =>
-        options.bootstrapWorker({
-          operationId: record.provisionOperationId,
-          sshEndpoint,
-          installation,
-          resolveIdentity: identityResolverFor(record, provider, leaseId),
-          signal: cancellation ? AbortSignal.any([signal, cancellation.signal]) : signal,
-        }),
-      );
-      cancellation?.assertActive();
-      if (!sameWorkerBuild(receipt, installation)) {
-        throw new Error("Worker bootstrap receipt does not match the expected build identity");
-      }
-    } catch (error) {
-      await cancellation?.settleStopIntent();
-      if (options.ownerSignal.aborted) {
-        // Owner shutdown leaves this allocation for restart recovery.
-        throw error;
-      }
-      return await failBootstrap(record, leaseId, provider, error);
-    }
-    return commitReady(record, { ...receipt, installKind: "bundle" }, {}, () => {
-      cancellation?.assertActive();
-      const current = requireCurrentOwner(record);
-      if (current.destroyRequestedAtMs !== null) {
-        throw serviceError("invalid_state", "Worker bootstrap owner is stopping");
-      }
-    });
-  };
+  const finishBootstrap = createWorkerSshBootstrap({
+    ...options,
+    identityResolverFor,
+    failBootstrap,
+    requireCurrentOwner,
+  });
 
   const finishProvision = async (
     initialRecord: WorkerEnvironmentRecord,
@@ -169,6 +138,9 @@ export function createWorkerProviderLifecycle(
     let projectOperation: Awaited<ReturnType<typeof prepareWorkerProviderProject>> | undefined;
     try {
       const profile = requireWorkerProfile(record.profileSnapshot.settings);
+      if (record.resourceReceipt && !provider.supportsResourceReceipts) {
+        throw new Error("Worker provider cannot honor the recorded resource receipt");
+      }
       const requestedExecutionMode = record.profileSnapshot.executionMode;
       if (
         requestedExecutionMode !== undefined &&
@@ -254,6 +226,21 @@ export function createWorkerProviderLifecycle(
         nodeBootstrapTimeoutMs,
         profileId: record.profileId,
         assertCurrent,
+        ...(record.resourceReceipt ? { resourceReceipt: record.resourceReceipt } : {}),
+        recordResourceReceipt: async (value) => {
+          assertCurrent();
+          if (!provider.supportsResourceReceipts) {
+            throw new Error("Worker provider does not support resource receipts");
+          }
+          const receipt = requireWorkerResourceReceipt(value);
+          record = await store.recordResourceReceipt({
+            environmentId: record.environmentId,
+            provisionOperationId: record.provisionOperationId,
+            receipt,
+            assertCurrent,
+          });
+          assertCurrent();
+        },
         reportStartStatus: (status: WorkerEnvironmentStartStatus) => {
           const current = assertCurrent();
           startStatuses.set(current.environmentId, { ownerEpoch: current.ownerEpoch, status });
@@ -311,13 +298,15 @@ export function createWorkerProviderLifecycle(
           providerTimeoutMs,
         ),
       );
+      assertWorkerResourceReceiptMatch(record.resourceReceipt, lease.resourceReceipt);
     } catch (error) {
       attemptOpen = false;
       // A provider timeout can precede delivery of its committed provisioning transition.
       // Join that write, without joining provider work that may still be blocked.
       if (provisioningTransition) {
         try {
-          record = await provisioningTransition;
+          await provisioningTransition;
+          record = requireCurrentOwner(record);
         } catch (transitionError) {
           if (transitionError !== closedAttempt) {
             throw transitionError;
@@ -342,7 +331,10 @@ export function createWorkerProviderLifecycle(
       // A current refusal cannot disprove allocation by an earlier attempt.
       const terminalFailure =
         record.state === "requested" ||
-        (provisioningTransition !== undefined && preparationComplete && permanent);
+        (provisioningTransition !== undefined &&
+          preparationComplete &&
+          permanent &&
+          !record.resourceReceipt);
       await (terminalFailure
         ? move(record, "failed", { lastError: detail })
         : saveError(record, error));
@@ -541,6 +533,15 @@ export function createWorkerProviderLifecycle(
           ? finishDestroy(record, provider, workSignal)
           : resumeProvision(record, provider, signal, retainProviderSettlement, beforeProvision)
       ).catch(() => undefined);
+      return;
+    }
+    if (
+      record.resourceReceipt &&
+      (record.destroyRequestedAtMs !== null || record.state === "destroying")
+    ) {
+      // A completed delete may no longer expose live inspection labels. Retry the exact
+      // recorded cleanup, whose provider result owns confirmation, not an inventory miss.
+      await finishDestroy(record, provider, workSignal).catch(() => undefined);
       return;
     }
     if (await step("mismatched-lease", () => retireMismatchedLease(record, provider))) {

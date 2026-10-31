@@ -93,5 +93,6 @@ export const SCHEMA_MIGRATION_BACKUP_TABLES: Record<
       "sqlite_stat1",
       "sqlite_stat4",
     ],
+    37: ["worker_environments"],
   },
 };

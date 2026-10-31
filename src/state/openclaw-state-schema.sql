@@ -1965,6 +1965,7 @@ CREATE TABLE IF NOT EXISTS worker_environments (
   ),
   provision_operation_id TEXT NOT NULL UNIQUE,
   lease_id TEXT,
+  resource_receipt_json TEXT,
   node_setup_id TEXT,
   node_device_id TEXT,
   ssh_host TEXT,
