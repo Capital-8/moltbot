@@ -10,6 +10,7 @@ import "../../../styles.css";
 import "../../../styles/chat.ts";
 import { ChatPaneRuntime } from "../chat-pane-render.ts";
 import { createPaneTestHost } from "../chat-pane.test-support.ts";
+import { makeMessage } from "../chat-thread.test-support.ts";
 import { saveChatSessionScrollPosition } from "../scroll.ts";
 import type { ChatWidgetLayout } from "../session-message-cache.ts";
 import type { ChatThreadProps } from "./chat-thread-interactions.ts";
@@ -447,14 +448,20 @@ it.each([120, 360, 1200])(
 it("parks retained rows without layout and restores their resized geometry and nested scroll", async () => {
   const prose = "A retained paragraph wraps to the current conversation width. ".repeat(20);
   const source = [prose, "```text", "wide".repeat(160), "```"].join("\n\n");
-  // Twelve rows fit the DOM-retention budget, so background preparation cannot
-  // evict the target while this test exercises its native box lifecycle.
-  const messages = Array.from({ length: 12 }, (_, index) => ({
-    role: index % 2 === 0 ? "user" : "assistant",
-    content: index === 1 ? source : `Row ${index}`,
-    timestamp: index + 1,
-    __openclaw: { id: `geometry-row-${index}` },
-  }));
+  // Only split completed runs retain DOM. The ordinary tail crosses the
+  // windowing threshold without competing with the final fragment's retention.
+  const messages = [
+    makeMessage("geometry-question", 1, { role: "user" }),
+    ...Array.from({ length: 34 }, (_, index) =>
+      makeMessage(`geometry-work-${index}`, index + 2, { phase: "commentary" }),
+    ),
+    makeMessage("geometry-answer", 36, {
+      phase: "final_answer",
+      stopReason: "stop",
+      content: source,
+    }),
+    ...geometryMessages(222).map((message, index) => ({ ...message, timestamp: 400 + index })),
+  ];
   const { host, viewport, session, virtualizer } = await mountPane(
     false,
     120,
@@ -462,7 +469,25 @@ it("parks retained rows without layout and restores their resized geometry and n
     0,
     messages,
   );
-  const row = requireElement(host, '.chat-virtual-row[data-index="1"]');
+  expect(session.revealMessage("geometry-answer")).toBe(true);
+  await expect.poll(() => host.querySelector('[data-entry-id="geometry-answer"]')).not.toBeNull();
+  session.cancelScroll();
+  const row = expectDefined(
+    requireElement(host, '[data-entry-id="geometry-answer"]').closest<HTMLElement>(
+      ".chat-virtual-row",
+    ),
+    "answer virtual row",
+  );
+  const targetIndex = Number(row.dataset.index);
+  // Other fixture rows have fixed CSS heights. Their later idle preparation
+  // must not change total extent while this test measures the retained row.
+  for (let index = 0; index < virtualizer.options.count; index++) {
+    if (index !== targetIndex) {
+      virtualizer.resizeItem(index, 120);
+    }
+  }
+  virtualizer.scrollToIndex(targetIndex, { align: "start", behavior: "auto" });
+  await settleLayout();
   // Other fixture rows have fixed heights. This row uses its real Markdown
   // height so the narrower pane must produce a new browser measurement.
   row.style.height = "auto";
@@ -492,7 +517,7 @@ it("parks retained rows without layout and restores their resized geometry and n
   });
   observer.observe(row, { box: "border-box" });
   try {
-    virtualizer.scrollToIndex(6, { align: "start", behavior: "auto" });
+    virtualizer.scrollToIndex(targetIndex + 5, { align: "start", behavior: "auto" });
     await expect.poll(() => row.hasAttribute("data-prepared-row")).toBe(true);
     await settleLayout();
     expect(row.isConnected).toBe(true);
@@ -510,10 +535,10 @@ it("parks retained rows without layout and restores their resized geometry and n
     expect(virtualizer.itemSizeCache.get(key)).toBeCloseTo(height, 1);
     expect(Math.abs(viewport.scrollHeight - extent)).toBeLessThanOrEqual(1);
 
-    virtualizer.scrollToIndex(1, { align: "start", behavior: "auto" });
+    virtualizer.scrollToIndex(targetIndex, { align: "start", behavior: "auto" });
     await expect.poll(() => row.hasAttribute("data-prepared-row")).toBe(false);
     await settleLayout();
-    expect(requireElement(host, '.chat-virtual-row[data-index="1"]')).toBe(row);
+    expect(requireElement(host, `.chat-virtual-row[data-index="${targetIndex}"]`)).toBe(row);
     expect(requireElement(row, ".code-block-viewport")).toBe(code);
     expect(code.scrollLeft).toBe(37);
     const resizedHeight = row.getBoundingClientRect().height;
@@ -525,7 +550,7 @@ it("parks retained rows without layout and restores their resized geometry and n
     );
     // Frame-deferred delivery can outlive the parked state that produced zero.
     virtualizer.resizeItem(
-      1,
+      targetIndex,
       virtualizer.options.measureElement(
         row,
         expectDefined(parkedReceipt, "parked zero-size receipt"),
@@ -742,6 +767,8 @@ it("commits rows before paint when an uncompensated extent shrink clamps the rea
 
 it("commits reader compensation before paint after a deferred measurement", async () => {
   const { host, viewport, virtualizer } = await mountPane();
+  // The observer's receipt can arrive after this row leaves the mounted window.
+  requireElement(host, '.chat-virtual-row[data-index="2"]').style.height = "150px";
   scrollReader(viewport, 480);
   expect(virtualizer.isScrolling).toBe(true);
   expect(virtualizer.scrollDirection).toBe("forward");
@@ -757,7 +784,6 @@ it("commits reader compensation before paint after a deferred measurement", asyn
     const compensated = new Promise<void>((resolve) => {
       viewport.addEventListener("scroll", () => resolve(), { once: true });
     });
-    requireElement(host, '.chat-virtual-row[data-index="2"]').style.height = "150px";
     virtualizer.resizeItem(2, 150);
     flush();
     await Promise.resolve();

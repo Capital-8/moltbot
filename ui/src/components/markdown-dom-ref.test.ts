@@ -15,7 +15,7 @@ import {
   toSanitizedMarkdownHtml,
 } from "./markdown.ts";
 
-it("reuses pristine idle-prepared DOM across visible mounts without parsing it again", () => {
+it("consumes prepared DOM once and can prewarm another visible mount", () => {
   const source = 'idle-cache-paragraph <img src="x" onerror="alert(1)">';
   const html = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!;
   let parses = 0;
@@ -41,16 +41,17 @@ it("reuses pristine idle-prepared DOM across visible mounts without parsing it a
   expect(view.container.querySelector("[onerror]")).toBeNull();
   expect(parses).toBe(0);
   const reused = toSanitizedMarkdownContent(source);
-  expect(reused).toEqual(cached);
+  expect(reused).toBe(toSanitizedMarkdownHtml(source));
   const second = renderSolidRef(() => createMarkdownRef(() => ({ content: reused })), {
     targetElement: document.createElement("div"),
   });
   expect(second.container.innerHTML).toBe(view.container.innerHTML);
-  expect(parses).toBe(0);
-  // Returning to a retained fragment needs no repeated preparation.
+  expect(parses).toBe(1);
+  // Ordinary remounts keep only HTML; an explicit prewarm rebuilds one fragment.
   expect(prewarmSanitizedMarkdown(source, {})).toBe(false);
+  expect(prewarmSanitizedMarkdown(source, {}, "fragment")).toBe(true);
   expect(prewarmSanitizedMarkdown(source, {}, "fragment")).toBe(false);
-  expect(prewarmSanitizedMarkdown(source, {}, "fragment")).toBe(false);
+  expect(parses).toBe(2);
   const preparedParses = parses;
   const rewarmed = toSanitizedMarkdownContent(source);
   expect(typeof rewarmed).not.toBe("string");
@@ -64,7 +65,7 @@ it("reuses pristine idle-prepared DOM across visible mounts without parsing it a
   expect(prewarmSanitizedMarkdown("oversized ".repeat(6000), {})).toBe(false);
 });
 
-it("retains HTML-only preparation after its first visible mount", () => {
+it("reuses sanitized HTML without retaining mounted DOM", () => {
   const marker = "html-only-visible-fragment";
   const source = `### ${marker}\n\n| State |\n| --- |\n| Ready |\n\n<img src="x" onerror="alert(1)"><script>alert(2)</script>`;
   const html = vi.spyOn(Element.prototype, "innerHTML", "set");
@@ -95,7 +96,7 @@ it("retains HTML-only preparation after its first visible mount", () => {
   expect(second.container.querySelector("h3")?.textContent).toBe(marker);
   expect(second.container.querySelector("td")?.textContent).toBe("Ready");
   expect(second.container.querySelector("script, [onerror]")).toBeNull();
-  expect(parses()).toBe(1);
+  expect(parses()).toBe(2);
 });
 
 it("bounds prepared DOM while keeping evicted HTML reusable", () => {
@@ -140,7 +141,7 @@ it("stops distant idle admission at the character budget without evicting nearby
   expect(parse.mock.calls.length).toBeGreaterThan(0);
 });
 
-it("retains fresh chat Markdown for another mount without reparsing", () => {
+it("reuses fresh chat Markdown as sanitized HTML across mounts", () => {
   const marker = "chat-sanitized-fragment-first-mount";
   const source = `### ${marker}\n\n| State |\n| --- |\n| Ready |\n\n<img src="x" onerror="alert(1)"><script>alert(2)</script>`;
   const html = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!;
@@ -165,14 +166,14 @@ it("retains fresh chat Markdown for another mount without reparsing", () => {
       {},
     ).parts()[0];
   const fresh = prepare();
-  expect(typeof fresh).not.toBe("string");
+  expect(typeof fresh).toBe("string");
   const first = renderSolidRef(() => createMarkdownRef(() => ({ content: fresh })), {
     targetElement: document.createElement("div"),
   });
   expect(first.container.querySelector("h3")?.textContent).toBe(marker);
   expect(first.container.querySelector("td")?.textContent).toBe("Ready");
   expect(first.container.querySelector("script, [onerror]")).toBeNull();
-  expect(parses).toBe(0);
+  expect(parses).toBe(1);
 
   const cached = prepare();
   expect(cached).toEqual(fresh);
@@ -180,7 +181,7 @@ it("retains fresh chat Markdown for another mount without reparsing", () => {
     targetElement: document.createElement("div"),
   });
   expect(second.container.innerHTML).toBe(first.container.innerHTML);
-  expect(parses).toBe(0);
+  expect(parses).toBe(2);
   expect(toSanitizedMarkdownHtml(source)).toBe(typeof fresh === "string" ? fresh : fresh.html);
 });
 
@@ -206,8 +207,8 @@ it("isolates ordinary and progress policies for fragment and HTML callers", () =
   expect(ordinaryHtml).not.toContain("<progress");
   expect(typeof progressHtml).toBe("string");
   expect(progressHtml).toContain('<progress value="2" max="5">');
-  expect(toSanitizedMarkdownContent(source)).toEqual(ordinary);
-  expect(toSanitizedMarkdownContent(source, { progressBars: true })).toEqual(progress);
+  expect(toSanitizedMarkdownContent(source)).toBe(ordinary.html);
+  expect(toSanitizedMarkdownContent(source, { progressBars: true })).toBe(progress.html);
 });
 
 it("mounts settled Markdown from one parse and preserves encoded carriage returns", () => {

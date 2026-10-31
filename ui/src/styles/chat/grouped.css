@@ -83,6 +83,15 @@
   max-width: none;
 }
 
+/* Expanded work-group contents keep the smaller text/tool boundary. */
+.chat-group-messages
+  > :is(
+    .chat-bubble--tool-shell + .chat-bubble:not(.chat-bubble--tool-shell),
+    .chat-bubble:not(.chat-bubble--tool-shell) + .chat-bubble--tool-shell
+  ) {
+  margin-block-start: var(--chat-message-type-boundary-gap);
+}
+
 :is(.chat-group > .chat-group-messages, .chat-agent-run-body)
   > :is(
     .chat-bubble--tool-shell + .chat-bubble:not(.chat-bubble--tool-shell),

@@ -270,6 +270,7 @@ div.chat-thread:where(.chat-thread--annotations) {
 
 .chat-group-messages {
   --chat-message-gap: 2px;
+  --chat-message-type-boundary-gap: var(--space-1);
   position: relative; /* anchors message-local popovers */
   display: flex;
   flex-direction: column;

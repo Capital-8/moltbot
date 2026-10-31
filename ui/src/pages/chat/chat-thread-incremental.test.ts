@@ -215,7 +215,9 @@ describe("incremental history build equivalence", () => {
         );
         expect(visible).toEqual([`${query} answer`]);
         for (const source of messages) {
-          expect(matches.mock.calls.filter(([message]) => message === source)).toHaveLength(1);
+          expect(
+            matches.mock.calls.filter(([sourceMessage]) => sourceMessage === source),
+          ).toHaveLength(1);
         }
       }
     } finally {
