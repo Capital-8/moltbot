@@ -694,15 +694,50 @@ registerHooks({resolve(specifier, context, nextResolve) {
       "⎯⎯ Unhandled Rejection ⎯⎯",
       "TypeError: request failed",
       'This error originated in "' + origin + '" test file.',
-    ]
-      .map((line) => "\u001b[31m" + line + "\u001b[0m")
-      .join("\n");
-    detector.observe(output);
+    ].map((line) => "\u001b[31m" + line + "\u001b[0m");
+    output.forEach(detector.observeLine);
     expect(detector.finish()).toEqual({
       count: 1,
       errorFirstLine: "TypeError: request failed",
       origin,
     });
+  });
+
+  it("keeps unhandled error lines separate across stream EOF", async () => {
+    const env = testRunnerFixtureEnv({ OPENCLAW_VITEST_RUNTIME: "node" });
+    const watched = spawnWatchedVitestProcess({
+      pnpmArgs: [
+        "exec",
+        "node",
+        "-e",
+        `const fs = require("node:fs");
+fs.writeSync(1, "\\u001b[31m⎯⎯ Unhandled Errors ⎯⎯\\u001b[0m");
+fs.closeSync(1);
+process.stdin.once("data", () => {
+  fs.writeSync(2, [
+    "Vitest caught 1 unhandled error during the test run.",
+    "⎯⎯ Unhandled Rejection ⎯⎯",
+    "TypeError: request failed",
+    'This error originated in "fixture.test.ts" test file.',
+  ].join("\\n"));
+});`,
+      ],
+      spawnParams: { ...resolveVitestSpawnParams(env), stdio: ["pipe", "pipe", "pipe"] },
+      env,
+      homeMode: "hermetic",
+    });
+    // The forwarder observes stdout's EOF tail before this gate admits stderr.
+    watched.child.stdout!.once("end", () => watched.child.stdin!.end("continue"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await watched.completion).code).toBe(0);
+      expect(log).toHaveBeenCalledWith(
+        "[vitest] UNHANDLED ERRORS (1): fixture.test.ts — TypeError: request failed",
+      );
+    } finally {
+      watched.teardown();
+      log.mockRestore();
+    }
   });
 
   it("adds workflow annotations only under GitHub Actions", () => {
