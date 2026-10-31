@@ -33,7 +33,10 @@ afterEach(async () => {
   }
 });
 
-function setup(mode: string, opts: { entry?: URL; maxRssBytes?: number } = {}) {
+function setup(
+  mode: string,
+  opts: { entry?: URL; maxRssBytes?: number; unavailableRetryMs?: number } = {},
+) {
   markerDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-id-supervisor-"));
   const statuses: TunnelSupervisorStatus[] = [];
   const log = { info: vi.fn(), warn: vi.fn() };
@@ -48,8 +51,17 @@ function setup(mode: string, opts: { entry?: URL; maxRssBytes?: number } = {}) {
       forwardedProto: "https",
     }),
     log,
-    env: { ...process.env, FAKE_TUNNEL_MODE: mode, FAKE_TUNNEL_MARKER: markerDir },
-    tuning: { ...fast, ...(opts.maxRssBytes ? { maxRssBytes: opts.maxRssBytes } : {}) },
+    env: {
+      ...process.env,
+      FAKE_TUNNEL_MODE: mode,
+      FAKE_TUNNEL_MARKER: markerDir,
+      FAKE_TUNNEL_AVAILABLE: path.join(markerDir, "available"),
+    },
+    tuning: {
+      ...fast,
+      ...(opts.maxRssBytes ? { maxRssBytes: opts.maxRssBytes } : {}),
+      ...(opts.unavailableRetryMs ? { unavailableRetryMs: opts.unavailableRetryMs } : {}),
+    },
     onReady,
     onStatus: (status) => statuses.push(status),
   });
@@ -127,12 +139,34 @@ describe("tunnel child supervisor", () => {
     });
   });
 
-  it("reports the transport unavailable and does not restart", async () => {
+  it("reports the transport unavailable and does not crash-restart", async () => {
     const { supervisor, starts } = setup("unavailable");
     supervisor.start();
     await vi.waitFor(() => expect(supervisor.status().state).toBe("unavailable"));
+    expect(supervisor.status()).toMatchObject({ retryInMs: 60_000 });
     await sleep(200);
     expect(starts()).toBe(1);
+  });
+
+  it("recovers to running once the binding becomes available again", async () => {
+    const { supervisor, starts } = setup("unavailable-until", { unavailableRetryMs: 100 });
+    supervisor.start();
+    await vi.waitFor(() => expect(supervisor.status().state).toBe("unavailable"));
+    await vi.waitFor(() => expect(starts()).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
+    expect(supervisor.status().state).toBe("unavailable");
+    fs.writeFileSync(path.join(markerDir!, "available"), "");
+    await vi.waitFor(() => expect(supervisor.status().state).toBe("running"), { timeout: 5_000 });
+  });
+
+  it("stops probing an unavailable transport once stopped", async () => {
+    const { supervisor, starts } = setup("unavailable", { unavailableRetryMs: 50 });
+    supervisor.start();
+    await vi.waitFor(() => expect(supervisor.status().state).toBe("unavailable"));
+    await supervisor.stop();
+    const after = starts();
+    await sleep(200);
+    expect(starts()).toBe(after);
+    expect(supervisor.status()).toEqual({ state: "stopped" });
   });
 
   it("reports unavailable when the child entry is missing", () => {

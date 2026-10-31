@@ -11,6 +11,10 @@ process.on("disconnect", () => process.exit(0));
 if (mode === "unavailable") {
   process.exit(78);
 }
+// The binding "appears" once the test creates FAKE_TUNNEL_AVAILABLE.
+if (mode === "unavailable-until" && !fs.existsSync(process.env.FAKE_TUNNEL_AVAILABLE ?? "")) {
+  process.exit(78);
+}
 if (mode === "crash") {
   process.exit(1);
 }

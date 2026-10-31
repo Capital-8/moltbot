@@ -3,7 +3,9 @@
 // (tailcat-spike docs/iroh/process-model.md): control over IPC, restart with
 // 1 -> 30 s backoff, lower CPU priority, health pings, an RSS watchdog that
 // restarts gracefully, and SIGTERM then SIGKILL after 2 s on stop. A child
-// that reports the transport unavailable is not restarted; the Gateway runs on.
+// that reports the transport unavailable is not crash-restarted; the Gateway
+// runs on and probes again every minute, so status recovers once the iroh
+// binding is installed or rebuilt.
 import { fork, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
@@ -37,6 +39,8 @@ export type TunnelSupervisorTuning = {
   maxRssBytes: number;
   /** Added to the Gateway's niceness for the child (best effort). */
   niceIncrement: number;
+  /** After the transport reported itself unavailable, wait this long before probing again. */
+  unavailableRetryMs: number;
 };
 
 export const DEFAULT_TUNNEL_SUPERVISOR_TUNING: TunnelSupervisorTuning = {
@@ -50,6 +54,7 @@ export const DEFAULT_TUNNEL_SUPERVISOR_TUNING: TunnelSupervisorTuning = {
   shutdownGraceMs: 2_000,
   maxRssBytes: 512 * 1024 * 1024,
   niceIncrement: 10,
+  unavailableRetryMs: 60_000,
 };
 
 /** Supervisor status as shown to operators. */
@@ -71,7 +76,8 @@ export type TunnelSupervisorStatus =
       crashLooping: boolean;
       lastExit: string;
     }
-  | { state: "unavailable"; reason: string };
+  /** `retryInMs` is set while the supervisor waits to probe the transport again. */
+  | { state: "unavailable"; reason: string; retryInMs?: number };
 
 /** How to launch the child: an entry module and the Node arguments that run it. */
 export type TunnelChildLaunch = { entry: URL; execArgv: string[] };
@@ -246,15 +252,21 @@ export function createTunnelSupervisor(params: {
         child = undefined;
       }
       const lastExit = signal ? `signal ${signal}` : `exit code ${code}`;
-      if (code === TUNNEL_EXIT_UNAVAILABLE) {
-        wanted = false;
+      if (code === TUNNEL_EXIT_UNAVAILABLE && wanted) {
+        // Not a crash: the binding is missing. Probe again later instead of backing off.
         setStatus({
           state: "unavailable",
           reason: "iroh transport is unavailable on this platform",
+          retryInMs: tuning.unavailableRetryMs,
         });
         params.log.warn(
           "openclaw-id: iroh transport unavailable; remote access is off, the Gateway keeps running",
         );
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          launch();
+        }, tuning.unavailableRetryMs);
+        retryTimer.unref();
         return;
       }
       if (code === TUNNEL_EXIT_KEY_REFUSED) {

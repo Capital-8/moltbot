@@ -135,6 +135,8 @@ const enLabs = {
       removeFailed: "Couldn't remove this member",
       noOwnerKey:
         "This browser has no owner device key for this claw. Remove members from an owner device.",
+      unavailableRetry:
+        "Remote access needs the iroh binding for this platform. The Gateway checks again every minute.",
       invites: {
         title: "Invite someone",
         description:

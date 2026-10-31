@@ -390,7 +390,16 @@ export function createOpenClawIdService(params: {
             }))
           : [],
         invites: listInviteViews(record, Math.floor(Date.now() / 1000)),
-        publication: lastPublish,
+        // After a restart, the last publication recorded with the claw stands in.
+        publication:
+          lastPublish ??
+          (record?.discovery.owner_account_id
+            ? {
+                state: "published" as const,
+                ownerAccountId: record.discovery.owner_account_id,
+                snapshotSeq: record.discovery.published_snapshot_seq,
+              }
+            : undefined),
       };
     },
 

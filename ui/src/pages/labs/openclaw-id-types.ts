@@ -19,7 +19,7 @@ export type OpenClawIdTunnelStatus =
       crashLooping: boolean;
       lastExit: string;
     }
-  | { state: "unavailable"; reason: string };
+  | { state: "unavailable"; reason: string; retryInMs?: number };
 
 /** One invite as the Gateway lists it to owners. */
 export type OpenClawIdInvite = {

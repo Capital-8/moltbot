@@ -60,6 +60,18 @@ function tunnelPresentation(status: OpenClawIdStatusResult["status"]): {
   }
 }
 
+// What to do about a tunnel problem, shown under its status; undefined when healthy.
+function tunnelHint(status: OpenClawIdStatusResult["status"]): string | undefined {
+  if (status.state !== "on") {
+    return undefined;
+  }
+  const tunnel = status.tunnel;
+  if (tunnel.state === "unavailable" && tunnel.retryInMs !== undefined) {
+    return t("labsPage.openclawId.unavailableRetry");
+  }
+  return undefined;
+}
+
 async function shortFingerprint(key: string | undefined): Promise<string | undefined> {
   return key ? displayFingerprint(await fingerprint(key as PublicKeyText)) : undefined;
 }
@@ -150,8 +162,15 @@ export function OpenClawIdPanel() {
                   nested
                   title={t("labsPage.openclawId.tunnelTitle")}
                   description={
-                    <Show when={state().serverFingerprint}>
-                      {(fp) => t("labsPage.openclawId.serverKey", { fingerprint: fp() })}
+                    <Show
+                      when={tunnelHint(state().status)}
+                      fallback={
+                        <Show when={state().serverFingerprint}>
+                          {(fp) => t("labsPage.openclawId.serverKey", { fingerprint: fp() })}
+                        </Show>
+                      }
+                    >
+                      {(hint) => hint()}
                     </Show>
                   }
                   control={<SettingsStatus kind={tunnel().kind} label={tunnel().label} />}
