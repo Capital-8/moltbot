@@ -529,7 +529,7 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
               "ungrouped",
               "category:General",
               "category:Reviews",
-              ...groups.map((name) => `catalog:${name}`),
+              ...groups.map((name) => `category:${name}`),
             ],
           });
         }
