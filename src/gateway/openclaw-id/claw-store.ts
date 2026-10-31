@@ -1,0 +1,48 @@
+// Durable OpenClaw ID claw record in the shared state database (core-owned
+// plugin-state namespace). The Gateway is the only writer: it loads the record
+// once and writes through on every accepted change.
+import type {
+  AuthorityState,
+  SignedStatement,
+} from "../../../packages/openclaw-id-protocol/src/index.js";
+import { createCorePluginStateKeyedStore } from "../../plugin-state/plugin-state-store.js";
+
+/** Everything the Gateway keeps about its claw. */
+export type StoredClaw = {
+  v: 1;
+  /** 128 random bits, hex; created on the first "Make reachable". */
+  claw_id: string;
+  /** `<claw_id>.<loaderDomain>`, fixed at link time (the binding is signed for it). */
+  hostname: string | null;
+  /** Membership authority; null until the claw is linked. */
+  authority: AuthorityState | null;
+  /** The current ServerBinding, signed by R or an owner device. */
+  binding: SignedStatement<"ServerBinding"> | null;
+  /** Discovery publication state (a mirror; never authority). */
+  discovery: {
+    owner_account_id: string | null;
+    published_binding_seq: number;
+    published_snapshot_seq: number;
+    mailbox_cursor: string | null;
+  };
+};
+
+const RECORD_KEY = "current";
+
+function openStore() {
+  return createCorePluginStateKeyedStore<StoredClaw>({
+    ownerId: "core:openclaw-id",
+    namespace: "claw",
+    retention: "retained",
+  });
+}
+
+/** Reads the claw record, or undefined before the first link attempt. */
+export async function readStoredClaw(): Promise<StoredClaw | undefined> {
+  return await openStore().lookup(RECORD_KEY);
+}
+
+/** Replaces the claw record. */
+export async function writeStoredClaw(record: StoredClaw): Promise<void> {
+  await openStore().register(RECORD_KEY, record);
+}

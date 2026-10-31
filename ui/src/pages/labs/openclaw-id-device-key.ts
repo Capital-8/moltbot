@@ -1,0 +1,58 @@
+// Owner device key D for this browser origin: a non-extractable Ed25519 key
+// kept in IndexedDB (structured clone keeps it non-extractable), one per claw.
+import type { StatementSigner } from "../../../../packages/openclaw-id-protocol/src/index.ts";
+import { requestResult } from "../../lib/chat/control-ui-database.runtime.ts";
+import { listen } from "../../lib/reactive/listener.ts";
+
+const DB_NAME = "openclaw-id";
+const STORE = "owner-devices";
+
+type StoredDeviceKey = { privateKey: CryptoKey; publicKey: CryptoKey };
+
+function openDatabase(): Promise<IDBDatabase> {
+  const request = indexedDB.open(DB_NAME, 1);
+  listen(request, "upgradeneeded", () => request.result.createObjectStore(STORE), { once: true });
+  return requestResult(request);
+}
+
+// Runs one request in its own transaction.
+async function run<T>(mode: IDBTransactionMode, operate: (store: IDBObjectStore) => IDBRequest<T>) {
+  const db = await openDatabase();
+  try {
+    return await requestResult(operate(db.transaction(STORE, mode).objectStore(STORE)));
+  } finally {
+    db.close();
+  }
+}
+
+async function toSigner(pair: StoredDeviceKey): Promise<StatementSigner> {
+  const publicKey = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+  return {
+    publicKey,
+    sign: async (message) =>
+      new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, new Uint8Array(message))),
+  };
+}
+
+/** Creates a new non-extractable device key (not stored until `saveOwnerDeviceKey`). */
+export async function generateOwnerDeviceKey(): Promise<{
+  pair: StoredDeviceKey;
+  signer: StatementSigner;
+}> {
+  const pair = (await crypto.subtle.generateKey("Ed25519", false, [
+    "sign",
+    "verify",
+  ])) as StoredDeviceKey;
+  return { pair, signer: await toSigner(pair) };
+}
+
+/** Stores this origin's owner device key for a claw. */
+export async function saveOwnerDeviceKey(clawId: string, pair: StoredDeviceKey): Promise<void> {
+  await run("readwrite", (store) => store.put(pair, clawId));
+}
+
+/** This origin's owner device signer for a claw, if one was saved. */
+export async function loadOwnerDeviceSigner(clawId: string): Promise<StatementSigner | undefined> {
+  const pair = await run<StoredDeviceKey | undefined>("readonly", (store) => store.get(clawId));
+  return pair ? await toSigner(pair) : undefined;
+}

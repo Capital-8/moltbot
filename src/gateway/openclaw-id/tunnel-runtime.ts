@@ -46,7 +46,8 @@ export function resolveTunnelPaths(stateDir: string): { keyPath: string; socketP
 export async function startTunnelRuntime(params: {
   settings: TunnelRuntimeSettings;
   gatewayServer: () => HttpServer | undefined;
-  membership: () => { seq: number; admitted: string[] };
+  /** Admitted peer keys at start; nothing is admitted until the first push. */
+  membership: { seq: number; admitted: string[] };
   log: RuntimeLogger;
   onStatus?: (status: TunnelSupervisorStatus) => void;
 }) {
@@ -75,16 +76,14 @@ export async function startTunnelRuntime(params: {
       );
     },
   });
-  const { seq, admitted } = params.membership();
-  supervisor.pushMembership(seq, admitted);
+  supervisor.pushMembership(params.membership.seq, params.membership.admitted);
   supervisor.start();
   return {
     settings: params.settings,
     supervisor,
-    /** Pushes the current admitted peer keys to the child. */
-    refreshMembership(): void {
-      const next = params.membership();
-      supervisor.pushMembership(next.seq, next.admitted);
+    /** Replaces the admitted peer keys; the child closes removed keys with `revoked`. */
+    pushMembership(seq: number, admitted: string[]): void {
+      supervisor.pushMembership(seq, admitted);
     },
     /** Stops the child (SIGTERM, then SIGKILL after 2 s) and closes the listener. */
     async stop(): Promise<void> {
