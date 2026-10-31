@@ -139,6 +139,10 @@ tuple (profileId, agent). Both operations require current **operator.admin**
 authority; the agent must also be within the administrator's role. Agent tools
 cannot list or modify these grants.
 
+If Knowledge reports a missing person/agent grant, ask a Gateway administrator
+to grant that person access to the agent’s Knowledge space using these
+operator-only actions. Agent tools cannot repair the missing grant themselves.
+
 The action takes **expectedRevision** from the query, the canonical **profileId**,
 **agent**, a lowercase **space** key, and **access** (read, read-write, or none to
 revoke). A grant records the agent's current effective store binding and applies only

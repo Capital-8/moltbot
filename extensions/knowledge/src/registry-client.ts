@@ -51,16 +51,23 @@ export class RegistryClient {
   }
   /** Permission mutations ask their original host owner immediately before
    * the worker's synchronous effect, not only before dispatch. */
-  callGuarded<Op extends keyof RegistryOperations>(
+  async callGuarded<Op extends keyof RegistryOperations>(
     assertCurrent: () => void,
     op: Op,
     ...args: Parameters<RegistryOperations[Op]>
   ): Promise<ReturnType<RegistryOperations[Op]>> {
     assertCurrent();
-    return this.dispatch(op, args, {
-      signal: new Int32Array(new SharedArrayBuffer(8)),
-      assertCurrent,
-    });
+    try {
+      return await this.dispatch(op, args, {
+        signal: new Int32Array(new SharedArrayBuffer(8)),
+        assertCurrent,
+      });
+    } catch (error) {
+      // A permission write may have committed before its reply was lost.
+      // Reconcile durable facts before any old authority can be used again.
+      this.current = undefined;
+      throw error;
+    }
   }
   private async dispatch<Op extends keyof RegistryOperations>(
     op: Op,
@@ -170,6 +177,7 @@ export class RegistryClient {
     return worker;
   }
   private fail(error: unknown) {
+    this.current = undefined;
     const calls = [...this.pending.values()];
     this.pending.clear();
     for (const call of calls) {

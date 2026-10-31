@@ -135,7 +135,9 @@ function audiencePrincipal(
   if (audience.requesterProfileId !== undefined) {
     const grant = personGrants(audience.requesterProfileId, audience.agentId);
     if (!grant) {
-      throw new Error("Knowledge access unavailable: an explicit person/agent grant is required.");
+      throw new Error(
+        "Knowledge access unavailable: an explicit person/agent grant is required. Ask a Gateway administrator to grant this person access to the agent’s Knowledge space using the operator-only person_grants and person_grant actions. See https://docs.openclaw.ai/plugins/knowledge/stores-and-access.",
+      );
     }
     if (write && grant.access !== "read-write") {
       throw new Error("Knowledge is read-only: this person/agent grant does not allow saves.");

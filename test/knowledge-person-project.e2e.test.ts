@@ -1,9 +1,12 @@
 // Real Gateway, real host authority and Knowledge workers; deterministic model I/O, not live inference.
-import { randomUUID } from "node:crypto";
+import { randomUUID, X509Certificate } from "node:crypto";
+import net from "node:net";
+import { createServer } from "node:tls";
 import { expect, it, onTestFinished } from "vitest";
 import { GATEWAY_OWNER_PROFILE_ID } from "../packages/gateway-protocol/src/schema/users.js";
 import { writeToolCall } from "../src/gateway/gateway-provider-fixture.test-support.js";
 import { connectGatewayClient, disconnectGatewayClient } from "../src/gateway/test-helpers.e2e.js";
+import { acquireTestPortBlock } from "../src/test-utils/port-claims.js";
 import { assertGatewayAgentsAdmitted } from "./helpers/gateway-agent-admission.js";
 import { readRequestText } from "./helpers/gateway-integration-fixtures.js";
 import {
@@ -12,16 +15,25 @@ import {
 } from "./helpers/openai-responses-model-fixture.js";
 import { writeOpenAiResponsesText } from "./helpers/openai-responses-sse.js";
 import { createOpenClawTestInstance } from "./helpers/openclaw-test-instance.js";
+import { TEST_TLS_CERT_PEM, TEST_TLS_KEY_PEM } from "./helpers/tls-fixture.js";
 
-it(
-  "shares a verified person's project, denies other tool routes, and preserves revocation after a new Gateway process",
+it.each(["shared-owner", "verified-person"] as const)(
+  "%s shares project Knowledge, denies other routes, and preserves revocation after a new Gateway process",
   { timeout: 300_000 },
-  async () => {
+  async (identity) => {
     let command:
       | { name: string; args: Record<string, unknown>; issued: boolean; output?: string }
       | undefined;
     let requests = 0;
     let activeAgent = "";
+    let activeSession = "person-proof";
+    let anotherPerson = false;
+    let personId = GATEWAY_OWNER_PROFILE_ID;
+    const personHeaders = (person: "p" | "q") => ({
+      "x-forwarded-user": person + "@knowledge-person.example.test",
+      "x-forwarded-for": "203.0.113.50",
+      "x-forwarded-proto": "https",
+    });
     const model = await startOpenAiResponsesModelServer({
       modelId: "person-proof",
       bindError: "Person proof fixture did not bind",
@@ -31,6 +43,11 @@ it(
           expect(raw).not.toContain("Private cedar body.");
           expect(raw).not.toContain("Private cedar sentinel");
           expect(raw).not.toContain("Private cedar original");
+        }
+        if (anotherPerson) {
+          expect(raw).not.toContain("Shared orchid sentinel");
+          expect(raw).not.toContain("Shared orchid body.");
+          expect(raw).not.toContain("Shared orchid original");
         }
         const body = JSON.parse(raw);
         requests++;
@@ -64,6 +81,25 @@ it(
     config.gateway = {
       http: { endpoints: { chatCompletions: { enabled: true }, responses: { enabled: true } } },
     };
+    if (identity === "verified-person") {
+      config.gateway.auth = {
+        mode: "trusted-proxy",
+        token: undefined,
+        trustedProxy: {
+          userHeader: "x-forwarded-user",
+          requiredHeaders: ["x-forwarded-proto"],
+          allowUsers: [
+            personHeaders("p")["x-forwarded-user"],
+            personHeaders("q")["x-forwarded-user"],
+          ],
+          allowLoopback: true,
+          deviceAutoApprove: { enabled: true, scopes: ["operator.read", "operator.write"] },
+        },
+        identityScopes: { [personHeaders("p")["x-forwarded-user"]]: ["operator.admin"] },
+      };
+      config.gateway.trustedProxies = ["127.0.0.1", "::1"];
+      config.gateway.controlUi = { allowedOrigins: ["https://knowledge-proof.example.test"] };
+    }
     config.agents!.ownership = "explicit";
     config.agents!.entries = { main: {}, research: {} };
     delete config.agents!.defaults!.models;
@@ -103,12 +139,61 @@ it(
         OPENCLAW_TEST_MINIMAL_GATEWAY: undefined,
       },
     });
+    let connectionUrl = instance.url;
+    if (identity === "verified-person") {
+      // The public client requires TLS for identity headers. Keep the Gateway
+      // fixture's HTTP readiness owner and terminate only the test ingress here.
+      const claim = await acquireTestPortBlock({ offsets: [0] });
+      const sockets = new Set<net.Socket>();
+      const front = createServer({ key: TEST_TLS_KEY_PEM, cert: TEST_TLS_CERT_PEM }, (socket) => {
+        const upstream = net.connect(instance.port, "127.0.0.1");
+        for (const stream of [socket, upstream]) {
+          sockets.add(stream);
+          stream.on("close", () => sockets.delete(stream));
+          stream.on("error", () => {
+            socket.destroy();
+            upstream.destroy();
+          });
+        }
+        socket.pipe(upstream).pipe(socket);
+        socket.on("close", () => upstream.destroy());
+        upstream.on("close", () => socket.destroy());
+      });
+      onTestFinished(async () => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+        if (front.listening) {
+          await new Promise<void>((resolve) => {
+            front.close(() => resolve());
+          });
+        }
+        await claim.release();
+      });
+      await new Promise<void>((resolve, reject) => {
+        front.once("error", reject);
+        front.listen(claim.port, "127.0.0.1", resolve);
+      });
+      connectionUrl = "wss://127.0.0.1:" + claim.port;
+    }
     let client: Awaited<ReturnType<typeof connectGatewayClient>> | undefined;
-    const connect = () =>
+    const connect = (person: "p" | "q" = "p") =>
       connectGatewayClient({
-        url: instance.url,
-        token: instance.gatewayToken,
-        scopes: ["operator.admin", "operator.read", "operator.write"],
+        url: connectionUrl,
+        ...(identity === "verified-person"
+          ? {
+              edgeAuthHeaders: personHeaders(person),
+              tlsFingerprint: new X509Certificate(TEST_TLS_CERT_PEM).fingerprint256,
+              clientName: "openclaw-control-ui",
+              mode: "webchat",
+              origin: "https://knowledge-proof.example.test",
+              deviceFamily: "knowledge-proof-" + person,
+            }
+          : { token: instance.gatewayToken }),
+        scopes:
+          person === "p"
+            ? ["operator.admin", "operator.read", "operator.write"]
+            : ["operator.read", "operator.write"],
         requestTimeoutMs: 120_000,
       });
     const feature = async <T>(actionId: string, payload: unknown): Promise<T> => {
@@ -120,11 +205,16 @@ it(
       expect(result.ok).toBe(true);
       return result.result;
     };
-    const grant = async (agent: string, space: string, access = "read-write") => {
+    const grant = async (
+      agent: string,
+      space: string,
+      access = "read-write",
+      profileId = personId,
+    ) => {
       const snapshot = await feature<{ revision: string }>("person_grants", {});
       const result = await feature<{ outcome: string }>("person_grant", {
         expectedRevision: snapshot.revision,
-        profileId: GATEWAY_OWNER_PROFILE_ID,
+        profileId,
         agent,
         space,
         access,
@@ -138,7 +228,7 @@ it(
         "agent",
         {
           agentId: agent,
-          sessionKey: "agent:" + agent + ":person-proof",
+          sessionKey: "agent:" + agent + ":" + activeSession,
           message: "Execute the next synthetic proof step.",
           deliver: false,
           idempotencyKey: randomUUID(),
@@ -159,7 +249,9 @@ it(
       const response = await fetch(instance.url.replace("ws:", "http:") + "/v1/" + endpoint, {
         method: "POST",
         headers: {
-          authorization: "Bearer " + instance.gatewayToken,
+          ...(identity === "verified-person"
+            ? personHeaders("p")
+            : { authorization: "Bearer " + instance.gatewayToken }),
           "content-type": "application/json",
           "x-openclaw-session-key": "agent:research:person-proof",
           "x-openclaw-agent-id": "research",
@@ -180,6 +272,11 @@ it(
     try {
       await instance.startGateway();
       client = await connect();
+      if (identity === "verified-person") {
+        const self = await client.request<{ profile: { id: string } }>("users.self", {});
+        personId = self.profile.id;
+        expect(personId).not.toBe(GATEWAY_OWNER_PROFILE_ID);
+      }
       await assertGatewayAgentsAdmitted(client, ["main", "research"]);
       for (const agentId of ["main", "research"]) {
         const created = await client.request<{ entry: { chatType?: string } }>("sessions.create", {
@@ -209,6 +306,7 @@ it(
         attachments: [personalUpload.evidence],
       });
       expect(personal).toMatch(/"state"\s*:\s*"published"/);
+      expect(JSON.parse(personal).git.state).toBe("committed");
       const id = /"id"\s*:\s*"([a-f0-9-]{36})"/.exec(personal)?.[1];
       expect(id).toBeTruthy();
       await grant("main", "orchid");
@@ -233,6 +331,7 @@ it(
       expect(project).toMatch(/"state"\s*:\s*"published"/);
       expect(await turn("research", "knowledge_records", {})).toContain("Shared orchid sentinel");
       const published = JSON.parse(project);
+      expect(published.git.state).toBe("committed");
       const retrieved = JSON.parse(
         await turn("research", "knowledge_record", { id: published.id, includeEvidence: true }),
       );
@@ -293,6 +392,43 @@ it(
         );
         expect(denial).not.toContain("Private cedar body.");
       }
+      if (identity === "verified-person") {
+        const p = client;
+        const q = await connect("q");
+        try {
+          const self = await q.request<{ profile: { id: string } }>("users.self", {});
+          expect(self.profile.id).not.toBe(personId);
+          expect(self.profile.id).not.toBe(GATEWAY_OWNER_PROFILE_ID);
+          await grant("research", "orchid", "read", self.profile.id);
+          await q.request("sessions.create", {
+            key: "agent:research:person-q-proof",
+            agentId: "research",
+            label: "Another synthetic person",
+          });
+          client = q;
+          activeSession = "person-q-proof";
+          anotherPerson = true;
+          expect(JSON.parse(await turn("research", "knowledge_records", {})).total).toBe(0);
+          expect(
+            JSON.parse(await turn("research", "knowledge_record", { id: published.id })).record,
+          ).toBeNull();
+          expect(
+            JSON.parse(await turn("research", "knowledge_grep", { query: "Shared orchid" })).hits,
+          ).toEqual([]);
+          const evidence = await turn("research", "knowledge_evidence_read", {
+            id: published.id,
+            path: projectUpload.evidence.path,
+            sha256: projectUpload.evidence.sha256,
+          });
+          expect(JSON.parse(evidence).status).toBe("error");
+          expect(evidence).not.toContain("Shared orchid original");
+        } finally {
+          client = p;
+          activeSession = "person-proof";
+          anotherPerson = false;
+          await disconnectGatewayClient(q);
+        }
+      }
       // The same authenticated person and durable direct session must not fall
       // back to legacy partitions when transported through an HTTP adapter.
       await grant("research", "orchid", "read");
@@ -322,6 +458,9 @@ it(
       await instance.startGateway();
       expect(instance.child?.pid).not.toBe(oldPid);
       client = await connect();
+      if (identity === "verified-person") {
+        expect(await client.request("users.self", {})).toMatchObject({ profile: { id: personId } });
+      }
       await assertGatewayAgentsAdmitted(client, ["main", "research"]);
       expect(await turn("research", "knowledge_records", {})).toMatch(/person.*grant/i);
       expect(await turn("main", "knowledge_records", {})).toContain("Shared orchid sentinel");

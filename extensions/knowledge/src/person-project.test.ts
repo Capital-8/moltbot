@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import type { Worker } from "node:worker_threads";
+import { expect, it, vi } from "vitest";
 import type { MemoryProviderRuntime } from "./memory-provider-types.js";
-import type { PersonGrantChangeInput } from "./person-grants-contract.js";
+import { personGrantKey, type PersonGrantChangeInput } from "./person-grants-contract.js";
+import { RegistryClient } from "./registry-client.js";
+import type { RegistryResponse } from "./registry-host.js";
 import { createKnowledgeService } from "./service.js";
+import type { RegistrySnapshot } from "./store-registry.js";
 import {
   afterTest,
   hostApi,
@@ -117,7 +121,9 @@ function fixture() {
 it("a verified requester without a person grant cannot fall back to agent-private records", async () => {
   const f = fixture();
   await f.save(toolContext(f.api), "Legacy owner secret");
-  await expect(f.service.records({}, f.person("research"))).rejects.toThrow(/person.*grant/i);
+  await expect(f.service.records({}, f.person("research"))).rejects.toThrow(
+    /explicit person.*grant.*Ask a Gateway administrator.*person_grants and person_grant/,
+  );
 });
 
 it("shares one person's project through native publication while withholding personal metadata, evidence and index", async () => {
@@ -187,6 +193,8 @@ it("shares one person's project through native publication while withholding per
     },
     a,
   );
+  expect(personal.git?.state).toBe("committed");
+  expect(project.git?.state).toBe("committed");
   const cutoff = Date.now();
   await f.grant("main", "personal");
   expect(JSON.stringify(await f.index("main", cutoff))).toContain("Personal sentinel");
@@ -289,6 +297,50 @@ it("revocation fences warmed provider leases and indexes and persists across a c
   await expect(f.service.record({ id: ref.id }, f.person("research"))).rejects.toThrow(
     /person.*grant/,
   );
+  expect(await f.index("research")).toBeUndefined();
+  expect((await f.service.records({}, f.person())).total).toBe(1);
+});
+
+it("fences old person authority when a committed revocation loses its registry reply", async () => {
+  const calls = vi.spyOn(RegistryClient.prototype, "callGuarded");
+  afterTest(() => {
+    calls.mockRestore();
+  });
+  const f = fixture();
+  await f.grant("main", "orchid");
+  await f.grant("research", "orchid");
+  await f.save(f.person(), "Orchid uncertain revocation");
+  const provider = await f.open("research");
+  const ref = (await provider.search({ query: "Orchid" })).hits[0]!.reference;
+  expect(JSON.stringify(await f.index("research"))).toContain("Orchid uncertain revocation");
+  const registry = calls.mock.contexts.find((context) => context instanceof RegistryClient);
+  if (!registry) {
+    throw new Error("Expected the native registry client");
+  }
+  // Observe the real worker only to drop its post-commit transport reply.
+  const worker = Reflect.get(registry, "worker") as Worker;
+  const emit = worker.emit.bind(worker);
+  let committed: RegistrySnapshot | undefined;
+  let exit: Promise<number> | undefined;
+  const delivery = vi.spyOn(worker, "emit").mockImplementation((event, ...args) => {
+    const response = args[0] as RegistryResponse;
+    if (event === "message" && response.type === "result" && response.ok && !exit) {
+      committed = response.value as RegistrySnapshot;
+      exit = worker.terminate();
+      return false;
+    }
+    return emit(event, ...args);
+  });
+  afterTest(() => {
+    delivery.mockRestore();
+  });
+  await expect(f.grant("research", "orchid", "none")).rejects.toThrow(/registry worker exited/);
+  await exit;
+  expect(committed).toBeDefined();
+  expect(committed?.personGrants[personGrantKey("person-p", "research")]).toBeUndefined();
+  await expect(provider.get({ reference: ref })).rejects.toThrow(/person.*grant|authority/);
+  await expect(f.service.records({}, f.person("research"))).rejects.toThrow(/person.*grant/);
+  await expect(f.open("research")).rejects.toThrow(/person.*grant/);
   expect(await f.index("research")).toBeUndefined();
   expect((await f.service.records({}, f.person())).total).toBe(1);
 });
