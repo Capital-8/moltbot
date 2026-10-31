@@ -14,6 +14,7 @@ against it. It runs unchanged in Node (>= 24), browsers and Workers: WebCrypto o
 | [tunnel.md](tunnel.md)         | OCF-189 | `openclaw/tunnel/1` over iroh: framing, limits, close codes, headers                                |
 | [discovery.md](discovery.md)   | OCF-191 | Discovery API v1: descriptor, devices, claws, snapshot mirror, mailbox, relay admission, enrollment |
 | [enrollment.md](enrollment.md) | OCF-190 | Invites, SAS device approval, kit enrollment, reference membership authority rules                  |
+| [acceptance.md](acceptance.md) | OCF-274 | Spec section 11 acceptance tests: which run here, which need the full system                        |
 
 Source material: the owner-key spec v0.2 ("OpenClaw ID remote access: owner key and device
 approval protocol", 2026-10-29) and the iroh spike (`tailcat-spike/docs/iroh/`). Spec
