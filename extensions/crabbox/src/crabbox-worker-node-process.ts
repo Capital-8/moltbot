@@ -10,6 +10,7 @@ import type { CrabboxOperatingSystem } from "./crabbox-worker-profile.js";
 export function createCrabboxNodeProcessRuntime(
   desktopTarget: CrabboxOperatingSystem | undefined,
   leaseId: string,
+  resumeDeviceId?: string,
 ): string {
   return `const desktopTarget = ${JSON.stringify(desktopTarget)};
 ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher() : ""}
@@ -146,7 +147,7 @@ ${desktopTarget === "windows/normal" ? createCrabboxWindowsDesktopNodeLauncher()
   return false;
   };
   const launchNodeProcess = async () => {
-  const args = mode === "connect" ? ["connect", "--target-file", setupFile] : ["node", "run"];
+  const args = mode === "connect" ? ["connect", "--target-file", setupFile] : ["node", "run", ...${JSON.stringify(resumeDeviceId ? ["--resume-device", resumeDeviceId] : [])}];
   setPhase("node launch");
   const logPath = path.join(stateDir, "node.log");
   const log = process.platform === "win32" ? undefined : fs.openSync(logPath, "a", 0o600);
