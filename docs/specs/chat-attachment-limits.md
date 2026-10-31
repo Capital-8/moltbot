@@ -103,7 +103,9 @@ remains separately tracked in
 
 ## Upgrade and downgrade
 
-Run `openclaw doctor --fix` as part of upgrading. If an existing explicit
+Doctor automatically preserves this policy for eligible single-file configs
+during noninteractive upgrades. Run `openclaw doctor --fix` when Doctor requests
+an explicit repair. If an existing explicit
 `agents.defaults.mediaMaxMb` supplied the old file cap and
 `attachments.maxFileMb` is absent, Doctor copies the equivalent whole-byte cap
 to the new field. It retains the media setting, explicit new file/total values,
@@ -139,6 +141,12 @@ limits, migration precedence/idempotence, schema bounds, worker staging, and
 client aggregate preflight. Rendered settings evidence uses the actual Control UI
 with a synthetic Gateway configuration response.
 
+A real isolated Gateway/agent test exercises `chat.send` with a deterministic
+provider: it rejects disguised media and over-file/over-total batches before
+provider dispatch, then accepts and retains a document above the media cap.
+Doctor integration coverage verifies backed-up, idempotent migration of a valid
+legacy config through the noninteractive update path.
+
 Release qualification still needs an installed latest-stable upgrade rehearsal
-and a real Gateway/agent/model attachment flow. Unit/migration tests and
-fixture-backed UI evidence do not substitute for those live checks.
+and an external live-model attachment flow. Deterministic-provider, migration,
+and fixture-backed UI evidence do not substitute for those checks.

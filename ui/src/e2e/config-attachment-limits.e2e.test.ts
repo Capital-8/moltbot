@@ -19,7 +19,7 @@ const proof = configProof("attachment-limits");
 suite.define(() => {
   it("renders independent limits and saves the exact per-file and message settings", async () => {
     const response = computeBaseConfigSchemaResponse();
-    const attachments = asSchemaObject(response.schema.properties?.attachments);
+    const attachments = asSchemaObject(asSchemaObject(response.schema)?.properties?.attachments);
     if (!attachments?.properties) {
       throw new Error("Attachment configuration schema missing");
     }
