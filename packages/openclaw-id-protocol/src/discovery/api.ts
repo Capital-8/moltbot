@@ -23,6 +23,8 @@ export const DISCOVERY_ENDPOINTS = {
   getDescriptor: { method: "GET", path: "/v1/claws/{claw_id}/descriptor", auth: "user" },
   publishSnapshot: { method: "PUT", path: "/v1/claws/{claw_id}/snapshot", auth: "gateway" },
   getSnapshot: { method: "GET", path: "/v1/claws/{claw_id}/snapshot", auth: "user" },
+  publishRevocations: { method: "PUT", path: "/v1/claws/{claw_id}/revocations", auth: "gateway" },
+  getRevocations: { method: "GET", path: "/v1/claws/{claw_id}/revocations", auth: "user" },
   bindDevice: { method: "POST", path: "/v1/devices", auth: "device" },
   listDevices: { method: "GET", path: "/v1/devices", auth: "user" },
   unbindDevice: { method: "DELETE", path: "/v1/devices/{device_fp}", auth: "user" },
@@ -103,10 +105,25 @@ export type PublishDescriptorRequest = { descriptor: ClawDescriptor };
 /** Response of GET /v1/claws/{claw_id}/descriptor. */
 export type GetDescriptorResponse = { descriptor: ClawDescriptor };
 
-/** PUT /v1/claws/{claw_id}/snapshot. Discovery checks the K_gw signature and that seq increases. */
+/**
+ * PUT /v1/claws/{claw_id}/snapshot. Discovery checks the K_gw signature and that the snapshot is
+ * newer than the stored one by (seq, issued_at): the Gateway re-signs the same seq at least every
+ * SNAPSHOT_REPUBLISH_SECONDS, so clients can tell the snapshot is fresh. Older -> `stale_snapshot`.
+ */
 export type PublishSnapshotRequest = { snapshot: SignedStatement<"MembershipSnapshot"> };
 /** Response of GET /v1/claws/{claw_id}/snapshot. Readers verify against the verified binding's K_gw. */
 export type GetSnapshotResponse = { snapshot: SignedStatement<"MembershipSnapshot"> };
+
+/**
+ * PUT /v1/claws/{claw_id}/revocations (gateway): owner-signed Revocations the Gateway accepted.
+ * Append-only; Discovery checks shape only and ignores statements it already has. Clients verify
+ * each under their pinned anchor; Discovery can withhold them but never forge one.
+ */
+export type PublishRevocationsRequest = { revocations: SignedStatement<"Revocation">[] };
+/** Response of GET /v1/claws/{claw_id}/revocations (readable like the descriptor). */
+export type GetRevocationsResponse = { revocations: SignedStatement<"Revocation">[] };
+/** Most revocations accepted in one PUT. */
+export const PUBLISH_REVOCATIONS_MAX = 64;
 
 /** POST /v1/devices: binds D (request signer) and W (proof) to the signed-in account. */
 export type BindDeviceRequest = {

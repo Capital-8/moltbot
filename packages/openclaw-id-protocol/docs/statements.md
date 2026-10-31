@@ -147,10 +147,36 @@ Evidence is untrusted Discovery output: `{ root_pub, rotations[], binding }`.
 
 On success the caller stores the returned pin and dials only `binding.k_srv`.
 
-**Accepted residual risk** (spec open question 1, recommendation (a)): a client with no
-stored binding_seq can be served an older, validly signed binding. It matters only to an
-attacker who also holds the old K_srv secret; rotation of K_srv should be accompanied by a
-root- or device-signed Revocation of the old K_srv (`target_kind: "server_key"`).
+### Revocation and freshness (freshness/v1)
+
+A ServerBinding never expires and step 5 accepts an equal binding_seq, so the pin alone does not
+stop a replayed older binding. Right after `verifyBindingForPin` succeeds and before any socket
+opens, the client runs `assessFreshness(evidence, { binding, anchor, stored, now, policy })` with
+Discovery's snapshot (`getSnapshot`) and revocations (`getRevocations`), both untrusted:
+
+1. Verify each Revocation under the pinned anchor (`verifyOwnerStatement`); ignore invalid ones.
+2. Verify the snapshot under the binding's K_gw (`verifyMembershipSnapshot`).
+3. Merge the revoked fingerprints and the snapshot's `revoked[]` into a per-origin set that only
+   ever grows. If anything was learned, re-run `verifyBindingForPin` with the merged set.
+4. fp(K_srv) or fp(K_gw) revoked -> `server_key_revoked`.
+5. A verified snapshot (served now or stored earlier) names a higher binding_seq than the binding
+   served -> `stale_binding`.
+6. The binding is fresh when a verified snapshot names exactly its binding_seq, was issued at most
+   `SNAPSHOT_MAX_AGE_SECONDS` (3 h) ago and at most `SNAPSHOT_CLOCK_SKEW_SECONDS` (300 s) ahead,
+   and is not older by (seq, issued_at) than the newest snapshot stored for this origin.
+7. Not fresh: `enforce` refuses with `freshness_unavailable` (no socket, no credential); `report`
+   dials and records the gap. Rules 4 and 5 apply under both policies.
+
+A snapshot from the future is never stored. The Gateway re-signs at least every
+`SNAPSHOT_REPUBLISH_SECONDS` (1 h), so an honest claw's snapshot is always well inside the 3 h
+window. A K_srv rotation must publish the new binding and a snapshot with its binding_seq together,
+with fp(old K_srv) in `revoked[]`.
+
+**Residual risk:** an attacker holding both the old K_srv and the old K_gw can sign fresh snapshots
+for the old binding. Only a Revocation of those keys stops it, and Discovery can withhold that
+from a client that never saw it. Closing it needs freshness from the live Gateway over the tunnel
+(a K_gw-signed answer to a client nonce), which v1 does not have. A K_gw holder can also deny
+service to an origin for good by signing an inflated binding_seq; K_gw can already refuse service.
 
 ## Test vectors
 

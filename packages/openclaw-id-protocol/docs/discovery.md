@@ -60,8 +60,10 @@ ready message.
 | listClaws               | `GET /v1/claws`                                       | user                                      | -> `{ claws: [{ claw_id, hostname, name, relationship, role, online, descriptor_published_at }] }` |
 | publishDescriptor       | `PUT /v1/claws/{claw_id}/descriptor`                  | gateway                                   | `{ descriptor }` -> 204; `stale_binding` if binding_seq decreases                                  |
 | getDescriptor           | `GET /v1/claws/{claw_id}/descriptor`                  | user                                      | -> `{ descriptor }`                                                                                |
-| publishSnapshot         | `PUT /v1/claws/{claw_id}/snapshot`                    | gateway                                   | `{ snapshot }` -> 204; `stale_snapshot` if seq does not increase                                   |
+| publishSnapshot         | `PUT /v1/claws/{claw_id}/snapshot`                    | gateway                                   | `{ snapshot }` -> 204; `stale_snapshot` unless newer by (seq, issued_at)                           |
 | getSnapshot             | `GET /v1/claws/{claw_id}/snapshot`                    | user                                      | -> `{ snapshot }`                                                                                  |
+| publishRevocations      | `PUT /v1/claws/{claw_id}/revocations`                 | gateway                                   | `{ revocations: SignedStatement<"Revocation">[] }` (<= 64) -> 204; append-only, duplicates ignored |
+| getRevocations          | `GET /v1/claws/{claw_id}/revocations`                 | user (same accounts as getDescriptor)     | -> `{ revocations }` (`[]` when none)                                                              |
 | bindDevice              | `POST /v1/devices`                                    | device (signer = device_pub)              | `{ device_pub, peer_key, label, ts, peer_key_proof }` -> `DeviceEntry`                             |
 | listDevices             | `GET /v1/devices`                                     | user                                      | -> `{ devices: [...] }`                                                                            |
 | unbindDevice            | `DELETE /v1/devices/{device_fp}`                      | user                                      | -> 204                                                                                             |
@@ -73,6 +75,16 @@ ready message.
 
 Types for every body are in `src/discovery/api.ts`; the endpoint table is
 `DISCOVERY_ENDPOINTS`.
+
+### Freshness (freshness/v1)
+
+The Gateway re-signs its MembershipSnapshot at startup, on every membership or binding change and
+at least every `SNAPSHOT_REPUBLISH_SECONDS` (1 h) even when nothing changed: the same `seq`, a
+new `issued_at`. Discovery orders snapshots by (`seq`, `issued_at`) (`isOlderSnapshot`) and
+refuses an older one with `stale_snapshot`. The Gateway also publishes every owner-signed
+`Revocation` it accepted (`publishRevocations`); Discovery stores them append-only after a shape
+check and serves them with `getRevocations`. Clients apply `assessFreshness`
+(statements.md, "Pins and rollback").
 
 ### Descriptor
 
@@ -181,7 +193,7 @@ match `code` only.
 | `not_found`          | 404  | unknown claw, device or message                                             |
 | `conflict`           | 409  | already registered / duplicate                                              |
 | `stale_binding`      | 409  | descriptor binding_seq lower than stored                                    |
-| `stale_snapshot`     | 409  | snapshot seq not greater than stored                                        |
+| `stale_snapshot`     | 409  | snapshot not newer than stored by (seq, issued_at)                          |
 | `code_invalid`       | 410  | enrollment code unknown, used or expired                                    |
 | `payload_too_large`  | 413  | mailbox payload over 64 KiB                                                 |
 | `rate_limited`       | 429  | per claw / account / address limit                                          |

@@ -8,6 +8,7 @@ export * from "./kit.js";
 export * from "./statements/index.js";
 export * from "./tunnel/index.js";
 export * from "./discovery/index.js";
+export * from "./freshness/index.js";
 export * from "./invites.js";
 export * from "./enrollment/sas.js";
 export * from "./enrollment/owner-cert.js";
