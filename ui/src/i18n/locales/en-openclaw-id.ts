@@ -31,6 +31,9 @@ const enOpenClawId = {
     roleOperator: "operator",
     roleViewer: "viewer",
     connectedRemotely: "Connected remotely · end-to-end encrypted",
+    regenerateOwnerKey: "Regenerate owner key",
+    frozenAlert:
+      "Conflicting owner-key changes reached this claw. Regenerate the owner key here to resolve them.",
   },
 } satisfies TranslationMap;
 
