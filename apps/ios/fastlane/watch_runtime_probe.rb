@@ -13,7 +13,7 @@ UI = FastlaneCore::UI unless defined?(UI)
 # Temporary, no-build reproduction of a Watch session overlapping runtime cleanup.
 def command(*args)
   stdout, stderr, status = Open3.capture3(*args)
-  raise "#{args.join(' ')} failed: #{stderr.strip}" unless status.success?
+  raise "#{args.join(' ')} failed (#{status.exitstatus}): #{(stdout + stderr).strip}" unless status.success?
   stdout
 end
 
@@ -30,17 +30,17 @@ begin
     .max_by { |entry| Gem::Version.new(entry.fetch("version")) }
   raise "No available Watch runtime" unless runtime
   WatchRuntimeAdmission.wait!
-  package_root = Dir.mktmpdir("openclaw-watch-arm64-", ENV.fetch("RUNNER_TEMP"))
-  facts["downloadOutput"] = command("xcodebuild", "-downloadPlatform", "watchOS", "-buildVersion", runtime.fetch("version"),
-    "-architectureVariant", "arm64", "-exportPath", package_root)
-  packages = Dir[File.join(package_root, "**", "*.dmg")]
-  raise "Expected one exported arm64 Watch runtime package, found #{packages.length}" unless packages.one?
-  facts["packageName"] = File.basename(packages.first)
-  facts["packageBytes"] = File.size(packages.first)
-  WatchRuntimeAdmission.wait!
   images = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j")).values
   image = images.find { |entry| entry["runtimeIdentifier"] == runtime.fetch("identifier") && entry["state"] == "Ready" }
   raise "No Ready Watch image to replace" unless image
+  packages = Dir[File.join(image.fetch("path"), "Restore", "*.dmg")]
+  facts["sourcePackages"] = packages.map { |path| File.basename(path) }
+  raise "Expected one Watch runtime DMG inside selected asset, found #{packages.length}" unless packages.one?
+  package_root = Dir.mktmpdir("openclaw-watch-staged-", ENV.fetch("RUNNER_TEMP"))
+  package = File.join(package_root, File.basename(packages.first))
+  command("/bin/cp", "-c", packages.first, package)
+  facts["packageName"] = File.basename(package)
+  facts["packageBytes"] = File.size(package)
   facts["retiredImage"] = image.fetch("identifier")
   retired_path = image.fetch("path")
   facts["deletions"] = []
@@ -63,7 +63,7 @@ begin
   end
   facts["assetRetired"] = !File.exist?(retired_path)
   raise "Broken Watch asset remains after supported runtime deletion" unless facts.fetch("assetRetired")
-  facts["importOutput"] = command("xcodebuild", "-importPlatform", packages.first)
+  facts["importOutput"] = command("xcrun", "simctl", "runtime", "add", package)
   facts["imagesImported"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
   WatchRuntimeAdmission.wait!
   facts["admittedAt"] = Time.now.utc.iso8601
