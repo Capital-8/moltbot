@@ -167,7 +167,7 @@ type ForegroundEntry = {
   phaseDetails: Record<string, unknown>;
 };
 
-type ShutdownSignal = "SIGINT" | "SIGKILL" | "SIGTERM";
+type ShutdownSignal = "SIGHUP" | "SIGINT" | "SIGKILL" | "SIGTERM";
 
 const IS_MAIN = (() => {
   const entrypoint = process.argv[1];
@@ -184,9 +184,10 @@ const IS_MAIN = (() => {
 
 function dockerAllUsage() {
   return [
-    "Usage: node scripts/test-docker-all.mjs [--plan-json | --prepare-only=<manifest> | --prepare-plugin-registry]",
+    "Usage: node scripts/test-docker-all.mjs [--lanes=<names>] [--plan-json | --prepare-only=<manifest> | --prepare-plugin-registry]",
     "",
     "Options:",
+    "  --lanes=<names>          Select comma-separated lanes instead of the lane-selection env vars.",
     "  --plan-json              Print the resolved Docker E2E plan as JSON and exit.",
     "  --prepare-only=<manifest> Prepare one immutable candidate manifest and exit.",
     "  --prepare-plugin-registry Prepare only the selected lanes' plugin registry.",
@@ -199,6 +200,7 @@ function dockerAllUsage() {
 export function parseDockerAllCliArgs(argv: readonly string[]) {
   const options: {
     help: boolean;
+    lanes?: string;
     planJson: boolean;
     prepareOnly?: string;
     preparePluginRegistry: boolean;
@@ -208,7 +210,12 @@ export function parseDockerAllCliArgs(argv: readonly string[]) {
     preparePluginRegistry: false,
   };
   for (const arg of argv) {
-    if (arg === "--plan-json") {
+    if (arg.startsWith("--lanes=")) {
+      options.lanes = arg.slice("--lanes=".length);
+      if (parseLaneSelection(options.lanes).length === 0) {
+        throw new Error(`--lanes requires at least one lane name\n\n${dockerAllUsage()}`);
+      }
+    } else if (arg === "--plan-json") {
       options.planJson = true;
     } else if (arg.startsWith("--prepare-only=")) {
       options.prepareOnly = arg.slice("--prepare-only=".length);
@@ -2114,6 +2121,9 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   handleShutdownSignal("SIGTERM", 143);
 });
+process.on("SIGHUP", () => {
+  handleShutdownSignal("SIGHUP", 129);
+});
 
 async function main() {
   const runStartedAt = new Date().toISOString();
@@ -2177,8 +2187,11 @@ async function main() {
     process.env.OPENCLAW_DOCKER_ALL_INCLUDE_OPENWEBUI ?? process.env.INCLUDE_OPENWEBUI,
     true,
   );
+  // Package aliases enter this lifecycle owner directly. An env-setting parent
+  // with its own kill deadline can exit before the scheduler joins its lanes.
   const selectedLaneNamesRaw =
-    process.env.OPENCLAW_DOCKER_ALL_LANES || process.env.DOCKER_E2E_LANES || "";
+    cliOptions.lanes ??
+    (process.env.OPENCLAW_DOCKER_ALL_LANES || process.env.DOCKER_E2E_LANES || "");
   const selectedLaneNames = parseLaneSelection(selectedLaneNamesRaw);
   if (selectedLaneNamesRaw && selectedLaneNames.length === 0) {
     throw new Error("OPENCLAW_DOCKER_ALL_LANES must include at least one lane name");

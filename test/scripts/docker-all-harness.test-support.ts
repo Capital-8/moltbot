@@ -16,6 +16,7 @@ export function copyDockerSchedulerHarness(root: string) {
   copyFileSync("scripts/test-docker-all.mts", path.join(scriptsDir, "test-docker-all.mts"));
   copyFileSync("scripts/lib/tsx-cli-shim.mjs", path.join(libDir, "tsx-cli-shim.mjs"));
   copyFileSync("scripts/tsx.mjs", path.join(scriptsDir, "tsx.mjs"));
+  copyFileSync("scripts/run-with-env.mts", path.join(scriptsDir, "run-with-env.mts"));
   copyFileSync(
     "scripts/prepublish-plugin-registry-artifact.mjs",
     path.join(scriptsDir, "prepublish-plugin-registry-artifact.mjs"),
@@ -27,6 +28,7 @@ export function copyDockerSchedulerHarness(root: string) {
     "docker-e2e-container.sh",
     "docker-e2e-resource-diagnostics.sh",
     "local-check-runtime.mts",
+    "numeric-options.mjs",
     "managed-child-process.mts",
     "managed-cleanup-handoff.mts",
     "vitest-resource-ownership.mts",
