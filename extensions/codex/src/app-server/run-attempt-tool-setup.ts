@@ -193,6 +193,10 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
   const requiresScheduledCodexAppAuthority = appCreatorCapture.required;
   const canResolveAnyScheduledCreatorAuthority =
     canResolveScheduledConfiguredMcpCreatorAuthority || requiresScheduledCodexAppAuthority;
+  const hasUnresolvedConfiguredMcpCreatorAuthority =
+    !authenticatedScheduledMode &&
+    bundleMcpThreadConfig.staticServerNames.length > 0 &&
+    !canResolveScheduledConfiguredMcpCreatorAuthority;
   type CreatorAuthorityResolver = NonNullable<
     Parameters<typeof buildDynamicTools>[0]["resolveCronCreatorToolAuthority"]
   >;
@@ -556,11 +560,7 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
         toolBridge.availableTools,
         { nativeToolSurfaceEnabled },
       );
-      if (
-        !authenticatedScheduledMode &&
-        bundleMcpThreadConfig.staticServerNames.length > 0 &&
-        !canResolveScheduledConfiguredMcpCreatorAuthority
-      ) {
+      if (hasUnresolvedConfiguredMcpCreatorAuthority) {
         // Native configured MCP is model-visible but absent from this dynamic-tool list.
         // Keep the names for finite intersections, but never certify a partial default cap.
         delete cronCreatorToolAllowlistCaptureRef.value;
@@ -577,6 +577,12 @@ export async function prepareCodexAttemptTools(runtime: CodexAttemptRuntime) {
     if (canResolveAnyScheduledCreatorAuthority) {
       resolveCreatorAuthorityImpl = async (options) => {
         options?.signal?.throwIfAborted();
+        if (hasUnresolvedConfiguredMcpCreatorAuthority) {
+          // App authority cannot make an unresolved native MCP surface complete.
+          throw new Error(
+            "Automation tool preparation is unavailable while configured MCP creator authority is unresolved.",
+          );
+        }
         if (codexAppAuthorityUnavailableReason) {
           throw new Error(codexAppAuthorityUnavailableReason);
         }

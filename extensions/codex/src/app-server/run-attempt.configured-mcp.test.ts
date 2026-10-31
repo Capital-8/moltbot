@@ -19,12 +19,13 @@ import {
   tempDir,
   userMessage,
 } from "./run-attempt-test-harness.js";
+import * as scheduledAppAuthority from "./scheduled-app-authority.js";
 import {
   readCodexAppServerBinding,
   registerCodexTestSessionIdentity,
   writeCodexAppServerBinding,
 } from "./session-binding.test-helpers.js";
-import { isCodexTurnContextHandoff } from "./test-support.js";
+import { createCodexTestOAuthProfile, isCodexTurnContextHandoff } from "./test-support.js";
 
 const { admitLocalOperatorCronAuthority, configureFakeMcp, mcpMocks, setupConfiguredMcpTestHooks } =
   await import("./run-attempt.configured-mcp.test-support.js");
@@ -565,6 +566,65 @@ describe("runCodexAppServerAttempt configured MCP creator authority", () => {
     params.senderIsOwner = senderIsOwner;
     return params;
   }
+
+  it.each([true, false])(
+    "app authority preserves configured MCP incompleteness (static MCP: %s)",
+    async (hasStaticMcp) => {
+      const params = createMcpAuthorityParams(true);
+      params.senderId = "external-sender";
+      admitLocalOperatorCronAuthority(params);
+      if (!hasStaticMcp) {
+        params.config!.mcp!.servers = {};
+      }
+      params.authProfileId = "openai:work";
+      params.authProfileStore = {
+        version: 1,
+        profiles: {
+          "openai:work": createCodexTestOAuthProfile("account-work"),
+        },
+      };
+      // Isolate the successful app provider boundary; keep the actual attempt,
+      // async creator resolver and configured-MCP completeness checks.
+      const appDecision = vi
+        .spyOn(scheduledAppAuthority, "resolveScheduledCodexAppCreatorCaptureDecision")
+        .mockReturnValue({ required: true, supported: true });
+      const appCapture = vi
+        .spyOn(scheduledAppAuthority, "captureScheduledCodexAppAuthority")
+        .mockResolvedValue({
+          version: 1,
+          runtimeId: "codex",
+          namespace: "codex.apps",
+          payload: {
+            version: 1,
+            auth: { profileId: "openai:work", accountId: "account-work" },
+            apps: [],
+          },
+        });
+      const { finish } = await startMcpAttempt(params);
+      try {
+        expect(mcpMocks.authorityResolvers).toHaveLength(1);
+        expect(mcpMocks.captureRefs[0]!.value).toBeUndefined();
+        const resolver = mcpMocks.authorityResolvers[0]!;
+        if (hasStaticMcp) {
+          await expect(resolver()).rejects.toThrow(
+            "configured MCP creator authority is unresolved",
+          );
+          expect(appCapture).not.toHaveBeenCalled();
+          expect(mcpMocks.captureCalls).toHaveLength(1);
+        } else {
+          await expect(resolver()).resolves.toMatchObject({
+            provenance: { version: 1, source: "final-executable-surface" },
+          });
+          expect(appCapture).toHaveBeenCalledOnce();
+        }
+        expect(mcpMocks.staticCalls).toHaveLength(0);
+      } finally {
+        await finish();
+        appCapture.mockRestore();
+        appDecision.mockRestore();
+      }
+    },
+  );
 
   it("withholds final provenance when a sender-attributed turn cannot snapshot native MCP", async () => {
     const params = createMcpAuthorityParams(true);
