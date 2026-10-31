@@ -213,13 +213,9 @@ afterEach(async ({ task }) => {
     releaseProfileCatalog = undefined;
   } finally {
     try {
-      await sdkResourceHost.scheduler.stop();
+      await sdkResourceHost.scheduler.stop().then(() => sdkResourceHost.close());
     } finally {
-      try {
-        await sdkResourceHost.close();
-      } finally {
-        await cleanupPreparedModelRuntimeHarness(state, task.result?.state === "fail");
-      }
+      await cleanupPreparedModelRuntimeHarness(state, task.result?.state === "fail");
     }
   }
 });
