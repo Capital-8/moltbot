@@ -2,7 +2,7 @@ require "timeout"
 
 # Temporary hosted-run evidence for the Watch boot shutdown investigation.
 class WatchBootTrace
-  PROCESSES = %w[CoreSimulatorService com.apple.CoreSimulator.CoreSimulatorService simdiskimaged launchd_sim Carousel backboardd runningboardd watchdogd ReportCrash SimulatorTrampoline].freeze
+  PROCESSES = %w[CoreSimulatorService com.apple.CoreSimulator.CoreSimulatorService simdiskimaged SimLaunchHost.arm64 SimLaunchHost.x86_64 launchd_sim Carousel backboardd runningboardd watchdogd ReportCrash SimulatorTrampoline cryptexd].freeze
 
   def self.start(udid, runtime, output)
     trace = new(udid, runtime, output)
@@ -71,21 +71,16 @@ class WatchBootTrace
   def snapshot
     images, = Open3.capture3("xcrun", "simctl", "runtime", "list", "-j")
     runtimes, = Open3.capture3("xcrun", "simctl", "list", "runtimes", "--json")
-    processes, = Open3.capture3("ps", "-axo", "pid,ppid,stat,%cpu,rss,comm")
+    mounts, = Open3.capture3("/sbin/mount")
     memory, = Open3.capture3("vm_stat")
     swap, = Open3.capture3("sysctl", "-n", "vm.swapusage")
     {
       "at" => Time.now.utc.iso8601,
-      "images" => JSON.parse(images).values.select { |entry| entry["runtimeIdentifier"] == @runtime }.map do |entry|
-        entry.slice("identifier", "state", "version", "build").merge("mountedPathExists" => !!(entry["runtimeBundlePath"] && File.directory?(entry["runtimeBundlePath"])))
+      "images" => JSON.parse(images).values.map do |entry|
+        entry.slice("identifier", "runtimeIdentifier", "state", "version", "build").merge("mountedPathExists" => !!(entry["runtimeBundlePath"] && File.directory?(entry["runtimeBundlePath"])))
       end,
-      "runtimes" => JSON.parse(runtimes).fetch("runtimes").select { |entry| entry["identifier"] == @runtime }.map { |entry| entry.slice("identifier", "isAvailable", "version", "buildversion") },
-      "processes" => processes.lines.filter_map do |line|
-        values = line.strip.split(/\s+/, 6)
-        next unless values.length == 6 && PROCESSES.include?(File.basename(values.last))
-        values[5] = File.basename(values[5])
-        values
-      end,
+      "runtimes" => JSON.parse(runtimes).fetch("runtimes").map { |entry| entry.slice("identifier", "isAvailable", "version", "buildversion") },
+      "mounts" => mounts.lines.grep(/CoreSimulator|cryptex.*(?:iOS|watchOS|tvOS|xrOS)/).map { |line| sanitize(line) },
       "vmStat" => memory, "swap" => swap
     }
   end
@@ -102,8 +97,10 @@ class WatchBootTrace
         JSON.parse(contents.split("\n", 2).last)
       end
       next unless PROCESSES.include?(report["procName"])
-      { "process" => report["procName"], "exception" => report["exception"],
-        "termination" => report["termination"], "faultingThread" => report["faultingThread"] }
+      thread = Array(report["threads"]).find { |entry| entry["triggered"] }
+      { "process" => report["procName"], "exception" => report.fetch("exception", {}).slice("type", "signal", "codes"),
+        "termination" => report.fetch("termination", {}).slice("namespace", "code"),
+        "frames" => Array(thread && thread["frames"]).first(12).map { |frame| sanitize(frame["symbol"].to_s)[0, 240] } }
     rescue JSON::ParserError, SystemCallError
       nil
     end
