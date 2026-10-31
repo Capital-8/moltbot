@@ -30,6 +30,10 @@ import { pruneSupersededSilentPairingsAfterApproval } from "../../device-pairing
 import { retireDeviceTokenClients } from "../../device-token-client-lifecycle.js";
 import { normalizeNodeHostCompatibilityMetadata } from "../../node-legacy-protocol-filter.js";
 import { isScopelessNodePairingRequest } from "../../node-pairing-auto-approve.js";
+import {
+  openclawIdPeerKeyOf,
+  recordDeviceTokenPeer,
+} from "../../openclaw-id/device-token-binding.js";
 import { normalizeChromeExtensionOrigin } from "../../origin-check.js";
 import { broadcastRejectedDevicePairing } from "../../pairing-events.js";
 import { formatForLog } from "../../ws-log.js";
@@ -603,6 +607,19 @@ export async function authorizeGatewayConnectDevice(
           isIssuanceCurrent: isConnectAuthorizationCurrent,
         });
 
+  // A token issued over the OpenClaw ID tunnel belongs to the device key that obtained it.
+  const issuedPeerKey = openclawIdPeerKeyOf(context.handler.ingressAttribution);
+  if (issuedPeerKey && state.device) {
+    for (const issued of [deviceToken, ...bootstrapDeviceTokens]) {
+      if (issued) {
+        await recordDeviceTokenPeer({
+          deviceId: state.device.id,
+          role: issued.role,
+          peerKey: issuedPeerKey,
+        });
+      }
+    }
+  }
   context.recordAttachTiming?.("deviceTokensMs", tokensStartedAt);
 
   return {
