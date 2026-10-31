@@ -1,10 +1,6 @@
 import type { GatewaySessionRow } from "../../../api/types.ts";
 import type { MessageGroup } from "../../../lib/chat/chat-types.ts";
 import { nativeHistoryMessageIdentity } from "../../../lib/chat/history-message-identity.ts";
-import {
-  isInlineImageSource,
-  readTranscriptMediaEntries,
-} from "../../../lib/chat/message-extract.ts";
 import { normalizeMessage } from "../../../lib/chat/message-normalizer.ts";
 import { extractToolCardsCached } from "../../../lib/chat/tool-cards.ts";
 import { fnv1aUtf16 } from "../../../lib/fnv1a.ts";
@@ -15,7 +11,6 @@ import {
   type AgentRunFrameRenderItem,
 } from "../chat-agent-run-grouping.ts";
 import { assistantGroupCanOwnActiveRunStatus } from "../chat-assistant-reply.ts";
-import { resolveCappedMessageId } from "../chat-message-recovery.ts";
 import { isHandoffBoundaryItem } from "../chat-sessions-yield.ts";
 import type { SystemEventRenderItem } from "../chat-system-event-grouping.ts";
 import { coalesceSystemEvents } from "../chat-system-event-grouping.ts";
@@ -375,28 +370,9 @@ export function projectTranscriptIndex(
           : [item];
       for (const rowItem of rendered) {
         // Rich work sources include their Markdown and paired tool output.
-        const retainDom =
-          (rowItem.kind === "agent-run-frame" && Boolean(rowItem.fragment)) ||
-          (rowItem.kind === "group" &&
-            !rowItem.isStreaming &&
-            (rowItem.role === "user" || rowItem.role === "assistant") &&
-            rowItem.messages.length === 1 &&
-            // Recovery changes height after the row leaves the viewport.
-            !resolveCappedMessageId(rowItem.messages[0]!.message, rowItem.role) &&
-            readTranscriptMediaEntries(rowItem.messages[0]!.message).length === 0 &&
-            normalizeMessage(rowItem.messages[0]!.message).content.every(
-              (part) =>
-                part.type === "text" ||
-                part.type === "thinking" ||
-                (part.type === "image" &&
-                  part.expiresAtMs === undefined &&
-                  part.sources.length > 0 &&
-                  part.sources.every((source) =>
-                    isInlineImageSource(
-                      source.preferData ? (source.dataUrl ?? source.url) : source.url,
-                    ),
-                  )),
-            ));
+        // Only split runs need advance materialization. Ordinary rows already
+        // fit the virtual window; retaining them duplicates mixed-session DOM.
+        const retainDom = rowItem.kind === "agent-run-frame" && Boolean(rowItem.fragment);
         const estimatedSize =
           rowItem.kind === "agent-run-frame" && rowItem.fragment
             ? rowItem.parts.reduce(

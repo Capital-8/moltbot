@@ -425,119 +425,26 @@ it("warms an embedded widget's caption without mounting the widget", () => {
 });
 
 it.each([600, 1400])(
-  "warms ordinary rows only in idle time without mounting their DOM (%i px)",
+  "keeps ordinary sessions cold outside the viewport (%i px)",
   async (height) => {
     const view = await transcriptFixture(0, true, false, true, height);
-    if (height === 1400) {
-      expect(
-        view.container.querySelectorAll(".chat-virtual-row:not([data-prepared-row])").length,
-      ).toBeGreaterThan(12);
+    const rendered = view.renderRow.mock.calls.length;
+    const elements = view.container.querySelectorAll(".chat-virtual-row").length;
+    for (let turn = 0; turn < 160; turn++) {
+      await view.idle(10, 1);
+      await view.frame(2, false);
     }
-    const rendered = view.renderRow.mock.calls.length;
-    const elements = view.container.querySelectorAll(".chat-virtual-row").length;
-    await view.idle(0);
     expect(view.renderRow.mock.calls).toHaveLength(rendered);
+    expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
+    expect(view.container.querySelector("[data-prepared-row]")).toBeNull();
+
+    await view.scrollTo(96);
+    expect(view.container.textContent).toContain("Idle ordinary message 96");
+    const afterScroll = view.renderRow.mock.calls.length;
     await view.idle();
-    expect(view.renderRow.mock.calls.length).toBeGreaterThan(rendered);
-    const warmed = view.renderRow.mock.calls[rendered]![0];
-    const index = warmed.kind === "item" ? warmed.item : -1;
-    expect(index).toBeGreaterThan(0);
-    expect(view.container.querySelector(`[data-virtual-row-key="${warmed.key}"]`)).toBeNull();
-    expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
-    expect(prewarmGroupedMessage(view.groups[index]!.messages[0]!.message, {})).toBe(false);
-    for (let turn = 0; turn < 80; turn++) {
-      await view.idle();
-    }
-    const last = view.renderRow.mock.calls.at(-1)![0];
-    expect(last.kind === "item" ? last.item : -1).toBeGreaterThan(index);
-    expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
-    // A fast first movement can cross several viewports before scroll warming runs.
-    expect(prewarmGroupedMessage(view.groups[96]!.messages[0]!.message, {})).toBe(false);
-    // A completed sweep does not walk the cached prefix again on every idle delivery.
-    expect(view.renderRow.mock.calls.length - rendered).toBeLessThan(530);
-    const completed = view.renderRow.mock.calls.length;
-    await view.idle();
-    expect(view.renderRow.mock.calls).toHaveLength(completed);
-    const parse = vi.spyOn(Element.prototype, "innerHTML", "set");
-    await view.scrollTo(index);
-    expect(view.container.textContent).toContain(`Idle ordinary message ${index}`);
-    expect(
-      parse.mock.calls.filter(([html]) => html.includes(`Idle ordinary message ${index}`)),
-    ).toHaveLength(0);
-    // A first fast gesture skips beyond the immediate neighbors.
-    const jump = index + 96;
-    await view.scrollTo(jump);
-    expect(view.container.textContent).toContain(`Idle ordinary message ${jump}`);
-    expect(
-      parse.mock.calls.filter(([html]) => html.includes(`Idle ordinary message ${jump}`)),
-    ).toHaveLength(0);
-  },
-);
-
-it.each([true, "toolCall"] as const)(
-  "warms costly completed frame messages with %s within each idle budget before their first mount",
-  async (content) => {
-    const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
-    const html = vi.spyOn(Element.prototype, "innerHTML", "set");
-    const view = await transcriptFixture(0, true, false, true, 600, content);
-    parse.mockClear();
-    html.mockClear();
-    const rendered = view.renderRow.mock.calls.length;
-    const elements = view.container.querySelectorAll(".chat-virtual-row").length;
-    await view.idle(0);
-    expect(view.renderRow.mock.calls).toHaveLength(rendered);
-
-    await view.idle(10, 6);
-    const warmed = view.renderRow.mock.calls[rendered]![0];
-    const index = warmed.kind === "item" ? warmed.item : -1;
-    expect(index).toBeGreaterThan(0);
-    const first = `idle-frame-${index}-first`;
-    const second = `idle-frame-${index}-second`;
-    const parsesFor = (text: string) =>
-      parse.mock.calls.filter(([input]) => input.includes(text)).length;
-    // Initial settling can retain the pristine fragment too, so a ready row
-    // needs no work. Each cold message consumes this slice's six-millisecond budget.
-    const preparationsFor = (text: string) =>
-      parsesFor(text) + html.mock.calls.filter(([input]) => input.includes(text)).length;
-    expect(preparationsFor(first) + preparationsFor(second)).toBeLessThanOrEqual(1);
-    expect(view.container.querySelector(`[data-virtual-row-key="${warmed.key}"]`)).toBeNull();
-    expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
-
-    await view.idle();
-    expect(view.container.querySelector(`[data-virtual-row-key="${warmed.key}"]`)).toBeNull();
-    const beforeMount = [parsesFor(first), parsesFor(second)];
-    await view.scrollTo(index);
-    const row = view.container.querySelector(`[data-virtual-row-key="${warmed.key}"]`);
-    expect(row?.textContent).toContain(first);
-    expect(row?.textContent).toContain(second);
-    expect([parsesFor(first), parsesFor(second)]).toEqual(beforeMount);
-  },
-);
-
-it.each([1, -1])(
-  "warms the next ordinary viewport before its frame in direction %s without idle delivery",
-  async (direction) => {
-    const view = await transcriptFixture(direction > 0 ? 0 : 24_000, true, false, true, 1_000);
-    await view.scrollTo(direction > 0 ? 60 : 180);
-    const rendered = view.renderRow.mock.calls.length;
-    const elements = view.container.querySelectorAll(".chat-virtual-row").length;
-    expect(view.renderRow.mock.calls).toHaveLength(rendered);
-    await view.frame(1, false);
-    await view.task();
-    const prepared = view.renderRow.mock.calls.slice(rendered);
-    expect(prepared.length).toBeGreaterThan(0);
-    expect(prepared.length).toBeGreaterThan(8);
-    const last = prepared.at(-1)![0];
-    const index = last.kind === "item" ? last.item : -1;
-    expect(prewarmGroupedMessage(view.groups[index]!.messages[0]!.message, {})).toBe(false);
-    expect(view.container.querySelectorAll(".chat-virtual-row")).toHaveLength(elements);
-
-    const warmedKeys = new Set(prepared.map(([row]) => row.key));
-    await view.scrollTo(120);
-    const nextRows = transcriptRows(view.container);
-    // The renderer mounts overscan too; leaving its edge rows cold still parses
-    // Markdown in the next scroll frame even when the viewport is prepared.
-    expect(nextRows.every((row) => warmedKeys.has(row.dataset.virtualRowKey!))).toBe(true);
+    await view.frame(2, false);
+    expect(view.renderRow.mock.calls).toHaveLength(afterScroll);
+    expect(view.container.querySelector("[data-prepared-row]")).toBeNull();
   },
 );
 
@@ -555,20 +462,8 @@ it("budgets large jumps and cancels queued scroll warming when hidden", async ()
   expect(view.renderRow.mock.calls).toHaveLength(rendered);
 });
 
-it("warms every message in the arriving viewport's completed rows before mounting", async () => {
-  const view = await transcriptFixture(0, true, false, true, 1_000, true);
-  await view.scrollTo(60);
-  await view.frame(1, false);
-  await view.task();
-  const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
-  await view.scrollTo(120);
-  expect(view.container.textContent).toContain("idle-frame-120-first");
-  expect(view.container.textContent).toContain("idle-frame-120-second");
-  expect(parse.mock.calls.filter(([input]) => input.includes("idle-frame-"))).toHaveLength(0);
-});
-
 it("keeps warming in the reader's direction through opposite size compensation", async () => {
-  const view = await transcriptFixture(24_000, true, false, true);
+  const view = await transcriptFixture(24_000, true, false, "retained");
   await view.scrollTo(180);
   await view.frame();
   await view.scrollTo(120.5);

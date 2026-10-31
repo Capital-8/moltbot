@@ -20,6 +20,7 @@ export class TranscriptInitialRange {
   preparingEnd = false;
   private tailRows: number;
   private rows: readonly TranscriptRow[] = [];
+  private hasRetainedRows = false;
   // Completed text rows have no widget custody. Retain their keyed DOM while
   // keeping inactive rows outside the visible range's flow.
   readonly preparedRowKeys = new Set<string>();
@@ -117,7 +118,10 @@ export class TranscriptInitialRange {
   }
 
   presentation(rows: readonly TranscriptRow[]) {
-    this.rows = rows;
+    if (this.rows !== rows) {
+      this.rows = rows;
+      this.hasRetainedRows = rows.some((row) => row.retainDom);
+    }
     this.retainViewportRows();
     return {
       activeRowKeys: new Set(
@@ -351,6 +355,7 @@ export class TranscriptInitialRange {
   private queuePreparation(materialize = false, afterFrame = false): void {
     if (
       this.cancelPreparation ||
+      !this.hasRetainedRows ||
       this.preparingEnd ||
       this.pending ||
       this.tailRows > 0 ||
@@ -393,6 +398,7 @@ export class TranscriptInitialRange {
       const range = virtualizer.range;
       if (
         this.preparingEnd ||
+        !this.hasRetainedRows ||
         !this.canPrepare() ||
         !range ||
         !virtualizer.scrollElement ||
@@ -653,6 +659,7 @@ export class TranscriptInitialRange {
 
   releaseRows(): void {
     this.rows = [];
+    this.hasRetainedRows = false;
   }
 
   disconnect(): void {

@@ -223,6 +223,7 @@ export async function probeLongSession(options: {
   otherSessionKey: string;
   messageCount: number;
   captureHeap?: boolean;
+  scrollCycles?: number;
   workload?: LongSessionWorkload;
 }) {
   const {
@@ -234,6 +235,7 @@ export async function probeLongSession(options: {
     otherSessionKey,
     messageCount,
     captureHeap = true,
+    scrollCycles = 1,
     workload = { scenario: "mixed" },
   } = options;
   const pane = page.locator(paneSelector);
@@ -470,6 +472,31 @@ export async function probeLongSession(options: {
         await new Promise(requestAnimationFrame);
       }
     }, count);
+  type ScrollCycle = {
+    cycle: number;
+    scrollTop?: Awaited<ReturnType<typeof scroll>>;
+    scrollBottom: Awaited<ReturnType<typeof scroll>>;
+    memory: Awaited<ReturnType<typeof memory>>;
+  };
+  const repeatScrollCycles = async (
+    first: Omit<ScrollCycle, "cycle">,
+    beforeMemory?: () => Promise<void>,
+  ) => {
+    const cycles: ScrollCycle[] = [{ cycle: 1, ...first }];
+    for (let cycle = 2; cycle <= scrollCycles; cycle++) {
+      const scrollTop = await scroll("top");
+      const scrollBottom = await scroll("bottom");
+      await beforeMemory?.();
+      // GC and heap snapshots must never enter either direction's action timing.
+      cycles.push({
+        cycle,
+        scrollTop,
+        scrollBottom,
+        memory: await memory(`scroll-cycle-${cycle}`),
+      });
+    }
+    return cycles;
+  };
   const measureRendered = async <T>(
     action: () => Promise<T>,
     afterRender?: () => Promise<void>,
@@ -664,12 +691,18 @@ export async function probeLongSession(options: {
       throw new Error(`Unexpected older history request cursors: ${JSON.stringify(cursors)}`);
     }
     const scrollBottom = await scroll("bottom");
+    const afterScroll = await memory("after-scroll");
+    const cycles =
+      scrollCycles > 1
+        ? await repeatScrollCycles({ scrollBottom, memory: afterScroll })
+        : undefined;
     return save({
       messageCount: workload.messageCount,
       stages,
       cursors,
       scrollBottom,
-      finalMemory: await memory("after-scroll"),
+      ...(cycles ? { scrollCycles: cycles } : {}),
+      finalMemory: cycles?.at(-1)?.memory ?? afterScroll,
     });
   }
   if (workload.scenario === "single-run" || workload.scenario === "direct-run") {
@@ -701,7 +734,12 @@ export async function probeLongSession(options: {
     await entry(workload.firstEntryId).waitFor({ state: "visible" });
     const scrollBottom = await scroll("bottom");
     await entry(workload.lastEntryId).waitFor({ state: "visible" });
-    const afterScroll = await memory("after-scroll");
+    const firstScrollMemory = await memory("after-scroll");
+    const cycles =
+      scrollCycles > 1
+        ? await repeatScrollCycles({ scrollTop, scrollBottom, memory: firstScrollMemory })
+        : undefined;
+    const afterScroll = cycles?.at(-1)?.memory ?? firstScrollMemory;
     await page.screenshot({ path: path.join(artifactDir, `${prefix}.bottom.png`) });
     let collapse;
     if (workload.scenario === "single-run") {
@@ -729,6 +767,7 @@ export async function probeLongSession(options: {
       disclosure,
       scrollTop,
       scrollBottom,
+      ...(cycles ? { scrollCycles: cycles } : {}),
       afterScroll,
       collapse,
       finalMemory: collapse ? await memory("final") : afterScroll,
@@ -796,15 +835,28 @@ export async function probeLongSession(options: {
   });
   const scrollTop = await scroll("top");
   const scrollBottom = await scroll("bottom");
-  const finalMemory = await memory("after-scroll");
-  // Widget admission intentionally waits for scrolling to stop. Its semantic
-  // readiness belongs to the capture, outside the measured scroll and heap.
-  await pane
-    .frameLocator(".chat-tool-card__preview-frame")
-    .last()
-    .frameLocator("iframe")
-    .getByText("Team metric 12", { exact: true })
-    .waitFor();
+  const settleBottomWidget = () =>
+    pane
+      .frameLocator(".chat-tool-card__preview-frame")
+      .last()
+      .frameLocator("iframe")
+      .getByText("Team metric 12", { exact: true })
+      .waitFor();
+  if (scrollCycles > 1) {
+    // Compare settled widget ownership in every repeated memory sample.
+    await settleBottomWidget();
+  }
+  const firstScrollMemory = await memory("after-scroll");
+  const cycles =
+    scrollCycles > 1
+      ? await repeatScrollCycles(
+          { scrollTop, scrollBottom, memory: firstScrollMemory },
+          settleBottomWidget,
+        )
+      : undefined;
+  const finalMemory = cycles?.at(-1)?.memory ?? firstScrollMemory;
+  // Single-cycle runs retain their capture-only widget readiness wait.
+  await settleBottomWidget();
   await page.screenshot({ path: path.join(artifactDir, `${prefix}.bottom.png`) });
   return save({
     otherSessionKey,
@@ -814,6 +866,7 @@ export async function probeLongSession(options: {
     clearSearch,
     scrollTop,
     scrollBottom,
+    ...(cycles ? { scrollCycles: cycles } : {}),
     finalMemory,
   });
 }

@@ -18,6 +18,7 @@
 // --gateway-http serves paired bundles, including layout cells, through the Gateway HTTP owner.
 // --first-load skips warm-up and clears client state; external Gateway URL runs stay single-sample.
 // --skip-long-session-heap-snapshots separates timing from heap-profiler conditioning.
+// --long-session-scroll-cycles 3 records post-GC memory after repeated full traversals.
 // --sidebar-persistent-children keeps expanded rows outside root windows for staggered handoff proof.
 // --boot-route chat|new|sessions|settings selects the measured reload destination.
 // --layout-matrix covers routes, themes, viewports and cold/warm reloads; --runs is per bundle/cell.
@@ -294,6 +295,7 @@ const { values } = parseArgs({
     "long-session-trace": { type: "boolean", default: false },
     "skip-long-session-heap-snapshots": { type: "boolean", default: false },
     "long-session-scenario": { type: "string", default: "mixed" },
+    "long-session-scroll-cycles": { type: "string", default: "1" },
     "overlay-probe": { type: "boolean", default: false },
     untraced: { type: "boolean", default: false },
     "filmstrip-only": { type: "boolean", default: false },
@@ -652,6 +654,14 @@ if (
 const longSessionScenario = LONG_SESSION_SCENARIOS.find(
   (scenario) => scenario === values["long-session-scenario"],
 );
+const longSessionScrollCycles = Number(values["long-session-scroll-cycles"]);
+if (
+  !Number.isSafeInteger(longSessionScrollCycles) ||
+  longSessionScrollCycles < 1 ||
+  (longSessionScrollCycles !== 1 && !values["long-session"])
+) {
+  throw new Error("long-session-scroll-cycles requires long-session and a positive integer");
+}
 if (!longSessionScenario || (longSessionScenario !== "mixed" && !values["long-session"])) {
   throw new Error(
     "long-session-scenario requires long-session and mixed, paging, single-run, or direct-run",
@@ -3570,6 +3580,7 @@ try {
           otherSessionKey: fixture.pinnedKeys[1]!,
           messageCount: fixture.counts.transcriptMessages,
           workload: fixture.longSessionWorkload,
+          scrollCycles: longSessionScrollCycles,
           captureHeap:
             run < bundleSlots.length && !cpuProfile && !values["skip-long-session-heap-snapshots"],
         })
@@ -3965,9 +3976,12 @@ try {
         comparisonBundleDirs,
         fixture: fixture.counts,
         longSessionScenario: values["long-session"] ? longSessionScenario : undefined,
+        ...(longSessionScrollCycles > 1 ? { longSessionScrollCycles } : {}),
         longSessionHeapSnapshots: values["long-session"]
           ? !cpuProfile && !values["skip-long-session-heap-snapshots"]
-            ? "first-cycle"
+            ? longSessionScrollCycles > 1
+              ? "each-scroll-cycle"
+              : "first-cycle"
             : "disabled"
           : undefined,
         sidebarView,

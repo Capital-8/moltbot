@@ -936,10 +936,10 @@ describe("system event presentation", () => {
 });
 
 it.each([
-  ["data:image/png;base64,cG5n", true],
-  ["blob:synthetic-inline", true],
+  ["data:image/png;base64,cG5n", false],
+  ["blob:synthetic-inline", false],
   ["https://images.example.test/saved.png", false],
-])("prepares only inline image rows before scrolling: %s", (url, retained) => {
+])("keeps ordinary image rows in the viewport only: %s", (url, retained) => {
   const chain = projectHistory([
     makeMessage("image-row", 1, {
       role: "user",
