@@ -149,6 +149,7 @@ export function writePlacementEnvironmentFixture(
     resource_receipt_json: environment.resourceReceipt
       ? JSON.stringify(environment.resourceReceipt)
       : null,
+    retention_json: environment.retention ? JSON.stringify(environment.retention) : null,
     node_setup_id: environment.nodeSetupId ?? null,
     node_device_id: environment.nodeDeviceId ?? null,
     shared_host: environment.sharedHost == null ? null : Number(environment.sharedHost),
@@ -206,6 +207,17 @@ export function writePlacementEnvironmentFixture(
               ...(environment.leaseId !== undefined ? { lease_id: values.lease_id } : {}),
               ...(environment.resourceReceipt !== undefined
                 ? { resource_receipt_json: values.resource_receipt_json }
+                : {}),
+              ...(environment.retention !== undefined
+                ? { retention_json: values.retention_json }
+                : {}),
+              ...(environment.bootstrapReceipt !== undefined
+                ? {
+                    bootstrap_bundle_hash: values.bootstrap_bundle_hash,
+                    bootstrap_openclaw_version: values.bootstrap_openclaw_version,
+                    bootstrap_protocol_features_json: values.bootstrap_protocol_features_json,
+                    bootstrap_install_kind: values.bootstrap_install_kind,
+                  }
                 : {}),
               ...(environment.sharedHost !== undefined ? { shared_host: values.shared_host } : {}),
               ...(environment.sshEndpoint !== undefined
