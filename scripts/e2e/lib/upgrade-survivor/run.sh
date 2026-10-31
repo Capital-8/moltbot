@@ -976,6 +976,34 @@ install_baseline() {
   fi
 }
 
+migrate_baseline_cron_authority() {
+  local bridge_prefix="$ARTIFACT_ROOT/cron-migration-bridge"
+  local bridge_install_log="$ARTIFACT_ROOT/cron-migration-bridge-install.log"
+  local bridge_cli="openclaw"
+  if [ "$baseline_version" != "2026.9.7" ]; then
+    rm_rf_retry "$bridge_prefix"
+    mkdir -p "$bridge_prefix"
+    if ! openclaw_prepublish_plugin_registry_run_published openclaw_e2e_maybe_timeout "${OPENCLAW_E2E_NPM_INSTALL_TIMEOUT:-600s}" npm install -g --prefix "$bridge_prefix" openclaw@2026.9.7 --no-fund --no-audit >"$bridge_install_log" 2>&1; then
+      echo "cron migration bridge npm install failed" >&2
+      openclaw_e2e_print_log "$bridge_install_log" >&2
+      return 1
+    fi
+    bridge_cli="$bridge_prefix/bin/openclaw"
+  fi
+  local bridge_version
+  if ! bridge_version="$(openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" "$bridge_cli" --version 2>&1)"; then
+    echo "cron migration bridge openclaw --version failed" >&2
+    echo "$bridge_version" >&2
+    return 1
+  fi
+  if [[ "$bridge_version" != *"2026.9.7"* ]]; then
+    echo "cron migration bridge version mismatch: expected 2026.9.7" >&2
+    echo "$bridge_version" >&2
+    return 1
+  fi
+  openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" "$bridge_cli" doctor --fix --non-interactive >"$BASELINE_DOCTOR_LOG" 2>&1
+}
+
 initialize_state() {
   local account_home=""
   openclaw_e2e_eval_test_state_from_b64 "${OPENCLAW_TEST_STATE_FUNCTION_B64:?missing OPENCLAW_TEST_STATE_FUNCTION_B64}"
@@ -2663,8 +2691,7 @@ phase prepare-update-restart-probe prepare_update_restart_probe
 phase bootstrap-mobile-pairing bootstrap_mobile_pairing
 phase seed-state seed_state
 if [ "$SCENARIO" = "cron-scheduled-authority" ]; then
-  phase migrate-baseline-cron-authority openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" \
-    openclaw doctor --fix --non-interactive >"$BASELINE_DOCTOR_LOG" 2>&1
+  phase migrate-baseline-cron-authority migrate_baseline_cron_authority
   export OPENCLAW_UPGRADE_SURVIVOR_BASELINE_DOCTOR_APPLIED=1
   phase assert-migrated-baseline-cron-authority assert_baseline_state
 fi

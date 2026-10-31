@@ -198,6 +198,7 @@ if (args[0] === "doctor") {
 trap - EXIT ERR HUP INT TERM
 storage_preflight() { :; }
 install_baseline() { baseline_version=2026.8.1; }
+migrate_baseline_cron_authority() { openclaw doctor --fix --non-interactive; }
 apply_baseline_config_recipe() {
   mkdir -p "$OPENCLAW_STATE_DIR"
   cp "$FIXTURE_AUTHORED_PATH" "$OPENCLAW_CONFIG_PATH"

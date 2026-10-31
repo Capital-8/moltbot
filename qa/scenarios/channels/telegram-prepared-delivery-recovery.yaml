@@ -137,7 +137,7 @@ flow:
                     [firstParagraph, ...codeBlocks, finalParagraph].join('\n\n')
               - set: auditPath
                 value:
-                  expr: path.join(env.gateway.tempRoot, `${marker}.jsonl`)
+                  expr: path.join(env.gateway.workspaceDir, `${marker}.jsonl`)
               - call: env.gateway.restartAfterStateMutation
                 args:
                   - lambda:
