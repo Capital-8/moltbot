@@ -2028,6 +2028,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   font-weight: 500;
   letter-spacing: -0.008em;
   color: var(--text);
+  transition: opacity var(--duration-normal) ease-out;
 }
 
 .sidebar-recent-sessions
@@ -2101,7 +2102,9 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   padding-right: var(--session-row-actions-reserve);
 }
 
-.sidebar-recent-session--child:is(:hover, :focus-within) .session-row-badge--pull-request {
+.shell:not(.shell--mobile-nav)
+  .sidebar-recent-session--child:is(:hover, :focus-within)
+  .session-row-badge--pull-request {
   display: none;
 }
 
@@ -2127,7 +2130,8 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
 }
 
 /* Hover actions replace trailing PR badges; leading state and second-line metadata stay visible. */
-.sidebar-recent-session--single-line:not(.sidebar-recent-session--child):is(:hover, :focus-within)
+.shell:not(.shell--mobile-nav)
+  .sidebar-recent-session--single-line:not(.sidebar-recent-session--child):is(:hover, :focus-within)
   :is(
     .session-row-badge--pull-request,
     .session-row-badges:has(> .session-row-badge--pull-request:only-child)
@@ -4013,8 +4017,23 @@ html.openclaw-native-web-chrome
   border-radius: 0;
 }
 
-.sidebar-recent-session--creating:not(:has(.sidebar-recent-session__name)) {
-  --session-row-bg: color-mix(in srgb, var(--text) 4%, transparent);
+/* A new session's row arrives once the Gateway lists it, without a placeholder.
+   Its title stays transparent while naming runs, then fades in with the name. */
+.sidebar-recent-session--naming {
+  animation: sidebar-session-arrive var(--duration-normal) ease-out;
+}
+
+.sidebar-recent-session--naming .sidebar-recent-session__name {
+  opacity: 0;
+}
+
+@keyframes sidebar-session-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .sidebar-recent-session__subtitle--narration {
