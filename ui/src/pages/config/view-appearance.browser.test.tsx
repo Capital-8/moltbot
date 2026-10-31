@@ -116,6 +116,11 @@ describe("config appearance preferences", () => {
     });
 
     const customButton = findButtonByText(container, "Import");
+    const clawPalette = required(
+      container,
+      ".settings-theme-card--claw .settings-theme-card__palette",
+      HTMLElement,
+    );
 
     expect(customButton.hasAttribute("aria-pressed")).toBe(false);
 
@@ -153,6 +158,13 @@ describe("config appearance preferences", () => {
     renderConfigInto(props, container);
     expect(pressed(container, "Light Green")).toBe("true");
     expect(pressed(container, "Claw")).toBe("false");
+    expect(
+      container.querySelector(".settings-theme-card--claw .settings-theme-card__palette"),
+    ).toBe(clawPalette);
+    expect(customButton.querySelector(".settings-theme-card__palette")).not.toBeNull();
+    props.theme = "claw";
+    renderConfigInto(props, container);
+    expect(customButton.querySelector(".settings-theme-card__icon")).not.toBeNull();
   });
 
   it("focuses its own importer through unrelated updates and retires pending focus on disposal", () => {
