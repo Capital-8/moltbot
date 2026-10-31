@@ -2286,6 +2286,11 @@ function firstPlusSkillsScenario(activation: "pointer" | "keyboard"): Interactio
       const panel = menu.locator(".agent-chat__capability-menu-panel");
       const trigger = page.locator(plusTriggerSelector);
       const back = menu.locator('[data-value="back"]');
+      // The header center contains the search input, which stops clicks.
+      const activateBack = () =>
+        activation === "pointer"
+          ? back.locator(":scope > .oc-menu-item__icon").click()
+          : activate(back);
       const search = menu.getByRole("textbox", { name: "Search skills", exact: true });
       const openSearch = () =>
         activate(menu.getByRole("button", { name: "Search skills", exact: true }));
@@ -2305,11 +2310,14 @@ function firstPlusSkillsScenario(activation: "pointer" | "keyboard"): Interactio
         }, plusMenuSelector);
       };
       const closeAndReopen = async (searching = false) => {
-        // Escape inside Search intentionally closes only Search; toggle the
-        // actual outer trigger to exercise dismissal with an active query.
-        if (searching) {
-          await activate(trigger);
+        if (activation === "pointer") {
+          await trigger.click();
         } else {
+          // Escape in the input clears Search. Keep the query active but move
+          // keyboard focus to Back so Escape dismisses the entire menu.
+          if (searching) {
+            await back.focus();
+          }
           await page.keyboard.press("Escape");
         }
         await panel.waitFor({ state: "hidden" });
@@ -2341,9 +2349,9 @@ function firstPlusSkillsScenario(activation: "pointer" | "keyboard"): Interactio
       await assertCatalog();
       await openSearch();
       await search.fill("Notes");
-      await activate(back);
+      await activateBack();
       await assertCatalog();
-      await activate(back);
+      await activateBack();
       await menu.locator('[data-value="open-skills"]').waitFor({ state: "visible" });
       await activate(menu.locator('[data-value="open-skills"]'));
       await assertCatalog();
@@ -2352,15 +2360,15 @@ function firstPlusSkillsScenario(activation: "pointer" | "keyboard"): Interactio
       await closeAndReopen(true);
       await activate(menu.locator('[data-value="open-skills"]'));
       await assertCatalog();
-      await activate(back);
+      await activateBack();
       await activate(menu.locator('[data-value="open-connectors"]'));
       await activate(menu.locator('[data-value="server:docs"]'));
       const tool = menu.locator('[data-value="mcp-tool:search-docs"]');
       await tool.waitFor({ state: "visible" });
-      await activate(back);
+      await activateBack();
       await activate(menu.locator('[data-value="open-connectors"]'));
       await tool.waitFor({ state: "visible" });
-      await activate(back);
+      await activateBack();
       await closeAndReopen();
       await activate(menu.locator('[data-value="open-connectors"]'));
       await tool.waitFor({ state: "visible" });
