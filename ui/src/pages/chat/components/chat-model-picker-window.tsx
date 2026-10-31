@@ -8,7 +8,6 @@ import {
   type VirtualItem,
 } from "@tanstack/virtual-core";
 import { createMemo, createProjection, createSignal, onSettled, Show } from "solid-js";
-import { cancelLayout, scheduleLayout } from "../../../lib/layout-frame.ts";
 import { createLayoutMeasurement } from "../../../lib/reactive/layout-measurement.ts";
 
 export type ModelPickerRowRenderer = (key: string, render: () => JSX.Element) => JSX.Element;
@@ -86,14 +85,8 @@ export function createModelPickerWindow(
   function Row(props: { rowKey: string; render: () => JSX.Element }) {
     let element: HTMLDivElement;
     onSettled(() => {
-      // Measure newly inserted rows together before Solid publishes their size changes.
-      scheduleLayout(element, () => {
-        virtualizer.measureElement(element);
-      });
-      return () => {
-        cancelLayout(element);
-        virtualizer.measureElement(null);
-      };
+      virtualizer.measureElement(element);
+      return () => virtualizer.measureElement(null);
     });
     return (
       <div

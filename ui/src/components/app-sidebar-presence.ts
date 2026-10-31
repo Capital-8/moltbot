@@ -32,23 +32,28 @@ type SidebarPresenceHost = {
   };
 };
 
-export function sidebarPresenceScope(host: SidebarPresenceHost): SidebarPresenceScope {
+export function sidebarMountedPresenceScope(
+  host: Pick<SidebarPresenceHost, "navigationView" | "contextualSidebar" | "mountedPresence">,
+): Pick<SidebarPresenceScope, "online" | "sessionKeys" | "activityProfileIds"> {
   const sessionsVisible = host.navigationView === "sessions" && !host.contextualSidebar;
   // Mounted refs include plugin-delegated lists while excluding collapsed or paged-out rows.
-  const { sessionKeys, activityProfileIds } = sessionsVisible
+  const mounted = sessionsVisible
     ? host.mountedPresence()
     : { sessionKeys: new Set<string>(), activityProfileIds: new Set<string>() };
-  const profileIds = new Set(activityProfileIds);
+  return { online: host.navigationView === "online", ...mounted };
+}
+
+export function sidebarPresenceScope(host: SidebarPresenceHost): SidebarPresenceScope {
+  const mounted = sidebarMountedPresenceScope(host);
+  const profileIds = new Set(mounted.activityProfileIds);
   for (const entry of host.reconciledSidebarZone().entries) {
     if (entry.type === "person") {
       profileIds.add(entry.profileId);
     }
   }
   return {
-    online: host.navigationView === "online",
-    sessionKeys,
+    ...mounted,
     profileIds,
-    activityProfileIds,
     selfUser: host.sessionDataContext?.gateway.snapshot.selfUser,
     selfInstanceId: host.sessionData.presenceInstanceId,
   };
@@ -85,7 +90,7 @@ export function sidebarPresencePresentation(
 export function sidebarPresenceActivityViewers(
   host: SidebarPresenceHost,
 ): readonly PresenceViewer[] {
-  const scope = sidebarPresenceScope(host);
+  const scope = sidebarMountedPresenceScope(host);
   return projectPresencePayload(host.sessionData.presencePayload).users.filter(
     (user) =>
       scope.online ||
