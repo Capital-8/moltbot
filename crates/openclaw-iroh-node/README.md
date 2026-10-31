@@ -29,5 +29,17 @@ Rust API changes; never edit them by hand.
 npm test
 ```
 
-`test/binding.test.cjs` needs no network services: API shape, direct echo, peer identity, close codes
-and reset codes.
+- `test/binding.test.cjs` needs no network services: API shape, direct echo, peer identity, close
+  codes and reset codes.
+- `test/compat.test.cjs` starts its own dev `iroh-relay` 1.4.1 on a free loopback port and checks
+  this binding against `@number0/iroh` (both directions, relay and direct paths, close codes) and
+  against the tailcat spike's Rust `tunnel-testserver` (`openclaw/tunnel/0`). Each group skips when
+  its dependency is missing: `IROH_RELAY_BIN` (default `~/.cargo/bin/iroh-relay`, install with
+  `cargo install iroh-relay@1.4.1 --locked --features server`), `IROH_NUMBER0_DIR` (a directory
+  whose `node_modules` holds `@number0/iroh@1.2.0`) and `TUNNEL_TESTSERVER_BIN`.
+- `test/throughput.test.cjs` (opt-in, `IROH_NODE_BENCH=1`, release build) downloads 256 MiB on one
+  stream and 8 x 64 MiB in parallel from a peer process and fails below `IROH_NODE_MIN_MBPS`
+  (default 100).
+
+`node test/support/measure.cjs --n 5 --cases down:256,streams8:512,conns8:512` prints the same
+measurements (MB/s, peak RSS, RSS growth, CPU seconds per MB) without thresholds.
