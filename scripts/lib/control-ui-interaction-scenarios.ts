@@ -1,5 +1,5 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import type { ElementHandle, Page } from "playwright";
+import type { ElementHandle, Locator, Page } from "playwright";
 import type { CommandEntry } from "../../packages/gateway-protocol/src/schema/commands.js";
 import type { UsersMentionableResult } from "../../packages/gateway-protocol/src/schema/human-mentions.js";
 import { buildWidgetDocument } from "../../src/canvas/wrap.ts";
@@ -2182,6 +2182,208 @@ async function verifyPlusSubview(page: Page) {
   await menu.locator('[data-value="open-skills"]').waitFor({ state: "visible" });
 }
 
+const plusMenuSelector = `${activePane} .agent-chat__capability-menu`;
+const plusTriggerSelector = `${activePane} .agent-chat__input-btn--attach`;
+const plusSkillsSelector = `${plusMenuSelector}[data-view="skills"]`;
+
+const plusSubviewFixture: NonNullable<InteractionScenario["fixtureOverrides"]> = (
+  sandbox,
+  base,
+) => {
+  const controls = routeControlFixtureOverrides(sandbox, base);
+  const config = {
+    ...createInteractionConfig(),
+    mcp: { servers: { docs: { url: "https://mcp.example.test/docs" } } },
+  };
+  return {
+    ...controls,
+    featureMethods: [...(controls.featureMethods ?? []), "tools.effective"],
+    methodResponses: {
+      ...controls.methodResponses,
+      "config.get": {
+        config,
+        sourceConfig: config,
+        runtimeConfig: config,
+        raw: JSON.stringify(config),
+        hash: "plus-subview-config",
+        valid: true,
+        issues: [],
+      },
+      "skills.status": {
+        workspaceDir: "/synthetic/workspace",
+        managedSkillsDir: "/synthetic/skills",
+        skills: [
+          createSkill({ name: "Notes", skillKey: "notes", primaryEnv: undefined }),
+          createSkill({
+            name: "e\u0301",
+            skillKey: "accent",
+            primaryEnv: undefined,
+            bundled: true,
+            disabled: true,
+            blockedByAgentFilter: true,
+          }),
+        ],
+      },
+      "tools.effective": {
+        agentId: "main",
+        profile: "full",
+        groups: [
+          {
+            id: "mcp",
+            label: "MCP",
+            source: "mcp",
+            tools: [
+              {
+                id: "mcp_docs_search",
+                label: "search_docs",
+                description: "Search synthetic documentation",
+                source: "mcp",
+                mcpServer: "docs",
+                mcpToolName: "search-docs",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+};
+
+function firstPlusSkillsScenario(activation: "pointer" | "keyboard"): InteractionScenario {
+  const activate = async (target: Locator) => {
+    if (activation === "pointer") {
+      await target.click();
+    } else {
+      await target.focus();
+      await target.press("Enter");
+    }
+  };
+  const scenario = coldRouteControlScenario({
+    id: `chat-skills-first-ready-open${activation === "pointer" ? "-pointer" : ""}`,
+    activation,
+    trigger: '[data-value="open-skills"]',
+    surface: plusSkillsSelector,
+    content: '[data-value^="skill:"]',
+    contentCount: 2,
+    focusSelector: '[data-value="back"]',
+    fixtureOverrides: plusSubviewFixture,
+  });
+  return {
+    ...scenario,
+    expected:
+      "First Skills entry renders real rows and Back focus; search resets and connector expansion survives public navigation and reopening.",
+    prepare: async (page, gateway) => {
+      await scenario.prepare(page, gateway);
+      await activate(page.locator(plusTriggerSelector));
+      await page
+        .locator(`${plusMenuSelector}[data-view="root"] [data-value="open-skills"]`)
+        .waitFor({ state: "visible" });
+    },
+    // The measured trigger disappears on Back. Restore focus to the actual outer
+    // trigger when dismissing, rather than using the root-control verifier.
+    verifyAfter: async (page) => {
+      const menu = page.locator(plusMenuSelector);
+      const panel = menu.locator(".agent-chat__capability-menu-panel");
+      const trigger = page.locator(plusTriggerSelector);
+      const back = menu.locator('[data-value="back"]');
+      const search = menu.getByRole("textbox", { name: "Search skills", exact: true });
+      const openSearch = () =>
+        activate(menu.getByRole("button", { name: "Search skills", exact: true }));
+      const assertCatalog = async () => {
+        await page.waitForFunction((selector) => {
+          const menu = document.querySelector(selector);
+          const rows = [...(menu?.querySelectorAll<HTMLElement>('[data-value^="skill:"]') ?? [])];
+          return (
+            menu?.getAttribute("data-view") === "skills" &&
+            !menu.querySelector("[data-search]") &&
+            rows.length === 2 &&
+            rows.every((row) => row.checkVisibility()) &&
+            menu.querySelector<HTMLElement>(".agent-chat__capability-menu-body")?.style.height ===
+              "" &&
+            menu.querySelector('[data-value="back"]') === document.activeElement
+          );
+        }, plusMenuSelector);
+      };
+      const closeAndReopen = async (searching = false) => {
+        // Escape inside Search intentionally closes only Search; toggle the
+        // actual outer trigger to exercise dismissal with an active query.
+        if (searching) {
+          await activate(trigger);
+        } else {
+          await page.keyboard.press("Escape");
+        }
+        await panel.waitFor({ state: "hidden" });
+        if (!(await trigger.evaluate((node) => document.activeElement === node))) {
+          throw new Error("Plus-menu dismissal must restore the outer trigger focus");
+        }
+        await activate(trigger);
+        await page.locator(`${plusMenuSelector}[data-view="root"]`).waitFor({ state: "visible" });
+      };
+      await assertCatalog();
+      await openSearch();
+      await search.fill("É");
+      await menu.locator('[data-value="skill:notes"]').waitFor({ state: "hidden" });
+      await menu.locator('[data-value="skill:accent"]').waitFor({ state: "visible" });
+      await search.fill("no-synthetic-match");
+      await menu
+        .getByText("No skills match your search.", { exact: true })
+        .waitFor({ state: "visible" });
+      if (await menu.locator('[data-value^="skill:"]').count()) {
+        throw new Error("A no-match Skills search must not retain skill rows");
+      }
+      await activate(menu.getByRole("button", { name: "Clear search", exact: true }));
+      await menu.locator('[data-value="skill:notes"]').waitFor({ state: "visible" });
+      await menu.locator('[data-value="skill:accent"]').waitFor({ state: "visible" });
+      if ((await search.inputValue()) !== "") {
+        throw new Error("Clear search must reset the query");
+      }
+      await search.press("Escape");
+      await assertCatalog();
+      await openSearch();
+      await search.fill("Notes");
+      await activate(back);
+      await assertCatalog();
+      await activate(back);
+      await menu.locator('[data-value="open-skills"]').waitFor({ state: "visible" });
+      await activate(menu.locator('[data-value="open-skills"]'));
+      await assertCatalog();
+      await openSearch();
+      await search.fill("Notes");
+      await closeAndReopen(true);
+      await activate(menu.locator('[data-value="open-skills"]'));
+      await assertCatalog();
+      await activate(back);
+      await activate(menu.locator('[data-value="open-connectors"]'));
+      await activate(menu.locator('[data-value="server:docs"]'));
+      const tool = menu.locator('[data-value="mcp-tool:search-docs"]');
+      await tool.waitFor({ state: "visible" });
+      await activate(back);
+      await activate(menu.locator('[data-value="open-connectors"]'));
+      await tool.waitFor({ state: "visible" });
+      await activate(back);
+      await closeAndReopen();
+      await activate(menu.locator('[data-value="open-connectors"]'));
+      await tool.waitFor({ state: "visible" });
+      await page.waitForFunction(
+        (selector) =>
+          document.querySelector(`${selector} [data-value="back"]`) === document.activeElement,
+        plusMenuSelector,
+      );
+      await page.keyboard.press("Escape");
+      await panel.waitFor({ state: "hidden" });
+      if (!(await trigger.evaluate((node) => document.activeElement === node))) {
+        throw new Error("Connector dismissal must restore the outer trigger focus");
+      }
+      return {
+        skillsSearchReset: true,
+        skillsCloseReopenReset: true,
+        connectorExpansionRetained: true,
+        behaviorVerifiedAfterMeasurement: true,
+      };
+    },
+  };
+}
+
 async function verifySlashArguments(page: Page, scope = activePane) {
   const triggerSelector = `${scope} .agent-chat__composer-combobox textarea`;
   const trigger = page.locator(triggerSelector);
@@ -3427,6 +3629,7 @@ export const interactionScenarios: readonly InteractionScenario[] = [
       }
     },
   },
+  ...(["keyboard", "pointer"] as const).map(firstPlusSkillsScenario),
   ...chatIdleMenuControls.flatMap(({ pointerKeepsTriggerFocus, ...control }) =>
     (["ready", "idle"] as const).flatMap((phase) =>
       (["keyboard", "pointer"] as const).map((activation) =>
