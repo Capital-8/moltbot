@@ -1,2 +1,2 @@
-# Exact provider status, cancellation/cleanup custody, and launcher preclaim regressions.
-229
+# Exact lease dispositions, cleanup custody, and Goal/launcher admission fixture migration.
+258
