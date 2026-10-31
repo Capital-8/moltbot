@@ -698,6 +698,16 @@ assert_prepublish_fixture_idle() {
     assert-no-requests "$OPENCLAW_CLAWHUB_URL"
 }
 
+assert_prepublish_fixture_requests() {
+  if [ "$SCENARIO" = "cron-scheduled-authority" ] && [ "$baseline_version" = "2026.6.34" ]; then
+    node "${OPENCLAW_UPGRADE_SURVIVOR_CLAWHUB_FIXTURE_SERVER:-scripts/e2e/lib/clawhub-fixture-server.cjs}" \
+      assert-prepublish-requests "$OPENCLAW_CLAWHUB_URL" "" \
+      "@openclaw/whatsapp" "$candidate_version" absent 2
+    return
+  fi
+  assert_prepublish_fixture_idle
+}
+
 prepublish_capability_consent_supported=""
 assert_prepublish_plugin_install() {
   local allow_pending="${1:-0}" expected_version="${2:-$candidate_version}"
@@ -737,7 +747,7 @@ assert_prepublish_plugin_install() {
     "$prepublish_capability_consent_supported" "${pending_args[@]}" "$published_companion_tarball" \
     "$candidate_version" || return "$?"
   [ "$SCENARIO" = "legacy-operator-state" ] && return 0
-  assert_prepublish_fixture_idle
+  assert_prepublish_fixture_requests
 }
 
 configure_plugin_registry() {
