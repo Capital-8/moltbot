@@ -85,6 +85,16 @@ jobs:
           bundle _4.0.23_ check
           test "$(bundle _4.0.23_ exec ruby -e 'require "fastlane"; print Fastlane::VERSION')" = "2.241.1"
 
+      - name: Begin temporary simulator lifecycle trace
+        id: watch-trace
+        run: |
+          set -euo pipefail
+          umask 077
+          predicate="$(ruby apps/ios/fastlane/watch_boot_trace.rb predicate)"
+          nohup /usr/bin/log stream --style ndjson --level debug --predicate "$predicate" \
+            > "$RUNNER_TEMP/watch-host-raw.jsonl" 2> "$RUNNER_TEMP/watch-host-log.stderr" &
+          echo "OPENCLAW_WATCH_TRACE_PID=$!" >> "$GITHUB_ENV"
+
       - name: Select Xcode and install pinned native tools
         run: |
           set -euo pipefail
@@ -119,6 +129,21 @@ jobs:
             --source apps/ios/build/SnapshotDerivedData \
             --output "$RUNNER_TEMP/ios-spotlight-probe.json"
 
+      - name: Finish temporary simulator lifecycle trace
+        if: always() && steps.watch-trace.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          kill "$OPENCLAW_WATCH_TRACE_PID" 2>/dev/null || true
+          if [[ ! -s "$RUNNER_TEMP/watch-host-raw.jsonl" ]]; then
+            cat "$RUNNER_TEMP/watch-host-log.stderr"
+            exit 1
+          fi
+          mkdir -p apps/ios/build
+          ruby apps/ios/fastlane/watch_boot_trace.rb \
+            "$RUNNER_TEMP/watch-host-raw.jsonl" apps/ios/build/watch-host-lifecycle.json
+          rm -f "$RUNNER_TEMP/watch-host-raw.jsonl" "$RUNNER_TEMP/watch-host-log.stderr"
+
       - name: Retain screenshots and sanitized diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -129,6 +154,7 @@ jobs:
             apps/ios/build/SnapshotTestResults/capture-attempts.json
             apps/ios/build/screenshot-diagnostics.json
             apps/ios/build/watch-boot-trace.json
+            apps/ios/build/watch-host-lifecycle.json
             ${{ runner.temp }}/ios-resource-timeline.jsonl
             ${{ runner.temp }}/ios-spotlight-probe.json
           if-no-files-found: error

@@ -1,8 +1,27 @@
 require "timeout"
+require "json"
 
 # Temporary hosted-run evidence for the Watch boot shutdown investigation.
 class WatchBootTrace
   PROCESSES = %w[CoreSimulatorService com.apple.CoreSimulator.CoreSimulatorService simdiskimaged SimLaunchHost.arm64 SimLaunchHost.x86_64 launchd_sim Carousel backboardd runningboardd watchdogd ReportCrash SimulatorTrampoline cryptexd].freeze
+  HOST_PROCESSES = %w[CoreSimulatorService com.apple.CoreSimulator.CoreSimulatorService simdiskimaged SimLaunchHost.arm64 SimLaunchHost.x86_64 cryptexd ReportCrash].freeze
+
+  def self.predicate
+    hosts = HOST_PROCESSES.map { |name| %Q(\"#{name}\") }.join(",")
+    guests = (PROCESSES - HOST_PROCESSES).map { |name| %Q(\"#{name}\") }.join(",")
+    "process IN {#{hosts}} OR (process IN {#{guests}} AND (eventMessage CONTAINS[c] \"shutdown\" OR eventMessage CONTAINS[c] \"exited\" OR eventMessage CONTAINS[c] \"crash\" OR eventMessage CONTAINS[c] \"watchdog\" OR eventMessage CONTAINS[c] \"timed out\"))"
+  end
+
+  def self.read_logs(path)
+    File.foreach(path).filter_map do |line|
+      event = JSON.parse(line)
+      next unless event["eventMessage"]
+      { "timestamp" => event["timestamp"], "process" => File.basename(event["processImagePath"].to_s),
+        "message" => event["eventMessage"].gsub(File.expand_path("~"), "<HOME>").gsub(%r{/Users/[^/\s]+}, "<HOME>")[0, 2000] }
+    rescue JSON::ParserError
+      nil
+    end
+  end
 
   def self.start(udid, runtime, output)
     trace = new(udid, runtime, output)
@@ -23,22 +42,14 @@ class WatchBootTrace
   def start
     @facts["before"] = snapshot
     @raw = Tempfile.new("watch-boot-log")
-    predicate = "process IN {#{PROCESSES.map { |name| %Q(\"#{name}\") }.join(',')}} OR eventMessage CONTAINS \"#{@udid}\""
-    @pid = Process.spawn("/usr/bin/log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate,
+    @pid = Process.spawn("/usr/bin/log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", self.class.predicate,
       out: @raw.path, err: File::NULL)
   end
 
   def finish
     @facts["after"] = snapshot
     stop
-    @facts["logs"] = File.foreach(@raw.path).filter_map do |line|
-      event = JSON.parse(line)
-      next unless event["eventMessage"]
-      { "timestamp" => event["timestamp"], "process" => File.basename(event["processImagePath"].to_s),
-        "message" => sanitize(event["eventMessage"])[0, 2000] }
-    rescue JSON::ParserError
-      nil
-    end.last(4000) if @raw
+    @facts["logs"] = self.class.read_logs(@raw.path) if @raw
     @facts["deviceLogs"] = Dir[File.expand_path("~/Library/Logs/CoreSimulator/#{@udid}/*.log")].to_h do |path|
       [File.basename(path), File.readlines(path).last(200).map { |line| sanitize(line)[0, 2000] }]
     end
@@ -108,5 +119,14 @@ class WatchBootTrace
 
   def sanitize(text)
     text.gsub(File.expand_path("~"), "<HOME>").gsub(%r{/Users/[^/\s]+}, "<HOME>")
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  if ARGV == ["predicate"]
+    puts WatchBootTrace.predicate
+  else
+    raw, output = ARGV
+    File.write(output, JSON.pretty_generate({ "logs" => WatchBootTrace.read_logs(raw) }))
   end
 end
