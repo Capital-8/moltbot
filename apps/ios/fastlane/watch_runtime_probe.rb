@@ -3,6 +3,7 @@ require "open3"
 require "fileutils"
 require "time"
 require "tempfile"
+require "tmpdir"
 require "fastlane"
 require_relative "watch_boot_trace"
 require_relative "watch_runtime_admission"
@@ -20,6 +21,7 @@ output = File.expand_path("../build/watch-runtime-probe.json", __dir__)
 facts = { "startedAt" => Time.now.utc.iso8601, "observations" => [] }
 udid = nil
 trace = nil
+package_root = nil
 begin
   facts["runtimeHelp"], = Open3.capture3("xcrun", "simctl", "runtime", "help")
   facts["imagesBefore"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
@@ -27,14 +29,24 @@ begin
   runtime = runtimes.select { |entry| entry["isAvailable"] && entry.fetch("identifier").include?(".watchOS-") }
     .max_by { |entry| Gem::Version.new(entry.fetch("version")) }
   raise "No available Watch runtime" unless runtime
-  facts["personalizationHelp"] = command("xcrun", "simctl", "help", "personalization")
+  WatchRuntimeAdmission.wait!
+  package_root = Dir.mktmpdir("openclaw-watch-universal-", ENV.fetch("RUNNER_TEMP"))
+  facts["downloadOutput"] = command("xcodebuild", "-downloadPlatform", "watchOS", "-buildVersion", runtime.fetch("version"),
+    "-architectureVariant", "universal", "-exportPath", package_root)
+  packages = Dir[File.join(package_root, "**", "*.dmg")]
+  raise "Expected one exported universal Watch runtime package, found #{packages.length}" unless packages.one?
+  facts["packageName"] = File.basename(packages.first)
+  facts["packageBytes"] = File.size(packages.first)
   WatchRuntimeAdmission.wait!
   images = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j")).values
   image = images.find { |entry| entry["runtimeIdentifier"] == runtime.fetch("identifier") && entry["state"] == "Ready" }
-  raise "No Ready image for targeted Watch personalization" unless image
-  facts["personalizationTarget"] = image.fetch("identifier")
-  facts["personalizationOutput"] = command("xcrun", "simctl", "personalization", "personalize", image.fetch("identifier"))
-  facts["imagesPersonalized"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
+  raise "No Ready Watch image to replace" unless image
+  facts["retiredImage"] = image.fetch("identifier")
+  facts["deleteOutput"] = command("xcrun", "simctl", "runtime", "delete", image.fetch("identifier"))
+  facts["assetRetired"] = !File.exist?(image.fetch("path"))
+  raise "Broken Watch asset remains after supported runtime deletion" unless facts.fetch("assetRetired")
+  facts["importOutput"] = command("xcodebuild", "-importPlatform", packages.first)
+  facts["imagesImported"] = JSON.parse(command("xcrun", "simctl", "runtime", "list", "-j"))
   WatchRuntimeAdmission.wait!
   facts["admittedAt"] = Time.now.utc.iso8601
   device = runtime.fetch("supportedDeviceTypes").find { |entry| entry.fetch("name").include?("Ultra") }
@@ -80,4 +92,5 @@ ensure
     Open3.capture3("xcrun", "simctl", "shutdown", udid)
     command("xcrun", "simctl", "delete", udid)
   end
+  FileUtils.remove_entry(package_root) if package_root && File.directory?(package_root)
 end
