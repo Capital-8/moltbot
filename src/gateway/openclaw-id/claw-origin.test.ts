@@ -92,6 +92,21 @@ describe("WebSocket origin policy for a linked claw", () => {
     expect(checkGatewayWsBrowserOrigin(direct, {}).ok).toBe(false);
   });
 
+  it("refuses a different claw address under the same loader domain over the tunnel", () => {
+    setOpenClawIdClawOriginResolver(() => "https://studio-e61zr.crabd.xyz");
+    const own = { ...tunnel, origin: "https://studio-e61zr.crabd.xyz" };
+    expect(checkGatewayWsBrowserOrigin(own, {}).ok).toBe(true);
+    for (const origin of [
+      "https://team-e61zr.crabd.xyz",
+      "https://studio-q9w4k.crabd.xyz",
+      "https://crabd.xyz",
+      "https://studio-e61zr.crabd.xyz.evil.example",
+      "https://studio-e61zr.crabd.xyz:8443",
+    ]) {
+      expect(checkGatewayWsBrowserOrigin({ ...tunnel, origin }, {}).ok, origin).toBe(false);
+    }
+  });
+
   it("refuses another claw's origin over the tunnel", () => {
     setOpenClawIdClawOriginResolver(() => CLAW);
     const other = { ...tunnel, origin: "https://team-k7x2q.claws.example.test" };
