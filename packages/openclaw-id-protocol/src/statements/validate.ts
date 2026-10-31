@@ -208,7 +208,11 @@ const BODIES: Record<StatementType, Check> = {
       remove: object({ op: oneOf(["remove"]), account_id: nonEmptyText }),
       set_role: object({ op: oneOf(["set_role"]), account_id: nonEmptyText, role }),
       revoke_device: object({ op: oneOf(["revoke_device"]), peer_key: irohKey }),
-      add_owner_device: object({ op: oneOf(["add_owner_device"]), cert: chainLink }),
+      add_owner_device: object({
+        op: oneOf(["add_owner_device"]),
+        cert: (value, path) => envelope("OwnerDeviceCert", ownerDeviceCertBody)(value, path),
+      }),
+      deny_invite: object({ op: oneOf(["deny_invite"]), invite_id: randomId }),
     } satisfies Record<(typeof MEMBERSHIP_OPS)[number], Check>),
     issued_at: seconds,
   }),

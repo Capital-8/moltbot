@@ -49,7 +49,9 @@ export type VerifyErrorCode =
   | "host_mismatch"
   | "rollback"
   | "server_key_revoked"
-  | "bad_proof";
+  | "bad_proof"
+  | "expired"
+  | "audience_mismatch";
 
 /** A verification failure. */
 export type VerifyFailure = { ok: false; code: VerifyErrorCode; detail: string };

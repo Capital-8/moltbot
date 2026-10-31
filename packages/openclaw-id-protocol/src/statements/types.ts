@@ -83,6 +83,7 @@ export const MEMBERSHIP_OPS = [
   "set_role",
   "revoke_device",
   "add_owner_device",
+  "deny_invite",
 ] as const;
 /** One of {@link MEMBERSHIP_OPS}. */
 export type MembershipOp = (typeof MEMBERSHIP_OPS)[number];
@@ -99,7 +100,9 @@ export type MembershipTarget =
   | { op: "remove"; account_id: string }
   | { op: "set_role"; account_id: string; role: MemberRole }
   | { op: "revoke_device"; peer_key: IrohEndpointKey }
-  | { op: "add_owner_device"; cert: SignedStatement<"OwnerDeviceCert"> };
+  | { op: "add_owner_device"; cert: SignedStatement<"OwnerDeviceCert"> }
+  /** Owner declines a pending redemption; the invite is consumed and nothing is admitted. */
+  | { op: "deny_invite"; invite_id: string };
 
 /** A change to a claw's membership, written by an owner device (or R) directly at the Gateway. */
 export type MembershipChangeBody = {

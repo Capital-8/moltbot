@@ -89,13 +89,14 @@ Member roles: `operator`, `viewer` (open question: final role set; invites grant
 
 MembershipChange targets:
 
-| op                 | target fields                                                                     |
-| ------------------ | --------------------------------------------------------------------------------- |
-| `add`              | account_id, role, peer_keys (>= 1), invite_id (null, or the invite this approves) |
-| `remove`           | account_id                                                                        |
-| `set_role`         | account_id, role                                                                  |
-| `revoke_device`    | peer_key                                                                          |
-| `add_owner_device` | cert: the new device's OwnerDeviceCert (flattened, verified like a chain link)    |
+| op                 | target fields                                                                           |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| `add`              | account_id, role, peer_keys (>= 1), invite_id (null, or the invite this approves)       |
+| `remove`           | account_id                                                                              |
+| `set_role`         | account_id, role                                                                        |
+| `revoke_device`    | peer_key                                                                                |
+| `add_owner_device` | cert: the new device's OwnerDeviceCert with its own chain (verified like any statement) |
+| `deny_invite`      | invite_id (declines a pending redemption; the invite is consumed)                       |
 
 `seq` must equal the Gateway's current membership seq + 1 (compare-and-set). This stops a
 captured change from being replayed later; a concurrent writer gets a conflict and retries.
@@ -173,7 +174,8 @@ node --import ./scripts/tsx.mjs -e 'const { buildStatementVectors } = await impo
 - `signer` carries the public key, not a fingerprint (see Envelope).
 - Capabilities are named (`approve_device`, `bind`, `invite`, `manage_members`), and a
   child certificate cannot exceed its issuer's caps.
-- Owner devices are added at a claw with `MembershipChange { op: "add_owner_device", cert }`.
+- Owner devices are added at a claw with `MembershipChange { op: "add_owner_device", cert }`;
+  a pending redemption is declined with `{ op: "deny_invite", invite_id }`.
 - MembershipChange.seq is a compare-and-set on the Gateway's seq.
 - New statement type `InviteRedemption` (spec section 6.3 step 2), self-signed by D_I.
 - MembershipSnapshot adds `owner_peer_keys` and `binding_seq` (relay admission needs owner
