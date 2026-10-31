@@ -49,6 +49,14 @@ describe("OpenClaw ID tunnel principals", () => {
       role: "operator",
     });
     expect(await claw.authority.resolvePeer(viewer)).toMatchObject({ role: "viewer" });
+
+    // A role change reconnects the member so the new ceiling applies at once.
+    const change = await claw.sign({ op: "set_role", account_id: "acct-view", role: "operator" });
+    expect(await claw.authority.submit(change, "tunnel")).toMatchObject({
+      ok: true,
+      events: expect.arrayContaining([{ type: "disconnect", peer_keys: [viewer] }]),
+    });
+    expect(await claw.authority.resolvePeer(viewer)).toMatchObject({ role: "operator" });
     expect(
       await claw.authority.resolvePeer(formatIrohEndpointKey(randomBytes(32))),
     ).toBeUndefined();
