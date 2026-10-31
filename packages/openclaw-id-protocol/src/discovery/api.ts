@@ -16,6 +16,7 @@ export type DiscoveryAuth = "user" | "device" | "gateway" | "relay";
 /** Every Discovery v1 endpoint. Paths use `{name}` placeholders. */
 export const DISCOVERY_ENDPOINTS = {
   createEnrollmentCode: { method: "POST", path: "/v1/enrollment-codes", auth: "user" },
+  checkClawName: { method: "POST", path: "/v1/claw-names", auth: "gateway" },
   registerClaw: { method: "POST", path: "/v1/claws", auth: "gateway" },
   listClaws: { method: "GET", path: "/v1/claws", auth: "user" },
   publishDescriptor: { method: "PUT", path: "/v1/claws/{claw_id}/descriptor", auth: "gateway" },
@@ -64,6 +65,14 @@ export type DiscoveryErrorBody = {
 /** POST /v1/enrollment-codes: a one-time code that links a claw to the signed-in account. */
 export type CreateEnrollmentCodeResponse = { code: string; expires_at: UnixSeconds };
 
+/**
+ * POST /v1/claw-names (signed by the Gateway's K_gw; the code is not spent). The hostname the
+ * code's account gets for a claw name: `<name>-<account tag>.<claw origin domain>`.
+ */
+export type CheckClawNameRequest = { code: string; name: string };
+/** Response to {@link CheckClawNameRequest}. `available` is false once a claw ever used the hostname. */
+export type CheckClawNameResponse = { name: string; account_tag: string; hostname: string; available: boolean };
+
 /** POST /v1/claws (signed by the K_gw named in the descriptor's binding). */
 export type RegisterClawRequest = { code: string; descriptor: ClawDescriptor };
 /** Response to {@link RegisterClawRequest}. */
@@ -73,6 +82,8 @@ export type RegisterClawResponse = { claw_id: string; owner_account_id: string }
 export type ClawListEntry = {
   claw_id: string;
   hostname: string;
+  /** The name the owner gave the claw (the hostname's `<name>` part); null for other hostnames. */
+  name: string | null;
   relationship: "owner" | "member" | "invited";
   role: MemberRole | null;
   /** True when the claw's K_srv is attached to the relay. */

@@ -55,8 +55,9 @@ ready message.
 | Name                    | Method and path                                       | Auth                                     | Request -> response                                                                          |
 | ----------------------- | ----------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
 | createEnrollmentCode    | `POST /v1/enrollment-codes`                           | user                                     | - -> `{ code, expires_at }` (one-time, 10 min)                                               |
+| checkClawName           | `POST /v1/claw-names`                                 | gateway (any K_gw; the code is not spent) | `{ code, name }` -> `{ name, account_tag, hostname, available }`                            |
 | registerClaw            | `POST /v1/claws`                                      | gateway (key = binding.k_gw)             | `{ code, descriptor }` -> `{ claw_id, owner_account_id }`                                    |
-| listClaws               | `GET /v1/claws`                                       | user                                     | -> `{ claws: [{ claw_id, hostname, relationship, role, online, descriptor_published_at }] }` |
+| listClaws               | `GET /v1/claws`                                       | user                                     | -> `{ claws: [{ claw_id, hostname, name, relationship, role, online, descriptor_published_at }] }` |
 | publishDescriptor       | `PUT /v1/claws/{claw_id}/descriptor`                  | gateway                                  | `{ descriptor }` -> 204; `stale_binding` if binding_seq decreases                            |
 | getDescriptor           | `GET /v1/claws/{claw_id}/descriptor`                  | user                                     | -> `{ descriptor }`                                                                          |
 | publishSnapshot         | `PUT /v1/claws/{claw_id}/snapshot`                    | gateway                                  | `{ snapshot }` -> 204; `stale_snapshot` if seq does not increase                             |
@@ -88,6 +89,24 @@ Types for every body are in `src/discovery/api.ts`; the endpoint table is
   is a security property.
 - The owner account is Discovery's own record (from the enrollment code), returned by
   registerClaw and listClaws, never part of the signed data.
+
+### Claw addresses
+
+A claw's hostname is `<name>-<account tag>.<claw origin domain>`, e.g.
+`studio-k7x2q.crabd.me`. The owner picks the name when linking; the account tag is random (not
+derived from the account id), 5 lower-case Crockford base32 characters, created at the account's
+first link, shared by all of its claws and never given to another account. The address carries
+no identity: clients trust `claw_id` and the pinned key, and check `binding.hostname ==
+location.host`.
+
+- `checkClawName` answers which hostname the code's account would get for `name` and whether
+  it is free. Names are 1-57 characters of `a-z`, `0-9` and single hyphens, start with a
+  letter and do not end with a hyphen (the whole label stays within 63); some names are
+  reserved for service hostnames. Invalid names are `bad_request`.
+- `registerClaw` refuses a binding hostname that is not `<valid name>-<the code account's
+  tag>` (`bad_request`) or that any claw ever had (`conflict`). Hostnames are never reused:
+  a retired claw's hostname stays assigned.
+- `listClaws` returns `name` (the `<name>` part), or null for a hostname of another form.
 
 ### Device binding
 
