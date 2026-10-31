@@ -46,7 +46,8 @@ process.on("disconnect", () => {
 process.send("ready");
 `,
     tempDirs.make("openclaw-node-script-output-"),
-    false,
+    // Windows kills non-detached children at parent exit; this writer must outlive it.
+    process.platform === "win32",
     17,
   );
   const result = await runNodeScript(script, process.env, 5_000);
