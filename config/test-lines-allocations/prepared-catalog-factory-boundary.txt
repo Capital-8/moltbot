@@ -1,2 +1,2 @@
-# SDK factory identity, prepared catalog imports, and synchronous config capture.
-120
+# SDK identity, prepared imports, config capture, publication gating, and captured suppression.
+149

@@ -224,7 +224,7 @@ export function prepareModelsConfigContext(
 }
 
 /** Ensures models.json and the agent SQLite catalog cache are current. */
-export async function ensureOpenClawModelsJson(
+export async function ensurePreparedModelsJson(
   input: PreparedModelsConfigContext | Promise<PreparedModelsConfigContext>,
 ): Promise<{ publishedSource?: Omit<PlannedOpenClawModelsJsonSource, "agentDir"> }> {
   const context = await input;
@@ -305,7 +305,7 @@ export async function ensureOpenClawModelsJson(
  * Plans the complete root/plugin catalog generation without mutating agent-owned state.
  * Control-plane inventory reads use this when their lifecycle generation may be superseded.
  */
-export async function planOpenClawModelsJsonSource(
+export async function planPreparedModelsJsonSource(
   input: PreparedModelsConfigContext | Promise<PreparedModelsConfigContext>,
   authStore?: AuthProfileStore,
 ): Promise<PlannedOpenClawModelsJsonSource> {

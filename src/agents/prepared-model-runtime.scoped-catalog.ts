@@ -7,8 +7,8 @@ import { createPreparedModelCatalogProviderNormalizer } from "./model-catalog-pr
 import { MODEL_RUNTIME_PROVIDER_DISCOVERY_TIMEOUT_MS } from "./model-catalog-timeouts.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import {
-  ensureOpenClawModelsJson,
-  planOpenClawModelsJsonSource,
+  ensurePreparedModelsJson,
+  planPreparedModelsJsonSource,
   prepareModelsConfigContext,
   resolveModelsConfigInput,
 } from "./models-config.prepared.js";
@@ -131,7 +131,7 @@ export async function prepareAgentCatalogSource(
     );
   const prepareSource = async () => {
     if (!persist) {
-      const source = await planOpenClawModelsJsonSource(prepareContext(), sourceOptions.authStore);
+      const source = await planPreparedModelsJsonSource(prepareContext(), sourceOptions.authStore);
       return {
         modelsJsonContents: source.modelsJsonContents,
         pluginCatalogs: source.pluginCatalogs,
@@ -139,7 +139,7 @@ export async function prepareAgentCatalogSource(
       };
     }
     if (!input.readOnly) {
-      const { publishedSource } = await ensureOpenClawModelsJson(prepareContext());
+      const { publishedSource } = await ensurePreparedModelsJson(prepareContext());
       if (publishedSource) {
         return { ...publishedSource, providerOutcomes: resultOutcomes() };
       }

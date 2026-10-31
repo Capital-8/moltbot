@@ -2,8 +2,8 @@ import { captureRuntimeConfigAsyncReader } from "../config/io.runtime.js";
 import { projectConfigOntoRuntimeSourceSnapshot } from "../config/runtime-source-projection.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
-  ensureOpenClawModelsJson as ensurePreparedModelsJson,
-  planOpenClawModelsJsonSource as planPreparedModelsJsonSource,
+  ensurePreparedModelsJson,
+  planPreparedModelsJsonSource,
   prepareModelsConfigContext,
   resolveModelsConfigInput,
   type EnsureOpenClawModelsJsonOptions,

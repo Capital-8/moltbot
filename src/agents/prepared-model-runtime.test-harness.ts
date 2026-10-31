@@ -398,9 +398,9 @@ vi.mock("./models-config.prepared.js", () => ({
     config,
     ...args,
   ],
-  ensureOpenClawModelsJson: (args: unknown[]) =>
+  ensurePreparedModelsJson: (args: unknown[]) =>
     preparedModelRuntimeMocks.ensureOpenClawModelsJson(...args),
-  planOpenClawModelsJsonSource: (
+  planPreparedModelsJsonSource: (
     [config, agentDir, options]: [unknown, unknown, Record<string, unknown>],
     authStore?: unknown,
   ) =>
