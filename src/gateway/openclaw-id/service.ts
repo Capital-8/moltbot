@@ -21,6 +21,7 @@ import { setDeviceTokenBindingOwner } from "./device-token-binding.js";
 import type { TunnelApiHandler } from "./ingress-listener.js";
 import { listInviteViews } from "./invites-view.js";
 import type { PublishOutcome } from "./publisher.js";
+import { setOpenClawIdTunnelPrincipalResolver } from "./tunnel-principal.js";
 import type { TunnelRuntime, TunnelRuntimeSettings } from "./tunnel-runtime.js";
 import type { TunnelSupervisorStatus } from "./tunnel-supervisor.js";
 
@@ -115,6 +116,7 @@ export function createOpenClawIdService(params: {
     mailbox?.stop();
     mailbox = undefined;
     setDeviceTokenBindingOwner(undefined);
+    setOpenClawIdTunnelPrincipalResolver(undefined);
     await current?.stop();
   };
 
@@ -270,6 +272,7 @@ export function createOpenClawIdService(params: {
           `openclaw-id: security: refused device token for ${event.deviceId} (${event.role}) presented from ${event.presentedFrom ?? "a non-tunnel connection"}; bound to ${event.boundTo ?? "no tunnel key"}`,
         ),
     });
+    setOpenClawIdTunnelPrincipalResolver((peerKey) => owner.resolvePeer(peerKey));
   };
 
   // Reads the Discovery mailbox once the claw is registered there.
