@@ -472,6 +472,29 @@ For a boot-weight comparison, use `--bundle-dir <base> --compare-bundle-dir <hea
 each build's own warm state. Every run records `presentation.firstNonemptyTranscriptMs`
 and `presentation.firstEnabledComposerMs` from visible DOM observed on animation
 frames; these are readiness observations, not compositor paint timestamps.
+`firstEnabledComposerMs` retains its original definition: the first matching
+hydrated-chat or New Session textarea is visible and enabled. It does not include
+the static boot composer or reject read-only or inert editors.
+
+`presentation.firstUsableComposerMs` adds an editable-input observation, with
+`firstUsableComposerKind` identifying `static`, `hydrated`, or `new`. It accepts a
+visible, enabled, non-read-only textarea with no inert ancestor from the static
+boot composer, the active hydrated chat pane, or New Session. It uses the same
+animation-frame sampler and visibility check, with no extra geometry or hit test.
+This is editor eligibility, not actual key-to-paint latency, compositor paint,
+click-occlusion proof, or send admission. Sampling ends at the existing shell and
+route completion boundary; the value remains null if no eligible editor was
+observed during that window. Older captures have no such fields: preserve them
+as absent, without relabeling or retrofitting the legacy metric.
+
+Warm reloads also record `warmReload.milestones.firstLiveTranscript` on the first
+sample with both visible transcript rows and the pane's `transcriptReady` state.
+It reuses the existing visibility and catch-up observations. `firstTranscript`
+still marks the first visible rows, including saved rows, and `catchupApplied`
+still marks owner readiness even while the virtualizer keeps rows hidden. The
+new marker distinguishes live transcript visibility from both; it is a DOM
+readiness observation, not an Element Timing paint. It remains absent if not
+observed before collection stops. Cold `firstNonemptyTranscriptMs` is unchanged.
 
 Every run also records browser paint entries (`presentation.firstPaintMs` and
 `firstContentfulPaintMs`), the first visible `#openclaw-boot-shell` frame and its
@@ -770,6 +793,14 @@ DOM-mutation-to-rAF are frame-boundary proxies, not paint timestamps.
 Use a separate `--trace` run for script/layout/style attribution. Long Task API
 metrics are present only when supported; WebKit's missing counters are not zero.
 WebKit Inspector durations are elapsed time, not CPU consumed by the action.
+The probe emits `streaming-reply:start:<startedAt>` once per stream run to align
+Inspector records with the snapshot's page-clock `startedAt` and relative delta
+timestamps. `startMarkCompletedAt` bounds the mark call's completion; use the
+interval between it and `startedAt` as clock uncertainty when Inspector records
+the mark's emission time. Delivery-window script/style/layout durations may
+overlap and include other tasks between deltas; they are elapsed work within the
+window, not CPU time or causal attribution to a single delta. Pool deliveries
+with identical timestamps and end the last window at `startedAt + elapsedMs`.
 `--cpu-throttle 4 --engines chromium` measures Chromium's emulated slowdown;
 WebKit has no equivalent supported CPU throttle, so requesting it fails explicitly.
 Use `--compare-bundle-dir` and `--control-bundle-dir` for interleaved candidate and
