@@ -208,6 +208,9 @@ describe("gateway minimal boot smoke", () => {
             expect(startupMeasures.indexOf("runtime.early")).toBeGreaterThan(
               startupMeasures.indexOf("http.listen"),
             );
+            const requestProjectionEnd = startupEvents.findIndex(
+              (event) => event.type === "span.end" && event.name === "sessions.projection",
+            );
             const postAttachEnd = startupEvents.findIndex(
               (event) =>
                 event.type === "span.end" &&
@@ -220,7 +223,9 @@ describe("gateway minimal boot smoke", () => {
                 event.phase === "startup" &&
                 event.name === "gateway.ready",
             );
+            expect(requestProjectionEnd).toBeGreaterThan(-1);
             expect(postAttachEnd).toBeGreaterThan(-1);
+            expect(readyMark).toBeGreaterThan(requestProjectionEnd);
             expect(readyMark).toBeGreaterThan(postAttachEnd);
           } finally {
             await server.close({ reason: "minimal boot smoke complete" });

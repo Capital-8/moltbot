@@ -8,6 +8,7 @@ import {
 import { hashConfigRaw } from "../config/io.read-helpers.js";
 import { isNixMode } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { flushDiagnosticsTimeline } from "../infra/diagnostics-timeline.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
 import { createDeferredCore } from "../shared/deferred.js";
@@ -194,6 +195,9 @@ export async function finishGatewayStartup(params: {
   // Projection preparation and early services are independent. Join both before
   // failure cleanup so early-service handles are installed before they are closed.
   const requestRuntimeReady = runtime.ensureRequestRuntimeReady().then(async () => {
+    // Readiness is also the performance collector's evidence boundary. Flush the
+    // terminal events for request-runtime spans before /readyz can become green.
+    flushDiagnosticsTimeline();
     kernel.setDispatchReady(true);
     if (!minimalTestGateway && !opts.updateCanary) {
       const { startOpenClawDatabaseIntegrityVerifier } =
