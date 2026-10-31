@@ -81,6 +81,7 @@ export async function hydrateChatHistory(
   method: "chat.history" | "chat.startup",
   inputRunIds: string[],
   requestKeyPrefix: string,
+  inheritedCursorReset: boolean,
 ): Promise<ObservedChatHistoryResult | undefined> {
   const requests = chatHistoryRequests(state);
   requests.historyRead?.abort();
@@ -184,6 +185,11 @@ export async function hydrateChatHistory(
     }
     const cursorReset = isHistoryCursor(response) && response.kind === "reset";
     if (cursorReset) {
+      const load = requests.historyLoad;
+      if (load.phase === "in-flight") {
+        // A superseding refresh still needs the gap after this rejected cursor is cleared.
+        load.cursorReset = true;
+      }
       clearHistoryCursor(state, sessionKey, requestAgentId);
       response = await request();
       if (!isCurrent()) {
@@ -192,7 +198,11 @@ export async function hydrateChatHistory(
     }
     // Only a Stop-style cursor reset can cut a transcript this pane shows from
     // its start; a window reset asks for a fresh window instead.
-    if (cursorReset && !isHistoryCursor(response) && !requests.windowReset?.isCurrent()) {
+    if (
+      (cursorReset || inheritedCursorReset) &&
+      !isHistoryCursor(response) &&
+      !requests.windowReset?.isCurrent()
+    ) {
       const { fillHeldHistoryGap } = await import("./chat-history-held-gap.ts");
       response = await fillHeldHistoryGap(
         state,

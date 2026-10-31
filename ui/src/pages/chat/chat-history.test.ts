@@ -2,7 +2,7 @@
 import { reduceSessionProjection } from "@openclaw/gateway-client/browser";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { missingScopeErrorShape } from "../../../../packages/gateway-protocol/src/schema/error-codes.js";
-import { createDeferred } from "../../../../test/helpers/promise.js";
+import { awaitGateBeforeSettlement, createDeferred } from "../../../../test/helpers/promise.js";
 import { GatewayRequestError } from "../../api/gateway-connect-errors.ts";
 import type { GatewaySessionRow, SessionsRewindResult } from "../../api/types.ts";
 import { handleChatGatewayEvent } from "./chat-gateway.ts";
@@ -327,7 +327,7 @@ describe("full tail after a long live turn", () => {
     sessionInfo: { ...sessionInfo, hasActiveRun: false, status: "killed" as const },
   });
 
-  async function loadAfterLiveTurn(
+  async function prepareLiveTurn(
     tail: ChatHistoryResult,
     older: () => Promise<ChatHistoryResult>,
     {
@@ -372,8 +372,13 @@ describe("full tail after a long live turn", () => {
     for (const row of [call(2), call(4), call(6)]) {
       publishLive(state, row, scope);
     }
-    await loadChatHistory(state);
     return { state, request };
+  }
+
+  async function loadAfterLiveTurn(...args: Parameters<typeof prepareLiveTurn>) {
+    const prepared = await prepareLiveTurn(...args);
+    await loadChatHistory(prepared.state);
+    return prepared;
   }
 
   it.each([
@@ -410,6 +415,33 @@ describe("full tail after a long live turn", () => {
     expect(state.chatMessages).toEqual(transcript);
     expect(older).toHaveBeenCalledOnce();
     expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+  });
+
+  it("keeps the held prompt when a session-message refresh supersedes the reset tail read", async () => {
+    const tail = tailFrom(2);
+    const older = vi.fn(async () => ({ messages: transcript.slice(0, 2), sessionInfo }));
+    const { state, request } = await prepareLiveTurn(tail, older);
+    const tailRequested = createDeferred();
+    const interruptedTail = createDeferred<ChatHistoryResult>();
+    request.mockResolvedValueOnce({ kind: "reset" }).mockImplementationOnce(async () => {
+      tailRequested.resolve();
+      return interruptedTail.promise;
+    });
+    const loading = loadChatHistory(state);
+    await awaitGateBeforeSettlement(
+      tailRequested.promise,
+      loading,
+      "The reset refresh settled before requesting its full tail",
+    );
+    // A same-session message invalidates the pending read after it cleared the cursor.
+    const replacement = loadChatHistory(state, { supersedeInFlight: true });
+    expect(state.chatMessages).toContainEqual(prompt);
+    interruptedTail.resolve(tail);
+    await Promise.all([loading, replacement]);
+
+    expect(state.chatMessages).toEqual(transcript);
+    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+    expect(older).toHaveBeenCalledOnce();
   });
 
   it("keeps the retryable boundary when the gap read fails", async () => {

@@ -30,6 +30,7 @@ type LoadChatHistoryOptions = {
   deferBranches?: boolean;
   supersedeInFlight?: boolean;
   startup?: boolean;
+  cursorReset?: boolean;
 };
 
 type ChatErrorDetail = Extract<ChatEvent, { state: "error" }>["errorDetail"];
@@ -130,6 +131,7 @@ export async function loadChatHistory(
     const refresh = {
       startup: startup || inFlight.startup,
       deferBranches: opts.deferBranches === true,
+      cursorReset: inFlight.cursorReset,
       promise: Promise.resolve<ObservedChatHistoryResult | undefined>(undefined),
     };
     refresh.promise = inFlight.request.then(() => {
@@ -156,6 +158,7 @@ export async function loadChatHistory(
     method,
     inputRunIds,
     requestKeyPrefix,
+    opts.cursorReset === true,
   ).then((result) => {
     const current = requests.historyLoad;
     if (current.phase === "in-flight" && current.request === promise) {
@@ -213,6 +216,7 @@ export async function loadChatHistory(
     sessionKey,
     requestAgentId,
     startup,
+    cursorReset: opts.cursorReset === true,
   };
   // Consumers await the current snapshot, including replacements admitted while
   // this read is pending. Refresh scheduling waits only for the raw request.

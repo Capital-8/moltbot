@@ -55,10 +55,12 @@ type ChatHistoryLoadState =
       sessions: ChatHistorySessions;
       request: Promise<ObservedChatHistoryResult | undefined>;
       promise: Promise<ObservedChatHistoryResult | undefined>;
+      cursorReset: boolean;
       refresh?: {
         promise: Promise<ObservedChatHistoryResult | undefined>;
         startup: boolean;
         deferBranches: boolean;
+        cursorReset: boolean;
       };
     } & ChatHistoryLoadRequest)
   | {
