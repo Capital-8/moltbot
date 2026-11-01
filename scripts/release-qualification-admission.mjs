@@ -513,7 +513,6 @@ function validateArtifact(descriptor, metadata, run, jobs) {
   );
   const job = jobs.jobs.find((item) => item.name === QUALIFICATION_ADMISSION_JOB);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
-  const upload = steps.find((item) => item.name === QUALIFICATION_ADMISSION_UPLOAD);
   const successfulJobWithoutSteps = job?.conclusion === "success" && steps.length === 0;
   validateActionsArtifactProducerJob({
     expected: {
@@ -525,14 +524,12 @@ function validateArtifact(descriptor, metadata, run, jobs) {
     },
     workflowJobs: jobs,
   });
-  const producerInterval = upload ?? (successfulJobWithoutSteps ? job : undefined);
   const created = Date.parse(metadata.created_at);
   requireValue(
     job.conclusion === "success" &&
-      producerInterval &&
       Number.isFinite(created) &&
-      created >= Date.parse(producerInterval.started_at) &&
-      created <= Date.parse(producerInterval.completed_at),
+      created >= Date.parse(job.started_at) &&
+      created <= Date.parse(job.completed_at),
     "Admission artifact was not created by its exact successful upload job",
   );
 }

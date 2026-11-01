@@ -215,6 +215,17 @@ describe("trusted P qualification admission", () => {
     expect(() => f.verify()).not.toThrow();
   });
 
+  it("accepts skewed step timestamps when the artifact remains inside the exact producer job", () => {
+    const f = fixture();
+    const upload = expectDefined(
+      expectDefined(f.jobs.jobs[0], "admission job").steps[0],
+      "admission upload step",
+    );
+    upload.started_at = "2026-09-27T23:00:01Z";
+    upload.completed_at = "2026-09-27T23:00:03Z";
+    expect(() => f.verify()).not.toThrow();
+  });
+
   it.each([true])(
     "revalidates current authority without reacquiring immutable evidence (protected=%s)",
     (protectedTag) => {
