@@ -27,7 +27,6 @@ import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
 import { hasCommittedMessagingToolDeliveryEvidence } from "../delivery-evidence.js";
 import { log } from "../logger.js";
 import { markActiveEmbeddedRunAbandoned, type EmbeddedAgentQueueHandle } from "../runs.js";
-import { buildEmbeddedForegroundPromptContext } from "./agent-end-context.js";
 import { buildEmbeddedAgentHookContext } from "./agent-hook-context.js";
 import type { EmbeddedAttemptExecutionPhaseInput } from "./attempt-execution-types.js";
 import { readAttemptNestedToolActivity } from "./attempt-nested-tool-activity.js";
@@ -395,10 +394,6 @@ export async function completeEmbeddedAttemptAfterTurn(
         modelProviderId: attempt.provider,
         modelId: attempt.modelId,
         modelContextWindowTokens: attempt.contextTokenBudget ?? attempt.model.contextWindow,
-        foregroundPromptContext: buildEmbeddedForegroundPromptContext(
-          { ...attempt, agentId: sessionAgentId },
-          agentDir,
-        ),
         authProfileId: attempt.authProfileId,
         // Prompt hooks can narrow the bundle; report the surface the model could call.
         toolNames: promptToolPolicy.current.uncompactedEffectiveTools.map((tool) => tool.name),

@@ -10,6 +10,7 @@ type EmbeddedForegroundPromptContextRun = Pick<
     agentId: string;
   };
 
+/** @deprecated Ignored by agent-end side effects; nothing reads it. Supported through 2026-12-31. */
 export function buildEmbeddedForegroundPromptContext(
   run: EmbeddedForegroundPromptContextRun,
   agentDir: string,

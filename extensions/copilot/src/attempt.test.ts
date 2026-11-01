@@ -638,19 +638,6 @@ describe("runCopilotAttempt", () => {
     await expect(attempt).resolves.toMatchObject({ terminal: { kind: "ok" } });
   });
 
-  it("hands the foreground prompt context to agent-end side effects", async () => {
-    const runAgentEnd = vi.spyOn(agentHarnessRuntime, "runAgentEndSideEffectsAsync");
-    const params = makeParams({ memberRoleIds: ["maintainer-role"], messageChannel: "discord" });
-
-    await runCopilotAttempt(params, { pool: makeFakePool(makeFakeSdk()) });
-
-    const ctx = runAgentEnd.mock.calls.at(-1)?.[0]?.ctx;
-    expect(ctx?.foregroundPromptContext).toMatchObject({
-      memberRoleIds: ["maintainer-role"],
-      agentDir: params.agentDir,
-    });
-  });
-
   it("retains the host terminal error after an unrelated successful tool", async () => {
     const terminalError = { error: "delivery failed", mutatingAction: true, toolName: "message" };
     let activeError: typeof terminalError | undefined;

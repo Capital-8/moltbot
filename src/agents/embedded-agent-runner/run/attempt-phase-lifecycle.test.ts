@@ -495,8 +495,8 @@ describe("embedded attempt phase lifecycle state", () => {
         prompt(),
       );
 
-      // Only foreground prompt projection still copies the full attempt.
-      expect(enumerateAttempt).toHaveBeenCalledOnce();
+      // No post-turn step copies the full attempt.
+      expect(enumerateAttempt).not.toHaveBeenCalled();
       if (boundary === "complete") {
         expect(onContextEngineTurnCandidate).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -533,15 +533,8 @@ describe("embedded attempt phase lifecycle state", () => {
           traceId: "11111111111111111111111111111111",
           spanId: "2222222222222222",
         },
-        foregroundPromptContext: {
-          agentId: "main",
-          agentDir: "/tmp/agent",
-          workspaceDir: dir,
-          cwd: dir,
-          sandboxSessionKey: target.sessionKey,
-          sandboxAgentId: "main",
-        },
       });
+      expect(context).not.toHaveProperty("foregroundPromptContext");
       expect(context?.config).toBe(config);
       expect(hoisted.runAgentEndSideEffects.mock.calls[0]?.[0].skillExperienceReviewSource).toEqual(
         sessionManager.getSessionTarget()

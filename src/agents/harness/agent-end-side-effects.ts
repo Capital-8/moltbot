@@ -40,19 +40,25 @@ type AgentEndSideEffectsParams = Omit<BaseAgentEndSideEffectsParams, "ctx"> & {
     /** @deprecated Set `toolNames`. Supported through 2026-12-31. */
     skillWorkshopAvailable?: boolean;
     compacted?: boolean;
+    /** @deprecated Ignored; background work rebuilds its context from the session. Supported through 2026-12-31. */
     foregroundPromptContext?: EmbeddedForegroundPromptContext;
   };
 };
+
+// A native harness turn (one that reports its tools) owns core post-turn work; CLI backends do not.
+const nativeHarnessTurn = Symbol("nativeHarnessTurn");
+type PreparedAgentEnd = AgentEndSideEffectsParams & { [nativeHarnessTurn]: boolean };
 
 /**
  * Settles the run's facts once, before core and plugin consumers read them: the skill-usage
  * receipt is consumed here, and the retired context fields map onto their public replacements.
  */
-function prepareAgentEnd(params: AgentEndSideEffectsParams): AgentEndSideEffectsParams {
-  const { modelIterations, skillWorkshopAvailable, ...ctx } = params.ctx;
+function prepareAgentEnd(params: AgentEndSideEffectsParams): PreparedAgentEnd {
+  const { modelIterations, skillWorkshopAvailable, foregroundPromptContext, ...ctx } = params.ctx;
   for (const [field, replacement, used] of [
     ["modelIterations", "event.modelIterations", modelIterations !== undefined],
     ["skillWorkshopAvailable", "ctx.toolNames", skillWorkshopAvailable !== undefined],
+    ["foregroundPromptContext", "nothing (it is ignored)", foregroundPromptContext !== undefined],
   ] as const) {
     if (used) {
       warnPluginSdkDeprecation({
@@ -78,19 +84,30 @@ function prepareAgentEnd(params: AgentEndSideEffectsParams): AgentEndSideEffects
   return {
     ...params,
     event: loadMessages ? bindAgentHarnessHookMessages(event, loadMessages) : event,
-    ctx:
-      ctx.toolNames === undefined && skillWorkshopAvailable === true
-        ? { ...ctx, toolNames: [SKILL_WORKSHOP_TOOL_NAME] }
-        : ctx,
+    ctx: {
+      ...ctx,
+      ...(ctx.agentId === undefined && foregroundPromptContext
+        ? { agentId: foregroundPromptContext.agentId }
+        : {}),
+      ...(ctx.toolNames === undefined && skillWorkshopAvailable === true
+        ? { toolNames: [SKILL_WORKSHOP_TOOL_NAME] }
+        : {}),
+    },
+    // Through the deprecation window, a harness that still sends a retired field keeps its
+    // Workshop side effects.
+    [nativeHarnessTurn]:
+      ctx.toolNames !== undefined ||
+      skillWorkshopAvailable !== undefined ||
+      foregroundPromptContext !== undefined,
   };
 }
 
 function runCoreAgentEndSideEffects(
-  params: AgentEndSideEffectsParams,
+  params: PreparedAgentEnd,
   read: "native" | "worker",
 ): void | Promise<void> {
-  const foregroundPromptContext = params.ctx.foregroundPromptContext;
-  if (!foregroundPromptContext) {
+  const agentId = params.ctx.agentId ?? params.skillExperienceReviewSource?.agentId;
+  if (!params[nativeHarnessTurn] || !agentId) {
     return;
   }
   // Hook contexts do not always carry the config; the runtime config is the owner at this boundary.
@@ -99,10 +116,9 @@ function runCoreAgentEndSideEffects(
     if (!anchor) {
       return;
     }
-    const ctx = { ...params.ctx, foregroundPromptContext };
     scheduleSkillExperienceReview({
       event: params.event,
-      ctx,
+      ctx: { ...params.ctx, agentId },
       config,
       source: anchor,
     });
@@ -112,8 +128,7 @@ function runCoreAgentEndSideEffects(
     log.warn(`skill experience review scheduling failed: ${String(error)}`);
   };
   try {
-    scheduleDailyWorkshopMaintenance(config, foregroundPromptContext.agentId);
-    // CLI hook contexts omit toolNames, so isEligibleContext rejects them.
+    scheduleDailyWorkshopMaintenance(config, agentId);
     const source = params.skillExperienceReviewSource;
     if (!source) {
       return;

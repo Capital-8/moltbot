@@ -351,10 +351,9 @@ Set `event.modelIterations` when the harness observes model calls directly, and
 `ctx.skillWorkshopAvailable` are deprecated aliases for those two fields,
 supported through 2026-12-31.
 
-Pass `ctx.foregroundPromptContext` built with
-`buildEmbeddedForegroundPromptContext(params, agentDir)` from the same
-`EmbeddedRunAttemptParams` the attempt ran with. The detached Skill Workshop
-experience review rebuilds its system prompt and tool catalog from that
-context, so the review shares the foreground turn's prompt-cache prefix.
-Omit it only for runs that have no foreground prompt, such as CLI hook
-contexts; the review is skipped for those.
+Background work after a turn, such as the Skill Workshop review, rebuilds its
+run context from the stored session, so harnesses no longer pass the foreground
+prompt context. `ctx.foregroundPromptContext` and
+`buildEmbeddedForegroundPromptContext(...)` are deprecated and ignored,
+supported through 2026-12-31. Runs without `ctx.toolNames`, such as CLI hook
+contexts, get no Workshop side effects.

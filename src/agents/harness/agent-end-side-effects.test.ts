@@ -58,11 +58,8 @@ function sideEffectParams(): Parameters<typeof runAgentEndSideEffects>[0] {
       runId: "run-1",
       workspaceDir: "/workspace",
       config: {},
-      foregroundPromptContext: {
-        agentId: "main",
-        workspaceDir: "/workspace",
-        sandboxSessionKey: "agent:main:main",
-      },
+      agentId: "main",
+      toolNames: ["skill_workshop"],
     },
   };
 }
@@ -205,6 +202,16 @@ it("gives plugin hooks the run's skills, iterations and tool names, keeping the 
   expect(mockExperienceReview.mock.calls[0]?.[0].event).toBe(hook?.event);
 });
 
+it("keeps the review for a harness that reports Workshop only through the retired flag", async () => {
+  const params = sideEffectParams();
+  const { toolNames: _reported, ...ctx } = params.ctx;
+  params.ctx = { ...ctx, skillWorkshopAvailable: true };
+
+  await awaitAgentEndSideEffects(params);
+
+  expect(mockExperienceReview.mock.calls[0]?.[0].ctx.toolNames).toEqual(["skill_workshop"]);
+});
+
 it("leaves an unknown model-call count off the plugin event", async () => {
   const params = sideEffectParams();
   params.event = { ...params.event, modelIterations: undefined };
@@ -216,7 +223,13 @@ it("leaves an unknown model-call count off the plugin event", async () => {
 
 it("maps the retired SDK context fields onto their public replacements", async () => {
   const params = sideEffectParams();
-  params.ctx = { ...params.ctx, modelIterations: 4, skillWorkshopAvailable: true };
+  const { toolNames: _reported, ...ctx } = params.ctx;
+  params.ctx = {
+    ...ctx,
+    modelIterations: 4,
+    skillWorkshopAvailable: true,
+    foregroundPromptContext: { agentId: "main", workspaceDir: "/w", sandboxSessionKey: "k" },
+  };
 
   await awaitAgentEndSideEffects(params);
 
@@ -225,4 +238,6 @@ it("maps the retired SDK context fields onto their public replacements", async (
   expect(hook?.ctx.toolNames).toEqual(["skill_workshop"]);
   expect(hook?.ctx).not.toHaveProperty("modelIterations");
   expect(hook?.ctx).not.toHaveProperty("skillWorkshopAvailable");
+  expect(hook?.ctx).not.toHaveProperty("foregroundPromptContext");
+  expect(mockExperienceReview.mock.calls[0]?.[0].ctx).not.toHaveProperty("foregroundPromptContext");
 });

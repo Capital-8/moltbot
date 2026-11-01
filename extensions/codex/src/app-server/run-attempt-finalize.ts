@@ -1,5 +1,4 @@
 import {
-  buildEmbeddedForegroundPromptContext,
   embeddedAgentLog,
   formatErrorMessage,
   runAgentHarnessLlmOutputHook,
@@ -78,7 +77,6 @@ export async function finalizeCodexAttempt(
     sessionAgentId,
     contextSessionKey,
     effectiveCwd,
-    agentDir,
     attemptStartedAt,
     startupAuthProfileId,
   } = connection;
@@ -526,10 +524,6 @@ export async function finalizeCodexAttempt(
         ),
         compacted: (result.compactionCount ?? 0) > 0,
         senderId: params.senderId ?? undefined,
-        foregroundPromptContext: buildEmbeddedForegroundPromptContext(
-          { ...params, agentId: sessionAgentId },
-          agentDir,
-        ),
       },
       hookRunner,
     });

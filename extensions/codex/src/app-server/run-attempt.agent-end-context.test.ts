@@ -108,8 +108,6 @@ describe("runCodexAppServerAttempt agent-end context", () => {
 
         const call = runAgentEndSideEffectsAsync.mock.calls.at(-1)?.[0];
         const ctx = call?.ctx;
-        expect(ctx?.foregroundPromptContext?.memberRoleIds).toEqual(["maintainer-role"]);
-        expect(typeof ctx?.foregroundPromptContext?.agentDir).toBe("string");
         expect(call?.event.modelIterations).toBe(10);
         expect(ctx?.toolNames).toContain("skill_workshop");
         const reviewSource =

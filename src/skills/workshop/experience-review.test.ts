@@ -10,6 +10,7 @@ import {
   completePromptCacheObservation,
 } from "../../agents/embedded-agent-runner/prompt-cache-observability.js";
 import { beginOpenAIObservation } from "../../agents/embedded-agent-runner/prompt-cache-observability.test-support.js";
+import type { RunEmbeddedAgentParams } from "../../agents/embedded-agent-runner/run/params.js";
 import {
   clearTestEmbeddedRun,
   createEmbeddedRunHandle,
@@ -38,7 +39,6 @@ import * as experienceReview from "./experience-review.js";
 import { runSkillExperienceReview } from "./experience-review.js";
 import { createExperienceReviewCandidate } from "./experience-review.test-support.js";
 import { createWorkshopSkill, writeWorkshopSkillFile } from "./library.js";
-import type { runSkillWorkshopReview } from "./review-run.js";
 import { resolveWorkshopSkillsDir } from "./skills-root.js";
 
 const mocks = vi.hoisted(() => ({
@@ -91,7 +91,9 @@ afterEach(async () => {
   await state.cleanup();
 });
 
-type ReviewParams = Parameters<typeof runSkillWorkshopReview>[0];
+type ReviewParams = RunEmbeddedAgentParams & {
+  preparedRunAdmission: NonNullable<RunEmbeddedAgentParams["preparedRunAdmission"]>;
+};
 const completedReview = { meta: { durationMs: 1 } };
 function observe(sessionId: string) {
   beginOpenAIObservation({ sessionId });
@@ -130,6 +132,35 @@ it.each(["success", "failure"])(
     expect(beginOpenAIObservation(foreground).previousCacheRead).toBe(8_000);
   },
 );
+
+it("runs the review as a session fork that credits the source conversation", async () => {
+  let run: ReviewParams | undefined;
+  mocks.runEmbeddedAgent.mockImplementation(async (params: ReviewParams) => {
+    run = params;
+    return completedReview;
+  });
+
+  await runSkillExperienceReview(candidate);
+
+  const { sessionKey, agentId } = candidate.source;
+  expect(run).toMatchObject({
+    agentId,
+    sandboxSessionKey: sessionKey,
+    sandboxAgentId: agentId,
+    inputProvenance: {
+      kind: "internal_system",
+      sourceTool: "session_fork",
+      sourceSessionKey: sessionKey,
+    },
+    toolsAllow: ["skill_workshop"],
+    toolExecutionAllow: ["skill_workshop"],
+    lane: "background:core:skill-workshop",
+    sessionPersistence: "detached",
+    modelSelectionLocked: true,
+  });
+  expect(run?.sessionKey).not.toBe(sessionKey);
+  expect(run?.inputProvenance?.runId).toBe(run?.runId);
+});
 
 it("yields an in-flight review when interactive work starts", async () => {
   const ownHandle = createEmbeddedRunHandle();
@@ -331,6 +362,7 @@ it.each(["off", "tool-policy"] as const)(
         ctx: {
           ...candidate.ctx,
           sessionKey: candidate.source.sessionKey,
+          agentId: candidate.source.agentId,
           toolNames: ["skill_workshop"],
         },
         config: candidate.config,

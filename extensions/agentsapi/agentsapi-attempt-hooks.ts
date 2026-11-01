@@ -1,9 +1,7 @@
 import {
   awaitAgentEndSideEffects,
   buildAgentHookContextChannelFields,
-  buildEmbeddedForegroundPromptContext,
   formatErrorMessage,
-  resolveAgentDir,
   runAgentEndSideEffectsAsync,
   runAgentHarnessLlmOutputHook,
   type AgentHarnessAttemptParamsV2,
@@ -65,10 +63,6 @@ export function createAgentsApiAttemptHooks(
       },
       ctx: {
         ...hookContext,
-        foregroundPromptContext: buildEmbeddedForegroundPromptContext(
-          { ...params, agentId },
-          params.agentDir ?? resolveAgentDir(params.config ?? {}, agentId),
-        ),
         compacted: false,
       },
     };
