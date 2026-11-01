@@ -2092,7 +2092,7 @@ html.openclaw-native-desktop .shell:not(.shell--mobile-nav) {
   right: calc(var(--sidebar-child-session-toggle-width) + 4px);
 }
 
-/* A disappearing disclosure must not move Archive under the resting pointer. */
+/* Reserve the desktop disclosure slot at rest so Archive and titles never jump. */
 @media (hover: hover) and (pointer: fine) {
   .shell:not(.shell--mobile-nav)
     .sidebar-recent-session:not(.sidebar-recent-session--child, .sidebar-recent-session--team):has(
