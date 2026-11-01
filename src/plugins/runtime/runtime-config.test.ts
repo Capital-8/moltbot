@@ -19,6 +19,7 @@ vi.mock("../../config/mutate.js", () => ({
   replaceConfigFile: (...args: unknown[]) => replaceConfigFileMock(...args),
 }));
 
+const { createRuntimeSystem } = await import("./runtime-system.js");
 const { createRuntimeBase } = await import("./runtime-base.js");
 
 describe("plugin runtime config", () => {
@@ -33,7 +34,7 @@ describe("plugin runtime config", () => {
     const runtimeConfig = { plugins: { entries: {} } };
     setRuntimeConfigSnapshot(runtimeConfig);
 
-    expect(createRuntimeBase().config.current()).toBe(runtimeConfig);
+    expect(createRuntimeBase(createRuntimeSystem).config.current()).toBe(runtimeConfig);
   });
 
   it("clones mutable config without losing its resolved secret facts", () => {
@@ -50,7 +51,7 @@ describe("plugin runtime config", () => {
     );
     setRuntimeConfigSnapshot(runtimeConfig);
 
-    const cloned = createRuntimeBase().config.current({ clone: true });
+    const cloned = createRuntimeBase(createRuntimeSystem).config.current({ clone: true });
     expectDefined(cloned.env?.vars, "cloned config variables").FIXTURE_API_KEY = "changed";
 
     expect(runtimeConfig.env.vars.FIXTURE_API_KEY).toBe("synthetic-key");
@@ -64,7 +65,7 @@ describe("plugin runtime config", () => {
   it("exposes canonical mutation helpers", async () => {
     mutateConfigFileMock.mockResolvedValue({ result: "updated" });
     replaceConfigFileMock.mockResolvedValue({ persistedHash: "hash" });
-    const configApi = createRuntimeBase().config;
+    const configApi = createRuntimeBase(createRuntimeSystem).config;
     const mutateParams = { mutate: vi.fn() };
     const replaceParams = { nextConfig: { plugins: {} } };
 

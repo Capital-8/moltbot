@@ -47,7 +47,7 @@ console.log("catalog-fingerprint-cold-import-ok");`,
   );
 });
 
-it("loads prepared catalogs without standalone config or protocol validation", async () => {
+it("loads prepared catalogs without standalone config, protocol validation or system execution", async () => {
   await withOpenClawTestState(
     { label: "catalog-prepared-import", applyEnv: false },
     async (state) => {
@@ -68,7 +68,7 @@ it("loads prepared catalogs without standalone config or protocol validation", a
 registerHooks({
   resolve(specifier, context, nextResolve) {
     const resolved = nextResolve(specifier, context);
-    if (["/agents/models-config", "/gateway-protocol/src/protocol-validator"].some((name) => [".ts", ".js"].some((extension) => resolved.url.endsWith(name + extension))) || ["io.runtime", "io.factory", "validation", "zod-schema", "zod-schema.core", "zod-schema.gateway", "zod-schema.agent-runtime"].some(
+    if (["/agents/models-config", "/gateway-protocol/src/protocol-validator", "/plugins/runtime/runtime-system", "/auto-reply/reply/session-event-handoff"].some((name) => [".ts", ".js"].some((extension) => resolved.url.endsWith(name + extension))) || ["io.runtime", "io.factory", "validation", "zod-schema", "zod-schema.core", "zod-schema.gateway", "zod-schema.agent-runtime"].some(
       (name) => [".ts", ".js"].some((extension) => resolved.url.endsWith("/config/" + name + extension)),
     )) {
       throw new Error("Prepared catalog loaded unrelated runtime module: " + resolved.url);
