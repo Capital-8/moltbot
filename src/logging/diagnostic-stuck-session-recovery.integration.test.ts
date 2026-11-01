@@ -159,7 +159,7 @@ describe("stuck session recovery integration", () => {
     }
   });
 
-  it("gives a long request one bounded retry window before recovering queued delivery once", async () => {
+  it("keeps repeated provider requests observational until their owner stops", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-04T03:00:00Z"));
     const sessionKey = "agent:main:repeated-requests";
@@ -239,16 +239,17 @@ describe("stuck session recovery integration", () => {
     }
     await Promise.resolve();
 
+    expect(operation.abortSignal.aborted).toBe(false);
+    expect(deliveries).toBe(0);
+    expect(getQueueSize(lane)).toBe(2);
+    expect(events.filter((event) => event.type === "session.recovery.requested")).toHaveLength(0);
+
+    expect(operation.abortByUser()).toBe(true);
     await expect(active).resolves.toBe("aborted");
     await expect(queued).resolves.toBe("delivered");
     await vi.advanceTimersByTimeAsync(1);
     expect(deliveries).toBe(1);
     expect(getQueueSize(lane)).toBe(0);
-    expect(events.filter((event) => event.type === "session.recovery.requested")).toHaveLength(1);
-    expect(events.find((event) => event.type === "session.recovery.completed")).toMatchObject({
-      status: "aborted",
-      action: "abort_embedded_run",
-    });
     unsubscribe();
   });
 
