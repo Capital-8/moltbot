@@ -30,10 +30,30 @@ model arguments. Group-origin delegation cannot evade the check by moving into a
 direct-looking execution session. Both get and set return content, so both are
 restricted; users retain the private Settings editor.
 
-This is deliberately smaller than the contract below. It does not implement
-private-audience admission for shared web tasks, confine raw files, or change
-Knowledge/LCM grants or retained history. Direct or unknown classifications retain
-their existing behavior and are not evidence of a person-private audience.
+The next review slice also checks committed session sharing facts before opening
+the selected personal overlay or returning personal-tool results. A qualifying
+session must be an existing creator-private Draft, have no public share, and have
+the same canonical human creator as the selected profile (bootstrap) or the
+authenticated editor (chat tool). A direct chat label alone does not qualify.
+Missing/unverified audiences, shared/read-only/suggest sessions, and creator
+mismatches withhold the overlay or direct the chat operation to Settings. Both a
+delegated tool's origin and execution session must qualify when they differ.
+
+This reuses retained session-sharing facts and the existing profile catalog;
+the public-share record now participates in that sharing projection and its
+invalidation. No registry, schema, configuration, or model argument is added.
+Bootstrap rechecks after file reads and hooks; the personal-file owner rechecks
+before response release and inside the existing safe writer's mutation guard.
+Canonical profile aliases and immutable session creator stamps stay authoritative.
+
+**This is not the complete contract below.** Bootstrap admission expires when the
+loader returns: it is not retained through every provider call or native thread.
+Sharing an already-used private conversation can still expose previous context,
+tool history, or generated responses. This draft does not confine raw files,
+change Knowledge/LCM grants, or make that transition safe. A creator-private Draft
+is an initial delivery condition, not an operating-system or history-isolation
+claim. The narrowed chat and bootstrap availability remain proposed behavior
+requiring host/profile-owner review.
 
 ## Existing foundation
 
@@ -52,6 +72,27 @@ execution permissions. Another sender must not silently replace session selectio
 to an **agent-private** Knowledge partition. Reuse that capability without treating
 the agent-private partition or the existing owner-private memory audience as
 authenticated-person isolation.
+
+### Newer Knowledge and history dependency evidence
+
+Draft [#189822](https://github.com/openclaw/openclaw/pull/189822), inspected at
+`ce0ad0404b7b5cc3b21b4efb8bfccc17fef735f4`, adds person/agent Knowledge grants
+separately from this profile-delivery work. It selects one space per person and
+agent, not a union of private and shared spaces. Its restricted embedded profile
+excludes raw file/execution/admin/cross-session-history and global Knowledge
+History/Recent/revision paths, and disables automatic workspace bootstrap.
+Do not duplicate those owners or treat that profile as the combined fixture.
+
+The current PR body reports an executed installed Knowledge–LosslessClaw
+continuity fixture using pinned LosslessClaw 1.2.0: actual Gateway/plugin/disk
+save, public compaction, cold restart, grep recall, evidence, and replay after
+committed publication but before the final reply. That is newer bounded
+#186065 evidence, not merely fixture source. It uses a shared-owner identity and
+deterministic model I/O; the distinct-person checks are separate scenarios.
+These are the dependency author's reported results, not an execution by this PR.
+Neither draft is integrated proof of combined two-person private/shared recall.
+Explicit-ID/delegated LCM expansion, broader direct access, live inference,
+native/Windows qualification, and owner acceptance remain separate requirements.
 
 ## Proposed first-stage behavior
 

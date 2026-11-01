@@ -4,6 +4,7 @@ import type { ChatType } from "../channels/chat-type.js";
 import { prepareSessionTranscriptHydration } from "../config/sessions/session-transcript-hydration.js";
 import type { AgentContextInjection } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { prepareSessionPersonalContext } from "../gateway/session-personal-context.js";
 import {
   createInternalHookEvent,
   triggerInternalHook,
@@ -277,13 +278,25 @@ async function resolveBootstrapFiles(
   for (const file of rawFiles) {
     file.origin = { kind: "agent-workspace", rootPath: resolveUserPath(params.workspaceDir) };
   }
-  const personalFile = isNonPrivateBootstrapSession(session)
+  using personalContext =
+    params.bootstrapUserProfileId && !isNonPrivateBootstrapSession(session)
+      ? await prepareSessionPersonalContext({
+          getConfig: () => params.config ?? {},
+          agentId:
+            params.agentId ?? resolveAgentIdFromSessionKey(params.sessionKey ?? "") ?? "main",
+          sessionKey: params.sessionKey,
+          sessionId: params.sessionId,
+          profileId: params.bootstrapUserProfileId,
+        })
+      : undefined;
+  const personalFile = !personalContext
     ? undefined
     : await loadPersonalUserBootstrapFile(
         params.workspaceDir,
         params.bootstrapUserProfileId,
         params.warn,
       );
+  personalContext?.assertCurrent();
   const userIndex = rawFiles.findIndex((file) => file.name === DEFAULT_USER_FILENAME);
   if (personalFile) {
     rawFiles.splice(userIndex < 0 ? rawFiles.length : userIndex + 1, 0, personalFile);
@@ -341,12 +354,17 @@ async function resolveBootstrapFiles(
   }
   const updated = typeof hooks === "object" ? [...hooked, ...hooks.projected] : hooked;
   const sessionFiltered = filterBootstrapFilesForSession(updated, session);
+  const audienceFiltered = personalContext
+    ? sessionFiltered
+    : sessionFiltered.filter(
+        (file) => file.personalUser !== true && file.origin?.kind !== "personal",
+      );
   // Hooks can relabel or alias loader-produced records. Reapply lexical/session
   // policy first, then enforce protected sources captured by the pinned opens.
   const afterHooks =
     protectedFiles.length === 0
-      ? sessionFiltered
-      : sessionFiltered.filter(
+      ? audienceFiltered
+      : audienceFiltered.filter(
           (file) =>
             !protectedFiles.some((protectedFile) => {
               if (workspaceFilesShareSourceIdentity(file, protectedFile)) {
@@ -387,6 +405,7 @@ async function resolveBootstrapFiles(
     seenPaths.add(dedupeKey);
     sanitized.push({ ...file, path: resolvedPath });
   }
+  personalContext?.assertCurrent();
   return sanitized;
 }
 
