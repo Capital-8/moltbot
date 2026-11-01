@@ -5,7 +5,11 @@ import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control
 import { createControlUiSessionRow } from "../test-helpers/control-ui-session-fixtures.ts";
 import { chatMessage } from "./chat-flow.test-support.ts";
 import { polledAttribute } from "./chat-presentation.test-support.ts";
-import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { controlUiE2eBuiltModuleRequest } from "./control-ui-built-module.test-support.ts";
+import {
+  createControlUiE2eSuite,
+  holdModuleResponse,
+} from "./control-ui-e2e-suite.test-support.ts";
 
 const suite = createControlUiE2eSuite({
   name: "Control UI fenced code blocks",
@@ -39,7 +43,7 @@ async function setThemeMode(page: Page, mode: "dark" | "light"): Promise<void> {
 }
 
 suite.define(() => {
-  it("paints warmed short fences with syntax in their first commit", async () => {
+  it("paints warmed short fences colored when the preloaded runtime is ready", async () => {
     await suite.withPage(desktop, async ({ page }) => {
       const sessionKey = "agent:main:chat:warm-syntax-12345678";
       const source = "```ts\nconst ready = true;\n```\n\n```python\nif ready: print(1)\n```";
@@ -85,8 +89,26 @@ suite.define(() => {
         });
         observer.observe(document, { childList: true, subtree: true });
       });
-      await page.reload();
-      await gateway.waitForRequest("connect");
+      const pane = await holdModuleResponse(
+        page,
+        controlUiE2eBuiltModuleRequest("ui/src/pages/chat/route-entry.ts"),
+      );
+      const runtime = page
+        .waitForResponse(
+          controlUiE2eBuiltModuleRequest("ui/src/components/markdown-highlight-runtime.ts"),
+        )
+        .catch(() => null);
+      try {
+        await page.reload({ waitUntil: "commit" });
+        await pane.request;
+        await gateway.waitForRequest("connect");
+        const response = await runtime;
+        expect(response, "warm syntax starts loading before the pane can mount").not.toBeNull();
+        await response!.finished();
+        await page.evaluate(`import(${JSON.stringify(response!.url())}).then(() => undefined)`);
+      } finally {
+        pane.release();
+      }
       await code.nth(1).waitFor();
       if (process.env.OPENCLAW_CAPTURE_UI_PROOF === "1") {
         await page.screenshot({ path: path.join(suite.artifactDir, "syntax-short-first.png") });
