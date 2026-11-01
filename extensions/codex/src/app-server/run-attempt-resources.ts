@@ -191,7 +191,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     const result = retired.closed
       ? await state.client.closeAndWait(CODEX_ONE_SHOT_CLIENT_CLOSE_OPTIONS)
       : undefined;
-    if (params.oneShotCliRun && result?.cleanup !== "closed") {
+    if (params.oneShotCliRun && (!result || result.cleanup === "uncertain")) {
       throw new Error("Codex one-shot client cleanup could not be confirmed");
     }
   };
@@ -210,7 +210,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
       releaseSharedClientLeaseOnce();
       if (ownedClient) {
         const result = await ownedClient.closeAndWait(CODEX_ONE_SHOT_CLIENT_CLOSE_OPTIONS);
-        if (params.oneShotCliRun && result.cleanup !== "closed") {
+        if (params.oneShotCliRun && result.cleanup === "uncertain") {
           throw new Error("Codex isolated client cleanup could not be confirmed");
         }
       }
