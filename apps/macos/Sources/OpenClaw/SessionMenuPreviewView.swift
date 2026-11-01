@@ -27,7 +27,8 @@ enum PreviewRole: String {
     }
 }
 
-actor SessionPreviewCache {
+@MainActor
+final class SessionPreviewCache {
     static let shared = SessionPreviewCache()
 
     private let now: @Sendable () -> Date
@@ -202,7 +203,7 @@ struct SessionMenuPreviewView: View {
 enum SessionMenuPreviewLoader {
     private static let logger = Logger(subsystem: "ai.openclaw", category: "SessionPreview")
     private static let previewTimeoutSeconds: Double = 4
-    private static let cacheMaxAgeSeconds: TimeInterval = 30
+    static let cacheMaxAgeSeconds: TimeInterval = 30
     private static let previewMaxChars = 240
 
     private struct PreviewTimeoutError: LocalizedError {
@@ -211,6 +212,7 @@ enum SessionMenuPreviewLoader {
         }
     }
 
+    @MainActor
     static func prewarm(
         sessionKeys: [String],
         maxItems: Int,
@@ -224,7 +226,7 @@ enum SessionMenuPreviewLoader {
         do {
             let (payload, lease) = try await self.requestPreview(keys: keys, maxItems: maxItems, gateway: gateway)
             for entry in payload.previews {
-                await cache.store(
+                cache.store(
                     snapshot: self.snapshot(from: entry, maxItems: maxItems),
                     for: entry.key,
                     gateway: gateway,
@@ -238,13 +240,14 @@ enum SessionMenuPreviewLoader {
         }
     }
 
+    @MainActor
     static func load(
         sessionKey: String,
         maxItems: Int,
         gateway: GatewayConnection = .shared,
         cache: SessionPreviewCache = .shared) async -> SessionMenuPreviewSnapshot
     {
-        if let cached = await cache.cachedSnapshot(
+        if let cached = cache.cachedSnapshot(
             for: sessionKey,
             gateway: gateway,
             maxAge: cacheMaxAgeSeconds),
@@ -259,13 +262,13 @@ enum SessionMenuPreviewLoader {
             let entry = payload.previews.first(where: { $0.key == sessionKey }) ?? payload.previews.first
             let snapshot = entry.map { self.snapshot(from: $0, maxItems: maxItems) }
                 ?? SessionMenuPreviewSnapshot(items: [], status: .error("Preview unavailable"))
-            await cache.store(snapshot: snapshot, for: sessionKey, gateway: gateway, lease: lease)
+            cache.store(snapshot: snapshot, for: sessionKey, gateway: gateway, lease: lease)
             guard gateway.serverLeaseMatchesCurrentRoute(lease) else { throw CancellationError() }
             return snapshot
         } catch is CancellationError {
             return SessionMenuPreviewSnapshot(items: [], status: .loading)
         } catch {
-            if let fallback = await cache.cachedSnapshot(for: sessionKey, gateway: gateway),
+            if let fallback = cache.cachedSnapshot(for: sessionKey, gateway: gateway),
                gateway.serverLeaseMatchesCurrentRoute(fallback.lease)
             {
                 return fallback.snapshot

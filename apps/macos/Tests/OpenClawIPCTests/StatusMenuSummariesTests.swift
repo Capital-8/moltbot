@@ -198,7 +198,7 @@ struct StatusMenuSummariesTests {
                 try await self.expectPreviewText("Gateway A", in: view)
                 let freshRequests = fixture.requests.value.filter { $0.method == "sessions.preview" }.count
                 sessions.configureSessionItem(item, row: row)
-                _ = await cache.cachedSnapshot(for: row.key, gateway: fixture.gateway)
+                _ = cache.cachedSnapshot(for: row.key, gateway: fixture.gateway)
                 try await self.expectPreviewText("Gateway A", in: view)
                 #expect(fixture.requests.value.filter { $0.method == "sessions.preview" }.count == freshRequests)
 
@@ -208,6 +208,7 @@ struct StatusMenuSummariesTests {
                 fixture.previewText.setValue("The museum visit has moved to 11:30.")
                 sessions.configureSessionItem(item, row: row)
                 sessions.configureSessionItem(item, row: row)
+                try await self.expectPreviewText("Loading preview…", in: view)
                 try await fixture.previewResponsesChanged.wait("expired preview request") {
                     fixture.pendingPreviewCount == 1
                 }
@@ -253,7 +254,7 @@ struct StatusMenuSummariesTests {
             #expect(current.items.map(\.text) == ["Current itinerary: meet at the north entrance."])
             fixture.releasePreviewResponses()
             _ = try await TestWait.value(of: first, "old preview settled")
-            let retained = await cache.cachedSnapshot(for: "main", gateway: fixture.gateway)
+            let retained = cache.cachedSnapshot(for: "main", gateway: fixture.gateway)
             #expect(retained?.snapshot.items.map(\.text) == ["Current itinerary: meet at the north entrance."])
         }
     }

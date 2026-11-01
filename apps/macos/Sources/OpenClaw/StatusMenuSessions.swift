@@ -111,6 +111,15 @@ final class StatusMenuSessions: NSObject {
             submenu = self.buildSessionSubmenu(for: row)
             item.submenu = submenu
         }
+        if let cached = self.previewCache.cachedSnapshot(
+            for: row.key,
+            gateway: self.control.gateway,
+            maxAge: SessionMenuPreviewLoader.cacheMaxAgeSeconds)
+        {
+            self.renderPreviews(cached.snapshot, in: submenu)
+        } else {
+            self.renderPreviews(SessionMenuPreviewSnapshot(items: [], status: .loading), in: submenu)
+        }
         self.refreshPreviews(in: submenu)
     }
 
@@ -412,16 +421,20 @@ extension StatusMenuSessions {
             guard !Task.isCancelled, let self else { return }
             self.previewTasks[id] = nil
             guard gateway.serverLeaseMatchesCurrentRoute(source) else { return }
-            for preview in menu.previews {
-                StatusMenuRenderer.configureHostedView(
-                    preview.item,
-                    rootView: SessionMenuPreviewView(
-                        maxLines: preview.maxLines,
-                        title: preview.title,
-                        items: snapshot.items,
-                        status: snapshot.status)
-                        .environment(\.isEnabled, true))
-            }
+            self.renderPreviews(snapshot, in: menu)
+        }
+    }
+
+    private func renderPreviews(_ snapshot: SessionMenuPreviewSnapshot, in menu: SessionMenu) {
+        for preview in menu.previews {
+            StatusMenuRenderer.configureHostedView(
+                preview.item,
+                rootView: SessionMenuPreviewView(
+                    maxLines: preview.maxLines,
+                    title: preview.title,
+                    items: snapshot.items,
+                    status: snapshot.status)
+                    .environment(\.isEnabled, true))
         }
     }
 
