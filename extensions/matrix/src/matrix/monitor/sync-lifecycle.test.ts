@@ -59,6 +59,52 @@ function expectLastStatusFields(
   }
 }
 
+describe("createMatrixMonitorStatusController", () => {
+  it("does not publish ready until startup maintenance completes", () => {
+    const setStatus = vi.fn();
+    const statusController = createMatrixMonitorStatusController({
+      accountId: "default",
+      statusSink: setStatus,
+      deferReadyUntilStartupComplete: true,
+    });
+
+    statusController.noteSyncState("SYNCING", undefined, 100);
+    expectLastStatusFields(setStatus, {
+      connected: false,
+      lifecycle: "starting",
+      healthState: "starting",
+    });
+
+    statusController.markStartupComplete(200);
+    expectLastStatusFields(setStatus, {
+      connected: true,
+      lifecycle: "ready",
+      healthState: "healthy",
+      lastConnectedAt: 200,
+    });
+  });
+
+  it("does not publish a stale ready state after startup disconnects", () => {
+    const setStatus = vi.fn();
+    const statusController = createMatrixMonitorStatusController({
+      accountId: "default",
+      statusSink: setStatus,
+      deferReadyUntilStartupComplete: true,
+    });
+
+    statusController.noteSyncState("SYNCING", undefined, 100);
+    statusController.noteSyncState("RECONNECTING", new Error("network flap"), 150);
+    statusController.markStartupComplete(200);
+
+    expectLastStatusFields(setStatus, {
+      connected: false,
+      lifecycle: "recovering",
+      healthState: "reconnecting",
+      lastError: "network flap",
+    });
+  });
+});
+
 describe("createMatrixMonitorSyncLifecycle", () => {
   it("publishes blocked for an invalidated token and preserves it through cleanup", () => {
     const { setStatus, statusController } = createSyncLifecycleHarness();
