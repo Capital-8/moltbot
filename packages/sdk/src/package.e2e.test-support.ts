@@ -352,8 +352,9 @@ async function startOpenClawRegistry(packages: PackedPackage[]): Promise<{
       createReadStream(pkg.tarball).pipe(res);
       return;
     }
-    const latest = byName.get(decodedPath.slice(1))?.at(-1);
-    if (!latest) {
+    const matchingPackages = byName.get(decodedPath.slice(1));
+    const latest = matchingPackages?.at(-1);
+    if (!matchingPackages || !latest) {
       res.writeHead(404).end();
       return;
     }

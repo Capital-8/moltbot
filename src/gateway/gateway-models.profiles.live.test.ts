@@ -37,6 +37,7 @@ import {
   isLiveTestEnabled,
   readLiveTestConfig,
   resolveLiveCredentialPrecedence,
+  useLiveTestRuntimeConfig,
 } from "../agents/live-test-helpers.js";
 import { shouldSkipLiveProviderDrift } from "../agents/live-test-provider-drift.js";
 import {
@@ -6399,6 +6400,11 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
         "Ultra admission receipts",
       );
       const wireObservations = ultraWireCapture.observations;
+      if (wireObservations.length === 0) {
+        // Closing the native harness retires its runtime-config owner; restore
+        // the fixture before reading trajectory-backed session state.
+        useLiveTestRuntimeConfig(params.cfg);
+      }
       const observations =
         wireObservations.length > 0
           ? wireObservations

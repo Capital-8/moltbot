@@ -550,6 +550,9 @@ describeLive("gateway live trajectory export", () => {
       });
       logLiveStep("agent-turn:done", { firstReply });
       expect(firstReply.trim()).toBe(replyToken);
+      // The native harness retires its runtime-config owner when the first turn
+      // settles. Republish before post-turn reads and again before follow-up RPCs.
+      useLiveTestRuntimeConfig(config);
       const { entry, storePath } = await loadSessionEntryAsync(sessionKey);
       if (!entry?.sessionId) {
         throw new Error(`live trajectory session was not persisted: ${sessionKey}`);
