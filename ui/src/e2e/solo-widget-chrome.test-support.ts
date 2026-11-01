@@ -143,7 +143,7 @@ export async function withWidgetChromeDiagnostics(
           );
           if (events) {
             await writeFile(
-              path.join(artifactDir(), "widget-chrome-menu-events.json"),
+              path.join(artifactDir(), "widget-chrome-state.json"),
               JSON.stringify(events, null, 2) + "\n",
             );
           }
