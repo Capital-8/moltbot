@@ -322,28 +322,20 @@ suite.define(() => {
                 await expect
                   .poll(() => page.locator(".chat-group.assistant img.chat-message-image").count())
                   .toBe(2);
-                await bubble.locator("img.chat-message-image").evaluateAll(async (images) => {
-                  await Promise.all(
-                    images.map(async (image) => {
-                      if (!(image instanceof HTMLImageElement)) {
-                        throw new Error("Expected an image element");
-                      }
-                      await image.decode();
-                    }),
-                  );
-                });
-                expect(
-                  await bubble
-                    .locator("img.chat-message-image")
-                    .evaluateAll((images) =>
-                      images.map(
-                        (image) =>
-                          image instanceof HTMLImageElement &&
-                          image.complete &&
-                          image.naturalWidth > 0,
+                await expect
+                  .poll(() =>
+                    bubble
+                      .locator("img.chat-message-image")
+                      .evaluateAll((images) =>
+                        images.map(
+                          (image) =>
+                            image instanceof HTMLImageElement &&
+                            image.complete &&
+                            image.naturalWidth > 0,
+                        ),
                       ),
-                    ),
-                ).toEqual([true, true]);
+                  )
+                  .toEqual([true, true]);
               };
               await assertDecoded();
               // Capture before the order assertion so an unfixed run retains the actual flattening.
