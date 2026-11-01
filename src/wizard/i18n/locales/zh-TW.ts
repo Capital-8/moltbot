@@ -230,6 +230,7 @@ export const zh_TW = {
       currentNotInCatalog: "目前值（不在目錄中）",
       allowed: "已允許",
       allowedNotInCatalog: "已允許（不在目錄中）",
+      fallbackText: "備用模型（逗號分隔 provider/model；留空則保留目前值）",
       fallbackPicker: "備用模型（多選）",
       allowlistPicker: "/model 選擇器中的模型（多選）",
       allowlistText: "允許的模型（逗號分隔 provider/model；留空則保留目前值）",

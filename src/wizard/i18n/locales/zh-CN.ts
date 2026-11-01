@@ -229,6 +229,7 @@ export const zh_CN = {
       currentNotInCatalog: "当前值（不在目录中）",
       allowed: "已允许",
       allowedNotInCatalog: "已允许（不在目录中）",
+      fallbackText: "备用模型（逗号分隔 provider/model；留空则保留当前值）",
       fallbackPicker: "备用模型（多选）",
       allowlistPicker: "/model 选择器中的模型（多选）",
       allowlistText: "允许的模型（逗号分隔 provider/model；留空则保留当前值）",

@@ -233,6 +233,7 @@ export const en = {
       currentNotInCatalog: "current (not in catalog)",
       allowed: "allowed",
       allowedNotInCatalog: "allowed (not in catalog)",
+      fallbackText: "Fallback models (comma-separated provider/model; blank to keep current)",
       fallbackPicker: "Fallback models (multi-select)",
       allowlistPicker: "Models in /model picker (multi-select)",
       allowlistText: "Allowlist models (comma-separated provider/model; blank to keep current)",

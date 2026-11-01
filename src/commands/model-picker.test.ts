@@ -584,3 +584,34 @@ it.each([
   });
   expect(multiselect.mock.calls[0]?.[0]?.initialValues).toEqual(seeded);
 });
+
+it.each([
+  { restrictsPicker: true, initial: "openai/*, anthropic/claude-sonnet-4-6" },
+  { restrictsPicker: false, initial: "anthropic/claude-sonnet-4-6" },
+])("keeps saved entries in the no-catalog text prompt: $restrictsPicker", async (testCase) => {
+  loadModelCatalog.mockResolvedValue([]);
+  const text = vi.fn(async ({ initialValue }: { initialValue?: string }) => initialValue ?? "");
+  const config: OpenClawConfig = {
+    meta: { migrations: { modelPolicyAllowlist: true } },
+    agents: {
+      defaults: {
+        model: { primary: "openai/gpt-5.5", fallbacks: ["anthropic/claude-sonnet-4-6"] },
+        models: { "openai/gpt-6-astra": {} },
+        modelPolicy: { allow: ["openai/*", "anthropic/claude-sonnet-4-6"] },
+      },
+    },
+  };
+  const result = await promptModelAllowlist({
+    config,
+    prompter: makePrompter({ text: text as unknown as WizardPrompter["text"] }),
+    restrictsPicker: testCase.restrictsPicker,
+  });
+  expect(text.mock.calls[0]?.[0]?.initialValue).toBe(testCase.initial);
+  if (testCase.restrictsPicker) {
+    const next = applyModelAllowlist(config, result.models ?? []);
+    expect(next.agents?.defaults?.modelPolicy?.allow).toEqual([
+      "openai/*",
+      "anthropic/claude-sonnet-4-6",
+    ]);
+  }
+});

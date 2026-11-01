@@ -42,7 +42,7 @@ import { resolveOwningPluginIdsForProviderRef } from "../plugins/providers.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { t } from "../wizard/i18n/index.js";
 import type { WizardPrompter, WizardSelectOption } from "../wizard/prompts.js";
-import { createScopedSeeds, normalizeModelKeys } from "./model-picker-allowlist.js";
+import { createPickerSeeds, normalizeModelKeys } from "./model-picker-allowlist.js";
 import {
   loadResolvedModelPickerRuntime,
   maybeHandleProviderPluginSelection,
@@ -775,10 +775,11 @@ export async function promptModelAllowlist(params: {
     ...fallbackKeys,
     ...(params.initialSelections ?? []),
   ]);
-  const scopedSeeds = createScopedSeeds({
+  const seeds = createPickerSeeds({
     ...params,
     initialSeeds,
-    fallbackSeeds: [resolvedKey, ...fallbackKeys],
+    primary: resolvedKey,
+    fallbacks: fallbackKeys,
   });
   const hasRealSeed =
     existingKeys.length > 0 ||
@@ -858,7 +859,7 @@ export async function promptModelAllowlist(params: {
       includeSetupRegistry: true,
     });
     const scopeKeys = allowedKeys.length > 0 ? allowedKeys : scopedFastKeys;
-    const initialKeys = scopedSeeds(scopeKeys);
+    const initialKeys = seeds.scoped(scopeKeys);
     const options: WizardSelectOption[] = [];
     const seen = new Set<string>();
     for (const key of scopeKeys) {
@@ -915,11 +916,10 @@ export async function promptModelAllowlist(params: {
     hasAuth,
   });
   if (catalog.length === 0) {
-    const noCatalogInitialKeys =
-      existingKeys.length > 0 ? normalizeModelKeys([...existingKeys, ...fallbackKeys]) : [];
+    const textPrompt = seeds.text(existingKeys);
     const raw = await params.prompter.text({
-      message: params.message ?? t("wizard.model.allowlistText"),
-      initialValue: noCatalogInitialKeys.join(", "),
+      message: params.message ?? textPrompt.message,
+      initialValue: textPrompt.initialValue,
       placeholder: "provider/model, other-provider/model",
     });
     const models = normalizeModelKeys((raw ?? "").split(","));
@@ -964,7 +964,7 @@ export async function promptModelAllowlist(params: {
         ...scopedConfiguredKeys,
       ])
     : undefined;
-  const selectableInitialSeeds = scopeKeys ? scopedSeeds(scopeKeys) : initialSeeds;
+  const selectableInitialSeeds = scopeKeys ? seeds.scoped(scopeKeys) : initialSeeds;
   const initialKeys = selectableInitialSeeds.filter(isVisibleModelRef);
 
   for (const entry of filteredCatalog) {
@@ -1013,7 +1013,7 @@ export function applyModelFallbacksFromSelection(
   });
   const resolvedKey = modelKey(resolved.provider, resolved.model);
   const includesResolvedPrimary = normalized.includes(resolvedKey);
-  if (!includesResolvedPrimary && !scopeKeySet) {
+  if (!includesResolvedPrimary && !scopeKeySet && !opts.fallbacksOnly) {
     return cfg;
   }
 

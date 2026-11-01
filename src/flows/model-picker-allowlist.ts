@@ -14,23 +14,28 @@ import { createModelVisibilityPolicy } from "../agents/model-visibility-policy.j
 import { normalizeAgentModelRefForConfig } from "../config/model-input.js";
 import { parseModelPolicyWildcardRef } from "../config/model-policy-ref.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { t } from "../wizard/i18n/index.js";
 
 export function normalizeModelKeys(values: string[]): string[] {
   return [...new Set(Array.from(values, normalizeAgentModelRefForConfig).filter(Boolean))];
 }
 
 /**
- * Initial picker selection for a scope. Re-running configure starts from the saved
- * allowlist too, including wildcard matches, so earlier picks stay selected.
+ * Initial picker selections. Re-running configure starts from the saved allowlist,
+ * including wildcard matches, so earlier picks stay selected; fallback-only
+ * selection starts from the primary and its fallbacks.
  */
-export function createScopedSeeds(params: {
+export function createPickerSeeds(params: {
   config: OpenClawConfig;
   agentId?: string;
   restrictsPicker?: boolean;
   initialSeeds: string[];
-  /** Fallback-only selection starts from the primary and its fallbacks. */
-  fallbackSeeds: string[];
-}): (scope: string[]) => string[] {
+  primary: string;
+  fallbacks: string[];
+}): {
+  scoped: (scope: string[]) => string[];
+  text: (configuredKeys: string[]) => { message: string; initialValue: string };
+} {
   const policy =
     params.restrictsPicker === false
       ? undefined
@@ -51,11 +56,34 @@ export function createScopedSeeds(params: {
       (policy.allowedKeys.has(key) || policy.allowsByWildcard(ref)),
     );
   };
-  return (scope) =>
-    normalizeModelKeys([
-      ...(params.restrictsPicker === false ? params.fallbackSeeds : params.initialSeeds),
-      ...scope.filter(allowedBySavedPolicy),
-    ]).filter((key) => scope.includes(key));
+  const fallbackOnly = params.restrictsPicker === false;
+  const savedRefs = resolveConfiguredModelPolicyAllow({
+    cfg: params.config,
+    agentId: params.agentId,
+  }).refs;
+  return {
+    scoped: (scope) =>
+      normalizeModelKeys([
+        ...(fallbackOnly ? [params.primary, ...params.fallbacks] : params.initialSeeds),
+        ...scope.filter(allowedBySavedPolicy),
+      ]).filter((key) => scope.includes(key)),
+    // Without a catalog the text prompt edits the saved list itself, wildcards included.
+    text: (configuredKeys) => {
+      const unrestricted =
+        configuredKeys.length > 0
+          ? normalizeModelKeys([...configuredKeys, ...params.fallbacks])
+          : [];
+      const keys = fallbackOnly
+        ? params.fallbacks
+        : savedRefs.length > 0
+          ? [...savedRefs]
+          : unrestricted;
+      return {
+        message: t(fallbackOnly ? "wizard.model.fallbackText" : "wizard.model.allowlistText"),
+        initialValue: keys.join(", "),
+      };
+    },
+  };
 }
 
 /**
