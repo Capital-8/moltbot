@@ -1,6 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
+import * as highlighter from "../../components/markdown-highlighter.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import type { ChatSessionSnapshot } from "./session-message-cache.ts";
 import * as database from "./session-snapshot-database.ts";
@@ -9,7 +10,7 @@ import {
   subscribeSnapshotInvalidation,
 } from "./session-snapshot-invalidation-events.ts";
 import { clearStoredChatSnapshots } from "./session-snapshot-invalidation.ts";
-import { prewarmChatSnapshot } from "./session-snapshot-prewarm.ts";
+import { joinPrewarmedChatHighlighting, prewarmChatSnapshot } from "./session-snapshot-prewarm.ts";
 import * as snapshots from "./session-snapshot-store.ts";
 import { writeSnapshotFixture } from "./session-snapshot.test-support.ts";
 
@@ -22,9 +23,9 @@ const stored: ChatSessionSnapshot = {
   deltaCursor: "stored-cursor",
 };
 
-async function seed() {
+async function seed(snapshot = stored) {
   const writer = new snapshots.SessionSnapshotStore();
-  writeSnapshotFixture(writer, key, stored);
+  writeSnapshotFixture(writer, key, snapshot);
   writeSnapshotFixture(writer, otherKey, { ...stored, sessionId: "other-session" });
   await writer.flush();
   return writer;
@@ -85,6 +86,7 @@ describe("routed transcript prewarm", () => {
   });
 
   it("starts before consumption and reuses the matching read only once", async () => {
+    const syntax = vi.spyOn(highlighter, "loadMarkdownHighlighter");
     const { open, reader } = await prewarm();
     expect(reader.readReady(key)).toBeUndefined();
     const ready = await snapshots.readPrewarmedChatSnapshot(key);
@@ -96,7 +98,40 @@ describe("routed transcript prewarm", () => {
     expect(open).toHaveBeenCalledOnce();
     expect(await reader.read(key)).toEqual(stored);
     expect(open).toHaveBeenCalledTimes(2);
+    expect(syntax).not.toHaveBeenCalled();
   });
+
+  it.each(["ready", "timeout"] as const)(
+    "joins fenced snapshots until syntax is %s, bounded to 100 ms",
+    async (settle) => {
+      const runtime = createDeferred<void>();
+      vi.spyOn(highlighter, "loadMarkdownHighlighter").mockReturnValue(runtime.promise);
+      await seed({
+        ...stored,
+        messages: [{ role: "assistant", content: "```ts\nconst ready = true;\n```" }],
+      });
+      void prewarmChatSnapshot(key);
+      await snapshots.readPrewarmedChatSnapshot(key);
+      vi.useFakeTimers();
+      try {
+        const completed = vi.fn();
+        const joined = joinPrewarmedChatHighlighting("agent:main:routed").then(completed);
+        await vi.advanceTimersByTimeAsync(99);
+        expect(completed).not.toHaveBeenCalled();
+        if (settle === "ready") {
+          runtime.resolve();
+        } else {
+          await vi.advanceTimersByTimeAsync(1);
+        }
+        await joined;
+        expect(completed).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        runtime.resolve();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("leaves the prewarm available when another session reads normally", async () => {
     const { open, reader } = await prewarm();

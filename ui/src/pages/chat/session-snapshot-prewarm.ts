@@ -1,3 +1,4 @@
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   sameBootRecordOwner,
   subscribeBootRecordChanges,
@@ -5,6 +6,7 @@ import {
 } from "../../app/boot-record.ts";
 import { loadMarkdownHighlighter } from "../../components/markdown-highlighter.ts";
 import type { SidebarSnapshotModel } from "../../components/sidebar-snapshot-data.ts";
+import { extractTextCached } from "../../lib/chat/message-extract.ts";
 import { readStoredChatSnapshotRecord } from "./session-snapshot-database.ts";
 import {
   sidebarSnapshotInvalidationMatches,
@@ -21,6 +23,7 @@ type PrewarmedSnapshot = {
   cacheKey: string;
   cancelled: boolean;
   promise: Promise<unknown>;
+  highlighting?: Promise<void>;
   prepared?: {
     promise: PreparedSnapshotRead;
     snapshot?: Awaited<PreparedSnapshotRead>;
@@ -71,9 +74,14 @@ export async function prewarmChatSnapshot(cacheKey: string): Promise<void> {
         if (entry.cancelled || generation !== snapshotStoreGeneration) {
           return undefined;
         }
-        // Warm syntax evaluation overlaps the route module instead of the first row commit.
-        if (record) {
-          void loadMarkdownHighlighter();
+        const messages = asOptionalRecord(asOptionalRecord(record)?.snapshot)?.messages;
+        if (
+          Array.isArray(messages) &&
+          messages.some((message) =>
+            /^ {0,3}(?:`{3,}|~{3,})/mu.test(extractTextCached(message) ?? ""),
+          )
+        ) {
+          entry.highlighting = loadMarkdownHighlighter();
         }
         return record;
       })
@@ -90,6 +98,21 @@ export async function prewarmChatSnapshot(cacheKey: string): Promise<void> {
       await readPrewarmedChatSnapshot(cacheKey);
     }
   } catch {}
+}
+
+/** Optional syntax can join route loading, but cannot hold a cached pane past 100 ms. */
+export function joinPrewarmedChatHighlighting(sessionKey: string) {
+  const entry = pending;
+  if (!entry?.cacheKey.endsWith(`\u0000${sessionKey}`) || !entry.highlighting) {
+    return Promise.resolve();
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    entry.highlighting,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, 100);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 export function consumePrewarmedChatSnapshot(cacheKey: string): PrewarmedSnapshot | undefined {

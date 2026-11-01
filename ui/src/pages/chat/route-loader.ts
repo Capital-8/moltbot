@@ -46,6 +46,7 @@ import {
   type SessionRoutePresentation,
 } from "./route-loader-short-resolve.ts";
 import type { ChatRouteData } from "./session-route-data.ts";
+import { joinPrewarmedChatHighlighting } from "./session-snapshot-prewarm.ts";
 
 export type { ChatRouteData, SessionChatRouteData } from "./session-route-data.ts";
 
@@ -639,6 +640,8 @@ export async function loadSessionPage(
   );
   const creation = context.chatSubmissions.creation;
   if ("kind" in result && result.kind === "session") {
+    await joinPrewarmedChatHighlighting(result.sessionKey);
+    signal.throwIfAborted();
     if (creation?.sessionKey === result.sessionKey) {
       result.creation = creation;
     }
