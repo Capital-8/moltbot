@@ -325,6 +325,48 @@ printf '%s\\t%s\\n' "$OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE" "$2" >> "$TRACE_PA
   ]);
 });
 
+it("bridges a 2026.10.9 cron authority migration through 2026.9.7", () => {
+  const root = tempDirs.make("openclaw-survivor-cron-bridge-");
+  const tracePath = path.join(root, "trace");
+  const source = readFileSync("scripts/e2e/lib/upgrade-survivor/run.sh", "utf8");
+  const start = source.indexOf("migrate_baseline_cron_authority() {");
+  const end = source.indexOf("\ninitialize_state()", start);
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      `${source.slice(start, end)}
+rm_rf_retry() { rm -rf "$1"; }
+openclaw_prepublish_plugin_registry_run_published() {
+  mkdir -p "$bridge_prefix/bin"
+  cat > "$bridge_prefix/bin/openclaw" <<'EOF'
+#!/bin/sh
+printf '%s\\n' "$*" >> "$TRACE_PATH"
+if [ "$1" = "--version" ]; then printf '%s\\n' 'OpenClaw 2026.9.7'; fi
+EOF
+  chmod +x "$bridge_prefix/bin/openclaw"
+}
+openclaw_e2e_maybe_timeout() { shift; "$@"; }
+baseline_version=2026.10.9
+ARTIFACT_ROOT="$FIXTURE_ROOT/artifacts"
+BASELINE_DOCTOR_LOG="$FIXTURE_ROOT/doctor.log"
+COMMAND_TIMEOUT=10s
+mkdir -p "$ARTIFACT_ROOT"
+migrate_baseline_cron_authority
+`,
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, FIXTURE_ROOT: root, TRACE_PATH: tracePath },
+    },
+  );
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(tracePath, "utf8").trim().split("\n")).toEqual([
+    "--version",
+    "doctor --fix --non-interactive",
+  ]);
+});
+
 const baselineJobs = [
   { id: "job-default", name: "survivor-default-owner" },
   { id: "job-ops", name: "survivor-ops-owner", agentId: "ops" },

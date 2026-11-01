@@ -991,8 +991,7 @@ migrate_baseline_cron_authority() {
   local bridge_install_log="$ARTIFACT_ROOT/cron-migration-bridge-install.log"
   local bridge_cli="openclaw"
   local bridge_version_expected="$baseline_version"
-  if [ "$baseline_version" != "2026.9.7" ] &&
-    [ "$(printf '%s\n' "2026.10.1" "$baseline_version" | sort -V | head -n 1)" != "2026.10.1" ]; then
+  if [ "$baseline_version" != "2026.9.7" ]; then
     rm_rf_retry "$bridge_prefix"
     mkdir -p "$bridge_prefix"
     if ! openclaw_prepublish_plugin_registry_run_published openclaw_e2e_maybe_timeout "${OPENCLAW_E2E_NPM_INSTALL_TIMEOUT:-600s}" npm install -g --prefix "$bridge_prefix" openclaw@2026.9.7 --no-fund --no-audit >"$bridge_install_log" 2>&1; then
