@@ -1,8 +1,8 @@
 import { createSignal } from "solid-js";
-import { escapeHtml } from "../../../src/shared/html-escape.js";
 
 type Highlighter = typeof import("./markdown-highlight-runtime.ts").highlightCodeHtml;
 const [readHighlighter, setHighlighter] = createSignal<Highlighter | null | undefined>(undefined);
+export { readHighlighter };
 let highlighterLoad: Promise<void> | undefined;
 
 /** Shared by code renderers; a failed optional chunk leaves escaped, copyable text. */
@@ -27,16 +27,4 @@ export function markdownHighlightingReady(): boolean {
 
 export function markdownHighlightingPending(): boolean {
   return highlighterLoad !== undefined && readHighlighter() === undefined;
-}
-
-/** Highlight when available; plain escaped code remains readable while the chunk loads. */
-export function highlightCodeHtml(text: string, lang: string): string {
-  const highlighter = readHighlighter();
-  if (highlighter) {
-    return highlighter(text, lang);
-  }
-  if (text.trim()) {
-    void loadMarkdownHighlighter();
-  }
-  return escapeHtml(text);
 }

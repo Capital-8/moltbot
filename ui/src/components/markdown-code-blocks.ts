@@ -3,7 +3,7 @@ import { t } from "../i18n/index.ts";
 import { registerCodeBlocksEnglish } from "../i18n/locales/en-code-blocks.ts";
 import { CODE_PREVIEW_LINE_COUNT } from "./markdown-code-highlight-chunks.ts";
 import { copyMarkdownText } from "./markdown-copy.ts";
-import { highlightCodeHtml } from "./markdown-highlighter.ts";
+import { loadMarkdownHighlighter, readHighlighter } from "./markdown-highlighter.ts";
 import {
   parseMarkdownJson,
   renderMarkdownJsonModes,
@@ -18,6 +18,18 @@ registerCodeBlocksEnglish();
 const blockArtCopyPayloadPrefix = "openclaw:block-art-code:";
 const blockArtCodeBlockCopyPayloadEncoding = "block-art-json";
 const CODE_STICKY_ACTIONS_LINE_THRESHOLD = 300;
+
+/** Highlight when available; plain escaped code remains readable while the chunk loads. */
+export function highlightCodeHtml(text: string, lang: string): string {
+  const highlighter = readHighlighter();
+  if (highlighter) {
+    return highlighter(text, lang);
+  }
+  if (text.trim()) {
+    void loadMarkdownHighlighter();
+  }
+  return escapeHtml(text);
+}
 
 function encodeCodeBlockCopyPayload(value: string): string {
   // DOMPurify removes attributes containing XML comment ends or closing tags.
