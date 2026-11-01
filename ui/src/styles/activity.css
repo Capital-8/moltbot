@@ -355,6 +355,7 @@ a.activity-current-work__row:hover {
 }
 
 .activity-pulse--loading {
+  background: var(--skeleton-base);
   height: 108px;
 }
 

@@ -61,6 +61,10 @@ describe("Control UI shimmer ownership", () => {
       const css = fs.readFileSync(path.join(uiSource, "styles", sheet), "utf8");
       expect(css, sheet).toContain("--skeleton-base: var(--skeleton-base-raised);");
     }
+    const activity = fs.readFileSync(path.join(uiSource, "styles/activity.css"), "utf8");
+    expect(activity).toMatch(
+      /\.activity-pulse--loading \{[^}]*background: var\(--skeleton-base\);/u,
+    );
   });
 });
 
