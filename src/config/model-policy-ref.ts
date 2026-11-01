@@ -46,10 +46,12 @@ export function parseModelPolicyWildcardRef(raw: string): ModelPolicyWildcardRef
   return { key: `${[provider, ...segments.slice(1), namePrefix].join("/")}*`, provider };
 }
 
-/** True when a canonical wildcard key from parseModelPolicyWildcardRef covers a provider/model key. */
+/**
+ * True when a canonical wildcard key from parseModelPolicyWildcardRef covers a provider/model key.
+ * `*` may match nothing, so `provider/family-v1*` also covers `provider/family-v1`.
+ */
 export function modelPolicyWildcardMatches(wildcardKey: string, key: string): boolean {
-  const prefix = wildcardKey.slice(0, -1);
-  return key.length > prefix.length && key.startsWith(prefix);
+  return key.startsWith(wildcardKey.slice(0, -1));
 }
 
 /** True for a syntactically valid exact provider/model policy reference. */
