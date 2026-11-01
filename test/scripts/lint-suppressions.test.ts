@@ -286,17 +286,19 @@ describe("production lint suppressions", () => {
         "src/config/sessions/session-transcript-reconcile.close-failure.test-support.mjs|typescript/unbound-method|1",
         "src/config/sessions/session-transcript-reconcile.sql-observer.test-support.ts|typescript/unbound-method|1",
         // Canonical entries must honor toJSON and omit non-JSON values exactly as persistence does.
-        "src/config/sessions/transcript-json.ts|unicorn/prefer-structured-clone|1",
+        "src/config/sessions/transcript-json-normalize.ts|unicorn/prefer-structured-clone|1",
         "src/config/zod-schema.channel-messaging-common.ts|typescript/no-generated-empty-object-type|1",
         // Command declarations compare their stored JSON shape, where undefined properties are omitted.
         "src/cron/store/job-mutations.ts|unicorn/prefer-structured-clone|1",
+        // Hello projections sort private arrays without copying them a second time.
+        "src/gateway/control-ui-plugin-tabs.ts|unicorn/no-array-sort|4",
         // These sort only freshly materialized arrays or locally owned swarm member lists.
         "src/gateway/health/collector.ts|unicorn/no-array-sort|3",
         "src/gateway/methods/read-share-keys.ts|unicorn/no-array-sort|1",
         "src/gateway/node-connection-notifications.ts|unicorn/no-array-sort|1",
         "src/gateway/node-plugin-tool-snapshot.ts|unicorn/no-array-sort|1",
         // These handlers sort only fresh private arrays, preserving their upstream sources.
-        "src/gateway/server-methods/sessions-files.ts|unicorn/no-array-sort|1",
+        "src/gateway/server-methods/session-files-root.ts|unicorn/no-array-sort|1",
         "src/gateway/server-methods/sessions-read.ts|unicorn/no-array-sort|1",
         "src/gateway/server-methods/sessions-search-projected.ts|unicorn/no-array-sort|1",
         "src/gateway/server-methods/tools-catalog.ts|unicorn/no-array-sort|1",

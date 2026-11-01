@@ -208,7 +208,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
     this.sessionProjection = (async () => {
       const config = await captureRuntimeConfigAsyncReader()();
       const { runSessionStartupMigration } =
-        await import("../config/sessions/startup-migration.js");
+        await import("../config/sessions/startup-migration-runtime.js");
       await runSessionStartupMigration({
         cfg: config,
         env: process.env,
