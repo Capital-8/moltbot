@@ -48,6 +48,10 @@ if (
       }
     }
   };
+  const profiler =
+    process.env.OPENCLAW_RECONCILE_MEASURE_PROFILE === "1"
+      ? (await import("./workspace-reconcile-gateway-profile.mjs")).createGatewayProfiler(directory)
+      : undefined;
   const server = createServer((request, response) => {
     const action = request.url?.slice(1);
     if (
@@ -62,18 +66,25 @@ if (
         response.writeHead(409).end();
         return;
       }
-      // Retain and observe the touched buffers for the complete Gateway lifetime.
-      assert.equal(
-        ballast.reduce((sum, buffer) => sum + buffer.byteLength, 0),
-        ballastBytes,
-      );
-      events.length = 0;
-      delay.reset();
-      scope = action;
-      start = snapshot();
-      response
-        .writeHead(200, { "content-type": "application/json" })
-        .end(JSON.stringify({ scope, pid: process.pid, rss: start.memory.rss }));
+      const begin = () => {
+        // Retain and observe the touched buffers for the complete Gateway lifetime.
+        assert.equal(
+          ballast.reduce((sum, buffer) => sum + buffer.byteLength, 0),
+          ballastBytes,
+        );
+        events.length = 0;
+        delay.reset();
+        scope = action;
+        start = snapshot();
+        response
+          .writeHead(200, { "content-type": "application/json" })
+          .end(JSON.stringify({ scope, pid: process.pid, rss: start.memory.rss }));
+      };
+      if (profiler) {
+        void profiler.start(action).then(begin, () => response.writeHead(500).end());
+      } else {
+        begin();
+      }
       return;
     }
     if (!scope) {
@@ -110,7 +121,13 @@ if (
     };
     appendFileSync(path.join(directory, "metrics.jsonl"), JSON.stringify(result) + "\n");
     scope = undefined;
-    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
+    const finishResponse = () =>
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
+    if (profiler) {
+      void profiler.stop(result.scope).then(finishResponse, () => response.writeHead(500).end());
+    } else {
+      finishResponse();
+    }
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);

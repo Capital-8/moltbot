@@ -16,6 +16,8 @@
  * loop delay, main-thread/process CPU, RSS and heapUsed delta (NOT allocation).
  * Captures ChildProcess.prototype.spawn only: spawnSync/execFileSync and broker CPU
  * are excluded. Selected fast-import launches use this asynchronous boundary.
+ * --profile adds diagnostic main-thread CPU profiles and broker IPC traces.
+ * Exclude profiled runs from timing aggregates; the default workload is unchanged.
  * Linux requires the real broker; other platforms retain their native fallback.
  * Source/build hashes, logs and metrics remain in output; all owned processes join
  * before temporary fixture cleanup. Failed fixtures remain for diagnosis, with
@@ -56,6 +58,7 @@ const { values } = parseArgs({
     arm: { type: "string", default: "candidate" },
     files: { type: "string", default: "4096" },
     "ballast-mib": { type: "string", default: "8192" },
+    profile: { type: "boolean", default: false },
   },
 });
 assert(values["repo-root"] && values["output-dir"], "--repo-root and --output-dir are required");
@@ -117,6 +120,13 @@ const provenance = {
   lockfileSha256: await fileHash(path.join(repoRoot, "pnpm-lock.yaml")),
   driverSha256: await fileHash(script),
   preloadSha256: await fileHash(preload),
+  ...(values.profile
+    ? {
+        profileHelperSha256: await fileHash(
+          path.join(path.dirname(script), "workspace-reconcile-gateway-profile.mjs"),
+        ),
+      }
+    : {}),
 };
 const fixtureRoot = await fs.mkdtemp(
   path.join(process.platform === "darwin" ? "/private/tmp" : os.tmpdir(), "oc-reconcile-"),
@@ -174,6 +184,7 @@ try {
           runtimeEnvPatch: {
             OPENCLAW_RECONCILE_MEASURE_DIR: outputDir,
             OPENCLAW_RECONCILE_MEASURE_BALLAST_MIB: String(ballastMiB),
+            ...(values.profile ? { OPENCLAW_RECONCILE_MEASURE_PROFILE: "1" } : {}),
           },
         }),
     },
@@ -312,6 +323,7 @@ try {
         retainedFixture: failure ? fixtureRoot : undefined,
         error: failure ? formatErrorMessage(failure) : undefined,
         arm: values.arm,
+        ...(values.profile ? { diagnosticProfile: true } : {}),
         provenance,
         platform: process.platform,
         node: process.version,
