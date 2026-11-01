@@ -1,11 +1,14 @@
 // A real, two-page PDF: no renderer mocks or external document data.
-export function pdfFixture(pages = ["Release checklist", "Confirm the rollback owner."]) {
+export function pdfFixture(
+  pages = ["Release checklist", "Confirm the rollback owner."],
+  rotations = [0, 0],
+) {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
     ...[6, 7].map(
-      (stream) =>
-        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 450 600] /Resources << /Font << /F1 5 0 R >> >> /Contents ${stream} 0 R >>`,
+      (stream, index) =>
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 450 600] /Rotate ${rotations[index]} /Resources << /Font << /F1 5 0 R >> >> /Contents ${stream} 0 R >>`,
     ),
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ...pages.map((text) => {

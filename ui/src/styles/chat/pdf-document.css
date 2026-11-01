@@ -75,6 +75,19 @@
   --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
+/* TextLayer uses unrotated page dimensions; rotate its root with the canvas. */
+.pdf-document .textLayer[data-main-rotation="90"] {
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.pdf-document .textLayer[data-main-rotation="180"] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.pdf-document .textLayer[data-main-rotation="270"] {
+  transform: rotate(270deg) translateX(-100%);
+}
+
 .pdf-document .textLayer :is(span, br) {
   position: absolute;
   color: transparent;
