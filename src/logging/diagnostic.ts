@@ -340,6 +340,11 @@ function isActiveAbortRecoveryEligible(params: {
   if (classification.classification !== "stalled_agent_run") {
     return false;
   }
+  // Repeated provider requests are diagnostic evidence, not independent stop
+  // authority. The provider retry/deadline owner must settle or stop the run.
+  if (classification.reason === "repeated_model_requests_without_progress") {
+    return false;
+  }
   // Repeated requests can be stalled while a tool owns the current phase.
   // Transport liveness must not replace that independent semantic evidence.
   if (isRepeatedModelRequestStalled(activity, stuckSessionAbortMs)) {

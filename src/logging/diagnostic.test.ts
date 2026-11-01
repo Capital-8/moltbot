@@ -491,7 +491,7 @@ describe("stuck session diagnostics threshold", () => {
   });
 
   it.each(["model_call", "tool_call"] as const)(
-    "recovers repeated request attempts during %s despite fresh mechanical activity",
+    "reports repeated request attempts during %s without preempting the provider owner",
     async (activeWorkKind) => {
       const recoverStuckSession = vi.fn(() => new Promise<never>(() => {}));
       const stuckSessionWarnMs = 30_000;
@@ -547,12 +547,7 @@ describe("stuck session diagnostics threshold", () => {
         activeWorkKind,
         activeToolAgeMs: activeWorkKind === "tool_call" ? (stuckSessionAbortMs * 4) / 3 : undefined,
       });
-      expect(recoverStuckSession).toHaveBeenCalledTimes(1);
-      expectRecoveryCall(recoverStuckSession, {
-        ...session,
-        queueDepth: 0,
-        allowActiveAbort: true,
-      });
+      expect(recoverStuckSession).not.toHaveBeenCalled();
     },
   );
 
