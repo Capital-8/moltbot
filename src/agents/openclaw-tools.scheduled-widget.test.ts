@@ -92,3 +92,18 @@ it("keeps scheduled turns with a real inline client on the normal widget surface
   expect(tool).toMatchObject({ requiredClientCaps: ["inline-widgets"] });
   expect(tool?.parameters).not.toMatchObject({ required: expect.arrayContaining(["pin"]) });
 });
+
+it.each([undefined, []] as Array<string[] | undefined>)(
+  "pins scheduled widgets without borrowing remembered inline capability (current: %j)",
+  (clientCaps) => {
+    expectPinnedOnlySchema(
+      createOpenClawTools({
+        agentSessionKey: "agent:main:dashboard:scheduled",
+        gatewayCallerScheduled: true,
+        runtimeToolAllowlist: ["*"],
+        listingClientCaps: ["inline-widgets"],
+        clientCaps,
+      }),
+    );
+  },
+);
