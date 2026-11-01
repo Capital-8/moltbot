@@ -8,6 +8,7 @@ import {
   createQaBusState,
   createQaChannelTransport,
   createQaGatewayChild,
+  isInternalRuntimeContextCarrierText,
   startQaBusServer,
 } from "../../../../extensions/qa-lab/api.js";
 import type { SessionsListResult } from "../../../../src/gateway/session-utils.types.js";
@@ -55,6 +56,25 @@ type RequestEvidence = {
   announceStep: boolean;
 };
 
+function inputText(content: unknown): string {
+  return Array.isArray(content)
+    ? content
+        .map((part: { text?: unknown }) => (typeof part?.text === "string" ? part.text : ""))
+        .join("\n")
+    : typeof content === "string"
+      ? content
+      : "";
+}
+
+function findLatestUserPromptText(body: ProviderRequest): string {
+  return (
+    body.input
+      .filter((item) => item.role === "user")
+      .map((item) => inputText(item.content))
+      .findLast((text) => !isInternalRuntimeContextCarrierText(text)) ?? ""
+  );
+}
+
 function toolOutput(body: ProviderRequest, callId: string): ToolReceipt | undefined {
   const output = body.input.find(
     (item) => item.type === "function_call_output" && item.call_id === callId,
@@ -90,13 +110,7 @@ async function startProofProvider() {
       const developerText = JSON.stringify(
         body.input.filter((item) => item.role === "developer" || item.role === "system"),
       );
-      const userText = JSON.stringify(
-        body.input.findLast(
-          (item) =>
-            item.role === "user" &&
-            !JSON.stringify(item.content).includes("<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>"),
-        ),
-      );
+      const userText = findLatestUserPromptText(body);
       const kind = developerText.includes("Generate a concise session title")
         ? "title"
         : body.model === "qa-child"
@@ -247,6 +261,24 @@ describe("sessions_send to a visible spawn child", () => {
     if (errors.length) {
       throw new AggregateError(errors, "visible child proof cleanup failed");
     }
+  });
+
+  it.each([
+    ["current", "OpenClaw runtime context:\nSession: agent:qa:main"],
+    [
+      "legacy",
+      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\nSession\n<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+    ],
+  ])("selects the real user prompt before a %s runtime carrier", (_kind, carrier) => {
+    expect(
+      findLatestUserPromptText({
+        model: "qa-parent",
+        input: [
+          { role: "user", content: PROMPT_SEND },
+          { role: "user", content: carrier },
+        ],
+      }),
+    ).toBe(PROMPT_SEND);
   });
 
   it("returns the waited reply inline without an announce run against the child", async () => {
