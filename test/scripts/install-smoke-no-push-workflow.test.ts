@@ -898,6 +898,11 @@ describe("install smoke no-push root image transport", () => {
       '"https://codeload.github.com/${TARGET_REPOSITORY}/tar.gz/${TARGET_SHA}"',
     );
     const packageStep = step(producer, "Package candidate only inside pinned harness");
+    expect(packageStep.env).toMatchObject({
+      OPENCLAW_DOCKER_PACKAGE_BUILD_TIMEOUT_MS: "3300000",
+    });
+    expect(packageStep.run).toContain("timeout --kill-after=30s 60m docker run --rm");
+    expect(packageStep.run).toContain("-e OPENCLAW_DOCKER_PACKAGE_BUILD_TIMEOUT_MS");
     expect(packageStep.run).toContain("--user node");
     expect(packageStep.run).toContain("--cap-drop ALL");
     expect(packageStep.run).toContain("pnpm install --frozen-lockfile");

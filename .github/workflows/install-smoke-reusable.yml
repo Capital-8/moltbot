@@ -819,6 +819,7 @@ jobs:
       - name: Package candidate only inside pinned harness
         env:
           ALLOW_UNRELEASED_CHANGELOG: ${{ inputs.allow_unreleased_changelog }}
+          OPENCLAW_DOCKER_PACKAGE_BUILD_TIMEOUT_MS: "3300000"
         run: |
           set -euo pipefail
           package_dir="${RUNNER_TEMP}/candidate-package"
@@ -828,7 +829,7 @@ jobs:
           limit_summary="$(mktemp "${RUNNER_TEMP}/candidate-limits.XXXXXX")"
           chmod 0666 "$limit_summary"
           trap 'pack_exit=$?; cat "$limit_summary" >> "$GITHUB_STEP_SUMMARY"; rm -f "$limit_summary"; exit "$pack_exit"' EXIT
-          timeout --kill-after=30s 50m docker run --rm \
+          timeout --kill-after=30s 60m docker run --rm \
             --cap-drop ALL \
             --security-opt no-new-privileges \
             --pids-limit 1024 \
@@ -838,6 +839,7 @@ jobs:
             -e CI=1 \
             -e GITHUB_ACTIONS \
             -e GITHUB_STEP_SUMMARY=/tmp/openclaw-limit-summary.md \
+            -e OPENCLAW_DOCKER_PACKAGE_BUILD_TIMEOUT_MS \
             -v "${limit_summary}:/tmp/openclaw-limit-summary.md" \
             -v "${RUNNER_TEMP}/candidate.tar.gz:/input/candidate.tar.gz:ro" \
             -v "${package_dir}:/output" \
