@@ -242,6 +242,12 @@ openclaw-select-picker {
   margin-inline-start: auto;
 }
 
+/* Safari collapses an unsized svg in this inline-flex rail. */
+.picker-select__check svg {
+  width: 16px;
+  height: 16px;
+}
+
 .picker-select__menu.oc-overlay {
   /* Keep the picker budget when the shared overlay stylesheet loads later. */
   max-height: min(400px, var(--oc-overlay-available-height, calc(100dvh - 16px)));
