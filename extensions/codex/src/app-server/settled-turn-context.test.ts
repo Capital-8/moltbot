@@ -86,6 +86,7 @@ async function captureContext(params: {
   model?: string;
   modelProvider?: string;
   authProfileId?: string;
+  promptSuppressed?: boolean;
 }) {
   mocks.readHistory.mockImplementation(
     (_target, read: (messages: Iterable<AgentMessage>) => unknown) => read(params.historyMessages),
@@ -99,6 +100,7 @@ async function captureContext(params: {
     model: params.model ?? "gpt-5.6-luna",
     modelProvider: params.modelProvider,
     authProfileId: params.authProfileId,
+    promptSuppressed: params.promptSuppressed,
   });
 }
 
@@ -202,6 +204,58 @@ describe("captureCodexSettledTurnFinalizationContext", () => {
       expect(Object.isFrozen(context?.selection)).toBe(true);
     },
   );
+
+  it("captures a turn whose internal prompt was never mirrored", async () => {
+    const prior = [
+      message({ role: "user", content: "Send the update to Alice." }, "turn-1:prompt"),
+      message(
+        { role: "assistant", content: [{ type: "text", text: "Update: shipped." }] },
+        "turn-1:final",
+      ),
+    ];
+    const settledMessages = settledTurn().slice(1);
+    const context = await captureContext({
+      historyMessages: [...prior, ...settledMessages],
+      mirroredMessages: settledMessages,
+      settledMessages,
+      promptSuppressed: true,
+    });
+
+    expect(context?.data).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Send the update to Alice." }],
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Update: shipped." }],
+      },
+      { type: "function_call", call_id: "call-2", name: "message", arguments: "{}" },
+      { type: "function_call_output", call_id: "call-2", output: "sent" },
+    ]);
+  });
+
+  it("rejects suppressed-prompt evidence that still carries a prompt row", async () => {
+    const settledMessages = settledTurn();
+    const warn = vi.spyOn(embeddedAgentLog, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(
+        captureContext({
+          historyMessages: settledMessages,
+          mirroredMessages: settledMessages,
+          settledMessages,
+          promptSuppressed: true,
+        }),
+      ).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith("codex settled-turn finalization context capture failed", {
+        reason: "provenance_rejected",
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   it.each([
     { budget: "items", overflow: 1, notice: false },
