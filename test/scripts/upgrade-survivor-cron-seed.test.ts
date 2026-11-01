@@ -293,6 +293,38 @@ repair_fixture_plugin_consent
   expect(existsSync(path.join(root, "served"))).toBe(mode === "auto-auth");
 });
 
+it("asserts post-Doctor config at the migrated stage", () => {
+  const root = tempDirs.make("openclaw-survivor-assert-stage-");
+  const binDir = path.join(root, "bin");
+  const tracePath = path.join(root, "trace");
+  mkdirSync(binDir);
+  writeFileSync(
+    path.join(binDir, "node"),
+    `#!/bin/sh
+printf '%s\\t%s\\n' "$OPENCLAW_UPGRADE_SURVIVOR_ASSERT_STAGE" "$2" >> "$TRACE_PATH"
+`,
+  );
+  chmodSync(path.join(binDir, "node"), 0o755);
+  const source = readFileSync("scripts/e2e/lib/upgrade-survivor/run.sh", "utf8");
+  const start = source.indexOf("assert_baseline_state() {");
+  const end = source.indexOf("\nresolve_candidate_version()", start);
+  const result = spawnSync("bash", ["-c", `${source.slice(start, end)}\nassert_baseline_state`], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      TRACE_PATH: tracePath,
+      OPENCLAW_UPGRADE_SURVIVOR_BASELINE_DOCTOR_APPLIED: "1",
+    },
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(tracePath, "utf8").trim().split("\n")).toEqual([
+    "survival\tassert-exec-approvals",
+    "survival\tassert-config",
+    "baseline\tassert-state",
+  ]);
+});
+
 const baselineJobs = [
   { id: "job-default", name: "survivor-default-owner" },
   { id: "job-ops", name: "survivor-ops-owner", agentId: "ops" },
