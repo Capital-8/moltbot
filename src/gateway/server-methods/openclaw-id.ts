@@ -149,6 +149,11 @@ export const openclawIdHandlers: GatewayRequestHandlers = {
       channel: resolveOpenClawIdClientChannel(opts.client) ?? null,
       // Whether openclawId.people will answer this client.
       owner: await isOwnerCaller(service, opts),
+      // Who this connection is (the account menu): loopback, owner device or member.
+      connection: await service.connectionIdentity(
+        resolveOpenClawIdClientChannel(opts.client),
+        resolveOpenClawIdClientPeerKey(opts.client),
+      ),
       services: {
         issuerUrl: config?.issuerUrl ?? null,
         discoveryUrl: config?.discoveryUrl ?? null,

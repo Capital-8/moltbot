@@ -26,6 +26,8 @@ export type OpenClawIdStatusResult = {
   channel: "local_operator" | "tunnel" | null;
   /** Whether `openclawId.people` answers this client (loopback operator or an owner device). */
   owner?: boolean;
+  /** Who this connection is; absent on Gateways before OCF-327. */
+  connection?: OpenClawIdConnection;
   services: {
     issuerUrl: string | null;
     discoveryUrl: string | null;
@@ -34,6 +36,22 @@ export type OpenClawIdStatusResult = {
     clientId?: string | null;
   };
 };
+
+/**
+ * Who this connection is (`openclawId.status` connection): the direct-loopback
+ * operator, over the tunnel an owner device or a member, or none of these.
+ */
+export type OpenClawIdConnection =
+  | { kind: "local" }
+  | { kind: "none" }
+  | { kind: "owner"; deviceLabel: string | null; ownerAccountId: string | null }
+  | {
+      kind: "member";
+      role: "operator" | "viewer";
+      accountId: string;
+      email: string | null;
+      displayName: string | null;
+    };
 
 /** Owner-only link state (`openclawId.people` result `link`). */
 export type OpenClawIdPeopleLink = OpenClawIdStatusResult["link"] & {

@@ -105,6 +105,19 @@ function sameSettings(a: TunnelRuntimeSettings, b: TunnelRuntimeSettings): boole
 const refusal = (code: string, detail: string): AuthorityRefusal => ({ ok: false, code, detail });
 
 /** The owner's choice for "Make reachable": a one-time link code and a claw name. */
+/** Who a connection is, as `openclawId.status` reports it to that connection. */
+export type OpenClawIdConnectionIdentity =
+  | { kind: "local" }
+  | { kind: "none" }
+  | { kind: "owner"; deviceLabel: string | null; ownerAccountId: string | null }
+  | {
+      kind: "member";
+      role: MemberRole;
+      accountId: string;
+      email: string | null;
+      displayName: string | null;
+    };
+
 export type ClawNameRequest = { enrollmentCode?: string; name?: string };
 
 /** The address Discovery assigns for a claw name, and whether it is free. */
@@ -627,6 +640,50 @@ export function createOpenClawIdService(params: {
         return false;
       }
       return (await (await getAuthority()).resolvePeer(peerKey))?.kind === "owner";
+    },
+
+    /**
+     * Who this connection is, for the account menu: the direct-loopback operator,
+     * or over the tunnel the owner device (its label and the claw's OpenClaw ID
+     * owner account) or the member (their own account, role and the name and email
+     * reported when they joined). Nothing about other people.
+     */
+    async connectionIdentity(
+      channel: "local_operator" | "tunnel" | undefined,
+      peerKey: string | undefined,
+    ): Promise<OpenClawIdConnectionIdentity> {
+      if (channel === "local_operator") {
+        return { kind: "local" };
+      }
+      if (channel !== "tunnel" || !peerKey || !isOpenClawIdEnabled(params.getConfig())) {
+        return { kind: "none" };
+      }
+      const store = await getAuthority();
+      const peer = await store.resolvePeer(peerKey);
+      const record = await store.load();
+      if (peer?.kind === "owner") {
+        const device = Object.values(record?.authority?.owner_devices ?? {}).find((entry) =>
+          entry.cert.body.peer_keys.includes(peerKey as IrohEndpointKey),
+        );
+        return {
+          kind: "owner",
+          deviceLabel: device?.cert.body.label ?? null,
+          ownerAccountId: record?.discovery.owner_account_id ?? null,
+        };
+      }
+      if (peer?.kind === "member") {
+        const report = Object.values(record?.invite_reports ?? {}).find(
+          (entry) => entry.account_id === peer.accountId && entry.resolution === "approved",
+        );
+        return {
+          kind: "member",
+          role: peer.role,
+          accountId: peer.accountId,
+          email: report?.email ?? null,
+          displayName: report?.display_name ?? null,
+        };
+      }
+      return { kind: "none" };
     },
 
     /**

@@ -23,6 +23,14 @@ const enOpenClawId = {
       "Set gateway.openclawId.loaderDomain to choose the address this claw is reachable at.",
     actionFailed: "Couldn't open that: {error}",
     makeReachable: "Make reachable",
+    remoteOwner: "Owner device ‘{label}’",
+    remoteOwnerUnnamed: "Owner device",
+    remoteOwnerAccount: "Linked to OpenClaw ID account {account}",
+    remoteMember: "{account} · member ({role})",
+    remoteMemberUnnamed: "Member ({role})",
+    roleOperator: "operator",
+    roleViewer: "viewer",
+    connectedRemotely: "Connected remotely · end-to-end encrypted",
   },
 } satisfies TranslationMap;
 

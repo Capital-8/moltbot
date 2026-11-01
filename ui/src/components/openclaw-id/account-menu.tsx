@@ -19,6 +19,7 @@ import type { OpenClawIdStatusResult } from "../../lib/openclaw-id/types.ts";
 import { registerEnglishCatalog, t } from "../../lib/reactive/i18n.ts";
 import { showToast } from "../../lib/toast.ts";
 import { renderSidebarMenuAction } from "../app-sidebar-dropdown.tsx";
+import { Icon } from "../solid/icon.tsx";
 import type { MenuEntry } from "../solid/menu.tsx";
 import { clawNameFromHostname } from "./claw-name.ts";
 
@@ -93,8 +94,79 @@ function infoLine(id: string, text: string): MenuEntry {
   };
 }
 
+// A line naming who this connection is: icon and text in the rows' columns, wrapping
+// instead of truncating, in the normal text colour (it states a fact; it is not a
+// disabled command).
+function identityRow(id: string, label: string, icon: "key" | "users" | "lock"): MenuEntry {
+  return {
+    kind: "content",
+    id: `openclaw-id-${id}`,
+    content: (
+      <div
+        class="sidebar-openclaw-id__identity"
+        style={{
+          display: "flex",
+          gap: "8px",
+          "align-items": "flex-start",
+          padding: "4px 8px",
+          "overflow-wrap": "anywhere",
+        }}
+      >
+        <Icon name={icon} />
+        <span>{label}</span>
+      </div>
+    ),
+  };
+}
+
+// Who this tunnel connection is: the owner device and the claw's owner account, or
+// the member and their role; then the remote, end-to-end encrypted transport.
+// There is no sign-in here: the loader signed this browser in through OpenClaw ID.
+function remoteEntries(connection: OpenClawIdStatusResult["connection"]): MenuEntry[] {
+  const lines: MenuEntry[] = [];
+  if (connection?.kind === "owner") {
+    lines.push(
+      identityRow(
+        "remote-owner",
+        connection.deviceLabel
+          ? t("openclawId.remoteOwner", { label: connection.deviceLabel })
+          : t("openclawId.remoteOwnerUnnamed"),
+        "key",
+      ),
+    );
+    if (connection.ownerAccountId) {
+      lines.push(
+        infoLine(
+          "owner-account",
+          t("openclawId.remoteOwnerAccount", { account: connection.ownerAccountId }),
+        ),
+      );
+    }
+  } else if (connection?.kind === "member") {
+    const role = t(
+      connection.role === "viewer" ? "openclawId.roleViewer" : "openclawId.roleOperator",
+    );
+    const account = connection.email ?? connection.displayName;
+    lines.push(
+      identityRow(
+        "remote-member",
+        account
+          ? t("openclawId.remoteMember", { account, role })
+          : t("openclawId.remoteMemberUnnamed", { role }),
+        "users",
+      ),
+    );
+  }
+  lines.push(identityRow("remote", t("openclawId.connectedRemotely"), "lock"));
+  return lines;
+}
+
 // Signed-out, signed-in or linked account lines (link-flow mockup steps 2 and 9).
+// Over the tunnel the connection itself says who this is.
 function accountEntries(status: OpenClawIdStatusResult): MenuEntry[] {
+  if (status.channel === "tunnel") {
+    return remoteEntries(status.connection);
+  }
   const account = openClawIdAccount();
   if (account) {
     const name = account.email ?? account.name ?? account.sub;
@@ -128,11 +200,15 @@ function reachabilityEntries(status: OpenClawIdStatusResult): MenuEntry[] {
         { disabled: true, className: "sidebar-openclaw-id__reachable" },
       ),
       infoLine("address", `https://${host}`),
-      infoLine("encrypted", t("openclawId.encrypted")),
+      // Over the tunnel the connection line already says it is end-to-end encrypted.
+      ...(status.channel === "tunnel" ? [] : [infoLine("encrypted", t("openclawId.encrypted"))]),
       ...(status.owner
         ? [renderSidebarMenuAction(DEVICES, t("openclawId.yourDevices"), "key")]
         : []),
     ];
+  }
+  if (status.channel === "tunnel") {
+    return [];
   }
   const blocker = makeReachableBlocker(status);
   return [
@@ -145,6 +221,9 @@ function reachabilityEntries(status: OpenClawIdStatusResult): MenuEntry[] {
 
 /**
  * Menu entries for the OpenClaw ID section; empty while the flag is off.
+ * Over the tunnel: who this connection is (owner device and the claw's owner
+ * account, or member and role) and "Connected remotely · end-to-end encrypted";
+ * no sign-in, sign-out or Make reachable.
  * Signed out: local operator, Sign in, "conversations stay on this computer".
  * Signed in: the account. Then Make reachable, or once linked the address and
  * transport and Your devices; People (the openclaw-id-access plugin page), both
@@ -161,7 +240,7 @@ export function openClawIdMenuEntries(status: OpenClawIdStatusResult | null): Me
     ...reachabilityEntries(status),
     // People and Your devices are owner-only (openclawId.people refuses others).
     ...(status.owner ? [renderSidebarMenuAction(PEOPLE, t("openclawId.people"), "users")] : []),
-    ...(openClawIdAccount()
+    ...(status.channel !== "tunnel" && openClawIdAccount()
       ? [renderSidebarMenuAction(SIGN_OUT, t("openclawId.signOut"), "x")]
       : []),
     {

@@ -80,11 +80,69 @@ describe("OpenClaw ID account menu", () => {
     expect(rows(entries).every((row) => !row.disabled)).toBe(true);
   });
 
-  it("keeps sign-in and Make reachable local to this machine", () => {
-    const entries = rows(menu(status({ channel: "tunnel" })));
+  it("keeps sign-in and Make reachable local to this machine on any other connection", () => {
+    const entries = rows(
+      menu(status({ channel: null, owner: false, connection: { kind: "none" } })),
+    );
     expect(entries.find((row) => row.label === "Sign in with OpenClaw ID")?.disabled).toBe(true);
     expect(entries.find((row) => row.label === "Make reachable")?.disabled).toBe(true);
-    expect(entries.find((row) => row.label === "People")?.disabled).toBeFalsy();
+    expect(entries.find((row) => row.label === "People")).toBeUndefined();
+  });
+
+  it("over the tunnel as an owner device: the device, the owner account, remote and owner items", () => {
+    const entries = menu(
+      status({
+        channel: "tunnel",
+        owner: true,
+        link: { linked: true, hostname: "studio-e61zr.crabd.xyz" },
+        connection: { kind: "owner", deviceLabel: "Josh's iPhone", ownerAccountId: "acct-owner" },
+      }),
+    );
+    expect(labels(entries)).toEqual(["studio is reachable", "Your devices", "People"]);
+    expect(texts(entries)).toEqual(
+      expect.arrayContaining([
+        "Owner device ‘Josh's iPhone’",
+        "Linked to OpenClaw ID account acct-owner",
+        "Connected remotely · end-to-end encrypted",
+      ]),
+    );
+    const all = [...labels(entries), ...texts(entries)].join(" ");
+    expect(all).not.toMatch(
+      /Local operator|Not signed in|stays? on this computer|Sign in|Sign out/,
+    );
+  });
+
+  it("over the tunnel as a member: the account and role, remote, and no owner items", () => {
+    const entries = menu(
+      status({
+        channel: "tunnel",
+        owner: false,
+        link: { linked: true, hostname: "studio-e61zr.crabd.xyz" },
+        connection: {
+          kind: "member",
+          role: "viewer",
+          accountId: "acct-member",
+          email: "member@example.test",
+          displayName: null,
+        },
+      }),
+    );
+    expect(labels(entries)).toEqual(["studio is reachable"]);
+    expect(texts(entries)).toEqual(
+      expect.arrayContaining([
+        "member@example.test · member (viewer)",
+        "Connected remotely · end-to-end encrypted",
+      ]),
+    );
+    const all = [...labels(entries), ...texts(entries)].join(" ");
+    expect(all).not.toMatch(/People|Your devices|Regenerate|Local operator|Sign in|Sign out/);
+  });
+
+  it("over the tunnel without a known identity still says it is remote, not local", () => {
+    const entries = menu(status({ channel: "tunnel", owner: false }));
+    expect(labels(entries)).toEqual([]);
+    expect(texts(entries)).toContain("Connected remotely · end-to-end encrypted");
+    expect(texts(entries).join(" ")).not.toMatch(/Local operator|this computer/);
   });
 
   it("offers People and Your devices only to an owner", () => {

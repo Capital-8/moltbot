@@ -105,12 +105,19 @@ describe("OpenClaw ID people access", () => {
     const viewer = await addMember(claw, "acct-viewer", "viewer");
     const operator = await addMember(claw, "acct-operator", "operator");
     const { service } = serviceFor(claw.authority);
-    for (const key of [viewer, operator]) {
+    for (const [key, self, other] of [
+      [viewer, "acct-viewer", "acct-operator"],
+      [operator, "acct-operator", "acct-viewer"],
+    ] as const) {
       const status = await call(service, "openclawId.status", tunnel(key));
       expect(status.ok).toBe(true);
       expect(status.payload?.owner).toBe(false);
       expect(Object.keys(status.payload!.link!).toSorted()).toEqual(SUMMARY_KEYS);
-      expect(JSON.stringify(status.payload)).not.toMatch(/acct-|sessionKey|runId|lastSeenAt/);
+      // Its own account is who it is (the account menu); nobody else's appears.
+      expect(status.payload?.connection).toMatchObject({ kind: "member", accountId: self });
+      expect(JSON.stringify(status.payload)).not.toMatch(
+        new RegExp(`${other}|sessionKey|runId|lastSeenAt`),
+      );
       const people = await call(service, "openclawId.people", tunnel(key));
       expect(people).toMatchObject({ ok: false, error: { details: { code: "not_owner" } } });
     }
@@ -134,6 +141,31 @@ describe("OpenClaw ID people access", () => {
       ],
       ownerDevices: [expect.objectContaining({ label: "phone" })],
     });
+  });
+
+  it("tells each connection who it is: loopback, owner device, member, anything else", async () => {
+    const claw = await linkedClaw();
+    const viewer = await addMember(claw, "acct-viewer", "viewer");
+    const { service } = serviceFor(claw.authority);
+    expect((await call(service, "openclawId.status", loopback)).payload?.connection).toEqual({
+      kind: "local",
+    });
+    expect((await call(service, "openclawId.status", tunnel(claw.w1))).payload?.connection).toEqual(
+      { kind: "owner", deviceLabel: "phone", ownerAccountId: null },
+    );
+    expect((await call(service, "openclawId.status", tunnel(viewer))).payload?.connection).toEqual({
+      kind: "member",
+      role: "viewer",
+      accountId: "acct-viewer",
+      email: null,
+      displayName: null,
+    });
+    const stranger = formatIrohEndpointKey(randomBytes(32));
+    for (const client of [lan, tunnel(stranger)]) {
+      expect((await call(service, "openclawId.status", client)).payload?.connection).toEqual({
+        kind: "none",
+      });
+    }
   });
 
   it("answers the direct-loopback operator and refuses a LAN client", async () => {
