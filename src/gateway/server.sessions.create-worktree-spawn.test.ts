@@ -29,6 +29,7 @@ import {
 } from "../sessions/session-controller.lifecycle.js";
 import { rpcSourceTesting } from "../sessions/session-lifecycle-admission.test-support.js";
 import { createDeferredCore } from "../shared/deferred.js";
+import { getSessionRepositoryWorkspaceStore } from "../state/session-repository-workspaces.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
@@ -834,4 +835,51 @@ test("an existing child row does not replace an unaccepted parent project source
     sessionId: child.sessionId,
   });
   expect(readEntry(key)?.worktree).toBeUndefined();
+});
+
+test("worker-style child creation inherits a repository parent without a Gateway Git fallback", async () => {
+  const parent = await createSession({
+    key: parentKey,
+    repository: { url: "https://github.com/example/spawn-fixture.git", ref: "main" },
+  });
+  const workspaces = getSessionRepositoryWorkspaceStore();
+  const initial = await workspaces.get(parent.entry.repositoryWorkspaceId!);
+  expect(initial).toBeDefined();
+  const diskAuthority = {
+    environmentId: "parent-private-worker",
+    sessionId: parent.sessionId,
+    ownerEpoch: 3,
+    ownerBinding: "parent-owned-disk",
+    identity: {
+      leaseId: "parent-lease",
+      attemptLeaseId: "parent-attempt",
+      slug: "parent",
+      resourceId: "parent-disk",
+    },
+    workspaceDir: "/worker/parent",
+  };
+  const original = await workspaces.bindBase({
+    workspaceId: initial!.workspaceId,
+    expectedRevision: initial!.revision,
+    baseCommit: "a".repeat(40),
+    diskAuthority,
+    assertCurrent() {},
+  });
+  const first = await createChild({ key: "agent:main:dashboard:repository-child" });
+  expect(first.entry.repositoryWorkspaceId).toBeDefined();
+  expect(first.entry.repositoryWorkspaceId).not.toBe(original.workspaceId);
+  expect(first.entry.worktree).toBeUndefined();
+  expect(first.entry.pendingWorktree).toBeUndefined();
+  const child = await workspaces.get(first.entry.repositoryWorkspaceId!);
+  expect(child).toMatchObject({
+    agentId: "main",
+    sessionKey: first.key,
+    url: original.url,
+    requestedRef: original.requestedRef,
+    baseCommit: original.baseCommit,
+    runSetupScript: false,
+  });
+  expect(child?.diskAuthority).toBeUndefined();
+  expect(await workspaces.get(original.workspaceId)).toEqual(original);
+  expect(projectCloneMocks.materializeProjectClone).not.toHaveBeenCalled();
 });
