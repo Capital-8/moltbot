@@ -1672,7 +1672,7 @@ const startupEnglish = {
 
     sendShortcutModifierEnter: "⌘/Ctrl+Enter",
 
-    followUpModeSteer: "Steer into the active run",
+    followUpModeSteer: "Steer at the next model/tool boundary",
 
     catalogOutputTruncated: "[Output truncated]",
     onboardingDisabled: "Disabled during setup",
