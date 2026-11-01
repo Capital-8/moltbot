@@ -9,7 +9,7 @@ import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execu
 import { loadSessionEntry, patchSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../../infra/kysely-sync.js";
 import type { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
-import * as processExec from "../../process/exec.js";
+import * as spawnDiagnostics from "../../process/spawn-diagnostics.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import type { DB } from "../../state/openclaw-state-db.generated.js";
@@ -157,14 +157,20 @@ describe("repository workspace result ownership", () => {
       let assertMutationCurrent: (() => void) | undefined;
       let queueOwner: Promise<void> | undefined;
       let saving: Promise<string> | undefined;
-      const imports = vi.spyOn(processExec, "runExec");
+      let fastImports = 0;
+      const recordSpawn = spawnDiagnostics.recordChildProcessSpawn;
+      vi.spyOn(spawnDiagnostics, "recordChildProcessSpawn").mockImplementation(
+        (command, child, operation, args = []) => {
+          recordSpawn(command, child, operation, args);
+          if (command === "git" && args.includes(artifactRoot) && args.includes("fast-import")) {
+            child.once("spawn", () => {
+              fastImports++;
+            });
+          }
+        },
+      );
       const writes = vi.spyOn(fs, "writeFile");
       const temporary = vi.spyOn(fs, "mkdtemp");
-      const fastImports = () =>
-        imports.mock.calls.filter(
-          ([command, args]) =>
-            command === "git" && args.includes(artifactRoot) && args.includes("fast-import"),
-        );
       const publicationWrites = () =>
         writes.mock.calls.filter(
           ([target]) => typeof target === "string" && target.startsWith(payloadPrefix),
@@ -257,7 +263,7 @@ describe("repository workspace result ownership", () => {
           expect(raw.current.baseCommit).toBe(before.baseCommit);
           expect(raw.changedEntries.map((entry) => entry.path)).toContain("editor.txt");
         }
-        const importsBefore = fastImports().length;
+        const importsBefore = fastImports;
         const writesBefore = publicationWrites();
         expect(importsBefore).toBe(boundary === "publication-metadata" ? 1 : 0);
         expect(writesBefore).toBe(0);
@@ -290,15 +296,12 @@ describe("repository workspace result ownership", () => {
         for (const importRoot of importRoots) {
           await expect(fs.stat(importRoot)).rejects.toMatchObject({ code: "ENOENT" });
         }
-        for (const call of fastImports()) {
-          expect(call[2]).toMatchObject({ stdinFileDescriptor: expect.any(Number) });
-        }
         expect(importRoots).toHaveLength(1);
         expect(await candidates()).toEqual([]);
         expect(resumes).toBe(1);
         expect(f.ownerSignal.aborted).toBe(false);
         expect(await fs.readFile(path.join(f.remote, "editor.txt"), "utf8")).toBe(editorBytes);
-        expect(fastImports()).toHaveLength(importsBefore);
+        expect(fastImports).toBe(importsBefore);
         expect(publicationWrites()).toBe(writesBefore);
         expect(await f.store.get(before.workspaceId)).toEqual(before);
         expect(await refs()).toBe(beforeRefs);

@@ -542,12 +542,17 @@ export class SpawnBrokerHost {
         return;
       }
       if (message.type === "owned" || message.type === "error") {
-        request.nativeInitiated?.resolve();
-        request.nativeInitiated = undefined;
-        // Worker errors join cleanup before reporting; no owned PID means no live custody.
-        if (message.type === "error" && request.pid === undefined) {
+        // Only a prepared launch's terminal receipt confirms no remaining native custody.
+        if (
+          message.type === "error" &&
+          message.resultUnavailable &&
+          request.nativeInitiated &&
+          request.pid === undefined
+        ) {
           request.child.markNotStarted();
         }
+        request.nativeInitiated?.resolve();
+        request.nativeInitiated = undefined;
       }
       if (message.type === "prepared") {
         const initiate = request.initiateSpawn;

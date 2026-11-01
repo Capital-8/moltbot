@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { fstatSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -378,9 +377,9 @@ it("reuses accepted blobs while preserving cumulative provenance, deletions and 
       command === "git" &&
       args.includes("fast-import") &&
       typeof options === "object" &&
-      options.stdinFileDescriptor !== undefined
+      options.inputFile !== undefined
     ) {
-      importBytes.push(fstatSync(options.stdinFileDescriptor).size);
+      importBytes.push((await fs.stat(options.inputFile)).size);
     }
     return execute(command, args, options);
   });
