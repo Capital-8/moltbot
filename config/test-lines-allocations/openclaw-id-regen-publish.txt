@@ -1,0 +1,2 @@
+# Requested red acceptance contract for Gateway-attested owner-key regeneration.
+204
