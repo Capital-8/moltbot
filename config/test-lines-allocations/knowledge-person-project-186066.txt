@@ -1,2 +1,2 @@
-1142
-# Person-space metadata/evidence/cache, requester provenance/recovery, lost-revocation replies, authenticated person Gateway denial/cold-process regressions, and exact person-space Git checkpoints/path rejection.
+1560
+# Person-space publication/evidence/privacy/recovery regressions and opt-in installed Knowledge-LCM continuity, cold restart, lost-reply replay, and provider-outage qualification.

@@ -364,3 +364,31 @@ Original source files are hash-verified with streaming reads; see
 [Evidence files](/plugins/knowledge/evidence). An incomplete scan fails instead
 of returning a partial or empty result. File access rejects symlinks and
 hardlinks.
+
+## Installed context-engine continuity qualification
+
+The opt-in E2E qualification installs pinned `@martian-engineering/lossless-claw@1.2.0`
+in disposable Gateway state. It is not run, and does not download external plugins,
+in ordinary PR tests. From a source checkout with the normal test dependencies:
+
+```bash
+OPENCLAW_KNOWLEDGE_LOSSLESS_CONTINUITY_PROOF=1 OPENCLAW_E2E_VERBOSE=1 \
+  pnpm test test/knowledge-lossless-continuity.e2e.test.ts --maxWorkers=1
+```
+
+It uses deterministic model I/O and the shared Gateway-owner profile, not live
+inference or different-person identity proof. It saves Knowledge with committed
+Git history, invokes real public LCM compaction, restarts the Gateway, recovers
+the original historical canary with `lcm_grep`, and reads the same record revision
+and verified evidence through the other authorized agent. It also crashes after
+publication but before the final agent reply and verifies that retrying the same
+mutation preserves the record and Git commit without another record. This is not
+a mid-transaction crash qualification.
+
+The provider-outage control records the current 30-second client timeout after
+synthetic HTTP 503 responses and verifies that no tool call was issued. It does
+not qualify fail-fast or terminal provider recovery. The runtime exceeds the
+ordinary test budget because it crosses an installed third-party context engine
+and multiple real Gateway processes; the outage control alone waits for that
+public client deadline. Person-space isolation has a separate maintained proof
+in `test/knowledge-person-project.e2e.test.ts`.
