@@ -1,8 +1,10 @@
 import type { Command } from "commander";
 import { formatErrorMessage } from "../infra/errors.js";
+import { readOnlyWorkerScope } from "../infra/sqlite-readonly-worker-context.js";
 import { loadBundledPluginManifestRegistry } from "../plugins/manifest-registry-build.js";
 import { loadPluginManifestRegistryCore } from "../plugins/manifest-registry.js";
 import type { PluginManifestRecord } from "../plugins/manifest-registry.types.js";
+import { withPluginRuntimeGatewayContextResolver } from "../plugins/runtime/gateway-request-scope.js";
 import type { OpenClawConfig } from "./config-contracts.js";
 import {
   loadBundledPluginPublicSurfaceModuleSync,
@@ -22,6 +24,15 @@ type QaRunnerTransportPolicy = {
   senderAllowlist?: readonly string[];
   topLevelReplies?: true;
 };
+
+/** Isolated fixture writes own fresh state and must not retain a prior scenario's authority. */
+export function runQaFixtureWithoutRuntimeAuthority<T>(operation: () => T): T {
+  return readOnlyWorkerScope.exit(() =>
+    withPluginRuntimeGatewayContextResolver(undefined, operation, {
+      inheritRequestScope: false,
+    }),
+  );
+}
 
 type QaRunnerAdapterOptions = {
   explicitScenarioSelection?: boolean;

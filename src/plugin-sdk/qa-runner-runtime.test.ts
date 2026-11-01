@@ -49,6 +49,37 @@ function firstPublicSurfaceCall(): PublicSurfaceCall | undefined {
 
 describe("plugin-sdk qa-runner-runtime", () => {
   const tempDirs: string[] = [];
+
+  it("detaches isolated fixture work from retired scenario authority", async () => {
+    const [{ readOnlyWorkerScope }, requestScope, module] = await Promise.all([
+      import("../infra/sqlite-readonly-worker-context.js"),
+      import("../plugins/runtime/gateway-request-scope.js"),
+      import("./qa-runner-runtime.js"),
+    ]);
+    const controller = new AbortController();
+    controller.abort(new Error("retired scenario"));
+    const readers = {
+      active: true,
+      busy: false,
+      controller,
+      pending: new Set<Promise<unknown>>(),
+      deadlineOwnedByCaller: true,
+    };
+    const resolveGatewayContext = () => ({}) as never;
+
+    readOnlyWorkerScope.run(readers, () =>
+      requestScope.withPluginRuntimeGatewayRequestScope(
+        { isWebchatConnect: () => false, resolveGatewayContext },
+        () =>
+          module.runQaFixtureWithoutRuntimeAuthority(() => {
+            expect(readOnlyWorkerScope.getStore()).toBeUndefined();
+            expect(
+              requestScope.getPluginRuntimeGatewayRequestScope()?.resolveGatewayContext,
+            ).toBeUndefined();
+          }),
+      ),
+    );
+  });
   const originalPrivateQaCli = process.env.OPENCLAW_ENABLE_PRIVATE_QA_CLI;
   const originalBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
 
