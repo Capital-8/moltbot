@@ -5,11 +5,8 @@ import {
   canonicalizePersistedUserMessageMedia,
   readPersistedMediaFacts,
 } from "../../media/media-facts.js";
-import {
-  cloneTranscriptEnvelope,
-  isOwnedTranscriptPayload,
-  normalizeTranscriptJsonValue,
-} from "./transcript-json.js";
+import { normalizeTranscriptJsonValue } from "./transcript-json-normalize.js";
+import { cloneTranscriptEnvelope, isOwnedTranscriptPayload } from "./transcript-json.js";
 
 it.each(["exec", "wait"])("shares admitted %s payloads across envelope copies", (toolName) => {
   const message = {
