@@ -87,9 +87,9 @@ it("offers notice text to transcript search highlighting", async () => {
   };
   const view = mountSolid(() => <ChatNotice item={item} />);
   const search = new TranscriptSearchState();
+  const stop = watchChatSearchHighlight(view.container, search);
   search.toggle();
   search.setQuery("the rollback");
-  const stop = watchChatSearchHighlight(view.container, search);
   try {
     await expect
       .poll(() =>

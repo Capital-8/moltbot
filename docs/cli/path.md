@@ -186,9 +186,13 @@ Reserved characters (`?`, `&`, `%`) outside quoted, predicate, or union
 segments are rejected. Control characters (U+0000-U+001F, U+007F) are
 rejected anywhere, including the `session` query value.
 
-`formatOcPath(parseOcPath(path)) === path` is guaranteed for normalized paths.
+`formatOcPath(parseOcPath(path)) === path` is guaranteed for canonical paths.
 Other query parameters are ignored except for the first non-empty
 `session=` value.
+
+File names, literal keys, and session values preserve their Unicode code points;
+canonically equivalent spellings remain distinct. Markdown section and item
+addresses still use their existing slug rules.
 
 Hard limits: a path caps at 4096 bytes, at most 4 slots (file/section/item/
 field), at most 64 dotted sub-segments per slot, and at most 256 nested
@@ -398,6 +402,12 @@ $ openclaw path set 'oc://config.jsonc/plugins/slack/enabled' 'true' --file conf
 JSONC edits go through `jsonc-parser`, so comments and whitespace survive a
 `set`. Run with `--dry-run` first to inspect the bytes before committing.
 `.json` files use the same adapter and edit path as `.jsonc`.
+
+For named object keys, JSON, JSONC, and JSONL reads, searches, and replacements
+use the last duplicate occurrence, matching runtime parsing. Replacements preserve
+earlier shadowed copies. Insertion beneath a duplicated parent is refused:
+consolidate the duplicate parents into one, retaining the last effective value,
+then retry.
 
 ### JSONL
 
