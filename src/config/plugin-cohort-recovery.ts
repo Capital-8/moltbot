@@ -76,10 +76,10 @@ export async function withPluginCohortConfigCapture<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   authority.assertCurrent();
-  const pair = loadPluginCohortRecovery(authority.runId, {
-    env: authority.env,
-    allowNativeRead: true,
-  });
+  // Runs before Doctor's migration capture. A native open of the live state
+  // database changes its captured file generation, which installed (older)
+  // updaters then refuse as an unattributed write; read a private snapshot.
+  const pair = loadPluginCohortRecovery(authority.runId, { env: authority.env });
   if (!pair || pair.cohort.disposition !== "pending") {
     return await captures.exit(operation);
   }

@@ -31,6 +31,10 @@ import {
   restorePluginCohortMigrationPublications,
 } from "./deferred-plugin-migrations.js";
 import {
+  readMatchingUpdateDatabaseGeneration,
+  readUpdateDatabaseGenerations,
+} from "./update-database-generations.js";
+import {
   decodePluginCohortRecovery,
   type PluginCohortRecovery,
 } from "./update-plugin-cohort-schema.js";
@@ -97,6 +101,20 @@ function setup() {
     readPluginCohortRecoveryPairRows(openOpenClawStateDatabase(options).db, cohort);
   return { options, reservation, cohort, rows };
 }
+
+it("keeps the installed updater's captured state generation before Doctor starts", async () => {
+  const f = setup();
+  closeOpenClawStateDatabaseForTest();
+  const statePath = resolveOpenClawStateSqlitePath(f.options.env);
+  const expected = readUpdateDatabaseGenerations([statePath])[statePath];
+  expect(expected).toEqual(expect.any(String));
+  await withPluginCohortConfigCapture(
+    { runId: f.cohort.runId, installKey: f.cohort.installKey, env: f.options.env, ...fence },
+    async () => {
+      expect(readMatchingUpdateDatabaseGeneration(statePath, expected!)).toBe(expected);
+    },
+  );
+});
 
 it("reopens the paired intent, retains old-reader refusal and settles only its own rows", async () => {
   const f = setup();
