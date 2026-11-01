@@ -926,15 +926,6 @@ function assertCronScheduledAuthorityMigrated(stateDir, stage) {
       return;
     }
     assert(fs.existsSync(databasePath), "legacy cron authority fixture missing before update");
-    readDatabase(databasePath, (db) => {
-      const rows = db.prepare("SELECT job_json FROM cron_jobs WHERE job_id LIKE 'cron-%'").all();
-      assert(rows.length === 5, "baseline cron authority fixture row count changed");
-      assert(
-        rows.every((row) => JSON.parse(row.job_json).scheduledToolPolicy === undefined),
-        "baseline unexpectedly authored current scheduled authority provenance",
-      );
-    });
-    return;
   }
   readDatabase(databasePath, (db) => {
     const rows = db

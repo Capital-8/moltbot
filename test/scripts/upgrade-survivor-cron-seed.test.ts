@@ -85,7 +85,18 @@ if (args[0] === "doctor") {
   const db = new DatabaseSync(databasePath);
   db.exec("CREATE TABLE cron_jobs (job_id TEXT PRIMARY KEY, job_json TEXT NOT NULL)");
   const insert = db.prepare("INSERT INTO cron_jobs (job_id, job_json) VALUES (?, ?)");
-  for (const job of jobs) insert.run(job.id, JSON.stringify(job));
+  for (const job of jobs) {
+    if (job.id === "cron-encoded-account") {
+      job.scheduledToolPolicy = {
+        version: 1,
+        mode: "account",
+        ownerSessionKey: job.owner.sessionKey,
+        ownerAccountId: "personal",
+      };
+      job.owner.accountId = "personal";
+    }
+    insert.run(job.id, JSON.stringify(job));
+  }
   db.exec("CREATE TABLE exec_approvals_config (config_key TEXT PRIMARY KEY, raw_json TEXT NOT NULL)");
   db.prepare("INSERT INTO exec_approvals_config VALUES (?, ?)").run("current", JSON.stringify(approvals));
   db.close();
@@ -180,7 +191,16 @@ if (args[0] === "doctor") {
       .map((row) => JSON.parse(row.job_json));
     db.close();
     assert.deepEqual(jobs.map((job) => job.id), ["cron-pre-cap", "cron-ownerless-cap", "cron-owner-session", "cron-encoded-account", "cron-agent-mismatch"]);
-    assert.equal(jobs.every((job) => job.scheduledToolPolicy === undefined), true);
+    assert.deepEqual(jobs[3].scheduledToolPolicy, {
+      version: 1,
+      mode: "account",
+      ownerSessionKey: "agent:main:discord:personal:direct:user-1",
+      ownerAccountId: "personal",
+    });
+    assert.equal(jobs[3].owner.accountId, "personal");
+    for (const index of [0, 1, 2, 4]) {
+      assert.equal(jobs[index].scheduledToolPolicy, undefined);
+    }
     assert.equal(jobs[3].owner.sessionKey, "agent:main:discord:personal:direct:user-1");
     assert.equal(jobs[4].owner.agentId, "other");
   }
