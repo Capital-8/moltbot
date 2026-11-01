@@ -259,13 +259,14 @@ export async function promptAuthConfig(
       if (canonicalPrimary) {
         next = applyOnboardingPrimaryModel(next, target, canonicalPrimary);
       }
-      const { scopeKeys, scopeComplete } = allowlistSelection;
+      const { scopeKeys } = allowlistSelection;
       next = applyAgentModelDefaults(next, target, (projected) => {
         const withFallbacks = applyModelFallbacksFromSelection(projected, selectedModels, {
           scopeKeys,
+          fallbacksOnly: !hasAllowlist,
         });
         return hasAllowlist
-          ? applyModelAllowlist(withFallbacks, selectedModels, { scopeKeys, scopeComplete })
+          ? applyModelAllowlist(withFallbacks, selectedModels, { scopeKeys })
           : withFallbacks;
       });
     }

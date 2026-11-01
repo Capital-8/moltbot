@@ -28,6 +28,8 @@ export function createScopedSeeds(params: {
   agentId?: string;
   restrictsPicker?: boolean;
   initialSeeds: string[];
+  /** Fallback-only selection starts from the primary and its fallbacks. */
+  fallbackSeeds: string[];
 }): (scope: string[]) => string[] {
   const policy =
     params.restrictsPicker === false
@@ -50,22 +52,23 @@ export function createScopedSeeds(params: {
     );
   };
   return (scope) =>
-    normalizeModelKeys([...params.initialSeeds, ...scope.filter(allowedBySavedPolicy)]).filter(
-      (key) => scope.includes(key),
-    );
+    normalizeModelKeys([
+      ...(params.restrictsPicker === false ? params.fallbackSeeds : params.initialSeeds),
+      ...scope.filter(allowedBySavedPolicy),
+    ]).filter((key) => scope.includes(key));
 }
 
 /**
  * Applies a configure-picker selection to the default model allowlist.
  * Configure never creates an allowlist: without one, models of providers with
  * auth already show. With one, the scoped provider's refs are replaced by the
- * selection. Selecting every model of a complete provider catalog keeps it dynamic
- * as `<provider>/*`; a partial scope (offered or configured models only) stays exact.
+ * selection as exact refs. An existing `<provider>/*` stays when every offered model
+ * of that provider stays selected; configure never adds a wildcard on its own.
  */
 export function applyModelAllowlist(
   cfg: OpenClawConfig,
   models: string[],
-  opts: { scopeKeys?: string[]; scopeComplete?: boolean } = {},
+  opts: { scopeKeys?: string[] } = {},
 ): OpenClawConfig {
   const defaults = cfg.agents?.defaults;
   const policy = resolveConfiguredModelPolicyAllow({ cfg });
@@ -103,9 +106,10 @@ export function applyModelAllowlist(
     for (const provider of scopeProviders) {
       const providerScope = scopeKeys.filter((key) => providerOf(key) === provider);
       const picks = providerScope.filter((key) => selected.has(key));
-      // Every model of the provider selected: keep newly released models visible too.
-      const refs =
-        opts.scopeComplete && picks.length === providerScope.length ? [`${provider}/*`] : picks;
+      const keepsWildcard =
+        picks.length === providerScope.length &&
+        existingAllow.some((ref) => parseModelPolicyWildcardRef(ref)?.key === `${provider}/*`);
+      const refs = keepsWildcard ? [`${provider}/*`] : picks;
       for (const ref of refs) {
         if (!nextAllow.includes(ref)) {
           nextAllow.push(ref);

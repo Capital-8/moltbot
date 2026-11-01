@@ -104,12 +104,7 @@ type PromptDefaultModelParams = {
 };
 
 type PromptDefaultModelResult = { model?: string; config?: OpenClawConfig };
-type PromptModelAllowlistResult = {
-  models?: string[];
-  scopeKeys?: string[];
-  /** The scope lists the provider's whole catalog, not only offered or configured models. */
-  scopeComplete?: boolean;
-};
+type PromptModelAllowlistResult = { models?: string[]; scopeKeys?: string[] };
 
 function resolveConfiguredModelKeys(cfg: OpenClawConfig): string[] {
   const models = cfg.agents?.defaults?.models ?? {};
@@ -780,7 +775,11 @@ export async function promptModelAllowlist(params: {
     ...fallbackKeys,
     ...(params.initialSelections ?? []),
   ]);
-  const scopedSeeds = createScopedSeeds({ ...params, initialSeeds });
+  const scopedSeeds = createScopedSeeds({
+    ...params,
+    initialSeeds,
+    fallbackSeeds: [resolvedKey, ...fallbackKeys],
+  });
   const hasRealSeed =
     existingKeys.length > 0 ||
     fallbackKeys.length > 0 ||
@@ -812,7 +811,6 @@ export async function promptModelAllowlist(params: {
     options: WizardSelectOption[],
     initialKeys: string[],
     scopeKeys?: string[],
-    scopeComplete = false,
   ): Promise<PromptModelAllowlistResult> => {
     if (options.length === 0) {
       return {};
@@ -841,11 +839,7 @@ export async function promptModelAllowlist(params: {
         return {};
       }
     }
-    return {
-      models: selected,
-      ...(scopeKeys ? { scopeKeys } : {}),
-      ...(scopeKeys && scopeComplete ? { scopeComplete } : {}),
-    };
+    return { models: selected, ...(scopeKeys ? { scopeKeys } : {}) };
   };
 
   const scopedFastKeys =
@@ -997,13 +991,13 @@ export async function promptModelAllowlist(params: {
     });
     seen.add(key);
   }
-  return promptSelection(options, initialKeys, scopeKeys, true);
+  return promptSelection(options, initialKeys, scopeKeys);
 }
 
 export function applyModelFallbacksFromSelection(
   cfg: OpenClawConfig,
   selection: string[],
-  opts: { scopeKeys?: string[] } = {},
+  opts: { scopeKeys?: string[]; fallbacksOnly?: boolean } = {},
 ): OpenClawConfig {
   const normalized = normalizeModelKeys(selection);
   const scopeKeys = opts.scopeKeys ? normalizeModelKeys(opts.scopeKeys) : [];
@@ -1051,7 +1045,7 @@ export function applyModelFallbacksFromSelection(
   const existingFallbackSet = new Set(existingFallbacks);
   const rawSelectedFallbacks = normalized.filter((key) => key !== resolvedKey);
   const selectedFallbacks =
-    scopeKeySet && !includesResolvedPrimary
+    scopeKeySet && !includesResolvedPrimary && !opts.fallbacksOnly
       ? rawSelectedFallbacks.filter((key) => existingFallbackSet.has(key))
       : rawSelectedFallbacks;
   const isVisibleProvider = createModelPickerVisibleProviderPredicate({
