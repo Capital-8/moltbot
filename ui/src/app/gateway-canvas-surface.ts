@@ -58,7 +58,9 @@ export function createGatewayCanvasSurfaceLease(
     expectedGeneration: number,
     helloUrl: string | undefined,
   ): void => {
-    if (!canRefresh) {
+    // An empty initial surface has no lease to load. Once loading starts,
+    // capability removal must still retire the existing or pending lease.
+    if (!canRefresh || (!helloUrl && !canvasSurfaceLeaseLoad)) {
       return;
     }
     void loadCanvasSurfaceLease()
