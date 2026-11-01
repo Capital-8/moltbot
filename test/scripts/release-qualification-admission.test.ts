@@ -226,6 +226,14 @@ describe("trusted P qualification admission", () => {
     expect(() => f.verify()).not.toThrow();
   });
 
+  it("accepts an artifact inside the upload step when the producer job interval crosses DST", () => {
+    const f = fixture();
+    const job = expectDefined(f.jobs.jobs[0], "admission job");
+    job.started_at = "2026-09-28T01:00:00Z";
+    job.completed_at = "2026-09-28T00:00:04Z";
+    expect(() => f.verify()).not.toThrow();
+  });
+
   it.each([true])(
     "revalidates current authority without reacquiring immutable evidence (protected=%s)",
     (protectedTag) => {
