@@ -504,3 +504,23 @@ it.each([true, false])(
     }
   },
 );
+
+it.each([
+  { name: "whole provider", picks: ["p/one", "p/two"], allow: ["a/x", "p/*"] },
+  { name: "narrowed provider", picks: ["p/one"], allow: ["a/x", "p/one"] },
+])("writes the configure selection into an existing allowlist: $name", ({ picks, allow }) => {
+  const models = { "a/x": { alias: "X" } };
+  const config: OpenClawConfig = {
+    meta: { migrations: { modelPolicyAllowlist: true } },
+    agents: { defaults: { models, modelPolicy: { allow: ["a/x", "p/one"] } } },
+  };
+  const next = applyModelAllowlist(config, picks, { scopeKeys: ["p/one", "p/two"] });
+  expect(next.agents?.defaults?.modelPolicy?.allow).toEqual(allow);
+  // The models map is metadata; picks are not mirrored into it.
+  expect(next.agents?.defaults?.models).toEqual(models);
+});
+
+it("does not create an allowlist when none exists", () => {
+  const config: OpenClawConfig = { meta: { migrations: { modelPolicyAllowlist: true } } };
+  expect(applyModelAllowlist(config, ["p/one"], { scopeKeys: ["p/one", "p/two"] })).toBe(config);
+});

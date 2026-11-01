@@ -151,15 +151,13 @@ describe("promptAuthConfig", () => {
 
     const result = await promptAuthConfig({}, makeRuntime(), noopPrompter);
 
-    expect(result.agents?.defaults?.modelPolicy?.allow).toEqual([
-      "anthropic/claude-sonnet-4-6",
-      "openai/gpt-5.5",
-    ]);
+    // Configure never creates an allowlist.
+    expect(result.agents?.defaults?.modelPolicy).toBeUndefined();
     expect(result.agents?.defaults?.model).toEqual({ primary: "openai/gpt-5.5" });
     expect(result.agents?.defaults?.models).toEqual(models);
   });
 
-  it.each([false, true])("writes selected-agent policy (legacy primary: %s)", async (legacy) => {
+  it.each([false, true])("writes selected-agent model (legacy primary: %s)", async (legacy) => {
     const primary = "openai/gpt-5.5";
     const shared = { primary: "anthropic/claude-sonnet-4-6" };
     const config = legacy
@@ -178,7 +176,7 @@ describe("promptAuthConfig", () => {
     });
     const result = await promptAuthConfig(config, makeRuntime(), noopPrompter, target);
     expect(result.agents?.entries?.OPS?.model).toEqual({ primary });
-    expect(result.agents?.entries?.OPS?.modelPolicy?.allow).toEqual([primary]);
+    expect(result.agents?.entries?.OPS?.modelPolicy).toBeUndefined();
     expect(result.agents?.defaults?.model).toEqual(
       legacy ? { primary: "anthropic/claude-sonnet-4-6" } : undefined,
     );
@@ -285,9 +283,10 @@ describe("promptAuthConfig", () => {
     expect(result.agents?.defaults?.model).toEqual(
       owner === "shared" ? { ...defaultModel, primary: recommended } : defaultModel,
     );
+    // Selecting every model of the provider keeps it dynamic.
     expect(result.agents?.entries?.OPS?.modelPolicy?.allow).toEqual([
       "shared/available",
-      recommended,
+      "configure-provider/*",
     ]);
     expect(result.agents?.defaults?.modelPolicy).toEqual(config.agents?.defaults?.modelPolicy);
     expect(result.agents?.entries?.ops).toBeUndefined();

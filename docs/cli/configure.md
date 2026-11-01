@@ -63,7 +63,14 @@ Reconfiguring trusted-proxy mode defaults the loopback prompt to the existing op
 ## Model section
 
 <Note>
-**Model** includes a multi-select for the explicit `agents.defaults.modelPolicy.allow` list (what shows up in `/model` and the model picker). Provider-scoped setup choices merge their selected models into the existing list instead of replacing unrelated providers already in the config. Per-model aliases and parameters remain under `agents.defaults.models`. Those entries do not restrict model overrides by themselves.
+**Model** includes a multi-select of the provider's models. Your selection sets the model fallbacks. Configure never creates a model allowlist. Without one, `/model` and the model picker already show the models of every provider with working auth.
+
+If `modelPolicy.allow` already exists (for the defaults or the selected agent), the selection updates the provider's entries in it. Unrelated providers stay as they are:
+
+- Select every model of the provider: configure writes `<provider>/*`, so models the provider adds later also show.
+- Select some of them: configure writes those exact `provider/model` refs.
+
+Per-model aliases and parameters stay under `agents.defaults.models`. Configure does not add selected models to that map, and those entries do not restrict model overrides by themselves.
 
 Re-running provider auth from configure preserves an existing `agents.defaults.model.primary`, even when the provider's auth step returns a config patch with its own recommended default model. Adding or reauthing a provider makes its models available without taking over your current primary model. Use `openclaw models auth login --provider <id> --set-default` or `openclaw models set <model>` to intentionally change the default model.
 </Note>

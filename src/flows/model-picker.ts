@@ -21,6 +21,10 @@ import {
 import { formatLiteralProviderPrefixedModelRef } from "../agents/model-ref-shared.js";
 import { createModelPickerVisibleProviderPredicate } from "../agents/model-runtime-aliases.js";
 import {
+  LEGACY_MODEL_POLICY_ALLOW_CONFIG_PATH,
+  resolveConfiguredModelPolicyAllow,
+} from "../agents/model-selection-shared.js";
+import {
   buildModelAliasIndex,
   type ModelAliasIndex,
   modelKey,
@@ -32,13 +36,12 @@ import {
 import { openAIModelCatalogRoutePolicy } from "../agents/openai-model-routes.js";
 import { formatTokenK } from "../commands/models/shared.js";
 import {
-  normalizeAgentModelMapForConfig,
   normalizeAgentModelRefForConfig,
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
   toAgentModelListLike,
 } from "../config/model-input.js";
-import { computeModelPolicyAllowlist } from "../config/model-policy-allowlist-migration.js";
+import { parseModelPolicyWildcardRef } from "../config/model-policy-ref.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveOwningPluginIdsForProviderRef } from "../plugins/providers.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -987,33 +990,37 @@ export async function promptModelAllowlist(params: {
   return promptSelection(options, initialKeys, scopeKeys);
 }
 
+/**
+ * Applies a configure-picker selection to the default model allowlist.
+ * Configure never creates an allowlist: without one, models of providers with
+ * auth already show. With one, the scoped provider's refs are replaced by the
+ * selection, and selecting every model of a provider keeps it dynamic as `<provider>/*`.
+ */
 export function applyModelAllowlist(
   cfg: OpenClawConfig,
   models: string[],
   opts: { scopeKeys?: string[] } = {},
 ): OpenClawConfig {
   const defaults = cfg.agents?.defaults;
+  const policy = resolveConfiguredModelPolicyAllow({ cfg });
+  if (policy.refs.length === 0) {
+    return cfg;
+  }
   const normalized = normalizeModelKeys(models);
   const scopeKeys = opts.scopeKeys ? normalizeModelKeys(opts.scopeKeys) : [];
   const scopeKeySet = scopeKeys.length > 0 ? new Set(scopeKeys) : null;
-  const existingModels = normalizeAgentModelMapForConfig(defaults?.models ?? {});
-  const legacyAllow = computeModelPolicyAllowlist({
-    root: cfg,
-    defaults,
-  });
-  const existingAllow = normalizeModelKeys(defaults?.modelPolicy?.allow ?? legacyAllow ?? []);
-  const scopeProviders = new Set(
-    scopeKeys.map((key) => normalizeProviderId(key.slice(0, key.indexOf("/")))),
-  );
+  const existingAllow = normalizeModelKeys([...policy.refs]);
+  const providerOf = (key: string) => normalizeProviderId(splitModelKey(key)?.provider ?? "");
+  const scopeProviders = new Set(scopeKeys.map(providerOf));
   const aliasIndex = buildModelAliasIndex({ cfg, defaultProvider: DEFAULT_PROVIDER });
   const isPolicyRefInScope = (raw: string): boolean => {
-    const trimmed = raw.trim();
-    if (trimmed.endsWith("/*")) {
-      return scopeProviders.has(normalizeProviderId(trimmed.slice(0, -2)));
+    const wildcard = parseModelPolicyWildcardRef(raw);
+    if (wildcard) {
+      return scopeProviders.has(wildcard.provider);
     }
     const resolved = resolveModelRefFromString({
       cfg,
-      raw: trimmed,
+      raw: raw.trim(),
       defaultProvider: DEFAULT_PROVIDER,
       aliasIndex,
     });
@@ -1021,41 +1028,35 @@ export function applyModelAllowlist(
       resolved && scopeKeySet?.has(modelKey(resolved.ref.provider, resolved.ref.model)),
     );
   };
-  const nextDefaults = { ...defaults };
-  if (normalized.length === 0) {
-    // No agent defaults means no policy/legacy map to edit; nothing to clear.
-    if (!defaults || (!defaults.modelPolicy && !legacyAllow)) {
-      return cfg;
-    }
-    const nextAllow = scopeKeySet ? existingAllow.filter((key) => !isPolicyRefInScope(key)) : [];
-    if (nextAllow.length > 0 || legacyAllow) {
-      nextDefaults.modelPolicy = { ...defaults.modelPolicy, allow: nextAllow };
-    } else {
-      delete nextDefaults.modelPolicy;
-    }
+  let nextAllow: string[];
+  if (!scopeKeySet) {
+    nextAllow = normalized;
   } else {
-    const nextModels = { ...existingModels };
-    for (const key of normalized) {
-      nextModels[key] = existingModels[key] ?? {};
-    }
-    let nextAllow = normalized;
-    if (scopeKeySet) {
-      nextAllow = existingAllow.filter((key) => !isPolicyRefInScope(key));
-      for (const key of normalized) {
-        if (!nextAllow.includes(key)) {
-          nextAllow.push(key);
+    const selected = new Set(normalized);
+    nextAllow = existingAllow.filter((key) => !isPolicyRefInScope(key));
+    for (const provider of scopeProviders) {
+      const providerScope = scopeKeys.filter((key) => providerOf(key) === provider);
+      const picks = providerScope.filter((key) => selected.has(key));
+      // Every model of the provider selected: keep newly released models visible too.
+      const refs = picks.length === providerScope.length ? [`${provider}/*`] : picks;
+      for (const ref of refs) {
+        if (!nextAllow.includes(ref)) {
+          nextAllow.push(ref);
         }
       }
     }
-    nextDefaults.models = nextModels;
-    nextDefaults.modelPolicy = { ...defaults?.modelPolicy, allow: nextAllow };
   }
-
+  if (nextAllow.length === 0 && policy.configPath !== LEGACY_MODEL_POLICY_ALLOW_CONFIG_PATH) {
+    // An empty allowlist is no restriction. A legacy map instead needs the explicit
+    // empty policy, or the map would keep restricting.
+    const { modelPolicy: _removed, ...rest } = defaults ?? {};
+    return { ...cfg, agents: { ...cfg.agents, defaults: rest } };
+  }
   return {
     ...cfg,
     agents: {
       ...cfg.agents,
-      defaults: nextDefaults,
+      defaults: { ...defaults, modelPolicy: { ...defaults?.modelPolicy, allow: nextAllow } },
     },
   };
 }
