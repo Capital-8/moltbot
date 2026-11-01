@@ -283,10 +283,10 @@ describe("promptAuthConfig", () => {
     expect(result.agents?.defaults?.model).toEqual(
       owner === "shared" ? { ...defaultModel, primary: recommended } : defaultModel,
     );
-    // Selecting every model of the provider keeps it dynamic.
+    // The mocked scope is not a complete provider catalog, so the pick stays exact.
     expect(result.agents?.entries?.OPS?.modelPolicy?.allow).toEqual([
       "shared/available",
-      "configure-provider/*",
+      recommended,
     ]);
     expect(result.agents?.defaults?.modelPolicy).toEqual(config.agents?.defaults?.modelPolicy);
     expect(result.agents?.entries?.ops).toBeUndefined();

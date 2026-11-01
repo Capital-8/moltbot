@@ -63,12 +63,12 @@ Reconfiguring trusted-proxy mode defaults the loopback prompt to the existing op
 ## Model section
 
 <Note>
-**Model** includes a multi-select of the provider's models. Your selection sets the model fallbacks. Configure never creates a model allowlist. Without one, `/model` and the model picker already show the models of every provider with working auth.
+**Model** includes a multi-select of the provider's models. Configure never creates a model allowlist:
 
-If `modelPolicy.allow` already exists (for the defaults or the selected agent), the selection updates the provider's entries in it. Unrelated providers stay as they are:
-
-- Select every model of the provider: configure writes `<provider>/*`, so models the provider adds later also show.
-- Select some of them: configure writes those exact `provider/model` refs.
+- **No `modelPolicy.allow` yet:** the prompt is **Fallback models** and sets only fallbacks. `/model` and the model picker already show the models of every provider with working auth.
+- **An existing `modelPolicy.allow`** (for the defaults or the selected agent): the prompt is **Models in /model picker** and updates the provider's entries in that list. Unrelated providers stay as they are.
+  - Select every model of the provider's full catalog: configure writes `<provider>/*`, so models the provider adds later also show.
+  - Select some of them, or pick from a setup that offers only some models: configure writes those exact `provider/model` refs.
 
 Per-model aliases and parameters stay under `agents.defaults.models`. Configure does not add selected models to that map, and those entries do not restrict model overrides by themselves.
 

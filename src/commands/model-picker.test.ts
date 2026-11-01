@@ -6,11 +6,8 @@ import { testing as cliBackendsTesting } from "../agents/cli-backends.test-suppo
 import type { ModelCatalogEntry, ModelCatalogSnapshot } from "../agents/model-catalog.types.js";
 import type { LoadPreparedModelCatalogParams } from "../agents/prepared-model-catalog.js";
 import type { OpenClawConfig } from "../config/config.js";
-import {
-  applyModelAllowlist,
-  promptDefaultModel,
-  promptModelAllowlist,
-} from "../flows/model-picker.js";
+import { applyModelAllowlist } from "../flows/model-picker-allowlist.js";
+import { promptDefaultModel, promptModelAllowlist } from "../flows/model-picker.js";
 import { createEmptyPluginSetupRegistry } from "../plugins/setup-registry.test-support.js";
 import type { WizardMultiSelectParams, WizardPrompter } from "../wizard/prompts.js";
 import { makePrompter } from "./setup/__tests__/test-utils.js";
@@ -454,8 +451,13 @@ it("includes stale configured preferred provider models in the scoped cleanup", 
   expect(optionValues(options)).toEqual([activeModel, staleModel]);
   expect(requireOption(options, staleModel).hint).toBe("configured (not in catalog)");
   expect(multiselect.mock.calls[0]?.[0]?.initialValues).toEqual([activeModel, staleModel]);
-  expect(result).toEqual({ models: [activeModel], scopeKeys: [activeModel, staleModel] });
-  const next = applyModelAllowlist(config, result.models ?? [], { scopeKeys: result.scopeKeys });
+  expect(result).toEqual({
+    models: [activeModel],
+    scopeKeys: [activeModel, staleModel],
+    scopeComplete: true,
+  });
+  // Unmigrated legacy map: its restriction carries into the explicit policy.
+  const next = applyModelAllowlist(config, result.models ?? [], result);
   expect(next.agents?.defaults?.models).toEqual(modelsBefore);
   expect(next.agents?.defaults?.modelPolicy?.allow).toEqual([
     "anthropic/claude-sonnet-4-6",
@@ -506,15 +508,25 @@ it.each([true, false])(
 );
 
 it.each([
-  { name: "whole provider", picks: ["p/one", "p/two"], allow: ["a/x", "p/*"] },
-  { name: "narrowed provider", picks: ["p/one"], allow: ["a/x", "p/one"] },
-])("writes the configure selection into an existing allowlist: $name", ({ picks, allow }) => {
+  { name: "whole provider", picks: ["p/one", "p/two"], complete: true, allow: ["a/x", "p/*"] },
+  { name: "narrowed provider", picks: ["p/one"], complete: true, allow: ["a/x", "p/one"] },
+  {
+    name: "partial scope",
+    picks: ["p/one", "p/two"],
+    complete: false,
+    allow: ["a/x", "p/one", "p/two"],
+  },
+])("writes the configure selection into an existing allowlist: $name", (testCase) => {
+  const { picks, complete, allow } = testCase;
   const models = { "a/x": { alias: "X" } };
   const config: OpenClawConfig = {
     meta: { migrations: { modelPolicyAllowlist: true } },
     agents: { defaults: { models, modelPolicy: { allow: ["a/x", "p/one"] } } },
   };
-  const next = applyModelAllowlist(config, picks, { scopeKeys: ["p/one", "p/two"] });
+  const next = applyModelAllowlist(config, picks, {
+    scopeKeys: ["p/one", "p/two"],
+    scopeComplete: complete,
+  });
   expect(next.agents?.defaults?.modelPolicy?.allow).toEqual(allow);
   // The models map is metadata; picks are not mirrored into it.
   expect(next.agents?.defaults?.models).toEqual(models);
@@ -523,4 +535,14 @@ it.each([
 it("does not create an allowlist when none exists", () => {
   const config: OpenClawConfig = { meta: { migrations: { modelPolicyAllowlist: true } } };
   expect(applyModelAllowlist(config, ["p/one"], { scopeKeys: ["p/one", "p/two"] })).toBe(config);
+});
+
+it("labels the selection as fallbacks when no allowlist exists", async () => {
+  setScopedCatalog([catalogModel("openai", "gpt-5.5", "GPT-5.5")]);
+  const { multiselect } = await pickAllowlist({
+    preferredProvider: "openai",
+    providerScopedCatalog: true,
+    restrictsPicker: false,
+  });
+  expect(multiselect.mock.calls[0]?.[0]?.message).toBe("Fallback models (multi-select)");
 });
