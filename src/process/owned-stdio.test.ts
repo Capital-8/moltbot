@@ -29,7 +29,11 @@ describe("owned stdio startup cleanup", () => {
   it("preserves the original startup failure when loaded cleanup settles after 500ms", async () => {
     const original = new Error("startup failed after admission");
     createChild.mockImplementation(({ onSpawnCleanup }) => {
-      onSpawnCleanup(new Promise<void>((resolve) => setTimeout(resolve, 750)));
+      onSpawnCleanup(
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 750);
+        }),
+      );
       throw original;
     });
 

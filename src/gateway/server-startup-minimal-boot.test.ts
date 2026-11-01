@@ -40,7 +40,9 @@ async function readTimelineAtReady(port: number, timelinePath: string): Promise<
     } catch {
       // The HTTP listener comes up before the readiness boundary.
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
   }
   throw new Error("Gateway did not become ready within the minimal boot budget");
 }

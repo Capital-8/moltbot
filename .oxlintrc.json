@@ -664,7 +664,13 @@
     {
       "files": ["src/gateway/server-kernel.test.ts"],
       "rules": {
-        "max-lines": ["error", { "max": 1008, "skipBlankLines": true, "skipComments": true }]
+        "max-lines": ["error", { "max": 1010, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": ["src/gateway/server-startup-finish.ts"],
+      "rules": {
+        "max-lines": ["error", { "max": 714, "skipBlankLines": true, "skipComments": true }]
       }
     },
     {

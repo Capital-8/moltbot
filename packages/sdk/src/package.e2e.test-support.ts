@@ -352,12 +352,11 @@ async function startOpenClawRegistry(packages: PackedPackage[]): Promise<{
       createReadStream(pkg.tarball).pipe(res);
       return;
     }
-    const matchingPackages = byName.get(decodedPath.slice(1));
-    if (!matchingPackages?.length) {
+    const latest = byName.get(decodedPath.slice(1))?.at(-1);
+    if (!latest) {
       res.writeHead(404).end();
       return;
     }
-    const latest = matchingPackages.at(-1)!;
     res.writeHead(200, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
@@ -428,13 +427,13 @@ export async function createPackedSdkConsumer(): Promise<PackedSdkConsumer> {
           cwd: packageRoot,
         });
       }
-      for (const [packageRoot, readManifest] of [
-        ...packageRoots.map((packageRoot) => [packageRoot, readPackageManifest] as const),
+      for (const [packedRoot, readManifest] of [
+        ...packageRoots.map((currentRoot) => [currentRoot, readPackageManifest] as const),
         ...externalPackageRoots.map(
-          (packageRoot) => [packageRoot, readRawPackageManifest] as const,
+          (currentRoot) => [currentRoot, readRawPackageManifest] as const,
         ),
       ]) {
-        const manifest = await readManifest(packageRoot);
+        const manifest = await readManifest(packedRoot);
         const tarball = path.join(root, tarballFileName(manifest));
         await fs.stat(tarball);
         packedPackages.push({ manifest, tarball });

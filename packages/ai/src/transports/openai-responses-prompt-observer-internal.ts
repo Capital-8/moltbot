@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core";
 import type { EasyInputMessage } from "openai/resources/responses/responses.js";
 import { stripSystemPromptCacheBoundary } from "../utils/system-prompt-cache-boundary.js";
 import {
@@ -14,10 +15,6 @@ type ResponsesPromptRequest = {
   tools?: unknown;
 };
 type ResponsesPromptMetadata = Pick<ResponsesPromptObservation, "egress" | "payloadVariant">;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function readSessionsSpawnSchema(
   tools: unknown,
