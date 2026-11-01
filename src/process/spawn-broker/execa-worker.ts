@@ -88,6 +88,7 @@ export async function startBrokerExeca(
   options: BrokerExecaOptions,
   assertCurrent: () => void,
   execCgroup?: string,
+  prepareLaunch?: () => Promise<void>,
 ): Promise<BrokerExecaProcess> {
   const controller = new AbortController();
   const outputs = new Map<number, { receiver: Socket; transform: Transform }>();
@@ -99,6 +100,10 @@ export async function startBrokerExeca(
       if (outputOption(options, fd) === "pipe" && buffered !== false) {
         outputs.set(fd, await createExecaOutput());
       }
+    }
+    // The host grants launch only after all asynchronous stream preparation settles.
+    if (prepareLaunch) {
+      await prepareLaunch();
     }
     assertCurrent();
     const { encoding, executionDeadlineMs, ...processOptions } = options;
@@ -132,7 +137,7 @@ export async function startBrokerExeca(
         ? getProcessInstanceStartTime(child.pid)
         : undefined;
     const stdio = [0, 1, 2].map((fd) => {
-      if (fd === 0 && options.input !== undefined) {
+      if (fd === 0 && (options.input !== undefined || options.inputFile !== undefined)) {
         return null;
       }
       if (fd > 0 && outputOption(options, fd === 1 ? 1 : 2) !== "pipe") {

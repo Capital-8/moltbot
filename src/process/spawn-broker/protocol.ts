@@ -38,6 +38,7 @@ export type BrokerRequest =
   | { type: "launch"; id: number; allowed: boolean }
   | {
       type: "spawn-execa";
+      prepare?: true;
       id: number;
       argv: string[];
       options: BrokerExecaOptions;

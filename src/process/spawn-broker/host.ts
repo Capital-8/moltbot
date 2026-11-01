@@ -37,6 +37,7 @@ import {
   type BrokerNativeResourceLease,
 } from "./resource-host.js";
 import {
+  isBrokerResourceResponse,
   SPAWN_BROKER_STARTUP_TIMEOUT_MS,
   spawnBrokerStartupNowMs,
   type BrokerBootstrap,
@@ -143,10 +144,7 @@ export class SpawnBrokerHost {
       : this.readiness.promise;
   }
 
-  readFile(filePath: string, signal?: AbortSignal): Promise<Buffer> {
-    return this.fileReads.read(filePath, signal);
-  }
-
+  readonly readFile = this.fileReads.read.bind(this.fileReads);
   readonly readFilePage = this.fileReads.readPage.bind(this.fileReads);
 
   captureNativeResource(
@@ -252,7 +250,7 @@ export class SpawnBrokerHost {
         return;
       }
       if (!request.nativeInitiated) {
-        if (message.type === "prepare-spawn") {
+        if (initiateSpawn) {
           child.markNotStarted();
         }
         this.requests.delete(message.id);
@@ -520,17 +518,7 @@ export class SpawnBrokerHost {
         }
         return;
       }
-      if (
-        message.type === "resource-ready" ||
-        message.type === "resource-created" ||
-        message.type === "resource-target" ||
-        message.type === "resource-owner" ||
-        message.type === "resource-owner-received" ||
-        message.type === "resource-owner-rejected" ||
-        message.type === "resource-closed" ||
-        message.type === "resource-close-error" ||
-        message.type === "resource-failed"
-      ) {
+      if (isBrokerResourceResponse(message)) {
         try {
           this.resourceClaims?.receive(message);
         } catch (error) {
@@ -556,6 +544,10 @@ export class SpawnBrokerHost {
       if (message.type === "owned" || message.type === "error") {
         request.nativeInitiated?.resolve();
         request.nativeInitiated = undefined;
+        // Worker errors join cleanup before reporting; no owned PID means no live custody.
+        if (message.type === "error" && request.pid === undefined) {
+          request.child.markNotStarted();
+        }
       }
       if (message.type === "prepared") {
         const initiate = request.initiateSpawn;

@@ -32,6 +32,7 @@ import {
 import type { CommandSpawnOptions, CommandSubprocess } from "./spawn-broker/execa-types.js";
 import type { SpawnBrokerHost } from "./spawn-broker/host.js";
 import { recordChildProcessSpawn } from "./spawn-diagnostics.js";
+import type { SpawnInitiation } from "./spawn-initiation.js";
 import { resolveSafeChildProcessInvocation } from "./windows-command.js";
 
 function isOutputOption(value: unknown): value is BrokerOutputOption | undefined {
@@ -104,11 +105,15 @@ function spawnBrokerCommand(
   options: ExecaOptions,
   prepared: BrokerExecaOptions,
   executionIntent: ProcessExecutionIntent,
+  initiateSpawn?: SpawnInitiation,
 ) {
+  const runInContext = AsyncLocalStorage.snapshot();
   const remote = host.spawnExeca(
     argv,
     prepared,
     executionIntent === "agent-tool" ? getAgentExecCgroup() : undefined,
+    initiateSpawn &&
+      ((launch, settlement) => runInContext(() => initiateSpawn(launch, settlement))),
   );
   const child = remote.child;
   const closed = child.waitForClose();
@@ -535,6 +540,7 @@ export function shouldSpawnWithShell(params: {
 }
 
 type SpawnCommandOptions = CommandSpawnOptions & {
+  initiateSpawn?: SpawnInitiation;
   executionIntent?: ProcessExecutionIntent;
   baseEnv?: NodeJS.ProcessEnv;
   executionTimeoutMs?: number;
@@ -605,6 +611,7 @@ export function spawnCommandWithInvocation<
     executionTimeoutMs,
     inheritScopeCancellation = true,
     executionIntent = "gateway-internal",
+    initiateSpawn,
     ...execaOptions
   } = sourceOptions;
   const commandEnv = resolveCommandEnv({ argv, baseEnv, env });
@@ -634,21 +641,25 @@ export function spawnCommandWithInvocation<
     // The 1s margin absorbs broker scheduling lag; the execution-only check cannot relabel an exited root.
     remoteOptions.executionDeadlineMs = executionTimeoutMs + 1_000;
   }
-  const reservation = reserveCommandProcessCustody([invocation.command, ...invocation.args]);
-  const child: CommandSubprocess<CommandSpawnOptions> =
-    broker && remoteOptions
+  let reservation: ReturnType<typeof reserveCommandProcessCustody>;
+  const launch = (): CommandSubprocess<CommandSpawnOptions> => {
+    reservation = reserveCommandProcessCustody([invocation.command, ...invocation.args]);
+    return broker && remoteOptions
       ? spawnBrokerCommand(
           broker,
           [invocation.command, ...invocation.args],
           commandOptions,
           remoteOptions,
           executionIntent,
+          initiateSpawn,
         )
       : runWithMainThreadTask(
           "process:spawn",
           () => execa(invocation.command, invocation.args, commandOptions),
           "command",
         );
+  };
+  const child = !remoteOptions && initiateSpawn ? initiateSpawn(launch) : launch();
   // nice execs Git in the same child; retain its family and operation attribution.
   const niceGit = argv[0] === "nice" && argv[1] === "-n" && argv[2] === "10" && argv[3] === "git";
   recordChildProcessSpawn(

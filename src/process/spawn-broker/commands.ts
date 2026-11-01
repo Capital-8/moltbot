@@ -97,9 +97,24 @@ export function createBrokerCommands(host: {
       const request = native(command, args, options, initiateSpawn, execCgroup, outputFile);
       return { child: request.child, output: request.output!.promise };
     },
-    spawnExeca: (argv: string[], options: BrokerExecaOptions, execCgroup?: string) => {
+    spawnExeca: (
+      argv: string[],
+      options: BrokerExecaOptions,
+      execCgroup?: string,
+      initiateSpawn?: SpawnInitiation,
+    ) => {
       const id = host.nextId();
-      const request = host.admit({ type: "spawn-execa", id, argv, options, execCgroup });
+      const request = host.admit(
+        {
+          type: "spawn-execa",
+          ...(initiateSpawn ? { prepare: true as const } : {}),
+          id,
+          argv,
+          options,
+          execCgroup,
+        },
+        initiateSpawn,
+      );
       return {
         child: request.child,
         result: request.result!.promise,

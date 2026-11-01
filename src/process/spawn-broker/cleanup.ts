@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
 import { getProcessInstanceStartTime, isPidDefinitelyDead } from "../../shared/pid-alive.js";
@@ -5,6 +6,23 @@ import { killProcessTree } from "../kill-tree.js";
 import { GRACEFUL_CANCEL_TIMEOUT_MS } from "../supervisor/cancellation-policy.js";
 import { readProcessGroupMembers } from "../supervisor/service-child-group-ownership.js";
 import { SpawnBrokerError } from "./protocol.js";
+
+export function disposeFailedChild(child: ChildProcess | undefined): void {
+  if (!child) {
+    return;
+  }
+  // Setup can fail before Node emits its queued spawn error.
+  child.once("error", () => {});
+  if (child.pid && child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
+  if (child.connected) {
+    child.disconnect();
+  }
+  for (const stream of child.stdio ?? []) {
+    stream?.destroy();
+  }
+}
 
 function groupGone(pid: number): boolean {
   try {

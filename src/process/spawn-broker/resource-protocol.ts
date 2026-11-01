@@ -1,4 +1,12 @@
 import type { NativeWorkerFailure } from "../../infra/worker-native-error.js";
+import type { BrokerResponse } from "./protocol.js";
+
+/** Resource replies occupy their own namespace on the version-matched private channel. */
+export function isBrokerResourceResponse(
+  message: BrokerResponse | BrokerResourceResponse,
+): message is BrokerResourceResponse {
+  return message.type.startsWith("resource-");
+}
 
 export const SPAWN_BROKER_STARTUP_TIMEOUT_MS = 15_000;
 

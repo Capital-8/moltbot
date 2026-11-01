@@ -1,7 +1,7 @@
 import { ok } from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { text } from "node:stream/consumers";
 import { serialize } from "node:v8";
@@ -281,6 +281,79 @@ describe.skipIf(!supportsSpawnBrokerCommandTransport())("broker command transpor
     expect(result).toBeInstanceOf(Error);
     expect(result).toMatchObject({ exitCode: 9, stderr: "failure" });
   });
+
+  it.each([false, true])(
+    "reads owned file input at the launch owner (broker=%s)",
+    async (broker) => {
+      const inputFile = path.join(tempDirs.make("openclaw-broker-input-"), "input");
+      const content = "exact input\u0000\r\n".repeat(100_000);
+      await writeFile(inputFile, content);
+      const ownerContext = new AsyncLocalStorage<string>();
+      let launches = 0;
+      const initiateSpawn = <T>(startCommand: () => T) => {
+        expect(ownerContext.getStore()).toBe("file-owner");
+        launches++;
+        return startCommand();
+      };
+      const run = () =>
+        runExec(
+          process.execPath,
+          [
+            "-e",
+            "process.stdout.write(String(process.ppid)+'\\n');process.stdin.pipe(process.stdout)",
+          ],
+          {
+            inputFile,
+            initiateSpawn,
+            logOutput: false,
+            maxBuffer: Buffer.byteLength(content) + 100,
+          },
+        );
+      const result = await ownerContext.run("file-owner", () =>
+        broker ? runWithSpawnBroker(host, run) : run(),
+      );
+      expect(result.stdout).toBe(`${broker ? host.pid : process.pid}\n${content}`);
+      expect(launches).toBe(1);
+    },
+  );
+
+  it.each([false, true])(
+    "refuses file-input work after launch authority is revoked (broker=%s)",
+    async (broker) => {
+      const directory = tempDirs.make("openclaw-broker-input-refused-");
+      const inputFile = path.join(directory, "input");
+      const marker = path.join(directory, "effect");
+      await writeFile(inputFile, "private input");
+      let current = broker;
+      let attempts = 0;
+      const initiateSpawn = <T>(startCommand: () => T) => {
+        attempts++;
+        if (!current) {
+          throw new Error("File import authority revoked");
+        }
+        return startCommand();
+      };
+      const run = () =>
+        runExec(
+          process.execPath,
+          ["-e", "require('node:fs').writeFileSync(process.argv[1], 'effect')", marker],
+          { inputFile, initiateSpawn, logOutput: false },
+        );
+      const reservation = { spawned: vi.fn(), settled: vi.fn() };
+      const reserve = vi.fn(() => reservation);
+      const scoped = () => withCommandProcessScope(run, undefined, { reserve });
+      const pending = broker ? runWithSpawnBroker(host, scoped) : scoped();
+      current = false;
+      await expect(pending).rejects.toThrow(
+        broker ? "launch authority refused" : "authority revoked",
+      );
+      await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(attempts).toBe(1);
+      expect(reserve).toHaveBeenCalledTimes(broker ? 1 : 0);
+      expect(reservation.spawned).not.toHaveBeenCalled();
+      expect(reservation.settled).toHaveBeenCalledTimes(broker ? 1 : 0);
+    },
+  );
 
   it("preserves launch errors and cancellation during broker admission", async () => {
     for (const buffer of [false, true]) {

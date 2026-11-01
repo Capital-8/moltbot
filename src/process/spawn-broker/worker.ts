@@ -11,6 +11,7 @@ import { spawnInAgentExecCgroup } from "../linux-exec-cgroup.js";
 import { spawnWithInheritedOomScore } from "../linux-oom-score.js";
 import { waitForBrokerChildCompletion } from "./child-completion.js";
 import {
+  disposeFailedChild,
   drainCurrentBrokerProcessGroup,
   isBrokerChildGroupAlive,
   terminateLostBrokerChild,
@@ -188,23 +189,6 @@ function shutdown(): void {
   })();
 }
 
-function disposeFailedChild(child: ChildProcess | undefined): void {
-  if (!child) {
-    return;
-  }
-  // Setup can fail before Node emits its queued spawn error.
-  child.once("error", () => {});
-  if (child.pid && child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-  }
-  if (child.connected) {
-    child.disconnect();
-  }
-  for (const stream of child.stdio ?? []) {
-    stream?.destroy();
-  }
-}
-
 async function readFile(message: Extract<BrokerRequest, { type: "read-file" }>): Promise<void> {
   const pending = { canceled: false, controller: new AbortController() };
   try {
@@ -284,6 +268,8 @@ async function launch(
     return;
   }
   const pending: { canceled?: boolean; signal?: NodeJS.Signals | number } = {};
+  const guarded =
+    message.type === "prepare-spawn" || (message.type === "spawn-execa" && message.prepare);
   starting.set(message.id, pending);
   let spawnedChild: ChildProcess | undefined;
   let spawnedClose: Promise<void> | undefined;
@@ -294,11 +280,7 @@ async function launch(
     (message.type === "spawn-execa" && message.options.killDescendants === true);
   const assertActive = () => {
     // Ordinary queued commands still settle cancellation through their native process result.
-    if (
-      stopping ||
-      !process.connected ||
-      (message.type === "prepare-spawn" && (pending.canceled || pending.signal))
-    ) {
+    if (stopping || !process.connected || (guarded && (pending.canceled || pending.signal))) {
       throw new Error("Spawn broker is stopping");
     }
   };
@@ -310,7 +292,7 @@ async function launch(
     // another descriptor acknowledgement or a large buffered command result.
     const admission = await sender.reserve<Admission>(async (publish) => {
       assertActive();
-      if (message.type === "prepare-spawn") {
+      const prepareLaunch = async () => {
         const grant = createDeferredCore<boolean>();
         launchGrants.set(message.id, grant);
         try {
@@ -322,10 +304,19 @@ async function launch(
         } finally {
           launchGrants.delete(message.id);
         }
+      };
+      if (message.type === "prepare-spawn") {
+        await prepareLaunch();
       }
       const execa =
         message.type === "spawn-execa"
-          ? await startBrokerExeca(message.argv, message.options, assertActive, message.execCgroup)
+          ? await startBrokerExeca(
+              message.argv,
+              message.options,
+              assertActive,
+              message.execCgroup,
+              guarded ? prepareLaunch : undefined,
+            )
           : undefined;
       const outputStdio = destination?.stdio;
       const child =

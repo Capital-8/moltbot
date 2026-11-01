@@ -25,6 +25,7 @@ import {
 import type { ProcessExecutionIntent } from "./linux-exec-cgroup.js";
 import { setProcessTimeout } from "./process-deadline.js";
 import { BrokerChild } from "./spawn-broker/child.js";
+import type { SpawnInitiation } from "./spawn-initiation.js";
 export { runCommandWithTimeout, runUtf8CommandWithTimeout } from "./exec-runner.js";
 export type { CommandOptions } from "./exec-runner.js";
 export { isPlainCommandExitFailure, resolveProcessExitCode } from "./exec-result.js";
@@ -41,6 +42,8 @@ export type RunExecOptions = {
   baseEnv?: NodeJS.ProcessEnv;
   env?: NodeJS.ProcessEnv;
   input?: string | Uint8Array;
+  inputFile?: string;
+  initiateSpawn?: SpawnInitiation;
   stdinFileDescriptor?: number;
   signal?: AbortSignal;
   /** Observe received bytes without changing buffering, completion or cancellation. */
@@ -67,6 +70,12 @@ export async function runExec(
   if (resolvedOptions.input !== undefined && resolvedOptions.stdinFileDescriptor !== undefined) {
     throw new Error("runExec accepts either input or stdinFileDescriptor, not both");
   }
+  if (
+    resolvedOptions.inputFile !== undefined &&
+    (resolvedOptions.input !== undefined || resolvedOptions.stdinFileDescriptor !== undefined)
+  ) {
+    throw new Error("runExec accepts only one input source");
+  }
   let acceptingOutput = true;
   let awaitingStartup = true;
   let deadlineExpired = false;
@@ -81,10 +90,17 @@ export async function runExec(
       env: resolvedOptions.env,
       forceKillAfterDelay: COMMAND_PROCESS_TREE_KILL_GRACE_MS,
       ...(resolvedOptions.input !== undefined ? { input: resolvedOptions.input } : {}),
+      inputFile: resolvedOptions.inputFile,
+      initiateSpawn: resolvedOptions.initiateSpawn,
       maxBuffer,
       reject: true,
       ...(resolvedOptions.stdinFileDescriptor === undefined
-        ? { stdin: resolvedOptions.input === undefined ? "ignore" : undefined }
+        ? {
+            stdin:
+              resolvedOptions.input === undefined && resolvedOptions.inputFile === undefined
+                ? "ignore"
+                : undefined,
+          }
         : {
             // Execa forwards arbitrary numeric stdin descriptors to Node, but its type narrows them to fd 0.
             stdin: resolvedOptions.stdinFileDescriptor as 0,

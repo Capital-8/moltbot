@@ -380,8 +380,13 @@ Reconciliation prepares the source difference once and sends changed nodes and
 their ancestors to each preflight. Each preflight still inspects the target
 filesystem again before mutation or acceptance; it does not reuse local node state.
 Independent workspaces can progress while the main thread serves requests. The
-host owns session authority, workspace mutations, Git subprocesses, and durable
-acceptance; cancellation joins outstanding work before cleanup.
+host owns session authority, workspace mutations, and durable acceptance;
+cancellation joins outstanding work before cleanup. On supported Node platforms,
+rollback snapshots and result staging launch Git through the existing spawn broker,
+which reads their prepared input files without transferring payload bytes through
+the Gateway. Staging rechecks live authority at the broker's final launch grant.
+Raw snapshots return their tree ID directly from fast-import, and directory-only
+reconciliation reuses its empty base tree.
 
 Node capture reuses this pool and its compiled manifest program rather than
 starting a process per verification. Each capture has a private workspace, hash
