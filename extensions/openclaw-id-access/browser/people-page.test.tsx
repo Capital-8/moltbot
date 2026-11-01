@@ -216,6 +216,40 @@ describe("People page", () => {
     );
   });
 
+  it("signs a removal at the claw's current seq, not the one the page last read", async () => {
+    const member = {
+      accountId: "acct-bob",
+      role: "operator",
+      peerKeys: ["iroh:bob"],
+      email: "bob@example.test",
+      displayName: "Bob",
+      approvedAt: 1_800_000_000,
+      devices: [],
+    };
+    const { container, request } = await mountPage([
+      linked({ invites: [], members: [member], seq: 4 }),
+    ]);
+    await vi.waitFor(() => expect(button(container, "Remove")?.disabled).toBe(false));
+    // Something else changed the claw after the page read it (seq 4 -> 6).
+    request.mockImplementation(async (method: string) =>
+      method === "openclawId.people"
+        ? { link: linked({ invites: [], members: [member], seq: 6 }).link }
+        : method === "openclawId.status"
+          ? { ...linked(), link: { linked: true, hostname: "studio-e61zr.crabd.xyz" } }
+          : {},
+    );
+    button(container, "Remove")!.click();
+    await vi.waitFor(() => expect(button(container, "Remove Bob")).toBeDefined());
+    button(container, "Remove Bob")!.click();
+    const { signMembershipChange } = await import("./owner-signing.js");
+    await vi.waitFor(() =>
+      expect(signMembershipChange).toHaveBeenLastCalledWith(expect.objectContaining({ seq: 6 }), {
+        op: "remove",
+        account_id: "acct-bob",
+      }),
+    );
+  });
+
   it("shows no people to a client that is not an owner, and never asks for them", async () => {
     const { container, request } = await mountPage([{ ...linked(), owner: false }]);
     await vi.waitFor(() =>

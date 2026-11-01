@@ -82,16 +82,19 @@ export function PeoplePage(props: { host: ControlUiHost }) {
     }
   };
 
-  // Runs one owner action, then refreshes; failures show above the sections.
+  // Runs one owner action, then refreshes; failures show above the sections. The
+  // action signs against the owner state read now, not the page's last read: the
+  // claw's seq moves on its own (a member's device joining, another owner device),
+  // and a change signed at an old seq is refused.
   const run = async <T,>(action: (link: Link) => Promise<T>): Promise<T | undefined> => {
-    const link = state()?.link;
-    if (!link || busy()) {
+    if (!state()?.link || busy()) {
       return undefined;
     }
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
+      const { link } = await host.request<{ link: Link }>("openclawId.people", {});
       return await action(link);
     } catch (failure) {
       setError(errorText(failure));
