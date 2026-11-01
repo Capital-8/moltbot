@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
+import { findLiveRegistryWorktreeByOwner } from "../../agents/worktrees/registry.test-support.js";
 import { managedWorktrees } from "../../agents/worktrees/service.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import * as sessionEntries from "../../config/sessions/session-accessor.js";
@@ -38,6 +40,52 @@ vi.mock("./repository-github-identity.js", () => ({
 }));
 const { fixture } = useRepositoryWorkspaceResultFixture();
 const url = "https://github.com/synthetic/disk-move-fixture.git";
+
+it("preserves the original disk when its source changes after Gateway import", async () => {
+  const f = await fixture("remote-exec", false, false, url);
+  const repository = await f.bindDisk();
+  await registerClonedProjectRegistry({ path: f.origin, name: "Fixture", originUrl: url });
+  vi.spyOn(cloneRuntime, "readProjectCheckoutRemoteHead").mockResolvedValue(undefined);
+  await f.write("only-on-disk.txt", "captured\n");
+  let changed = false;
+  const assertCurrent = () => {
+    const worktree = findLiveRegistryWorktreeByOwner(
+      process.env,
+      "session",
+      sessionTarget.sessionKey,
+    );
+    if (!changed && worktree && fsSync.existsSync(path.join(worktree.path, "only-on-disk.txt"))) {
+      fsSync.writeFileSync(path.join(f.remote, "only-on-disk.txt"), "changed after import\n");
+      changed = true;
+    }
+  };
+  const quiescence = await f.tunnel.quiesceWorkspace(f.remote, assertCurrent);
+  try {
+    const prepareMove = createRepositoryGatewayMovePreparation({
+      placements: f.placements,
+      environments: f.environments,
+      getConfig: getRuntimeConfig,
+    });
+    await expect(
+      prepareMove({ ...sessionTarget, sessionId: SESSION_ID, assertCurrent, quiescence }),
+    ).rejects.toThrow("Repository workspace changed during checkpoint capture");
+    expect(changed).toBe(true);
+    expect(sessionEntries.loadSessionEntry(sessionTarget)?.repositoryWorkspaceId).toBe(
+      repository.workspaceId,
+    );
+    expect(
+      await managedWorktrees.findLiveByOwner("session", sessionTarget.sessionKey),
+    ).toBeUndefined();
+    expect((await f.store.get(repository.workspaceId))?.diskAuthority).toEqual(
+      repository.diskAuthority,
+    );
+    expect(await fs.readFile(path.join(f.remote, "only-on-disk.txt"), "utf8")).toBe(
+      "changed after import\n",
+    );
+  } finally {
+    await quiescence.resume();
+  }
+});
 
 it.each([
   "complete",
