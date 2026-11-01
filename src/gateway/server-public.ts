@@ -78,6 +78,8 @@ export type GatewayServerOptions = {
     | "markListening"
     | "yieldExecutionForRollingHandoff"
     | "restoreExecutionAfterRollingHandoff"
+    | "observeRollingExecutionHandoff"
+    | "rebindRollingExecutionHandoff"
     | "assertExecutionCurrent"
     | "gatewayOwnerId"
     | "commitRollingPreparation"

@@ -9,7 +9,10 @@ import {
   resolveTimestampMsToIsoString,
 } from "@openclaw/normalization-core/number-coercion";
 import { resolveConfigPath, resolveGatewayLockDir, resolveStateDir } from "../config/paths.js";
-import type { GatewayRollingContract } from "../gateway/rolling-release-contract.js";
+import type {
+  GatewayRollingContract,
+  GatewayRollingLeaseObservation,
+} from "../gateway/rolling-release-contract.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { isPidAlive, isPidDefinitelyDead } from "../shared/pid-alive.js";
 import {
@@ -71,6 +74,12 @@ export type GatewayLockHandle = {
   /** Yield the existing PG execution lease while this private reader owner remains alive. */
   yieldExecutionForRollingHandoff?: (contract: GatewayRollingContract) => Promise<void>;
   restoreExecutionAfterRollingHandoff?: () => Promise<void>;
+  observeRollingExecutionHandoff?: () => Promise<GatewayRollingLeaseObservation>;
+  rebindRollingExecutionHandoff?: (
+    previous: GatewayRollingContract,
+    candidateBootId: string,
+    expectedOwner: string,
+  ) => Promise<GatewayRollingContract>;
   returnRollingPreparationToPredecessor?: () => Promise<void>;
   commitRollingPreparation?: (releaseId: string) => void;
   gatewayOwnerId?: string;

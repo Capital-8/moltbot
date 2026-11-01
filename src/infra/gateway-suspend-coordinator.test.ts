@@ -65,6 +65,40 @@ afterEach(() => {
 });
 
 describe("gateway suspend coordinator", () => {
+  it.each([false, true])("reports the actual scheduler resume outcome (failure: %s)", (fail) => {
+    const warn = vi.fn();
+    expect(
+      prepare({
+        warn,
+        resumeScheduling: () => {
+          if (fail) {
+            throw new Error("scheduler unavailable");
+          }
+        },
+      }),
+    ).toMatchObject({ status: "ready" });
+    expect(resumeGatewaySuspend(LEASE)).toEqual(resumed);
+    expect(getGatewaySuspendStatus(LEASE)).toEqual({ status: "running" });
+    expect(getGatewaySuspendStatus(LEASE, true)).toMatchObject({
+      status: "running",
+      resumeObservationVersion: 1,
+      resumeObservation: {
+        suspensionId: LEASE,
+        ownerId: "request",
+        schedulingResumed: !fail,
+        admissionReopened: true,
+        reason: "resume",
+      },
+    });
+    expect(getGatewaySuspendStatus("different", true)).not.toHaveProperty("resumeObservation");
+    expect(warn).toHaveBeenCalledTimes(fail ? 1 : 0);
+    expect(prepare({ createSuspensionId: () => "next" })).toMatchObject({ status: "ready" });
+    expect(getGatewaySuspendStatus(LEASE, true)).not.toHaveProperty("resumeObservation");
+    resumeGatewaySuspend("next");
+    resetGatewaySuspendCoordinatorForLifecycleRestart();
+    expect(getGatewaySuspendStatus("next", true)).not.toHaveProperty("resumeObservation");
+  });
+
   it.each([false, true])(
     "lifecycle reset resumes a held scheduler before admission is cleared (drain: %s)",
     (drain) => {

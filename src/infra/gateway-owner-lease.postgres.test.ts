@@ -1,11 +1,14 @@
 import path from "node:path";
+import { Client } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { withEngineStoreAdmission } from "./database-engine/admission-scope.js";
 import {
   mixedAgentConnection,
   useMixedAgentPair,
 } from "./database-engine/mixed-agent.conformance.test-support.js";
+import { getPostgresPhysicalFacts } from "./database-engine/physical-facts.js";
 import {
   acquireGatewayOwnerLease,
   readGatewayOwnerLease,
@@ -138,4 +141,92 @@ describe.skipIf(!mixedAgentConnection)("PostgreSQL rolling execution-owner abort
       successor.owner,
     );
   });
+
+  it.each([false, true])(
+    "rebinds a reserved or returned grant without reviving predecessor writes (%s)",
+    async (returned) => {
+      physical = acquirePhysical();
+      const predecessor = acquireGatewayOwnerLease({
+        port: 19381,
+        mode: "foreground",
+        supervisor: null,
+      });
+      leases.push(predecessor);
+      await predecessor.ready;
+      const namespace = withEngineStoreAdmission(
+        () => getPostgresPhysicalFacts(openOpenClawStateDatabase().db)?.namespace,
+      );
+      expect(namespace).toBeDefined();
+      const client = new Client({ connectionString: mixedAgentConnection });
+      await client.connect();
+      try {
+        const contract = {
+          version: 1 as const,
+          releaseId: "postgres-rebind",
+          predecessorBootId: "old-boot",
+          candidateBootId: "failed-boot",
+          predecessorOwner: predecessor.owner,
+          compatibilityDigest: "a".repeat(64),
+          companionGeneration: "frozen-companion",
+          expiresAtMs: Date.now() + 60_000,
+        };
+        await predecessor.yieldTo(contract);
+        let expectedOwner = predecessor.owner;
+        if (returned) {
+          const candidate = acquireGatewayOwnerLease({
+            port: 19382,
+            mode: "foreground",
+            supervisor: null,
+            owner: "failed-candidate",
+            rollingHandoff: contract,
+          });
+          leases.push(candidate);
+          await candidate.ready;
+          await expect(
+            predecessor.rebindYield(contract, "fresh-boot", candidate.owner),
+          ).rejects.toThrow();
+          await candidate.returnToPredecessor();
+          await candidate.release();
+          expectedOwner = candidate.owner;
+        }
+        const quoted = `"${namespace!.replaceAll('"', '""')}"`;
+        const before = await client.query(
+          `SELECT expires_at FROM ${quoted}.state_leases WHERE owner = $1`,
+          [expectedOwner],
+        );
+        expect(before.rows).toHaveLength(1);
+        await expect(
+          predecessor.rebindYield(contract, "fresh-boot", "wrong-owner"),
+        ).rejects.toThrow();
+        const next = await predecessor.rebindYield(contract, "fresh-boot", expectedOwner);
+        expect(next).toEqual({ ...contract, candidateBootId: "fresh-boot" });
+        expect(await predecessor.observeYield()).toEqual({
+          owner: predecessor.owner,
+          contract: next,
+        });
+        expect(() => predecessor.assertCurrent()).toThrow();
+        const after = await client.query(
+          `SELECT expires_at FROM ${quoted}.state_leases WHERE owner = $1`,
+          [predecessor.owner],
+        );
+        expect(after.rows).toEqual(before.rows);
+        const replacement = acquireGatewayOwnerLease({
+          port: 19383,
+          mode: "foreground",
+          supervisor: null,
+          owner: "fresh-candidate",
+          rollingHandoff: next,
+        });
+        leases.push(replacement);
+        await replacement.ready;
+        expect(() => replacement.assertCurrent()).not.toThrow();
+        expect(() => predecessor.assertCurrent()).toThrow();
+        await replacement.returnToPredecessor();
+        await replacement.release();
+        await predecessor.restoreYield();
+      } finally {
+        await client.end();
+      }
+    },
+  );
 });

@@ -482,6 +482,16 @@ export type GatewayRequestContext = GatewayKernelContext &
     yieldRollingExecution?: (
       contract: import("../rolling-release-contract.js").GatewayRollingContract,
     ) => Promise<void>;
+    observeRollingExecution?: () => Promise<
+      import("../rolling-release-contract.js").GatewayRollingLeaseObservation
+    >;
+    rebindRollingExecution?: (
+      suspensionId: string,
+      previous: import("../rolling-release-contract.js").GatewayRollingContract,
+      candidateBootId: string,
+      expectedOwner: string,
+      assertCallerCurrent: () => void,
+    ) => Promise<import("../rolling-release-contract.js").GatewayRollingContract>;
     resumeRollingExecution?: () => Promise<void>;
     reopenRollingAdmission?: () => void;
     /** Retains warm/yielded lifetime admission even while shutdown resets process admission. */

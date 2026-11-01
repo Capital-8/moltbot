@@ -12,6 +12,12 @@ export type GatewayRollingContract = {
   companionGeneration?: string;
   expiresAtMs: number;
 };
+export type GatewayRollingLeaseObservation = {
+  owner: string;
+  contract: GatewayRollingContract;
+  returnedToOwner?: string;
+};
+
 export type BoundGatewayRollingContract = GatewayRollingContract & { companionGeneration: string };
 
 export type GatewayRollingPhase =

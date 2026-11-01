@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import path from "node:path";
-import type { GatewayRollingContract } from "../gateway/rolling-release-contract.js";
+import { isDeepStrictEqual } from "node:util";
+import {
+  parseGatewayRollingContract,
+  type GatewayRollingContract,
+  type GatewayRollingLeaseObservation,
+} from "../gateway/rolling-release-contract.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getAsyncWorkSignal } from "../shared/async-work-scope.js";
 import { getFileLockProcessStartTime } from "../shared/pid-alive.js";
@@ -68,6 +73,13 @@ export type GatewayOwnerLease = {
   /** Domain mutators are fenced/settled; the private old read transport may remain alive. */
   yieldTo: (contract: GatewayRollingContract) => Promise<void>;
   restoreYield: () => Promise<void>;
+  observeYield: () => Promise<GatewayRollingLeaseObservation>;
+  /** Rebind an exact reserved grant; does not reopen predecessor execution. */
+  rebindYield: (
+    previous: GatewayRollingContract,
+    candidateBootId: string,
+    expectedOwner: string,
+  ) => Promise<GatewayRollingContract>;
   returnToPredecessor: () => Promise<void>;
   commitPreparation: (releaseId: string) => void;
 };
@@ -265,7 +277,7 @@ export function acquireGatewayOwnerLease(params: {
   const runControl = <T>(run: () => T): T =>
     controlSelection ? withDatabaseEngineSelection(controlSelection, run) : run();
   const mutateLease = <T>(
-    operation: "acquire" | "release" | "listening" | "handoff",
+    operation: "acquire" | "release" | "listening" | "handoff" | "observe",
     mutate: (db: EngineConnection) => T,
   ) => {
     const run = () =>
@@ -464,6 +476,90 @@ export function acquireGatewayOwnerLease(params: {
       released = true;
       yielded = contract;
     },
+    async observeYield() {
+      custody?.assertCurrent();
+      if (!yielded || !released) {
+        throw new Error("Gateway has no held execution handoff");
+      }
+      const held = yielded;
+      return mutateLease("observe", (db) => {
+        custody?.assertCurrent();
+        const observed = readGatewayOwnerLeaseFromDatabase(db);
+        const contract = observed?.rollingHandoff;
+        if (
+          !observed ||
+          !contract?.companionGeneration ||
+          !isDeepStrictEqual({ ...contract, candidateBootId: held.candidateBootId }, held) ||
+          (observed.owner === identity.owner
+            ? observed.rollingReturnToOwner !== undefined
+            : observed.rollingReturnToOwner !== identity.owner)
+        ) {
+          throw new Error("Matching reserved or returned handoff is unavailable");
+        }
+        return {
+          owner: observed.owner,
+          contract: { ...contract },
+          ...(observed.rollingReturnToOwner
+            ? { returnedToOwner: observed.rollingReturnToOwner }
+            : {}),
+        };
+      });
+    },
+    async rebindYield(previous, candidateBootId, expectedOwner) {
+      custody?.assertCurrent();
+      const next = parseGatewayRollingContract({ ...previous, candidateBootId });
+      if (
+        !yielded ||
+        !released ||
+        preparation ||
+        warned ||
+        constructionFailure ||
+        previous.predecessorOwner !== identity.owner ||
+        !previous.companionGeneration ||
+        candidateBootId === previous.candidateBootId ||
+        previous.expiresAtMs <= Date.now() ||
+        !isDeepStrictEqual({ ...yielded, candidateBootId: previous.candidateBootId }, previous)
+      ) {
+        throw new Error("Gateway has no matching held handoff to rebind");
+      }
+      mutateLease("handoff", (db) => {
+        custody?.assertCurrent();
+        const observed = readGatewayOwnerLeaseFromDatabase(db);
+        if (
+          !observed ||
+          observed.owner !== expectedOwner ||
+          !isDeepStrictEqual(observed.rollingHandoff, previous) ||
+          previous.expiresAtMs <= Date.now() ||
+          (observed.owner === identity.owner
+            ? observed.rollingReturnToOwner !== undefined
+            : observed.rollingReturnToOwner !== identity.owner)
+        ) {
+          throw new Error("Gateway handoff changed or candidate has not returned its grant");
+        }
+        const rebound = executeSqliteQueryTakeFirstSync(
+          db,
+          getNodeSqliteKysely<Pick<DB, "state_leases">>(db)
+            .updateTable("state_leases")
+            .set({
+              owner: identity.owner,
+              payload_json: JSON.stringify({ ...payload, rollingHandoff: next }),
+              created_at: acquiredAt,
+              updated_at: Date.now(),
+            })
+            .where("scope", "=", identity.scope)
+            .where("lease_key", "=", identity.key)
+            .where("owner", "=", expectedOwner)
+            .returning("owner"),
+        );
+        if (!rebound) {
+          throw new Error("Gateway rebind lost its exact reservation");
+        }
+      });
+      // Keep execution released and its heartbeat stopped. Only the fresh
+      // candidate may acquire this reservation through normal admission.
+      yielded = next;
+      return { ...next };
+    },
     async returnToPredecessor() {
       assertCurrent();
       const contract = preparation;
@@ -593,36 +689,33 @@ export function createGatewayRollingLeaseControls(
   ownerLease: GatewayOwnerLease | undefined,
   assertStateOwnerCurrent: () => void,
 ) {
+  const currentOwner = (message = "Gateway execution owner is unavailable") => {
+    assertStateOwnerCurrent();
+    if (!ownerLease) {
+      throw new Error(message);
+    }
+    return ownerLease;
+  };
   return {
-    yieldExecutionForRollingHandoff: async (contract: GatewayRollingContract) => {
-      assertStateOwnerCurrent();
-      if (!ownerLease) {
-        throw new Error("Gateway rolling handoff requires the current global owner lease");
-      }
-      await ownerLease.yieldTo(contract);
-    },
+    yieldExecutionForRollingHandoff: async (contract: GatewayRollingContract) =>
+      currentOwner("Gateway rolling handoff requires the current global owner lease").yieldTo(
+        contract,
+      ),
+    observeRollingExecutionHandoff: async () => currentOwner().observeYield(),
+    rebindRollingExecutionHandoff: async (
+      previous: GatewayRollingContract,
+      candidateBootId: string,
+      expectedOwner: string,
+    ) => currentOwner().rebindYield(previous, candidateBootId, expectedOwner),
     restoreExecutionAfterRollingHandoff: async () => {
-      assertStateOwnerCurrent();
-      if (!ownerLease) {
-        throw new Error("Gateway execution owner is unavailable");
-      }
-      await ownerLease.restoreYield();
-      ownerLease.markListening();
+      const owner = currentOwner();
+      await owner.restoreYield();
+      owner.markListening();
     },
-    returnRollingPreparationToPredecessor: async () => {
-      assertStateOwnerCurrent();
-      if (!ownerLease) {
-        throw new Error("Gateway rolling preparation owner is unavailable");
-      }
-      await ownerLease.returnToPredecessor();
-    },
-    commitRollingPreparation: (releaseId: string) => {
-      assertStateOwnerCurrent();
-      if (!ownerLease) {
-        throw new Error("Gateway preparation owner is unavailable");
-      }
-      ownerLease.commitPreparation(releaseId);
-    },
+    returnRollingPreparationToPredecessor: async () =>
+      currentOwner("Gateway rolling preparation owner is unavailable").returnToPredecessor(),
+    commitRollingPreparation: (releaseId: string) =>
+      currentOwner("Gateway preparation owner is unavailable").commitPreparation(releaseId),
     gatewayOwnerId: ownerLease?.owner,
   };
 }

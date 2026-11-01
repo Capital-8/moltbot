@@ -72,7 +72,13 @@ function respondSuspendStatus(
 }
 
 export const suspendHandlers: GatewayRequestHandlers = {
-  "gateway.suspend.handoff": async ({ respond, params, context, client }) => {
+  "gateway.suspend.handoff": async ({
+    respond,
+    params,
+    context,
+    client,
+    hasCurrentClientAuthority,
+  }) => {
     if (!validateGatewaySuspendHandoffParams(params)) {
       respond(false, undefined, invalidParams("gateway.suspend.handoff"));
       return;
@@ -82,6 +88,62 @@ export const suspendHandlers: GatewayRequestHandlers = {
       params.target.processInstanceId !== getGatewayProcessInstanceId()
     ) {
       respondError(respond, ErrorCodes.UNAVAILABLE, "gateway process changed after preflight");
+      return;
+    }
+    const executionActions =
+      Number(Boolean(params.yieldExecution)) +
+      Number(Boolean(params.rebindExecution)) +
+      Number(Boolean(params.inspectExecution));
+    if (executionActions > 1 || (executionActions > 0 && params.commit)) {
+      respond(false, undefined, invalidParams("gateway.suspend.handoff"));
+      return;
+    }
+    if (params.inspectExecution || params.rebindExecution) {
+      const held = getGatewaySuspendStatus(params.suspensionId, true);
+      if (
+        (held.status !== "ready" && held.status !== "draining") ||
+        held.executionYielded !== true ||
+        (held.status === "draining" && (params.rebindExecution || held.phase !== "draining")) ||
+        !context.observeRollingExecution ||
+        !hasCurrentClientAuthority?.() ||
+        (params.rebindExecution && !context.rebindRollingExecution)
+      ) {
+        respondError(
+          respond,
+          ErrorCodes.UNAVAILABLE,
+          "Matching held execution handoff is unavailable",
+        );
+        return;
+      }
+      if (params.rebindExecution) {
+        const { previous, candidateBootId, expectedOwner } = params.rebindExecution;
+        await context.rebindRollingExecution!(
+          params.suspensionId,
+          previous,
+          candidateBootId,
+          expectedOwner,
+          () => {
+            if (!hasCurrentClientAuthority?.()) {
+              throw new Error("Gateway recovery caller is no longer current");
+            }
+          },
+        );
+      }
+      const execution = await context.observeRollingExecution();
+      if (!hasCurrentClientAuthority?.()) {
+        respondError(
+          respond,
+          ErrorCodes.UNAVAILABLE,
+          "Gateway recovery caller is no longer current",
+        );
+        return;
+      }
+      respond(true, {
+        status: params.rebindExecution ? "execution-rebound" : "execution-observed",
+        suspensionId: params.suspensionId,
+        expiresAtMs: execution.contract.expiresAtMs,
+        execution,
+      });
       return;
     }
     if (params.yieldExecution) {

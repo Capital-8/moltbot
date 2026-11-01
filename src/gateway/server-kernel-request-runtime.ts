@@ -3,6 +3,7 @@ import { listAgentIds } from "../agents/agent-scope-config.js";
 import { getRuntimeConfig } from "../config/io.js";
 import { setDatabaseEngineReadOnlyAdmission } from "../infra/database-engine/context.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { getGatewaySuspendStatus } from "../infra/gateway-suspend-coordinator.js";
 import { retireQuestionChannelGateway } from "../infra/question-channel-runtime.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { bindLegacyPluginSdkResourceHost } from "../plugins/legacy-sdk-resource-host.js";
@@ -93,6 +94,38 @@ export async function prepareGatewayKernelRequestRuntime(params: {
   if (runtime.opts.rollingStartup) {
     gatewayRequestContext.isRollingReadReady = () => runtime.opts.rollingStartup!.readReady;
   }
+  gatewayRequestContext.observeRollingExecution = async () => {
+    const owner = runtime.opts.gatewayStateOwner;
+    if (!getGatewayRollingAdmission() || !owner?.observeRollingExecutionHandoff) {
+      throw new Error("Gateway has no observable rolling execution handoff");
+    }
+    return owner.observeRollingExecutionHandoff();
+  };
+  gatewayRequestContext.rebindRollingExecution = async (
+    suspensionId,
+    previous,
+    candidateBootId,
+    expectedOwner,
+    assertCallerCurrent,
+  ) => {
+    const owner = runtime.opts.gatewayStateOwner;
+    if (!owner?.rebindRollingExecutionHandoff || runtime.bootId !== previous.predecessorBootId) {
+      throw new Error("Gateway rebind does not name this physical predecessor");
+    }
+    assertCallerCurrent();
+    const actual = await readGatewayRollingCompatibility(getRuntimeConfig());
+    assertCallerCurrent();
+    const suspension = getGatewaySuspendStatus(suspensionId, true);
+    if (
+      actual.compatibilityDigest !== previous.compatibilityDigest ||
+      getGatewayRollingAdmission()?.releaseId !== previous.releaseId ||
+      suspension.status !== "ready" ||
+      suspension.executionYielded !== true
+    ) {
+      throw new Error("Gateway is no longer the matching held read-only predecessor");
+    }
+    return owner.rebindRollingExecutionHandoff(previous, candidateBootId, expectedOwner);
+  };
   gatewayRequestContext.resumeRollingExecution = async () => {
     const rolling = getGatewayRollingAdmission();
     const owner = runtime.opts.gatewayStateOwner;
