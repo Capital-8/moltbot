@@ -175,8 +175,14 @@ function trackSchemaChanges(
     const iterator = phase !== "bind" && !snapshot && !owner.capturing ? {} : undefined;
     const newSnapshot = snapshot && snapshot !== owner.snapshot && !owner.capturing;
     if (newSnapshot) {
-      if (!owner.transactionCatalogBound && database.isTransaction && owner.transactionRead) {
-        invalidate(owner);
+      if (
+        database.isTransaction &&
+        (owner.transactionRead || owner.transactionCatalogBound) &&
+        owner.processRevision !== getSqliteDatabaseSchemaRevision(database)
+      ) {
+        if (!owner.transactionCatalogBound) {
+          invalidate(owner);
+        }
         owner.transactionalFacts = true;
       } else {
         // The pin marker precedes its first native step. Adopt committed facts now;
@@ -626,8 +632,12 @@ export function getAdmittedSqliteSchemaFacts(
     return undefined;
   }
   const snapshot = getSqlitePinnedReadSnapshot(database);
+  // A bound catalog that predates a sibling's DDL is historical once its facts are
+  // invalidated: recapturing it must neither borrow nor publish shared facts.
   const unknownSnapshot =
-    (database.isTransaction && owner.transactionRead && !owner.transactionCatalogBound) ||
+    (database.isTransaction &&
+      (owner.transactionRead || owner.transactionCatalogBound) &&
+      owner.processRevision !== getSqliteDatabaseSchemaRevision(database)) ||
     owner.unmanagedSnapshots.size > 0;
   const scopeChanged = observeSchemaLifetime(database, owner, snapshot);
   if (!owner.facts) {
