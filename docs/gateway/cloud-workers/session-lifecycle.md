@@ -27,6 +27,13 @@ settlement keeps its existing owner. The internal **ensureRetainedRunning** oper
 checks resource identity, environment epoch, and current caller authority, waits for
 the original enrolled node, and verifies runtime admission through the existing
 supervisor and bundle installer. Provider resume alone is not usable readiness.
+If initial provisioning stopped after recording the resource receipt but before
+node enrollment, retry the original creation request with the same idempotency key
+and retention policy. The fresh request revalidates caller and source authority,
+recovers compute against the same receipt and operation, and resumes normal
+provisioning admission. Background reconciliation cannot reopen that window.
+Pending provider readiness is polled without starting or renewing compute; closed
+windows still require explicit recovery.
 
 Crabbox checks Linux Azure Sandbox retention capabilities, owner binding, policy,
 window, and independent lifecycle readback. One unavailable provider cannot prevent
