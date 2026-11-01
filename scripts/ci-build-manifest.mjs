@@ -452,12 +452,12 @@ const includeReleaseOnlyUiTests =
     compatibilityTarget ||
     changedPaths === null);
 // Ordinary CI shares eight 16-class browser jobs; full inventories retain
-// twelve. Private source-server projects keep their own one-worker limit.
+// thirteen. Private source-server projects keep their own one-worker limit.
 const compactUiE2e = supportsUiE2eProjects && !includeReleaseOnlyUiTests;
 let uiE2eJobCount = compactUiE2e
   ? 9
   : supportsUiE2eProjects
-    ? 13
+    ? 14
     : usesHostedRunnerProfile
       ? 14
       : 4;

@@ -10036,7 +10036,7 @@ describe("ci workflow guards", () => {
       ["hybrid", 14],
     ] as const) {
       for (const uiE2eProjectsCapability of [false, true]) {
-        const jobCount = uiE2eProjectsCapability ? 13 : legacyJobCount;
+        const jobCount = uiE2eProjectsCapability ? 14 : legacyJobCount;
         const manifest = runCiManifestFixture({
           bundledPlanner: true,
           eventName: "workflow_dispatch",
@@ -10583,7 +10583,7 @@ describe("ci workflow guards", () => {
     expect(uiE2e.strategy["fail-fast"]).toBe(false);
     expect(uiE2e.strategy["max-parallel"]).toBe(14);
     expect(uiE2e.strategy.matrix).toBe("${{ fromJson(needs.preflight.outputs.ui_e2e_matrix) }}");
-    const expectedUiE2eMatrices = [6, 8, 12].map((vitestShardCount) => ({
+    const expectedUiE2eMatrices = [6, 8, 13].map((vitestShardCount) => ({
       include: Array.from({ length: vitestShardCount + 1 }, (_, index) => {
         const shard = index + 1;
         return {
