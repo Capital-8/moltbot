@@ -14,11 +14,7 @@ import { constants, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectManagedProcessGroup } from "../lib/managed-child-process.mts";
-import {
-  claimMaterializedAnchor,
-  retireMaterializedAnchor,
-  sweepMaterializedAnchors,
-} from "./materialized-anchor.mjs";
+import { claimMaterializedAnchor, retireMaterializedAnchor } from "./materialized-anchor.mjs";
 
 const SIGNAL_GRACE_MS = 5000;
 const KILL_DRAIN_MS = 5000;
@@ -50,7 +46,6 @@ process.once("exit", () => {
     retireMaterializedAnchor(ownedAnchor);
   }
 });
-sweepMaterializedAnchors(ownedAnchor);
 const workflowContext = process.env.OPENCLAW_PR_WORKFLOW_CONTEXT;
 if (workflowContext) {
   // Exec preserves the verified producer PID; only its child receives this FD.

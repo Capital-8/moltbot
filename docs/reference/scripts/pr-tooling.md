@@ -14,14 +14,14 @@ title: "PR wrapper tooling"
 
 Materialized anchors use `openclaw-pr-anchor.<creator-pid>.<suffix>` directories.
 The creator owns retirement across its exec chain, including success, failure,
-signals, and failed execs; a supervised operation retains its anchor only while
-its process group or notification pipe has not drained. Every supervisor startup
-also sweeps at most four owned, mode-0700 anchor directories whose modification
-and change times are both older than 24 hours, excluding its own anchor and any
-recorded live creator PID. Legacy names without a PID qualify by age alone. A dead
-creator is the sweep's only evidence that an operation ended: descendants still
-running 24 hours after a crashed or undrained supervisor can lose their anchor,
-while that operation's retained PR lock still requires `lock-recover`.
+signals, and failed execs. Retirement requires the original creator and the held
+descriptor (FD 9) to identify the same physical anchor directory.
+A supervised operation retains its anchor while its process group or
+notification pipe has not drained.
+
+Supervisor startup leaves unrelated anchors untouched, including legacy names
+and anchors whose creator has exited. Age and a dead creator do not release
+another operation's custody. Retained anchors can continue to consume storage.
 
 `OPENCLAW_PR_TOOLING_ROOT` selects a full checkout of the same repository for
 materialized wrappers' third-party dependencies; otherwise `openclaw.pr.toolingRoot` in the
@@ -66,12 +66,14 @@ The current wrapper can prepare dependencies for older retained workflows withou
 changing their binding or executing newer workflow code in their place.
 
 Each entry records its consumer wrapper PIDs. Reuse refreshes its modification
-time; each materialization keeps the four most recently used complete entries
-with no live consumers, plus every entry with a live consumer and the current
-entry. Other unused complete entries are removed regardless of age. Cleanup
-only removes owned, mode-0700 directories with cache entry names. PID reuse may
-delay cleanup. Failed or interrupted staging directories and incomplete entries
-retain a 24-hour grace period and the same live-consumer and live-creator checks.
+time. Materialization retains unrelated complete and incomplete cache entries,
+which can continue to consume storage. It does not reclaim them by age or PID.
+
+The materializer's cleanup removes its own unpublished staging directory.
+Successful publication retains the completed entry. The materializer refuses a
+mismatched current entry without deleting or reinstalling it.
+If cleanup does not finish after failure or interruption, staging state can remain.
+
 The canonical and explicit tooling roots are never fetched, fast-forwarded, or
 reinstalled by this path. Explicit-root identity checks remain unchanged, and
 matching installed packages still take the direct path. Keep any externally

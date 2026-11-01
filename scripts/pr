@@ -550,40 +550,6 @@ function repository(url, root) {
   return `${parsed.hostname.toLowerCase()}/${parsed.pathname.replace(/^\/|\/$/g, "").replace(/\.git$/, "").toLowerCase()}`;
 }
 
-function sweep(cache, current) {
-  const entries = readdirSync(cache)
-    .filter((name) => /^(?:[a-f0-9]{64}|install-[0-9]+-[A-Za-z0-9]+)$/.test(name))
-    .map((name) => {
-      const path = join(cache, name);
-      return { name, path, stat: lstatSync(path, { throwIfNoEntry: false }) };
-    })
-    .filter(({ stat }) => stat)
-    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
-  let retained = 0;
-  for (const { name, path, stat } of entries) {
-    if (path === current || !stat?.isDirectory() || stat.uid !== process.getuid?.() ||
-        (stat.mode & 0o777) !== 0o700) continue;
-    // Creator PIDs survive the wrapper/supervisor exec chain. PID reuse only
-    // delays collection; a live consumer must never lose its pinned packages.
-    const users = join(path, ".pr-users");
-    const pids = existsSync(users) ? readdirSync(users) : [];
-    if (name.startsWith("install-")) pids.push(name.split("-")[1]);
-    if (pids.some((pid) => {
-      if (!/^[1-9][0-9]*$/.test(pid)) return true;
-      try { process.kill(Number(pid), 0); return true; }
-      catch (error) { return error.code !== "ESRCH"; }
-    })) continue;
-    if (!name.startsWith("install-") && existsSync(join(path, ".pr-complete"))) {
-      // Adjacent main heads get a small reuse window; live and current installs
-      // do not consume it. Age alone cannot bound one new tree per landing.
-      if (retained++ < 4) continue;
-    } else if (stat.mtimeMs >= Date.now() - 86_400_000) {
-      continue;
-    }
-    rmSync(path, { recursive: true, force: true });
-  }
-}
-
 function dependencyKey(rows, tree, audit) {
   let identity = tree;
   if (audit && audit.runtime.platform === process.platform && audit.runtime.arch === process.arch &&
@@ -739,8 +705,6 @@ function materializeDependencies(owner, canonicalPath, destination, revision) {
   utimesSync(entry, now, now);
   if (!materialize(entry, destination)) throw new Error("Cached dependencies do not match the trust anchor.");
   console.error(`Using frozen scripts/pr dependency installation: ${entry}`);
-  try { sweep(cache, entry); }
-  catch { console.error("Warning: unable to sweep stale scripts/pr dependency installations."); }
 }
 
 try {
