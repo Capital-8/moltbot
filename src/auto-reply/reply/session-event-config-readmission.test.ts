@@ -514,7 +514,7 @@ it.for([
             } else {
               expect(completedOutcome.error).toEqual(
                 overflow
-                  ? expect.stringContaining("Auto-compaction could not recover this turn")
+                  ? expect.stringContaining("The context window was exceeded mid-turn")
                   : "Provider retry limit reached",
               );
               expect(routePreparedReply).not.toHaveBeenCalled();

@@ -127,7 +127,7 @@ export function createSubagentModelConfig(
     provider: "synthetic",
     api: "openai-responses",
     baseUrl: options.baseUrl ?? "https://example.invalid/v1",
-    contextWindow: 4096,
+    contextWindow: options.runtime ? 128_000 : 4096,
     maxTokens: 1024,
   });
   return {
