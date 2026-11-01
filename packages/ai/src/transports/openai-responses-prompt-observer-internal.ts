@@ -6,7 +6,13 @@ import {
 } from "./openai-responses-contracts.js";
 import { sanitizeTransportPayloadText } from "./transport-stream-shared.js";
 
-type ResponsesPromptRequest = { instructions?: unknown; input?: unknown };
+type ResponsesPromptRequest = {
+  instructions?: unknown;
+  input?: unknown;
+  model?: unknown;
+  reasoning?: { effort?: unknown };
+  tools?: Array<{ name?: unknown; strict?: unknown; parameters?: { required?: unknown } }>;
+};
 type ResponsesPromptMetadata = Pick<ResponsesPromptObservation, "egress" | "payloadVariant">;
 
 function readFinalResponsesPrompt(
@@ -49,12 +55,29 @@ export function createResponsesPromptEgressObserver(
   );
   return (request: ResponsesPromptRequest, metadata: ResponsesPromptMetadata) => {
     const [promptSource, observedPrompt] = readFinalResponsesPrompt(request);
+    const sessionsSpawn = request.tools?.find((tool) => tool.name === "sessions_spawn");
     observer({
       ...metadata,
       promptSource,
       expectedChars: expectedPrompt.length,
       observedChars: observedPrompt.length,
       matchesAssembledPrompt: promptSource !== "missing" && observedPrompt === expectedPrompt,
+      ...(typeof request.model === "string" ? { model: request.model } : {}),
+      ...(typeof request.reasoning?.effort === "string"
+        ? { reasoningEffort: request.reasoning.effort }
+        : {}),
+      ...(sessionsSpawn
+        ? {
+            sessionsSpawn: {
+              ...(typeof sessionsSpawn.strict === "boolean"
+                ? { strict: sessionsSpawn.strict }
+                : {}),
+              categoryRequired:
+                Array.isArray(sessionsSpawn.parameters?.required) &&
+                sessionsSpawn.parameters.required.includes("category"),
+            },
+          }
+        : {}),
     });
   };
 }

@@ -128,6 +128,7 @@ import { findFinalTagMatches, stripFinalTags } from "../shared/text/final-tags.j
 import { deleteTestEnvValue, setTestEnvValue, withEnvAsync } from "../test-utils/env.js";
 import { getFreePort, isPortFree } from "../test-utils/ports.js";
 import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
+import { loadSqliteTrajectoryRuntimeEvents } from "../trajectory/runtime-store.sqlite.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { GatewayClient } from "./client.js";
 import { enterIsolatedGatewayLiveDiscoveryState } from "./gateway-models.profiles.live.discovery.test-helpers.js";
@@ -4343,7 +4344,7 @@ type OpenAIUltraWireObservation = {
   traceparent?: string;
   dispatch?: {
     runId: string;
-    callId: string;
+    callId?: string;
     sessionId?: string;
     sessionKey?: string;
     isHeartbeat?: boolean;
@@ -4407,6 +4408,55 @@ function readOpenAIUltraWireObservation(body: string): OpenAIUltraWireObservatio
   } catch {
     return {};
   }
+}
+
+async function loadOpenAIUltraTrajectoryObservations(
+  ultraRuns: ReadonlyMap<string, string>,
+): Promise<OpenAIUltraWireObservation[]> {
+  const observations: OpenAIUltraWireObservation[] = [];
+  for (const sessionKey of new Set(ultraRuns.values())) {
+    const { storePath, entry } = await loadSessionEntryAsync(sessionKey);
+    if (!entry?.sessionId) {
+      continue;
+    }
+    const events = await loadSqliteTrajectoryRuntimeEvents({
+      agentId: GATEWAY_LIVE_AGENT_ID,
+      sessionId: entry.sessionId,
+      storePath,
+    });
+    for (const event of events) {
+      if (event.type !== "provider.prompt.observed" || !isRecord(event.data)) {
+        continue;
+      }
+      const model = typeof event.data.model === "string" ? event.data.model : undefined;
+      const reasoningEffort =
+        typeof event.data.reasoningEffort === "string" ? event.data.reasoningEffort : undefined;
+      const rawSpawn = isRecord(event.data.sessionsSpawn) ? event.data.sessionsSpawn : undefined;
+      observations.push({
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(rawSpawn
+          ? {
+              sessionsSpawn: {
+                ...(typeof rawSpawn.strict === "boolean" ? { strict: rawSpawn.strict } : {}),
+                categoryRequired: rawSpawn.categoryRequired === true,
+              },
+            }
+          : {}),
+        requestIndex: observations.length + 1,
+        ...(typeof event.runId === "string"
+          ? {
+              dispatch: {
+                runId: event.runId,
+                ...(typeof event.sessionId === "string" ? { sessionId: event.sessionId } : {}),
+                ...(typeof event.sessionKey === "string" ? { sessionKey: event.sessionKey } : {}),
+              },
+            }
+          : { dispatch: null }),
+      });
+    }
+  }
+  return observations;
 }
 
 function startOpenAIUltraWireCapture(upstreamBaseUrls: readonly string[]): OpenAIUltraWireCapture {
@@ -6344,16 +6394,21 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
       await server.close({ reason: "live test complete" });
       server = undefined;
       await waitForDiagnosticEventsDrained();
-      const observations = ultraWireCapture.observations;
+      const ultraRuns = expectDefined(
+        openAIUltraRunsByClient.get(client),
+        "Ultra admission receipts",
+      );
+      const wireObservations = ultraWireCapture.observations;
+      const observations =
+        wireObservations.length > 0
+          ? wireObservations
+          : await loadOpenAIUltraTrajectoryObservations(ultraRuns);
       for (const model of filterAttemptedGatewayLiveModels(ultraCandidates, attemptedModelKeys)) {
         try {
           assertOpenAIUltraWireEffort({
             expectedModel: model.id,
             observations,
-            ultraRuns: expectDefined(
-              openAIUltraRunsByClient.get(client),
-              "Ultra admission receipts",
-            ),
+            ultraRuns,
           });
         } catch (error) {
           failures.push({ model: `${model.provider}/${model.id}`, error: String(error) });

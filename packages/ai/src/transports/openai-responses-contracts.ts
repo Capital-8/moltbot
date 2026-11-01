@@ -183,6 +183,9 @@ export type ResponsesPromptObservation = {
   expectedChars: number;
   observedChars: number;
   matchesAssembledPrompt: boolean;
+  model?: string;
+  reasoningEffort?: string;
+  sessionsSpawn?: { strict?: boolean; categoryRequired: boolean };
 };
 type ResponsesPromptObserver = (observation: ResponsesPromptObservation) => void;
 

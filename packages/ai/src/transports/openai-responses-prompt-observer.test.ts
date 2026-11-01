@@ -710,6 +710,32 @@ describe("OpenAI Responses provider prompt observer", () => {
     expect(request.instructions).toBe(normalizedPrompt);
   });
 
+  it("records safe final-request model, reasoning, and sessions_spawn schema facts", async () => {
+    const run = await runObservedRequest({
+      model: createModel({ id: "gpt-5.6-sol" }),
+      context: createContext("prompt", {
+        tools: [
+          {
+            name: "sessions_spawn",
+            description: "spawn",
+            parameters: {
+              type: "object",
+              properties: { category: { type: "string" } },
+              required: ["category"],
+            },
+          },
+        ] as never,
+      }),
+      options: { reasoningEffort: "max" },
+    });
+
+    expect(run.observations[0]).toMatchObject({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "max",
+      sessionsSpawn: { strict: false, categoryRequired: true },
+    });
+  });
+
   it("observes each native WebSocket connection-limit dispatch before send", async () => {
     const prompt = "PRIVATE-NATIVE-WEBSOCKET-PROMPT";
     const identity = { sessionId: "websocket-usage-session", authProfileId: "websocket-profile" };
@@ -782,6 +808,7 @@ describe("OpenAI Responses provider prompt observer", () => {
         expectedChars: prompt.length,
         observedChars: prompt.length,
         matchesAssembledPrompt: true,
+        model: "gpt-5.4",
       },
       {
         egress: "native-codex-websocket",
@@ -790,6 +817,7 @@ describe("OpenAI Responses provider prompt observer", () => {
         expectedChars: prompt.length,
         observedChars: prompt.length,
         matchesAssembledPrompt: true,
+        model: "gpt-5.4",
       },
     ]);
     expect(JSON.stringify(observations)).not.toContain(prompt);
@@ -845,6 +873,7 @@ describe("OpenAI Responses provider prompt observer", () => {
         expectedChars: prompt.length,
         observedChars: prompt.length,
         matchesAssembledPrompt: true,
+        model: "gpt-5.4",
       },
     ]);
     expect(JSON.stringify(observations)).not.toContain(prompt);
