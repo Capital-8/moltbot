@@ -188,6 +188,7 @@ export function createGatewayInstanceRuntime(
         dispatchOptions.allowModelOverride === true ||
         dispatchOptions.allowSyntheticModelOverride === true ||
         dispatchOptions.allowSyntheticCronRunContinuation === true ||
+        dispatchOptions.interruptedRunId ||
         dispatchOptions.internalDeliveryMediaUrls ||
         dispatchOptions.runtimeContextFragments ||
         dispatchOptions.internalDeliverySuppressText === true ||
@@ -204,6 +205,7 @@ export function createGatewayInstanceRuntime(
                 dispatchOptions.allowModelOverride === true ||
                 dispatchOptions.allowSyntheticModelOverride === true,
               cronRunContinuation: dispatchOptions.allowSyntheticCronRunContinuation === true,
+              interruptedRunId: dispatchOptions.interruptedRunId,
               internalDeliveryMediaUrls: dispatchOptions.internalDeliveryMediaUrls,
               runtimeContextFragments: dispatchOptions.runtimeContextFragments,
               internalDeliverySuppressText: dispatchOptions.internalDeliverySuppressText,

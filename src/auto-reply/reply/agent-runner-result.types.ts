@@ -29,6 +29,13 @@ export type FinalizeReplyAgentRunInput = Pick<
   | "shouldInjectGroupIntro"
   | "storePath"
 > & {
+  toolHandoff?: {
+    settlement: ReturnType<
+      typeof import("../../agents/harness/tool-handoff-settlement.js").createToolHandoffSettlement
+    >;
+    sourceTurnId: string;
+    recoveryRunId: string;
+  };
   activeIsNewSession: boolean;
   activeSessionEntry: SessionEntry | undefined;
   activeSessionStore: Record<string, SessionEntry> | undefined;

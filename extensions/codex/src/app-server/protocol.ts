@@ -350,6 +350,7 @@ type CodexTurnSteerParams = JsonObject &
   };
 
 export type CodexTurn = {
+  itemsView?: "full" | "summary" | "notLoaded" | null;
   id: string;
   threadId?: string;
   status?: string;

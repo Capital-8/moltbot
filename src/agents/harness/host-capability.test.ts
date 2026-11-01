@@ -16,6 +16,11 @@ import {
   bindGatewayContextResolver,
   withPluginRuntimeGatewayRequestScope,
 } from "../../plugins/runtime/gateway-request-scope.js";
+import {
+  beginGatewayRestartSignalAdmission,
+  markGatewayRestartDraining,
+  resetGatewayWorkAdmission,
+} from "../../process/gateway-work-admission.js";
 import { AsyncWorkScope } from "../../shared/async-work-scope.js";
 import {
   closeAdmittedRunDelegatedAuthority,
@@ -129,6 +134,37 @@ afterEach(() => {
 });
 
 describe("agent harness host capability", () => {
+  it("only exposes settlement registration for capable active command owners", async () => {
+    const ordinary = await admittedAttempt("handoff-unsupported");
+    const unsupported = createAgentHarnessHostCapabilities({
+      attempt: ordinary.attempt,
+      pluginId: "codex",
+    });
+    expect(unsupported.capabilities.registerToolHandoffSettlement).toBeUndefined();
+    expect(unsupported.capabilities.toolHandoffDrainSignal).toBeUndefined();
+    unsupported.close();
+    const register = vi.fn();
+    const { attempt } = await admittedAttempt("handoff-command", {
+      registerToolHandoffSettlement: register,
+    });
+    const host = createAgentHarnessHostCapabilities({ attempt, pluginId: "codex" });
+    const callback = async () => {};
+    host.capabilities.registerToolHandoffSettlement?.(callback);
+    expect(register).toHaveBeenCalledExactlyOnceWith(callback);
+    try {
+      const fence = beginGatewayRestartSignalAdmission();
+      expect(host.capabilities.toolHandoffDrainSignal?.aborted).toBe(false);
+      expect(fence?.rollback()).toBe(true);
+      markGatewayRestartDraining("stop (SIGTERM)");
+      expect(host.capabilities.toolHandoffDrainSignal?.aborted).toBe(true);
+    } finally {
+      resetGatewayWorkAdmission();
+    }
+    host.close();
+    expect(() => host.capabilities.registerToolHandoffSettlement?.(callback)).toThrow();
+    expect(register).toHaveBeenCalledOnce();
+  });
+
   it("does not remove existing shell policy from a non-Codex required-root harness", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-rooted-other-"));
     const { attempt } = await admittedAttempt("required-other", {

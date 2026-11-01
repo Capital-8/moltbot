@@ -317,7 +317,6 @@ export async function prepareGatewayClose(
     await measureCloseStep("reply-drain", () =>
       prepareGatewayRunShutdown({
         ...params,
-        restart: restartExpectedMs !== null,
         timeoutMs: drainTimeoutMs,
         warnings,
       }),

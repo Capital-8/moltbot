@@ -13,7 +13,6 @@ import {
   type NativeSessionBindingLeaseOptions,
   type NativeSessionBindingStateStore,
   type NativeSessionGenerationAdoptionResult,
-  type NativeSessionGenerationOperationsV2,
   type NativeSessionGenerationReclaimPlan,
 } from "openclaw/plugin-sdk/agent-harness-session-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
@@ -28,7 +27,14 @@ import {
   adoptCodexNativeSubagentSubmissions,
   type CodexNativeSubagentSubmission,
 } from "./native-subagent-submission.js";
-import { createCodexSessionGenerationSupersededError } from "./session-binding-authority.js";
+import {
+  codexSessionGenerationOperations,
+  createCodexSessionGenerationSupersededError,
+} from "./session-binding-authority.js";
+import {
+  mutateCodexDynamicToolHandoffBinding,
+  type CodexDynamicToolHandoffMutation,
+} from "./session-binding-handoff-mutations.js";
 import {
   CODEX_APP_SERVER_BINDING_LEASE,
   PHYSICAL_SESSION_RETIRE_TTL_MS,
@@ -91,6 +97,7 @@ export {
 } from "./session-binding-meta.js";
 
 type CodexAppServerBindingMutation =
+  | CodexDynamicToolHandoffMutation
   | CodexNativeSubagentBindingMutation
   | {
       kind: "set";
@@ -439,6 +446,14 @@ export function createCodexAppServerBindingStore(
         return await lifecycle.transact(
           key,
           (current, leaseToken) => {
+            if (mutation.kind === "dynamic-tool-handoff") {
+              return mutateCodexDynamicToolHandoffBinding({
+                identity,
+                current,
+                mutation,
+                assertCurrent,
+              });
+            }
             if (
               mutation.kind === "record-native-subagent-assignment" ||
               mutation.kind === "consume-native-subagent-assignment" ||
@@ -693,29 +708,6 @@ export function createCodexAppServerBindingStore(
 
     withLease: (identity, run, options) =>
       lifecycle.withLease(bindingStoreKey(identity), run, prepareLease(identity, options)),
-  };
-}
-
-function codexSessionGenerationOperations(
-  store: CodexAppServerBindingStore,
-  identity: Extract<CodexAppServerBindingIdentity, { kind: "session" }>,
-): NativeSessionGenerationOperationsV2 {
-  return {
-    prepareReclaim: () => store.prepareSessionGenerationReclaim(identity),
-    adopt: (expectedPreviousSessionId, authority) =>
-      store.adoptSessionGeneration(
-        identity,
-        expectedPreviousSessionId,
-        authority.assertCurrent,
-        authority,
-      ),
-    reclaim: (expectedPreviousSessionId, authority) =>
-      store.mutate(
-        identity,
-        { kind: "reclaim-generation", expectedPreviousSessionId },
-        authority.assertCurrent,
-        authority,
-      ),
   };
 }
 

@@ -11,6 +11,7 @@ import { resolveCodexStartupTimeoutMs } from "./attempt-timeouts.js";
 import { protectCodexAppServerLiveThread } from "./client-runtime.js";
 import { resolveCodexAppServerClientInstanceId, type CodexAppServerClient } from "./client.js";
 import { shouldAutoApproveCodexAppServerApprovals } from "./config.js";
+import type { CodexPlannedToolHandoff } from "./dynamic-tool-handoff-capture.js";
 import { CodexAppServerEventProjector } from "./event-projector.js";
 import { buildCodexHookRequester } from "./hook-requester.js";
 import { getCodexInferenceThreadQualification } from "./inference-routing.js";
@@ -27,7 +28,7 @@ import { createNativeSubagentAssignmentStore } from "./native-subagent-assignmen
 import { createCodexNativeSubagentHistoryOwner } from "./native-subagent-history-owner.js";
 import { codexNativeSubagentMonitorRuntime } from "./native-subagent-monitor.js";
 import type { CodexNativeSubagentSubmissionStore } from "./native-subagent-submission.js";
-import type { CodexSandboxPolicy, CodexTurnEnvironmentParams } from "./protocol.js";
+import type { CodexSandboxPolicy, CodexTurnEnvironmentParams, JsonObject } from "./protocol.js";
 import { reportCodexBackgroundCleanupFailure } from "./run-attempt-lifecycle.js";
 import type { CodexAttemptPrompt } from "./run-attempt-prompt.js";
 import {
@@ -131,7 +132,9 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     routeActivated: false,
     detachRouteAbort: (() => undefined) as () => void,
     trajectoryEndRecorded: false,
+    plannedToolHandoff: undefined as CodexPlannedToolHandoff | undefined,
     nativeHookRelay: undefined as CodexNativeHookRelay | undefined,
+    nativeHookRelayConfigPatch: undefined as JsonObject | undefined,
     nativeSpawnAdmissionInstalled: false,
     nativeSubagentMonitor: undefined as
       | Awaited<ReturnType<typeof codexNativeSubagentMonitorRuntime.register>>
@@ -578,8 +581,9 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
         : nativeHookRelayEvents;
     if (params.pluginHarnessToolPolicyRestricted === true) {
       state.nativeHookRelay = undefined;
+      state.nativeHookRelayConfigPatch = buildCodexNativeHookRelayDisabledConfig();
       return {
-        configPatch: buildCodexNativeHookRelayDisabledConfig(),
+        configPatch: state.nativeHookRelayConfigPatch,
         nativeHookRelayGeneration: undefined,
       };
     }
@@ -665,16 +669,17 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
         );
       }
     }
+    state.nativeHookRelayConfigPatch = state.nativeHookRelay
+      ? buildCodexNativeHookRelayConfig({
+          relay: state.nativeHookRelay,
+          events: relayEvents,
+          hookTimeoutSec: options.nativeHookRelay?.hookTimeoutSec,
+        })
+      : options.nativeHookRelay?.enabled === false
+        ? buildCodexNativeHookRelayDisabledConfig()
+        : undefined;
     return {
-      configPatch: state.nativeHookRelay
-        ? buildCodexNativeHookRelayConfig({
-            relay: state.nativeHookRelay,
-            events: relayEvents,
-            hookTimeoutSec: options.nativeHookRelay?.hookTimeoutSec,
-          })
-        : options.nativeHookRelay?.enabled === false
-          ? buildCodexNativeHookRelayDisabledConfig()
-          : undefined,
+      configPatch: state.nativeHookRelayConfigPatch,
       nativeHookRelayGeneration: state.nativeHookRelay?.generation,
     };
   };

@@ -33,6 +33,7 @@ export function createSyntheticPluginRuntimeClient(
       | "operatorRunAuthority"
       | "operatorAccessAuthority"
       | "cronRunContinuation"
+      | "interruptedRunId"
       | "internalDeliveryMediaUrls"
       | "runtimeContextFragments"
       | "internalDeliverySuppressText"
@@ -80,6 +81,7 @@ export function createSyntheticPluginRuntimeClient(
       ...(params?.runtimeContextFragments
         ? { runtimeContextFragments: params.runtimeContextFragments }
         : {}),
+      ...(params?.interruptedRunId ? { interruptedRunId: params.interruptedRunId } : {}),
       ...(params?.internalDeliveryMediaUrls
         ? { internalDeliveryMediaUrls: [...params.internalDeliveryMediaUrls] }
         : {}),

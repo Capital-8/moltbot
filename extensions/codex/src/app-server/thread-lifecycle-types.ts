@@ -31,6 +31,9 @@ type CodexAppServerThreadLifecycle = {
   preserveExistingBinding?: true;
   rotatedContextEngineBinding?: boolean;
   activeTurnIds?: string[];
+  /** Authenticated host custody of an already running native turn; never persisted. */
+  retainedDynamicTools?: readonly CodexDynamicToolSpec[];
+  rejoinedTurn?: { turnId: string; sourceRunId: string; terminalOnly?: true };
 };
 
 export type CodexAppServerThreadLifecycleBinding = CodexAppServerThreadBinding & {
@@ -84,6 +87,9 @@ export type CodexStartOrResumeThreadParams = Omit<
   agentDir?: string;
   cwd: string;
   dynamicTools: CodexDynamicToolSpec[];
+  /** Current host-owned unrestricted Gateway exec, required for v1 handoff admission. */
+  availableDynamicTools?: readonly CodexDynamicToolSpec[];
+  isDynamicToolHandoffAuthorized?: () => boolean;
   persistentWebSearchAllowed?: boolean;
   agentWorkspaceDeveloperInstructions?: string;
   finalConfigPatch?: JsonObject;

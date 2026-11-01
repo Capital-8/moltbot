@@ -19,6 +19,7 @@ export type GatewayInstanceAgentDispatchOptions = {
   expectFinal?: boolean;
   /** Instance-owned dispatch always uses a synthetic client. */
   forceSyntheticClient?: boolean;
+  interruptedRunId?: string;
   internalDeliveryMediaUrls?: string[];
   runtimeContextFragments?: RuntimeContextFragment[];
   internalDeliverySuppressText?: boolean;

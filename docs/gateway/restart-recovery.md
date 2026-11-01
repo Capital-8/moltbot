@@ -148,6 +148,21 @@ gateway stops accepting new work, then waits for active agent turns and
 background tasks to finish, up to a drain budget (5 minutes by default). Most
 restarts therefore interrupt nothing at all.
 
+Ordinary process shutdown (`SIGTERM` or `openclaw gateway stop`) also preserves
+unfinished tasks for the next Gateway start. A task that completes during drain
+still finishes normally. If the native connection disappears during shutdown,
+the task retains its recovery claim rather than becoming a terminal failure.
+Recovery still checks native ownership and uncertain tool outcomes before it can
+continue. Explicit session Stop or cancel remains final and does not resume.
+
+For eligible Codex tasks, the Gateway begins saving tool receipts when it
+commits to draining. During normal operation this adds no receipt writes.
+If the first supported command is still running when drain begins, its original
+result can carry over to the same live native turn. If an earlier dynamic tool
+already finished before drain, this version lets the task finish within the
+remaining time but cannot use this handoff to recover it afterward. An
+unannounced process crash also falls back to existing recovery checks.
+
 Read-only RPC waits (`agent.wait`, approval decision waits, `question.waitAnswer`,
 and `device.scopes.waitUpgrade`) stop observing when their client disconnects.
 When shutdown drain begins, connected waiters receive retryable `UNAVAILABLE`

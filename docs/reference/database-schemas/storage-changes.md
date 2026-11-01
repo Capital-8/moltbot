@@ -7,6 +7,84 @@ read_when:
 title: "Storage changes and release preflight"
 ---
 
+## 2026-10-29 — Channel input before first dispatch (R9)
+
+Accepted by the maintainer on 2026-10-29. The existing before-agent-reply checkpoint may
+contain `undispatched-v1` for the original visible text input. The channel owner
+commits this checkpoint with its source-keyed transcript admission. Before hooks
+or execution it clears the checkpoint under the same session and run ownership.
+Startup can consume it once in the existing recovery admission transaction.
+First dispatch uses the exact original input, sender and delivery target. Missing
+checkpoints on older rows never establish that execution did not start. After
+consumption a second crash requires the usual running-task evidence.
+
+## Codex dynamic-tool result handoff
+
+The maintainer accepted the bounded V1 handoff design on 2026-10-28 and narrowed
+capture to planned deployment drain on 2026-10-29. An optional
+`dynamicToolHandoff` field in the existing Codex binding JSON records one
+accepted native turn. It uses the existing plugin-state binding owner,
+transaction, lease, and session-generation checks.
+
+During ordinary execution this feature writes no tool receipts. Capture can
+start when the Gateway commits to draining and the host of a persistent
+WebSocket command can settle its final result. An orderly service stop or
+restart, including deployment SIGTERM, uses that signal. A reversible restart
+proposal and an unannounced process kill do not start capture.
+The record identifies the original operational
+run and native turn. Its admission fingerprint covers the resolved native
+approval policy, reviewer, sandbox, code-mode restriction and session root, as
+well as binding policy and the exact native hook configuration and generation.
+A matching fingerprint never grants authority: live task custody and current
+policy checks still apply before rejoining or answering a native request.
+
+If any host dynamic call has already finished before drain, the turn cannot
+open a complete journal. It can continue to run during drain. Otherwise the
+opening transaction records the original requests for all in-flight dynamic
+calls as `started` together. After capture opens, each new dynamic call commits
+`started` before dispatching hooks or effects. If that write fails the new
+call stops before execution.
+A `completed` call contains the original request ID, a SHA-256 digest of the exact
+request identity and arguments, and the exact protocol result. Raw arguments are
+not stored. V1 accepts one text item only after synchronous result processing and
+after-tool hooks settle. V1 accepts the host-created Gateway exec projection
+when the executor and its current durable approval policy both permit unrestricted
+execution without asking. It checks the current owner at rejoin and again for
+the exact callback, including its namespace and argument schema. Per-call
+approval, before-tool policies, secret egress, elevated and background execution
+are ineligible. File tools and plugin-owned tools lack this authorization check.
+The authorization domain forms part of the fingerprint. A record created under
+a wider domain cannot qualify for this one.
+Async work, media, child or delivery obligations, unknown
+outcomes, timeouts, and unsupported response shapes cannot authorize recovery.
+Tool text can contain private task data and uses the binding's existing private
+storage permissions; it is not added to logs or exposed as an inspection API.
+
+The journal permits at most 128 calls and 256 KiB of serialized data. Exceeding
+either bound marks the turn ineligible without truncating a response, evicting
+unknown calls, or blocking the current live execution. A new Gateway may replay
+an exact completed response only after admitting the complete journal for the
+same still-running native turn; it never executes that original call again.
+The record does not reconstruct pending callbacks after a native-process restart.
+
+Cleanup requires both a native terminal state and host custody: a persisted
+pending-final marker or confirmed delivery. The command's live authority and an
+exact generation/thread/client/turn/source comparison protect cleanup from late
+callbacks and successor work. Uncertain or failed cleanup retains bounded
+evidence until successful settlement or ordinary binding/session retirement;
+there is no timed expiry. An older retained journal disables capture for a new
+ordinary turn instead of blocking that turn or replacing the old evidence.
+
+Upgrade does not backfill a journal from transcript text. Missing, malformed,
+over-budget, or unknown-version records cannot authorize rejoining. The current
+binding codec preserves unknown sibling versions without interpreting them.
+Older releases can ignore or discard this sibling when rewriting their binding;
+rollback therefore has no handoff guarantee, and cannot infer a completed result
+from its absence. There is no downgrade migration or automatic effect retry.
+Validation belongs to the binding owner (including SQLite reopen), exact-response
+and identity checks, result-boundary tests, live authority revocation, and host
+custody cleanup tests.
+
 ## Preparing for another database backend
 
 SQLite remains the supported runtime store. Preparation for PostgreSQL should

@@ -8,6 +8,11 @@ import { projectProviderError } from "../../../../packages/ai/src/utils/provider
 import { createTempDirTracker } from "../../../../test/helpers/temp-dir.js";
 import { sleepWithAbort } from "../../../infra/backoff.js";
 import { flushDiagnosticsTimeline } from "../../../infra/diagnostics-timeline.js";
+import {
+  beginGatewayRestartSignalAdmission,
+  markGatewayRestartDraining,
+  resetGatewayWorkAdmission,
+} from "../../../process/gateway-work-admission.js";
 import { withEnvAsync } from "../../../test-utils/env.js";
 import {
   buildEmbeddedRunnerAssistant,
@@ -34,6 +39,59 @@ vi.mock("../../../infra/backoff.js", async (importOriginal) => ({
 const tempDirs = createTempDirTracker();
 const requireRecord = createRequireRecord("record", "expected-label-object-capitalized");
 afterEach(() => tempDirs.cleanup());
+
+describe("deployment interruption during drain", () => {
+  afterEach(resetGatewayWorkAdmission);
+
+  const failure = {
+    kind: "client_closed_before_turn_completed",
+    transport: "websocket",
+    threadId: "native-thread",
+    turnId: "native-turn",
+    replaySafe: false,
+    replayBlockedReason: "potential_side_effect",
+  } as const;
+
+  it("retains a disconnected task for restart without replaying uncertain tool effects", async () => {
+    markGatewayRestartDraining("stop (SIGTERM)");
+    await expect(
+      recoverAfterTransportDrop({
+        pluginHarnessOwnsTransport: true,
+        codexAppServerFailure: failure,
+        terminal: { kind: "failed", source: "prompt", error: new Error("native connection lost") },
+      }),
+    ).rejects.toMatchObject({ code: "OPENCLAW_RESTART_ABORT" });
+  });
+
+  it.each(["accepting", "pending-restart", "timeout", "cancel", "ordinary-failure"] as const)(
+    "does not turn %s into a deployment interruption",
+    async (scenario) => {
+      resetGatewayWorkAdmission();
+      if (scenario === "pending-restart") {
+        beginGatewayRestartSignalAdmission();
+      } else if (scenario !== "accepting") {
+        markGatewayRestartDraining("stop (SIGTERM)");
+      }
+      const controller = new AbortController();
+      if (scenario === "cancel") {
+        controller.abort(new Error("explicit user cancellation"));
+      }
+      const result = await recoverAfterTransportDrop({
+        pluginHarnessOwnsTransport: true,
+        retryAvailable: false,
+        abortSignal: controller.signal,
+        codexAppServerFailure: scenario === "ordinary-failure" ? undefined : failure,
+        terminal:
+          scenario === "timeout"
+            ? { kind: "timeout", phase: "prompt", source: "runtime" }
+            : { kind: "failed", source: "prompt", error: new Error("native connection lost") },
+      });
+      expect(result.recovery.action).toBe("proceed");
+      expect(result.continueFromCurrentTranscript).not.toHaveBeenCalled();
+      expect(result.markOwnedTranscriptRetry).not.toHaveBeenCalled();
+    },
+  );
+});
 
 it.each(["ECONNREFUSED"])(
   "fails fast on %s for setup while normal runs retain connection retries",

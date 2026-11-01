@@ -248,7 +248,12 @@ export async function completeReplyAgentRun(input: {
       const persistedPendingFinalDelivery = await patchSessionEntryCore(
         { agentId: followupRun.run.agentId, storePath, sessionKey },
         (entry) =>
-          entry.sessionId === expectedSessionId
+          entry.sessionId === expectedSessionId &&
+          (!context.toolHandoff ||
+            (entry.restartRecoveryDeliverySourceRunId === context.toolHandoff.sourceTurnId &&
+              entry.restartRecoveryDeliveryRunId === context.toolHandoff.recoveryRunId &&
+              !entry.abortedLastRun &&
+              !entry.mainRestartRecovery?.tombstone))
             ? {
                 pendingFinalDelivery: {
                   ...(resolvedPendingText && commandOwnerReference === undefined
@@ -274,6 +279,15 @@ export async function completeReplyAgentRun(input: {
           pendingFinalDeliveryIntentId
       ) {
         throw new Error("pending final delivery session changed or was deleted");
+      }
+      if (
+        context.toolHandoff &&
+        persistedPendingFinalDelivery.pendingFinalDelivery.kind === "replayable"
+      ) {
+        // Final delivery now has durable custody. Failed cleanup retains the exact receipt.
+        await context.toolHandoff.settlement
+          .settle(() => context.replyOperation.abortSignal.throwIfAborted())
+          .catch(() => {});
       }
     }
   }

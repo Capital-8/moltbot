@@ -14,6 +14,7 @@ import {
   getPluginRuntimeGatewayRequestScope,
   withPluginRuntimeGatewayRequestScope,
 } from "../../plugins/runtime/gateway-request-scope.js";
+import { getGatewayToolHandoffDrainSignal } from "../../process/gateway-work-admission.js";
 import { bindUserTurnTranscriptAnnotation } from "../../sessions/user-turn-transcript-annotation.js";
 import { getAsyncWorkSignal } from "../../shared/async-work-scope.js";
 import { resolveSkillResourceCandidates } from "../../skills/runtime/resource-candidates.js";
@@ -33,6 +34,7 @@ import { log } from "../embedded-agent-runner/logger.js";
 import type { EmbeddedRunAttemptParams } from "../embedded-agent-runner/run/types.js";
 import { runBestEffortCallback } from "../embedded-agent-subscribe.callback.js";
 import { createCronScheduledToolProjection } from "../exec-tool-target-pinning.js";
+import { getHarnessRestartRecoveryClaim } from "../main-session-recovery/harness-recovery-claim.js";
 import { throwAgentRunRestartAbortReason } from "../run-termination.js";
 import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { isToolExecutionAllowed } from "../tool-policy-shared.js";
@@ -407,10 +409,27 @@ export function createAgentHarnessHostCapabilities(params: {
     nativeModelPolicySupported
       ? (model) => bindHarnessModelExecution(attempt.admittedRunContext, model, assertActive)
       : undefined;
+  const registerToolHandoffSettlement = attempt.registerToolHandoffSettlement;
   const capabilities: AgentHarnessHostCapabilities = Object.freeze({
     kind: "agent-harness-host-capability" as const,
     version: 1 as const,
     assertActive,
+    ...(registerToolHandoffSettlement
+      ? {
+          toolHandoffDrainSignal: getGatewayToolHandoffDrainSignal(),
+          registerToolHandoffSettlement: (
+            callback: Parameters<
+              NonNullable<AgentHarnessHostCapabilities["registerToolHandoffSettlement"]>
+            >[0],
+          ) => {
+            assertActive();
+            registerToolHandoffSettlement(callback);
+          },
+        }
+      : {}),
+    get restartRecoveryClaim() {
+      return getHarnessRestartRecoveryClaim(attempt.admittedRunContext, assertActive);
+    },
     get assertNativeSubagentSpawnAllowed() {
       return bindHarnessNativeSpawnAuthority(personalToolParticipants, assertActive);
     },

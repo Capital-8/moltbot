@@ -16,6 +16,7 @@ import type {
 import { getPluginToolMeta } from "../plugins/tool-metadata.js";
 
 export { pinExecToolTarget };
+export { isGatewayExecResultHandoffAuthorized } from "../agents/exec-tool-target-pinning.js";
 export { resolveBootstrapFilesForPreparation } from "../agents/bootstrap-files.js";
 export { loadCodexBundleMcpApprovalConfig } from "../agents/codex-mcp-config.js";
 export {

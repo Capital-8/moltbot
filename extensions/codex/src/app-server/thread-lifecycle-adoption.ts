@@ -175,7 +175,7 @@ export async function stopCodexAutomaticRestart(
     {
       cause,
       userMessage:
-        "The previous task could not be safely resumed. Its history is preserved, and I stopped automatic recovery to avoid repeating earlier tool effects.",
+        "I couldn’t safely continue the previous task. Check whether its last action completed, then reply in this thread with what still needs doing.",
     },
   );
 }

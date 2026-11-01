@@ -4,6 +4,7 @@ import {
   hasBeforeToolCallPolicy,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { resolveAgentConfig } from "openclaw/plugin-sdk/agent-scope-runtime";
+import { isGatewayExecResultHandoffAuthorized } from "openclaw/plugin-sdk/codex-mcp-projection";
 import { resolveCodexAppServerForModelProvider } from "./app-server-policy.js";
 import { startCodexAttemptThread } from "./attempt-startup.js";
 import { joinPresentSections } from "./developer-instruction-sections.js";
@@ -111,6 +112,11 @@ export async function startCodexAttemptRuntime(resources: CodexAttemptResources)
       effectiveWorkspace,
       effectiveCwd,
       dynamicTools: toolBridge.specs,
+      availableDynamicTools: toolBridge.availableSpecs,
+      isDynamicToolHandoffAuthorized: () =>
+        toolBridge.availableTools.some(
+          (tool) => tool.name === "gateway_exec" && isGatewayExecResultHandoffAuthorized(tool, {}),
+        ),
       persistentWebSearchAllowed: toolState.persistentWebSearchAllowed,
       webSearchAllowed: toolState.webSearchAllowed,
       developerInstructions,

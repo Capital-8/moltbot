@@ -8,6 +8,8 @@ import type {
 
 /** OpenClaw-only dynamic-tool facts that never cross into the Codex protocol. */
 export type CodexDynamicToolRuntimeResponse = CodexDynamicToolCallResponse & {
+  /** Original producer attestation; absent on timeout/error fallback and never sent to native. */
+  handoffDisposition?: "eligible" | "unsupported";
   asyncStarted?: boolean;
   diagnosticTerminalReason?: CodexDynamicToolDiagnosticTerminalReason;
   diagnosticTerminalType?: CodexDynamicToolDiagnosticTerminalType;

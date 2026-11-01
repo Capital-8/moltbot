@@ -212,6 +212,7 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   expectedRuntimeArtifact?: AgentHarnessRuntimeArtifactBinding;
   /** OpenClaw-owned runtime policy prepared by the orchestrator for this attempt. */
   runtimePlan?: AgentRuntimePlan;
+  registerToolHandoffSettlement?: import("../../harness/tool-handoff-settlement.js").RegisterToolHandoffSettlement;
   /** Reports terminal tool facts to the host-owned attempt outcome accumulator. */
   observeToolTerminal?: EmbeddedRunAttemptToolTerminalObserver;
   /** Host-issued scope for harness-owned child completion. */

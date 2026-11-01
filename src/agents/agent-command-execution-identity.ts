@@ -172,6 +172,28 @@ export function prepareAgentCommandExecutionIdentity(params: {
     onAdmitted: async (admittedRunContext) => {
       await opts.onAdmittedRunContext?.(admittedRunContext);
       admittedContext = admittedRunContext;
+      if (recovery && prepared.sessionEntry && opts.interruptedRunId) {
+        const [{ bindHarnessRestartRecoveryClaim }, { loadExactSessionEntryReadOnly }] =
+          await Promise.all([
+            import("./main-session-recovery/harness-recovery-claim.js"),
+            import("../config/sessions/session-accessor.js"),
+          ]);
+        bindHarnessRestartRecoveryClaim({
+          admitted: admittedRunContext,
+          entry: prepared.sessionEntry,
+          interruptedRunId: opts.interruptedRunId,
+          attempt: recovery.owner.attempt,
+          lifecycleGeneration: recovery.owner.lifecycleGeneration,
+          readCurrent: () =>
+            loadExactSessionEntryReadOnly({
+              sessionKey: recovery.sessionKey,
+              storePath: recovery.storePath,
+              agentId: prepared.sessionAgentId,
+              readConsistency: "latest",
+              projection: "list",
+            })?.entry as InternalSessionEntry | undefined,
+        });
+      }
       if (!recovery || !admittedRunContext.executionIdentityToken) {
         return;
       }
@@ -234,6 +256,7 @@ export function sanitizePublicAgentCommandIngressOpts(
     senderIsOwner: false,
     mainRestartRecoveryOwnerLease: undefined,
     mainRestartRecoveryAdmitted: undefined,
+    interruptedRunId: undefined,
     mainRestartRecoveryAttempt: undefined,
     pinnedWidgetAuthoring: undefined,
     executionIdentityAdmission: undefined,

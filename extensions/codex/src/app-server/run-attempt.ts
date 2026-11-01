@@ -10,6 +10,7 @@ import { finalizeCodexAttempt } from "./run-attempt-finalize.js";
 import { createCodexAttemptLifecycleController } from "./run-attempt-lifecycle-controller.js";
 import { createCodexAttemptNotificationController } from "./run-attempt-notification-controller.js";
 import { prepareCodexAttemptPrompt } from "./run-attempt-prompt.js";
+import { resumeCodexHandedOffTurn } from "./run-attempt-recovery.js";
 import { prepareCodexAttemptResources } from "./run-attempt-resources.js";
 import { prepareCodexAttemptRoute } from "./run-attempt-route.js";
 import { prepareCodexAttemptRuntime } from "./run-attempt-runtime.js";
@@ -111,6 +112,7 @@ export async function runCodexAppServerAttempt(
           try {
             try {
               await activeTurn.ready;
+              await resumeCodexHandedOffTurn(resources, turnRuntime, notifications);
               finalizedResult = await finalizeCodexAttempt(
                 resources,
                 turnRuntime,
@@ -120,6 +122,14 @@ export async function runCodexAppServerAttempt(
                 activeTurn,
               );
             } finally {
+              turnRuntime.state.liveRejoinAdmission?.reject(
+                new Error("Codex live recovery admission ended"),
+              );
+              // Finish publishing any drain receipt and its settlement callback before
+              // native cleanup can clear acceptance and the command can deliver its final.
+              const handoff = resources.state.plannedToolHandoff;
+              handoff?.detach();
+              await handoff?.opening?.catch(() => {});
               await cleanupCodexAttempt(resources, turnRuntime, lifecycle, turnRequest, activeTurn);
             }
           } catch (error) {
@@ -154,6 +164,10 @@ export async function runCodexAppServerAttempt(
           connection.assertModelExecutionCurrent();
           return finalizedResult;
         } finally {
+          turnRuntime.state.liveRejoinAdmission?.reject(
+            new Error("Codex live recovery admission ended"),
+          );
+          resources.state.plannedToolHandoff?.detach();
           turnRuntime.deadlines.dispose();
         }
       } finally {

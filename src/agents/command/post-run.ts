@@ -28,8 +28,8 @@ import { normalizeAgentRunTerminalReplySnapshot } from "../agent-run-terminal-re
 import { OPENCLAW_AGENT_RUNTIME_ID } from "../agent-runtime-id.js";
 import { isHeartbeatLifecycleRunKind } from "../bootstrap-mode.js";
 import type { AcceptedCompactionSuccessor } from "../embedded-agent-runner/compaction-successor.js";
+import { persistPendingFinalDeliveryWithToolHandoff } from "../harness/tool-handoff-settlement.js";
 import { buildMainSessionRecoveryClearPatch } from "../main-session-recovery/main-session-recovery-clear.js";
-import { persistPendingFinalDeliveryMarker } from "../pending-final-delivery-marker.js";
 import type { AgentRunSessionTarget } from "../run-session-target.types.js";
 import { throwAgentRunRestartAbortReason } from "../run-termination.js";
 import type { SessionMaintenanceRequest } from "../session-maintenance/run.js";
@@ -329,25 +329,26 @@ export async function finalizeEmbeddedAgentCommand(params: {
     }
 
     const payloads = result.payloads ?? [];
-    const pendingFinalDeliveryMarker = await persistPendingFinalDeliveryMarker({
-      assertCurrent: () => {
-        assertSourceCurrent?.();
-        operatorAuthority?.assertCurrent();
-        assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
-      },
-      commandOwnerReference: params.opts.assertSourceCurrent?.recoveryReference,
-      agentId: sessionAgentId,
-      deliver: params.opts.deliver === true,
-      sessionStore,
-      sessionKey,
-      sessionEntry,
-      storePath,
-      suppressVisibleSessionEffects: params.suppressVisibleSessionEffects,
-      sessionReboundDuringRun,
-      payloads: selectSourceDeliverablePayloads(payloads, params.opts),
-      deliveryContext: params.currentRunDeliveryContext,
-      runOwnedSessionId,
-    });
+    const { pendingFinalDeliveryMarker, settleToolHandoff } =
+      await persistPendingFinalDeliveryWithToolHandoff(params.attempt.toolHandoffSettlement, {
+        assertCurrent: () => {
+          assertSourceCurrent?.();
+          operatorAuthority?.assertCurrent();
+          assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
+        },
+        commandOwnerReference: params.opts.assertSourceCurrent?.recoveryReference,
+        agentId: sessionAgentId,
+        deliver: params.opts.deliver === true,
+        sessionStore,
+        sessionKey,
+        sessionEntry,
+        storePath,
+        suppressVisibleSessionEffects: params.suppressVisibleSessionEffects,
+        sessionReboundDuringRun,
+        payloads: selectSourceDeliverablePayloads(payloads, params.opts),
+        deliveryContext: params.currentRunDeliveryContext,
+        runOwnedSessionId,
+      });
     sessionEntry = pendingFinalDeliveryMarker.sessionEntry;
 
     const resolveFreshSessionEntryForDelivery =
@@ -556,6 +557,8 @@ export async function finalizeEmbeddedAgentCommand(params: {
           }
         : deliveryParams,
     );
+
+    await settleToolHandoff(deliveryResult?.deliverySucceeded === true);
 
     hasResultError = Boolean(fallbackExhausted || lifecycle.resolveResultError(result, false));
     if (

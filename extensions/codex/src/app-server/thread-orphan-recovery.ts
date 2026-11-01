@@ -9,6 +9,7 @@ import {
   isCodexAppServerLiveThreadClaimed,
   isCodexAppServerLiveThreadProtected,
 } from "./client-runtime.js";
+import { beginCodexDynamicToolHandoff } from "./dynamic-tool-handoff-capture.js";
 import { isJsonObject, type CodexThread, type CodexTurn } from "./protocol.js";
 import { requestCodexAppServerClientJson } from "./request.js";
 import type { CodexAttemptResources } from "./run-attempt-resources.js";
@@ -64,6 +65,7 @@ export async function recordCodexAcceptedTurn(
     throw new CodexThreadBindingConflictError(thread.threadId, "recording native turn acceptance");
   }
   thread.turnRecovery = turnRecovery;
+  await beginCodexDynamicToolHandoff(resources, turnId, assertCurrent);
 }
 
 /** A confirmed native terminal needs no future recovery receipt. Never clear a successor. */

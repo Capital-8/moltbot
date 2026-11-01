@@ -291,6 +291,14 @@ describe("executeAgentTurn: terminal failures", () => {
 
   it.each([
     { reason: "restart", code: "aborted_for_restart", phase: "end", stopReason: "restart" },
+    {
+      reason: "restart",
+      code: "aborted_for_restart",
+      phase: "end",
+      stopReason: "restart",
+      restartError: true,
+      errorOnly: true,
+    },
     { reason: "user", code: "aborted_by_user", phase: "error", stopReason: "aborted" },
     { reason: "user", code: "aborted_by_user", phase: "error", stopReason: "timeout" },
     {
@@ -331,7 +339,7 @@ describe("executeAgentTurn: terminal failures", () => {
       state.runEmbeddedAgentMock.mockImplementationOnce(async () => {
         if (reason === "superseded") {
           replyOperation.supersede();
-        } else {
+        } else if (!("errorOnly" in testCase)) {
           const abortReason =
             reason === "restart"
               ? createAgentRunRestartAbortError()

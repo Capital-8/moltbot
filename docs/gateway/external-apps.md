@@ -107,6 +107,11 @@ The RPC contract is:
 
 - `gateway.suspend.prepare` — `operator.admin`; params
   `{ "requestId": "stable-host-operation-id", "terminalPolicy": "preserve", "drain": true }`
+  A planned deployment may also supply `plannedDeadlineMs` as an absolute Unix timestamp in
+  milliseconds. Use the same deadline for each renewal. While a healthy Gateway waits for active
+  work, detailed readiness reports `plannedDrain: true` and stays unready. Eligible running tasks
+  can then capture bounded tool receipts. This window ends at the original deadline or after
+  30 minutes, whichever comes first. Use `gateway.suspend.handoff` to arm a cooperative process stop.
 - `gateway.suspend.status` — `operator.read`; params
   `{ "suspensionId": "id-from-prepare", "includeLifecycle": true }`
 - `gateway.suspend.resume` — `operator.admin`; params

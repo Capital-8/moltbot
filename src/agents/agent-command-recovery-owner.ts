@@ -192,7 +192,9 @@ export async function runWithAgentCommandRecoveryOwner<
     const target = prepared;
     const mayWaitForRecovery =
       params.mode === "claim" &&
-      params.opts.inputProvenance?.sourceTool === "subagent_settle" &&
+      (params.opts.inputProvenance === undefined ||
+        params.opts.inputProvenance.kind === "external_user" ||
+        params.opts.inputProvenance.sourceTool === "subagent_settle") &&
       params.opts.sessionEffects !== "internal" &&
       !params.opts.mainRestartRecoveryAdmitted &&
       !params.opts.mainRestartRecoveryOwnerLease;
@@ -208,8 +210,7 @@ export async function runWithAgentCommandRecoveryOwner<
     let acquired: AcquiredRecoveryOwner | undefined;
     for (;;) {
       if (pendingOwner) {
-        // Keep the accepted settle turn (and its idempotency key) alive rather
-        // than returning a cached no-turn rejection to the durable delivery owner.
+        // Keep accepted input bound to the same target while the original recovery owns it.
         await racePromiseWithAbortSignal(pendingOwner, params.opts.abortSignal);
         params.opts.abortSignal?.throwIfAborted();
         assertAgentRunLifecycleGenerationCurrent(params.lifecycleGeneration);

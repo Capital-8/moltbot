@@ -1701,9 +1701,13 @@ describe("createGatewayCloseHandler", () => {
     );
   });
 
-  it.each([false, true])(
-    "cancels only captured Gateway replies before disposal (marker fails: %s)",
-    async (markerFails) => {
+  it.each([
+    { markerFails: false, restartExpectedMs: 123 },
+    { markerFails: true, restartExpectedMs: 123 },
+    { markerFails: false, restartExpectedMs: null },
+  ])(
+    "cancels only captured Gateway replies after custody marking (marker fails: $markerFails, restart: $restartExpectedMs)",
+    async ({ markerFails, restartExpectedMs }) => {
       const resolveGatewayContext = () => undefined;
       const otherGatewayContext = () => undefined;
       const operations: ReplyOperation[] = [];
@@ -1756,7 +1760,7 @@ describe("createGatewayCloseHandler", () => {
         resolveGatewayContext,
       });
       try {
-        const closing = close({ restartExpectedMs: 123, drainTimeoutMs: 0 });
+        const closing = close({ restartExpectedMs, drainTimeoutMs: 0 });
         await markerEntered.promise;
         expect(owned.abortSignal.aborted).toBe(false);
         replaced.complete();
@@ -1936,7 +1940,7 @@ describe("createGatewayCloseHandler", () => {
     ).toBe(true);
   });
 
-  it("cancels remaining runs after ordinary shutdown grace without restart recovery", async () => {
+  it("preserves remaining runs for recovery after ordinary shutdown grace", async () => {
     const controller = new AbortController();
     const chatAbortControllers = new Map([
       [
@@ -1961,15 +1965,14 @@ describe("createGatewayCloseHandler", () => {
 
     const result = await close({ reason: "SIGTERM", drainTimeoutMs: 0 });
 
-    expect(result.warnings).not.toContain("restart-reply-drain");
+    expect(result.warnings).toContain("restart-reply-drain");
     expect(controller.signal.aborted).toBe(true);
-    expect(isAgentRunRestartAbortReason(controller.signal.reason)).toBe(false);
+    expect(isAgentRunRestartAbortReason(controller.signal.reason)).toBe(true);
     expect(chatAbortControllers.size).toBe(0);
-    expect(getPendingReplyCount).not.toHaveBeenCalled();
-    expect(markMainSessionsAbortedForRestart).not.toHaveBeenCalled();
+    expect(markMainSessionsAbortedForRestart).toHaveBeenCalledOnce();
     expect(deps.broadcast).toHaveBeenCalledWith(
       "chat",
-      expect.objectContaining({ runId: "run-1", state: "aborted", stopReason: "rpc" }),
+      expect.objectContaining({ runId: "run-1", state: "aborted", stopReason: "restart" }),
       { sessionKeys: ["session-1"] },
     );
   });

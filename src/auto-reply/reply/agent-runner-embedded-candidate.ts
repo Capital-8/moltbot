@@ -122,6 +122,7 @@ export async function runEmbeddedFallbackCandidate(
       const embeddedRunParams: RunEmbeddedAgentInternalParams = {
         preparedRunAdmission: params.preparedRunAdmission,
         ...embeddedContext,
+        registerToolHandoffSettlement: turn.registerToolHandoffSettlement,
         messageActionTurnCapability: params.messageActionTurnCapability,
         lifecycleGeneration: params.getLifecycleGeneration(),
         allowGatewaySubagentBinding: true,

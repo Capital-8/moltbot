@@ -610,6 +610,7 @@ function withoutPluginHarnessPrivateState(
   // separate projections can drift and expose authority on less common operations.
   const {
     admittedRunContext: _admittedRunContext,
+    registerToolHandoffSettlement: _registerToolHandoffSettlement,
     runtimePluginToolGrant: _runtimePluginToolGrant,
     assistantErrorTranscript: _assistantErrorTranscript,
     compactionCountOwner: _compactionCountOwner,

@@ -27,6 +27,8 @@ export type AgentToolWithMeta<TParameters extends TSchema, TResult> = AgentTool<
   TResult
 > & {
   displaySummary?: string;
+  /** Host-owned pure current-authority check; no execution or approval consumption. */
+  isCompletedResultHandoffAuthorized?: (params: unknown) => boolean;
   /** Keep this tool model-visible; hidden catalog bridges cannot preserve its result contract. */
   catalogMode?: "direct-only";
   /** Gateway client capabilities required before this tool can be assembled. */

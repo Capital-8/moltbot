@@ -535,6 +535,7 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
       : {}),
     runtimePlan,
     observeToolTerminal: createToolTerminalObserver(params.runId),
+    registerToolHandoffSettlement: params.registerToolHandoffSettlement,
     model: applyAuthHeaderOverride(
       applyLocalNoAuthHeaderOverride(effectiveModel, runtime.apiKeyInfo),
       runtime.runtimeAuthState !== null ? null : runtime.apiKeyInfo,

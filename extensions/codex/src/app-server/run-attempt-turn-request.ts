@@ -14,6 +14,7 @@ import {
 import { prepareCodexWorkspaceReferences } from "./client-runtime.js";
 import { isCodexAppServerIndeterminateRequestCancellationError } from "./client.js";
 import { joinPresentSections } from "./developer-instruction-sections.js";
+import { registerCodexDynamicToolHandoffSettlement } from "./dynamic-tool-handoff-capture.js";
 import { resolveCodexExplicitSkillInputs } from "./explicit-skill-input.js";
 import { CODEX_INFERENCE_GENERATION_KEY } from "./inference-context.js";
 import { getCodexInferenceThread } from "./inference-routing.js";
@@ -139,6 +140,34 @@ export async function prepareCodexAttemptTurnRequest(
   };
   const startCodexTurn = async (): Promise<CodexStartedTurn> => {
     const activeTurnRoute = await ensureCurrentThreadRoute();
+    const rejoined = resourceState.thread.lifecycle.rejoinedTurn;
+    if (rejoined) {
+      const claim = params.hostCapabilities.restartRecoveryClaim;
+      connection.assertCurrent();
+      runAbortController.signal.throwIfAborted();
+      claim?.assertCurrent();
+      resourceState.thread.liveThreadOwnership?.assertCurrent();
+      if (
+        !claim ||
+        claim.sourceRunId !== rejoined.sourceRunId ||
+        claim.recoveryRunId !== params.runId
+      ) {
+        throw new Error("Codex live recovery lost its original host custody.");
+      }
+      registerCodexDynamicToolHandoffSettlement(resources, rejoined.turnId);
+      activeTurnRoute.armTurn();
+      turnRuntime.state.recoveredTurnId = rejoined.turnId;
+      resources.nativeProcessAuthority?.bindTurn(
+        resourceState.client,
+        resourceState.thread.threadId,
+        rejoined.turnId,
+      );
+      return {
+        turn: { turn: { id: rejoined.turnId, status: "inProgress", items: [] } },
+        upstreamUserText: "",
+      };
+    }
+
     // Resume may observe a newer native tuple after host auth was prepared. Keep
     // that truthful binding, but never infer with credentials selected for the old tuple.
     assertCodexSessionRuntimeOwnership(

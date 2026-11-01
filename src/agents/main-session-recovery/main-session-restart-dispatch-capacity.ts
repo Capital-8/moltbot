@@ -10,6 +10,7 @@ import {
 
 export async function dispatchRestartRecoveryWithinCapacity(params: {
   agentParams: AgentRunRequest;
+  interruptedRunId?: string;
   capacity?: MainSessionRecoveryCapacity;
   gatewayRuntime: GatewayRecoveryRuntime;
   onSettled?: () => void;
@@ -39,6 +40,7 @@ export async function dispatchRestartRecoveryWithinCapacity(params: {
   try {
     const outcome = await dispatchRestartRecoveryUntilStarted({
       agentParams: params.agentParams,
+      interruptedRunId: params.interruptedRunId,
       gatewayRuntime: params.gatewayRuntime,
       onSettled,
     });

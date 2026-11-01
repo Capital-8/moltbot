@@ -37,6 +37,7 @@ type GatewayRootWorkAdmission = {
 type GatewayWorkAdmissionState = {
   restartDrainReason: GatewayDrainReason | undefined;
   restartDrainController: AbortController;
+  plannedHandoffController?: AbortController;
   restartSignalPending: boolean;
   restartSignalGeneration: number;
   suspendPhase: GatewaySuspendAdmissionPhase;
@@ -281,6 +282,17 @@ export async function waitForGatewayRestartFenceSettlement(): Promise<void> {
 
 export function getGatewayRestartDrainSignal(): AbortSignal {
   return GATEWAY_WORK_ADMISSION_STATE.restartDrainController.signal;
+}
+
+/** Running attempts share a one-shot signal, independent of the irreversible shutdown fence. */
+export function getGatewayToolHandoffDrainSignal(): AbortSignal {
+  const planned = (GATEWAY_WORK_ADMISSION_STATE.plannedHandoffController ??= new AbortController());
+  return AbortSignal.any([getGatewayRestartDrainSignal(), planned.signal]);
+}
+
+export function notifyGatewayPlannedToolHandoff(): void {
+  const planned = (GATEWAY_WORK_ADMISSION_STATE.plannedHandoffController ??= new AbortController());
+  planned.abort();
 }
 
 export function isGatewayRestartDrainError(error: unknown): error is GatewayDrainingError {
@@ -644,6 +656,9 @@ export function tryBeginGatewaySuspendAdmission(
     }
     GATEWAY_WORK_ADMISSION_STATE.suspendPhase = next;
     if (next === "accepting") {
+      if (GATEWAY_WORK_ADMISSION_STATE.plannedHandoffController?.signal.aborted) {
+        GATEWAY_WORK_ADMISSION_STATE.plannedHandoffController = undefined;
+      }
       GATEWAY_WORK_ADMISSION_STATE.suspendInvalidated = undefined;
       resolveSuspendOpenWaiters();
       admissionLog.info("admission reopened: suspend phase");
@@ -675,6 +690,7 @@ export function resetGatewayWorkAdmission(): void {
   GATEWAY_WORK_ADMISSION_STATE.activeRootWork.clear();
   GATEWAY_WORK_ADMISSION_STATE.restartDrainReason = undefined;
   GATEWAY_WORK_ADMISSION_STATE.restartDrainController = new AbortController();
+  GATEWAY_WORK_ADMISSION_STATE.plannedHandoffController = undefined;
   GATEWAY_WORK_ADMISSION_STATE.restartSignalPending = false;
   GATEWAY_WORK_ADMISSION_STATE.restartSignalGeneration += 1;
   if (GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting") {

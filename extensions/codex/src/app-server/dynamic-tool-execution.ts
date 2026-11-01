@@ -144,6 +144,7 @@ type DynamicToolCallExecutionParams = {
     Partial<Pick<CodexDynamicToolBridge, "sideEffectOwnerKeyForTool">>;
   signal: AbortSignal;
   timeoutMs: number;
+  shouldSettleForHandoff?: () => boolean;
   toolMeta?: string;
   toolCallOrdinal?: number;
   onAgentToolResult?: EmbeddedRunAttemptParams["onAgentToolResult"];
@@ -323,6 +324,7 @@ async function executeDynamicToolCallWithTimeout(
         onAgentToolResult: notifyAgentToolResult,
         toolCallOrdinal: params.toolCallOrdinal,
         retainExecutionSnapshot: true,
+        shouldSettleForHandoff: params.shouldSettleForHandoff,
       }),
       abortPromise,
       timeoutPromise,

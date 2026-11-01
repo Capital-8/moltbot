@@ -99,8 +99,8 @@ export async function drainGatewayActiveWork({
         logger.warn(
           `gateway active-work drain timeout reached; proceeding with shutdown: ${formatDrainCounts(activeWorkDrain.snapshot)}`,
         );
-        runtime.abortEmbeddedAgentRun(undefined, { mode: "all" });
-        runtime.abortActiveCronTaskRuns("Gateway stopping.");
+        // Server shutdown records task custody before canceling unfinished runs.
+        runtime.abortActiveCronTaskRuns();
       }
     } catch (err) {
       logger.warn(

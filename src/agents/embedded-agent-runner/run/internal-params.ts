@@ -36,6 +36,7 @@ export type CompactionAccountingFact = Readonly<
 >;
 
 export type RunEmbeddedAgentInternalParams = RunEmbeddedAgentParams & {
+  registerToolHandoffSettlement?: import("../../harness/tool-handoff-settlement.js").RegisterToolHandoffSettlement;
   /** Fail-closed caller input admission against the actual prepared model, before dispatch. */
   assertModelInput?: (model: Pick<Model, "input">) => void;
   /** Reset deferred terminal facts when the host admits a new attempt, before preparation. */

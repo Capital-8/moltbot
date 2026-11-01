@@ -22,6 +22,17 @@ import {
   toCodexDynamicToolProgressResponse,
   toCodexDynamicToolProtocolResponse,
 } from "./dynamic-tool-execution.js";
+import {
+  hasCurrentCodexDynamicToolHandoff,
+  recordCodexDynamicToolHandoffStarted,
+  recordCodexDynamicToolHandoffResult,
+} from "./dynamic-tool-handoff-capture.js";
+import {
+  buildCodexDynamicToolHandoffAdmissionConfig,
+  readCodexDynamicToolHandoffV1,
+  readCompletedCodexDynamicToolHandoffResponse,
+  fingerprintCodexDynamicToolHandoffAdmission,
+} from "./dynamic-tool-handoff.js";
 import { recordCodexDynamicToolResult } from "./dynamic-tool-result-projection.js";
 import { routeCodexAppServerElicitationRequest } from "./elicitation-bridge.js";
 import { shouldEmitTranscriptToolProgress } from "./event-projector-tool-progress.js";
@@ -168,7 +179,7 @@ export function createCodexAttemptServerRequestController(
       noteProgress(`request:${request.method}:start`);
     };
     try {
-      if (!turnId) {
+      if (!turnId || resourceState.thread.lifecycle.rejoinedTurn?.terminalOnly) {
         return undefined;
       }
       if (request.method === "mcpServer/elicitation/request") {
@@ -223,6 +234,79 @@ export function createCodexAttemptServerRequestController(
       const call = readCodexDynamicToolCallParams(request.params);
       if (!call || call.threadId !== resourceState.thread.threadId || call.turnId !== turnId) {
         return undefined;
+      }
+      const retainedCatalog = resourceState.thread.lifecycle.retainedDynamicTools;
+      if (
+        retainedCatalog &&
+        !retainedCatalog.some((spec) =>
+          spec.type === "namespace"
+            ? spec.name === call.namespace && spec.tools.some((tool) => tool.name === call.tool)
+            : call.namespace == null && spec.name === call.tool,
+        )
+      ) {
+        return {
+          success: false,
+          contentItems: [{ type: "inputText", text: "Tool is unavailable on this thread." }],
+        };
+      }
+      const assertHandoffCurrent = () => {
+        connection.assertCurrent();
+        params.hostCapabilities.assertActive();
+        signal.throwIfAborted();
+        const rejoined = resourceState.thread.lifecycle.rejoinedTurn;
+        if (rejoined) {
+          const claim = params.hostCapabilities.restartRecoveryClaim;
+          if (
+            !claim ||
+            claim.sourceRunId !== rejoined.sourceRunId ||
+            claim.recoveryRunId !== params.runId
+          ) {
+            throw new Error("Codex tool handoff lost its original task claim");
+          }
+          claim.assertCurrent();
+        }
+      };
+      const rejoined = resourceState.thread.lifecycle.rejoinedTurn;
+      if (rejoined) {
+        assertHandoffCurrent();
+        const binding = connection.bindingStore.read(connection.bindingIdentity);
+        const handoff = readCodexDynamicToolHandoffV1(binding?.dynamicToolHandoff);
+        if (
+          !binding ||
+          binding.threadId !== call.threadId ||
+          binding.clientId !== resourceState.thread.clientId ||
+          binding.turnRecovery?.state !== "accepted" ||
+          binding.turnRecovery.turnId !== call.turnId ||
+          !handoff ||
+          handoff.sourceRunId !== rejoined.sourceRunId ||
+          handoff.turnId !== rejoined.turnId ||
+          handoff.admissionFingerprint !==
+            fingerprintCodexDynamicToolHandoffAdmission(
+              binding,
+              buildCodexDynamicToolHandoffAdmissionConfig(
+                connection.appServer,
+                resourceState.nativeHookRelayConfigPatch,
+              ),
+            )
+        ) {
+          throw new Error("Codex original tool handoff is no longer current");
+        }
+        const recorded = handoff.calls.find(
+          (entry) => entry.callId === call.callId || entry.requestId === request.id,
+        );
+        if (recorded) {
+          const replay = readCompletedCodexDynamicToolHandoffResponse(handoff, {
+            requestId: request.id,
+            call,
+          });
+          if (!replay || !toolBridge.isToolCallAvailableForHandoff(call)) {
+            throw new Error("Codex original tool outcome is unknown or request identity changed");
+          }
+          assertHandoffCurrent();
+          return replay as JsonValue;
+        }
+        // Coverage was admitted before rejoin. An absent call was never dispatched
+        // by the retired host; this owner must journal it before normal execution.
       }
       // A replay owns a new reply channel, but the original execution keeps its
       // existing deadline. Preserve this tool's wire budget on both deliveries.
@@ -320,12 +404,21 @@ export function createCodexAttemptServerRequestController(
             // Publish the execution claim before persistence yields, so a replay
             // cannot become another owner of this call's progress or result.
             await projector?.transcriptCheckpoint.flush();
+            await recordCodexDynamicToolHandoffStarted(
+              resources,
+              { requestId: request.id, call },
+              assertHandoffCurrent,
+            );
             emitDynamicToolStartedDiagnostic(diagnosticContext);
             const response = await handleDynamicToolCallWithTimeout({
               call,
               toolBridge,
               signal,
               timeoutMs: dynamicToolTimeoutMs,
+              shouldSettleForHandoff: () =>
+                (resourceState.plannedToolHandoff?.turnId === call.turnId &&
+                  Boolean(resourceState.plannedToolHandoff.opening)) ||
+                hasCurrentCodexDynamicToolHandoff(resources, call.turnId),
               toolMeta,
               toolCallOrdinal,
               onAgentToolResult: params.onAgentToolResult,
@@ -352,6 +445,12 @@ export function createCodexAttemptServerRequestController(
               toCodexDynamicToolProtocolResponse(response),
             );
             await projector?.transcriptCheckpoint.flush();
+            await recordCodexDynamicToolHandoffResult(
+              resources,
+              { requestId: request.id, call },
+              response,
+              assertHandoffCurrent,
+            );
             return response;
           } finally {
             if (retainedExecutionController) {

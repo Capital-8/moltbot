@@ -69,6 +69,7 @@ import type {
 } from "./bash-tools.exec-types.js";
 import { formatUnavailableWorkdirFailure, resolveExecWorkdir } from "./bash-tools.exec-workdir.js";
 import { clampWithDefault, readEnvInt, truncateMiddle } from "./bash-tools.shared.js";
+import { createExecResultHandoffAuthorizer } from "./exec-tool-handoff.js";
 import {
   createExecToolExecutionTimeoutResolver,
   resolveExecDefaultTimeoutSec,
@@ -188,6 +189,7 @@ export function createExecTool(
   });
   return {
     name: "exec",
+    isCompletedResultHandoffAuthorized: createExecResultHandoffAuthorizer(defaults),
     label: "exec",
     displaySummary: EXEC_TOOL_DISPLAY_SUMMARY,
     get description() {

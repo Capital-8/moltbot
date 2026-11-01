@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { appendCurrentInboundContext } from "../../agents/embedded-agent-runner/run/runtime-context-prompt.js";
+import { createToolHandoffSettlement } from "../../agents/harness/tool-handoff-settlement.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import { resolveRestartRecoveryChannelAuthority } from "../../config/sessions/restart-recovery-state.js";
 import { withBeforeAgentReplyObserver } from "../../plugins/before-agent-reply.js";
 import { getGatewayContextResolver } from "../../plugins/runtime/gateway-request-scope.js";
 import { readPendingUserTurnTranscriptAdmission } from "../../sessions/user-turn-transcript-admission.js";
@@ -100,6 +102,7 @@ type ExecutePreparedReplyAgentRunInput = Omit<
     RunReplyAgentParams,
     "blockReplyChunking" | "toolProgressDetail" | "transcriptCommandBody" | "typing" | "typingMode"
   > & {
+    consumeUndispatchedSource: () => Promise<string | undefined>;
     admitUserTurn: ReturnType<typeof createReplyRestartRecoveryClaimController>["admitUserTurn"];
     applyReplyToMode: (payload: ReplyPayload) => ReplyPayload;
     beginBeforeAgentReply: ReturnType<
@@ -221,6 +224,27 @@ export async function executePreparedReplyAgentRun(
   // Suppressed delivery persists only the user transcript; crashed suppressed runs die
   // silently. Deliverable turns atomically persist transcript plus recovery ownership.
   await turnAdoptionLifecycle?.onAdopted();
+  const originalRunId = await input.consumeUndispatchedSource();
+  const source = followupRun.userTurnTranscriptRecorder?.getPersistedMessage?.();
+  const channel = activeSessionEntry && resolveRestartRecoveryChannelAuthority(activeSessionEntry);
+  const toolHandoff =
+    channel &&
+    activeSessionEntry &&
+    channel.sourceTurnId === source?.idempotencyKey &&
+    activeSessionEntry.restartRecoveryRequesterSenderId === followupRun.run.senderId &&
+    Boolean(followupRun.run.senderId) &&
+    originalRunId &&
+    activeSessionEntry.restartRecoveryDeliveryRunId === originalRunId &&
+    (!context.opts?.runId || context.opts.runId === originalRunId) &&
+    !activeSessionEntry.incognito &&
+    activeSessionEntry.restartRecoverySourceReplyDeliveryMode !== "message_tool_only" &&
+    !context.blockStreamingEnabled
+      ? {
+          settlement: createToolHandoffSettlement(),
+          sourceTurnId: channel.sourceTurnId,
+          recoveryRunId: activeSessionEntry.restartRecoveryDeliveryRunId,
+        }
+      : undefined;
   const runOutcome = await withBeforeAgentReplyObserver(
     {
       beforeDispatch: async () => {
@@ -296,6 +320,8 @@ export async function executePreparedReplyAgentRun(
       traceAgentPhase("reply.run_agent_turn", () =>
         executeAgentTurn({
           ...context,
+          ...(toolHandoff ? { opts: { ...context.opts, runId: toolHandoff.recoveryRunId } } : {}),
+          registerToolHandoffSettlement: toolHandoff?.settlement.register,
           resolveVisibleReplyDelivery: input.resolveVisibleReplyDelivery,
           replyThreading: replyThreadingOverride ?? sessionCtx.ReplyThreading,
         }),
@@ -339,6 +365,7 @@ export async function executePreparedReplyAgentRun(
     activeSessionEntry,
     preflightCompactionApplied,
     runFollowupTurn,
+    toolHandoff,
     execution: runOutcome.outcome,
     runId: runOutcome.runId,
     runStartedAt,

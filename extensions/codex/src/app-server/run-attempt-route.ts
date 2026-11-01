@@ -124,8 +124,14 @@ export async function prepareCodexAttemptRoute(
     resourceState.detachRouteAbort = attachRouteAbort(route);
     await route.activate({
       onNotificationReceived: noteNotificationReceived,
-      onNotification: enqueueNotification,
-      onRequest: handleServerRequest,
+      onNotification: async (...args) => {
+        await state.liveRejoinAdmission?.promise;
+        return await enqueueNotification(...args);
+      },
+      onRequest: async (...args) => {
+        await state.liveRejoinAdmission?.promise;
+        return await handleServerRequest(...args);
+      },
     });
     resourceState.routeActivated = true;
   };

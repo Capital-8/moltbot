@@ -140,6 +140,7 @@ export function createCodexAttemptNotificationController(
         const assertCurrent = () => {
           runAbortController.signal.throwIfAborted();
           connection.assertCurrent();
+          connection.params.hostCapabilities.restartRecoveryClaim?.assertCurrent();
           resourceState.thread.liveThreadOwnership?.assertCurrent();
           if (
             !isSameCodexAppServerThreadOwner(

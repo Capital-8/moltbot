@@ -128,6 +128,7 @@ export function runAgentAttempt(
       skillsSnapshot: SkillSnapshot | undefined;
       resolvedVerboseLevel: VerboseLevel | undefined;
       agentDir: string;
+      registerToolHandoffSettlement?: RunEmbeddedAgentInternalParams["registerToolHandoffSettlement"];
       onAgentEvent: (evt: {
         stream: string;
         data?: Record<string, unknown>;
@@ -849,6 +850,7 @@ export function runAgentAttempt(
     modelRun: params.opts.modelRun,
     promptMode: params.opts.promptMode,
     onAgentEvent: params.onAgentEvent,
+    registerToolHandoffSettlement: params.registerToolHandoffSettlement,
     deferTerminalLifecycle: params.deferTerminalLifecycle,
     onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
     onDeferredLifecycleAbort: params.deferredLifecycle?.abort,

@@ -327,9 +327,14 @@ describe("agent command restart recovery ownership", () => {
     }
   });
 
-  it.each(["before preparation", "during claim"] as const)(
-    "keeps requester settlement pending when recovery starts %s",
-    async (timing) => {
+  it.each([
+    ["before preparation", { kind: "inter_session", sourceTool: "subagent_settle" }],
+    ["during claim", { kind: "inter_session", sourceTool: "subagent_settle" }],
+    ["before preparation", undefined],
+    ["during claim", { kind: "external_user" }],
+  ] as const)(
+    "keeps accepted input pending when recovery starts %s (provenance %j)",
+    async (timing, inputProvenance) => {
       const target = createTarget();
       const lifecycleGeneration = getAgentEventLifecycleGeneration();
       await write(target, {
@@ -383,7 +388,7 @@ describe("agent command restart recovery ownership", () => {
         mode: "claim",
         opts: {
           runId: "settle-turn",
-          inputProvenance: { kind: "inter_session", sourceTool: "subagent_settle" },
+          inputProvenance,
         } as AgentCommandOpts,
         prepare,
         run,

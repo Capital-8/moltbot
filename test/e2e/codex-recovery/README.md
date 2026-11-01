@@ -27,6 +27,20 @@ Scenarios:
 
 Every repaired scenario asserts subsequent requests in both the same and an independent conversation complete. Effect scenarios assert the file contains exactly one marker. Successful original requests must emit one logical terminal event, with no final error. Restart/outage scenarios expect a terminal original failure, not speculative task replay. The pre-fix active/result-loss baseline can be checked with `--expect-broken`: original failure, blocked same-conversation follow-up, and a successful independent request.
 
+### Planned shutdown and tool handoff
+
+With the same isolated binary and a fresh output directory for each run, pass these modes to `repro.mjs`:
+
+- `gateway-remote-active-inflight-tool-effect-gateway-restart-sigterm-automatic-startup-live-handoff-channel-run --expect-recovered` holds a real command across SIGTERM, releases its effect during drain, then drops the confirmed response before native receives it. It checks the original turn, one file append, one delivery, and cleanup before the next channel message.
+- `gateway-remote-model-wait-gateway-restart-sigterm-drain-cutoff-automatic-startup-live-handoff-channel-run --expect-recovered` uses a local supervisor to SIGKILL the Gateway after its SIGTERM drain snapshot commits. Native generation remains pending until the same turn reattaches.
+- `gateway-remote-active-inflight-tool-effect-gateway-restart-sigterm-live-handoff-drain-complete --expect-recovered` allows the original command and delivery to finish before the old Gateway exits.
+- `gateway-remote-active-inflight-tool-effect-gateway-restart-sigterm-automatic-startup-live-handoff-channel-run-notify-failure` applies the original file effect, then holds its response across shutdown. The local channel host explicitly grants an actionable failure notice to the original DM. Omitting `-notify-failure` verifies silence for the same failed recovery.
+- Add `-planned-receipt-cut` to the automatic-startup/live-handoff fixture to acquire a real
+  planned drain before stopping the Gateway. Use `inflight-tool-effect` to lose a confirmed
+  tool response, `model-wait` to lose a pure-text final, or `lost-result-effect` (without
+  `--expect-recovered`) to verify that earlier effects are never backfilled.
+- `gateway-remote-active-lost-result-effect-gateway-restart-automatic-startup-live-handoff` kills the Gateway without a drain signal after the effect. It requires zero stored handoff data and refuses to run the original input or tool again.
+
 The fixture records the source commit and working-change hash, native version, wire events, agent lifecycle events, Gateway results, and side-effect marker in the supplied directory. It rejects source changes during execution and terminates owned processes and releases port claims in `finally`. Retain output only for an active comparison; remove it when that comparison is finished. Heartbeat and Slack notification behavior have separate dispatch tests; the default mode does not send chat messages. A synthetic configuration change demonstrates that recovery boundary, not the cause of a production configuration change.
 
 ## Legacy state across an upgrade

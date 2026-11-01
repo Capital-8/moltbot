@@ -49,6 +49,7 @@ export function registerShutdownBudgetTests({
   consumeGatewayRestartIntent,
   createGatewayActiveWorkSnapshot,
   waitForGatewayActiveWork,
+  abortEmbeddedAgentRun,
   gatewayLog,
   writeDiagnosticStabilityBundleForFailureSync,
 }: {
@@ -62,6 +63,7 @@ export function registerShutdownBudgetTests({
   waitForGatewayActiveWork: Mock<
     typeof import("../../infra/gateway-active-work.js").waitForGatewayActiveWork
   >;
+  abortEmbeddedAgentRun: Mock;
   gatewayLog: { info: Mock; warn: Mock };
   writeDiagnosticStabilityBundleForFailureSync: Mock;
 }) {
@@ -112,6 +114,10 @@ export function registerShutdownBudgetTests({
           }
         });
         const close = vi.fn<GatewayServer["close"]>(async () => {
+          if (signal === "SIGTERM") {
+            // Server close must retain custody before it cancels unfinished turns.
+            expect(abortEmbeddedAgentRun).not.toHaveBeenCalled();
+          }
           await connectionWork.drain();
         });
         const { start, started } = createSignaledStart(close);

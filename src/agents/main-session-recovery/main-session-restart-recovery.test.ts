@@ -1508,9 +1508,10 @@ describe("main-session-restart-recovery", () => {
     });
   });
 
-  it("keeps a running recovery silent while preserving its original delivery route", async () => {
+  it("keeps recovered Telegram typing current without sending a progress notice", async () => {
     const sessionsDir = await makeSessionsDir();
     const sessionKey = "agent:main:telegram:group:-100123:topic:99";
+    const storePath = path.join(sessionsDir, "sessions.json");
     await writeMainSession({
       sessionsDir,
       sessionKey,
@@ -1522,9 +1523,17 @@ describe("main-session-restart-recovery", () => {
       },
     });
     await writeCompletedToolTranscript(sessionsDir);
-
-    await expectRecovery({ started: 1, settled: 0, failed: 0, skipped: 0 });
-
+    const stopTyping = vi.fn();
+    const startRecoveryTyping = vi.fn<NonNullable<GatewayRecoveryRuntime["startRecoveryTyping"]>>(
+      () => stopTyping,
+    );
+    await expect(
+      recoverRestartAbortedMainSessions({
+        stateDir: tmpDir,
+        gatewayRuntime: { ...mockRecoveryRuntime, startRecoveryTyping },
+      }),
+    ).resolves.toEqual({ started: 1, settled: 0, failed: 0, skipped: 0 });
+    expect(sendRecoveryNotice).not.toHaveBeenCalled();
     expect(gatewayParams()).toMatchObject({
       deliver: true,
       channel: "telegram",
@@ -1532,8 +1541,34 @@ describe("main-session-restart-recovery", () => {
       accountId: "work",
       threadId: "99",
     });
-    expect(sendRecoveryNotice).not.toHaveBeenCalled();
+    expect(startRecoveryTyping).toHaveBeenCalledOnce();
+    const typing = startRecoveryTyping.mock.calls[0]?.[0];
+    expect(typing).toMatchObject({
+      channel: "telegram",
+      to: "telegram:-100123",
+      accountId: "work",
+      threadId: 99,
+      runId: String(gatewayParams().idempotencyKey),
+    });
+    expect(typing?.isCurrent?.({})).toBe(true);
+    const current = loadSessionEntry({ sessionKey, storePath });
+    if (!current) {
+      throw new Error("expected recovered session");
+    }
+    await writeStore(sessionsDir, {
+      [sessionKey]: { ...current, abortedLastRun: true },
+    });
+    expect(typing?.isCurrent?.({})).toBe(false);
+    await writeStore(sessionsDir, {
+      [sessionKey]: { ...current, sessionId: "replacement-session" },
+    });
+    expect(typing?.isCurrent?.({})).toBe(false);
+    await writeStore(sessionsDir, { [sessionKey]: current });
+    expect(typing?.isCurrent?.({})).toBe(true);
     dispatchSettlement.resolve();
+    await waitForFast(() => expect(typing?.isCurrent?.({})).toBe(false));
+    expect(stopTyping).toHaveBeenCalledOnce();
+    expect(sendRecoveryNotice).not.toHaveBeenCalled();
   });
 
   it("re-adopts a persisted Telegram private-topic route and releases the next turn", async () => {

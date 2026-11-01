@@ -99,6 +99,7 @@ type AgentHarnessLegacyAttemptResult = Omit<AgentHarnessCanonicalAttemptResult, 
 type AgentHarnessAttemptParamsBase = Omit<
   InternalEmbeddedRunAttemptParams,
   | "admittedRunContext"
+  | "registerToolHandoffSettlement"
   | "disableToolSearch"
   | "sessionReadScopeKey"
   | "assistantErrorTranscript"

@@ -22,11 +22,6 @@ import { withPreparedModelRuntimePluginGenerationScope } from "../../agents/prep
 import { resolveScheduledToolPolicyContext } from "../../agents/scheduled-tool-policy.js";
 import { resolveIngressWorkspaceOverrideForSessionRun } from "../../agents/spawned-context.js";
 import { isExecutionIdentityCollectionEnabled } from "../../audit/audit-config.js";
-import {
-  resolveReplySourceTurnId,
-  setChannelSourceTurnId,
-  setChannelSourceTurnSameThreadRequired,
-} from "../../auto-reply/reply/source-turn-id.js";
 import { isAbortError } from "../../infra/abort-signal.js";
 import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
 import { bindGatewayContextResolver } from "../../plugins/runtime/gateway-request-scope.js";
@@ -55,6 +50,7 @@ import { yieldAfterAgentAcceptedAck } from "./agent-handler-helpers.js";
 import { captureAgentJobSession } from "./agent-job.js";
 import {
   resolveAgentRestartRecoveryContext,
+  buildAgentRunChannelContext,
   resolveAgentRestartRecoveryExecutionIdentityAdmission,
 } from "./agent-restart-recovery-context.js";
 import { createAgentRunDiagnostics } from "./agent-run-diagnostics.js";
@@ -79,6 +75,9 @@ export async function startAgentRunExecution(params: StartAgentRunExecutionParam
 
 async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<void> {
   const { prepared } = params;
+  const inputProvenance = prepared.dispatchedOriginalSource
+    ? prepared.userTurn.inputProvenance
+    : params.inputProvenance;
   const diagnostics = createAgentRunDiagnostics(
     params.resolvedSessionKey,
     params.sessionEntry?.incognito,
@@ -342,11 +341,10 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
         if (!params.isRawModelRun) {
           ({ message, execApprovalContinuationPromptRange } = annotateAgentRunUserTurnPrompt({
             message,
-            inputProvenance: params.inputProvenance,
+            inputProvenance,
             execApprovalContinuationPromptRange,
           }));
         }
-        const senderIsOwner = prepared.userTurn.senderIsOwner;
         const userTurnTranscriptRecorder = prepared.userTurn.recorder;
 
         const ingressAgentId = params.resolvedSessionKey
@@ -387,32 +385,15 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
           sessionEntry: params.sessionEntry,
         });
         const restartRecoveryChannelContext = restartRecoveryContext?.channel;
-        const runContext = {
-          messageChannel:
-            restartRecoveryContext?.messageChannel ?? params.delivery.originMessageChannel,
-          accountId:
-            restartRecoveryChannelContext?.requesterAccountId ?? params.delivery.resolvedAccountId,
-          senderId: restartRecoveryChannelContext?.requesterSenderId,
-          groupId: params.groupId,
-          groupChannel: params.groupChannel,
-          groupSpace: params.groupSpace,
-          currentChannelId: restartRecoveryChannelContext?.currentChannelId,
-          currentThreadTs:
-            restartRecoveryChannelContext?.currentThreadTs ??
-            (prepared.resolvedThreadId != null ? String(prepared.resolvedThreadId) : undefined),
-        };
-        setChannelSourceTurnId(
-          runContext,
-          resolveReplySourceTurnId({
-            sourceTurnId: restartRecoveryChannelContext?.sourceTurnId,
-            admissionRunId: params.runId,
-            ingressProvider: runContext.messageChannel,
-            entry: params.sessionEntry,
-          }),
-        );
-        setChannelSourceTurnSameThreadRequired(
-          runContext,
-          restartRecoveryChannelContext?.sameChannelThreadRequired,
+        // The service caller owns the recovery attempt, never the external sender's privileges.
+        const restoringChannelSender =
+          params.isRestartRecoveryResumeRun &&
+          Boolean(restartRecoveryChannelContext?.requesterSenderId);
+        const senderIsOwner = !restoringChannelSender && prepared.userTurn.senderIsOwner;
+        const runContext = buildAgentRunChannelContext(
+          params,
+          restartRecoveryContext,
+          prepared.resolvedThreadId,
         );
 
         const localUserIngress = getGatewayLocalUserIngress(params.client);
@@ -492,7 +473,9 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                 gatewayUiCommandTarget,
                 approvalReviewerDeviceId: callerContext.ApprovalReviewerDeviceId,
                 taskSuggestionDeliveryMode: supportsTaskSuggestions ? "gateway" : undefined,
-                ...(prepared.userTurn.bashElevated
+                ...(!restoringChannelSender &&
+                !prepared.dispatchedOriginalSource &&
+                prepared.userTurn.bashElevated
                   ? { bashElevated: prepared.userTurn.bashElevated }
                   : {}),
                 ...(execApprovalContinuationPromptRange
@@ -536,7 +519,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                 acpTurnSource: params.request.acpTurnSource,
                 internalEvents: params.request.internalEvents,
                 runtimeContextFragments: params.client?.internal?.runtimeContextFragments,
-                inputProvenance: params.inputProvenance,
+                inputProvenance,
                 privateCompletion: prepared.userTurn.privateCompletion,
                 senderIsOwner,
                 sessionEffects: params.sessionEffects,
@@ -553,7 +536,10 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                 forceCodeModeTools: params.request.forceCodeModeTools,
                 ...(executionIdentityAdmission ? { executionIdentityAdmission } : {}),
                 operationalRunInstance: prepared.operationalRunInstance,
-                operatorAuthority: prepared.operatorAuthority,
+                operatorAuthority:
+                  restoringChannelSender || prepared.dispatchedOriginalSource
+                    ? undefined
+                    : prepared.operatorAuthority,
                 onAdmittedRunContext: (admittedRunContext) => {
                   skillLibraryAuthoring?.bind(admittedRunContext);
                   bindGatewayContextResolver(
@@ -619,10 +605,11 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                   sessionEntry: params.sessionEntry,
                 }),
                 allowGatewaySubagentBinding: true,
-                ...(params.mainRestartRecoveryOwnerLease
-                  ? { mainRestartRecoveryOwnerLease: params.mainRestartRecoveryOwnerLease }
-                  : {}),
-                ...(params.isRestartRecoveryResumeRun ? { mainRestartRecoveryAdmitted: true } : {}),
+                mainRestartRecoveryOwnerLease: params.mainRestartRecoveryOwnerLease,
+                mainRestartRecoveryAdmitted: params.isRestartRecoveryResumeRun || undefined,
+                interruptedRunId: params.isRestartRecoveryResumeRun
+                  ? params.client?.internal?.interruptedRunId
+                  : undefined,
                 ...(params.request.internalExecutionIdentityRecoveryAttempt !== undefined
                   ? {
                       mainRestartRecoveryAttempt:

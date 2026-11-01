@@ -5,6 +5,10 @@
 // translate that alias back to its canonical tool name. The registry is
 // in-memory object identity only — nothing here is persisted.
 import { asNonArrayRecord } from "@openclaw/normalization-core/record-coerce";
+import {
+  getPluginOriginalValue,
+  getPluginValueInstance,
+} from "../plugins/plugin-instance-scope.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
 /** Canonical identity of a host-created scheduled tool alias. */
@@ -21,11 +25,21 @@ type CronScheduledToolProjection = Readonly<{
   sourceToolName: string;
   info: CronScheduledToolProjectionInfo;
   execute: AnyAgentTool["execute"];
+  isCompletedResultHandoffAuthorized?: (args: unknown) => boolean;
 }>;
 
 // Keyed by tool object identity; readers may hold a narrower structural view
 // of the tool than the registering host, so the key type is plain `object`.
 const scheduledToolProjections = new WeakMap<object, CronScheduledToolProjection>();
+const normalizedExecHandoffs = new WeakMap<
+  object,
+  {
+    name: string;
+    execute: AnyAgentTool["execute"];
+    authorizer: AnyAgentTool["isCompletedResultHandoffAuthorized"];
+    authorize: (args: unknown) => boolean;
+  }
+>();
 
 const EXEC_POLICY_PARAMETER_NAMES = new Set(["host", "security", "ask"]);
 const NODE_EXEC_PARAMETER_NAMES = new Set(["command", "workdir", "env", "timeoutSeconds", "node"]);
@@ -76,6 +90,8 @@ export function createCronScheduledToolProjection(
       sourceToolName: projectedTool.name,
       info,
       execute: projectedTool.execute,
+      isCompletedResultHandoffAuthorized:
+        targetTool === "exec" ? projectedTool.isCompletedResultHandoffAuthorized : undefined,
     }),
   );
   return projectedTool;
@@ -138,6 +154,70 @@ export function readCronScheduledToolProjection(tool: {
   return projection.info;
 }
 
+/** Only the provider-normalization owner may attest its exact one-hop instance fences.
+ * This carries handoff authority, never cron creator/alias identity, and never unwraps dispatch. */
+export function copyNormalizedGatewayExecHandoff(source: AnyAgentTool, target: AnyAgentTool): void {
+  const projection = scheduledToolProjections.get(source);
+  if (
+    !projection ||
+    projection.info.targetTool !== "exec" ||
+    source.name !== projection.sourceToolName ||
+    target.name !== projection.sourceToolName ||
+    source.execute !== projection.execute ||
+    !projection.isCompletedResultHandoffAuthorized ||
+    source.isCompletedResultHandoffAuthorized !== projection.isCompletedResultHandoffAuthorized ||
+    typeof target.execute !== "function" ||
+    typeof target.isCompletedResultHandoffAuthorized !== "function"
+  ) {
+    return;
+  }
+  const execute = target.execute;
+  const authorizer = target.isCompletedResultHandoffAuthorized;
+  const owner = getPluginValueInstance(execute);
+  if (
+    !owner ||
+    getPluginValueInstance(authorizer) !== owner ||
+    getPluginOriginalValue(execute, owner) !== projection.execute ||
+    getPluginOriginalValue(authorizer, owner) !== projection.isCompletedResultHandoffAuthorized
+  ) {
+    return;
+  }
+  owner.run(() => projection.assertActive());
+  normalizedExecHandoffs.set(target, {
+    name: target.name,
+    execute,
+    authorizer,
+    authorize: (args) => owner.run(() => isGatewayExecResultHandoffAuthorized(source, args)),
+  });
+}
+
+/** V1 receipts admit only exact host-created Gateway aliases with current unrestricted exec. */
+export function isGatewayExecResultHandoffAuthorized(tool: AnyAgentTool, args: unknown): boolean {
+  const delegated = normalizedExecHandoffs.get(tool);
+  if (delegated) {
+    return (
+      tool.name === delegated.name &&
+      tool.execute === delegated.execute &&
+      tool.isCompletedResultHandoffAuthorized === delegated.authorizer &&
+      delegated.authorize(args)
+    );
+  }
+  const projection = scheduledToolProjections.get(tool);
+  if (!projection || projection.info.targetTool !== "exec") {
+    return false;
+  }
+  readCronScheduledToolProjection(tool);
+  if (
+    projection.info.execTarget?.host !== "gateway" ||
+    projection.info.execTarget.ask ||
+    !projection.isCompletedResultHandoffAuthorized ||
+    projection.isCompletedResultHandoffAuthorized !== tool.isCompletedResultHandoffAuthorized
+  ) {
+    return false;
+  }
+  return projection.isCompletedResultHandoffAuthorized(args);
+}
+
 /** Preserves projection identity across shallow tool-object copies made by tool plumbing. */
 export function copyCronScheduledToolProjection(source: AnyAgentTool, target: AnyAgentTool): void {
   const projection = scheduledToolProjections.get(source);
@@ -159,9 +239,13 @@ export function pinExecToolTarget(tool: AnyAgentTool, target: PinnedExecToolTarg
   const prepare = tool.prepareBeforeToolCallParams;
   const finalize = tool.finalizeBeforeToolCallParams;
   const getExecutionTimeoutMs = tool.getExecutionTimeoutMs;
+  const authorizeHandoff = tool.isCompletedResultHandoffAuthorized;
   return {
     ...tool,
     parameters: restrictExecToolParameters(tool.parameters, target.host, Boolean(pinnedNode)),
+    ...(authorizeHandoff
+      ? { isCompletedResultHandoffAuthorized: (args: unknown) => authorizeHandoff(pinArgs(args)) }
+      : {}),
     ...(getExecutionTimeoutMs
       ? { getExecutionTimeoutMs: (args: unknown) => getExecutionTimeoutMs(pinArgs(args)) }
       : {}),

@@ -42,6 +42,7 @@ describe("sanitizePublicAgentCommandIngressOpts", () => {
       message: "create an automation",
       allowModelOverride: false,
       privateCompletion: true,
+      interruptedRunId: "forged-original-run",
       cronCreatorAuthorityCapability: forgedCapability,
       skillLibraryAuthoring: { target: "personal", invoke: async () => ({}) },
       pinnedWidgetAuthoring: true,
@@ -62,6 +63,7 @@ describe("sanitizePublicAgentCommandIngressOpts", () => {
     expect(sanitizePublicAgentCommandIngressOpts(opts)).toMatchObject({
       message: "create an automation",
       privateCompletion: undefined,
+      interruptedRunId: undefined,
       cronCreatorAuthorityCapability: undefined,
       skillLibraryAuthoring: undefined,
       pinnedWidgetAuthoring: undefined,

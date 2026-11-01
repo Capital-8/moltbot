@@ -3,6 +3,7 @@ import { emitAgentEvent } from "../../../infra/agent-events.js";
 import { emitDiagnosticsTimelineEvent } from "../../../infra/diagnostics-timeline.js";
 import { formatErrorMessage, toErrorObject } from "../../../infra/errors.js";
 import { isRetryableAssistantError, isTerminalAssistantError } from "../../../llm/utils/retry.js";
+import { getGatewayRestartDrainSignal } from "../../../process/gateway-work-admission.js";
 import { projectAgentRunAttemptTerminal } from "../../agent-run-terminal-outcome.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../defaults.js";
 import { buildAssistantFailoverSignal } from "../../embedded-agent-helpers/assistant-message-failures.js";
@@ -17,6 +18,7 @@ import { resolveRetryAfterMs } from "../../failover/retry-evidence.js";
 import type { FailoverReason } from "../../failover/signal.js";
 import { LiveSessionModelSwitchError } from "../../live-model-switch-error.js";
 import { shouldSwitchToLiveModel, clearLiveModelSwitchPending } from "../../live-model-switch.js";
+import { createAgentRunRestartAbortError } from "../../run-termination.js";
 import type { normalizeUsage } from "../../usage.js";
 import { log } from "../logger.js";
 import type { EmbeddedAgentRunResult, TraceAttempt } from "../types.js";
@@ -121,6 +123,18 @@ export async function recoverEmbeddedRunAttempt(input: {
     idleTimedOut,
   } = projectAgentRunAttemptTerminal(attempt.terminal);
   const terminalInterrupted = isEmbeddedRunTerminalInterrupted(terminalState.outcome);
+  if (
+    !terminalInterrupted &&
+    promptError &&
+    promptErrorSource === "prompt" &&
+    attempt.codexAppServerFailure?.kind === "client_closed_before_turn_completed" &&
+    getGatewayRestartDrainSignal().aborted
+  ) {
+    // Transport can disappear during grace, before server close marks custody.
+    // Preserve this turn for startup reconciliation; uncertain effects still forbid replay.
+    runInput.laneController.throwIfAborted();
+    throw createAgentRunRestartAbortError();
+  }
   const currentAttemptReplaySafe = isCurrentAttemptReplaySafe(attempt);
   const settledEvidence = resolveSettledToolBatchEvidence(attempt);
   // Project decisions at their existing return points; diagnostics never decide

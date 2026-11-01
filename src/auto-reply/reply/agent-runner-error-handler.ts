@@ -120,6 +120,10 @@ export async function handleAgentExecutionError(params: {
     if (!reason) {
       return undefined;
     }
+    if (reason === "restart") {
+      // Claim cleanup can run before the lifecycle event reaches durable storage.
+      turn.replyOperation?.abortForRestart();
+    }
     // Preserve signal-owned timeout attribution; only normalized restart/supersession need metadata.
     const terminalMetadata = reason === "user" ? undefined : { aborted: true, stopReason: reason };
     takePendingLifecycleTerminal().emit(

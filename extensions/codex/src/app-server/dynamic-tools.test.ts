@@ -1532,6 +1532,98 @@ describe("createCodexDynamicToolBridge", () => {
     );
   });
 
+  it("refuses unowned tools even when their schema and historical catalog still match", () => {
+    const execute = vi.fn(async () => textToolResult("done"));
+    const tool = createTool({ name: "synthetic_write", execute });
+    const current = createSingleToolBridge(tool);
+    const call = {
+      ...createDynamicToolCall(tool.name),
+      namespace: "openclaw",
+    };
+    expect(current.isToolCallAvailableForHandoff(call)).toBe(false);
+    expect(current.isToolCallAvailableForHandoff({ ...call, namespace: null })).toBe(false);
+    const removed = createCodexDynamicToolBridge({
+      tools: [],
+      registeredSpecs: current.specs,
+      signal: new AbortController().signal,
+    });
+    expect(removed.specs).toEqual(current.specs);
+    expect(removed.isToolCallAvailableForHandoff(call)).toBe(false);
+    const direct = createSingleToolBridge(tool, { loading: "direct" });
+    expect(direct.isToolCallAvailableForHandoff({ ...call, namespace: null })).toBe(false);
+    expect(direct.isToolCallAvailableForHandoff(call)).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps plugin-owned per-call resource authorization outside supported handoff", async () => {
+    const tool = createOwnerBackedContractTool({
+      pluginId: "resource-owner",
+      name: "private_resource",
+      result: textToolResult("private result"),
+    });
+    const bridge = createSingleToolBridge(tool);
+    const call = { ...createDynamicToolCall(tool.name), namespace: "openclaw" };
+    expect(bridge.isToolCallAvailableForHandoff(call)).toBe(false);
+    const result = await bridge.handleToolCall(call, { shouldSettleForHandoff: () => true });
+    expect(result.handoffDisposition).toBe("unsupported");
+  });
+
+  it("does not attest an unowned tool even after its after-tool hook settles", async () => {
+    const entered = createDeferred<void>();
+    const release = createDeferred<void>();
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([
+        {
+          hookName: "after_tool_call",
+          handler: async () => {
+            entered.resolve();
+            await release.promise;
+          },
+        },
+      ]),
+    );
+    const bridge = createBridgeWithToolResult("synthetic_write", textToolResult("done"));
+    const pending = bridge.handleToolCall(
+      { ...createDynamicToolCall("synthetic_write"), namespace: "openclaw" },
+      { shouldSettleForHandoff: () => true },
+    );
+    await entered.promise;
+    release.resolve();
+    expect((await pending).handoffDisposition).toBe("unsupported");
+    const ordinary = await bridge.handleToolCall(
+      createDynamicToolCall("synthetic_write", {}, "ordinary"),
+    );
+    expect(ordinary.handoffDisposition).toBeUndefined();
+  });
+
+  it("does not treat arbitrary text or hidden media as an authorization attestation", async () => {
+    const completed = createBridgeWithToolResult(
+      "synthetic_write",
+      textToolResult("  exact receipt\n"),
+    );
+    const text = await completed.handleToolCall(
+      { ...createDynamicToolCall("synthetic_write"), namespace: "openclaw" },
+      {
+        shouldSettleForHandoff: () => true,
+      },
+    );
+    expect(text.handoffDisposition).toBe("unsupported");
+    expect(toCodexDynamicToolProtocolResponse(text)).not.toHaveProperty("handoffDisposition");
+    installResultMiddleware(async () => ({ result: textToolResult("shown as text") }));
+    const hidden = createBridgeWithToolResult("synthetic_render", {
+      content: [{ type: "image", data: COMPUTER_FRAME_IMAGE, mimeType: "image/png" }],
+      details: {},
+    });
+    const media = await hidden.handleToolCall(
+      { ...createDynamicToolCall("synthetic_render"), namespace: "openclaw" },
+      {
+        shouldSettleForHandoff: () => true,
+      },
+    );
+    expectInputText(media, "shown as text");
+    expect(media.handoffDisposition).toBe("unsupported");
+  });
+
   it("keeps thrown read-only dynamic tool failures replay-safe", async () => {
     const bridge = createSingleToolBridge(
       createTool({
@@ -1559,10 +1651,12 @@ describe("createCodexDynamicToolBridge", () => {
 
     const result = await bridge.handleToolCall(
       createDynamicToolCall("image_generate", { prompt: "lighthouse" }),
+      { shouldSettleForHandoff: () => true },
     );
 
     const protocolResponse = toCodexDynamicToolProtocolResponse(result);
     expectInputText(protocolResponse, "Background task started.");
+    expect(result.handoffDisposition).toBe("unsupported");
     expect(result.asyncStarted).toBe(true);
     expect(result.sideEffectEvidence).toBe(true);
     expect(result.terminate).toBe(true);
@@ -1593,8 +1687,10 @@ describe("createCodexDynamicToolBridge", () => {
 
     const result = await bridge.handleToolCall(
       createDynamicToolCall("web_search", { query: "scheduler" }, "call-async-search"),
+      { shouldSettleForHandoff: () => true },
     );
 
+    expect(result.handoffDisposition).toBe("unsupported");
     expect(result.asyncStarted).toBe(true);
     expect(result.sideEffectEvidence).toBe(true);
   });

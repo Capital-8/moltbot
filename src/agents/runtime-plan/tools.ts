@@ -12,6 +12,7 @@ import {
   logProviderToolSchemaDiagnostics,
   normalizeProviderToolSchemas,
 } from "../embedded-agent-runner/tool-schema-runtime.js";
+import { copyNormalizedGatewayExecHandoff } from "../exec-tool-target-pinning.js";
 import type { AgentTool } from "../runtime/index.js";
 import {
   filterProviderNormalizableTools,
@@ -68,6 +69,7 @@ function copyRuntimeToolMetadata(source: AgentTool, target: AgentTool): void {
     ...(hideFromChannelProgress === true ? { hideFromChannelProgress } : {}),
   });
   copyAgentToolMetadata(source as never, target as never);
+  copyNormalizedGatewayExecHandoff(source as never, target as never);
 }
 
 // Duplicate names cannot be matched by map lookup alone, so same-index matches

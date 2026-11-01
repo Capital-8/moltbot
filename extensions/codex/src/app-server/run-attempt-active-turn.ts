@@ -670,16 +670,18 @@ export function activateCodexAttemptTurn(
         runAbortController.abort("permission-change");
       }
       await bindProjection(
-        mirrorPromptAtTurnStartBestEffort({
-          params,
-          agentId: sessionAgentId,
-          notifyUserMessagePersisted,
-          sessionKey: contextSessionKey,
-          cwd: effectiveCwd,
-          threadId: resourceState.thread.threadId,
-          turnId: activeTurnId,
-          upstreamUserText,
-        }),
+        thread.lifecycle.rejoinedTurn
+          ? Promise.resolve()
+          : mirrorPromptAtTurnStartBestEffort({
+              params,
+              agentId: sessionAgentId,
+              notifyUserMessagePersisted,
+              sessionKey: contextSessionKey,
+              cwd: effectiveCwd,
+              threadId: resourceState.thread.threadId,
+              turnId: activeTurnId,
+              upstreamUserText,
+            }),
       );
     } catch (error) {
       activationFailed = true;

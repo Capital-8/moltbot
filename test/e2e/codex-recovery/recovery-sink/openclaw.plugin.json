@@ -1,0 +1,6 @@
+{
+  "id": "recovery-sink",
+  "activation": { "onStartup": true },
+  "channels": ["recovery-sink"],
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}

@@ -1,12 +1,15 @@
 import path from "node:path";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
+import { setCodexTestToolFactory } from "./host-capability.test-support.js";
 import { itemNotification, rawItemCompleted, turnCompleted } from "./protocol.test-helpers.js";
 import * as attemptActiveTurn from "./run-attempt-active-turn.js";
 import {
   createParams,
+  createRuntimeDynamicTool,
   createStartedThreadHarness,
   runCodexAppServerAttempt,
+  setCodexTestModelSupportsTools,
   setupRunAttemptTestHooks,
   tempDir,
 } from "./run-attempt-test-harness.js";
@@ -44,6 +47,70 @@ async function startCheckpointAttempt(params: ReturnType<typeof createParams>) {
 }
 
 describe("runCodexAppServerAttempt", () => {
+  it("keeps the host callback separate from the canonical native tool output", async () => {
+    const params = createParams(
+      path.join(tempDir, "host-result.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+    await attachSqliteSessionTarget(
+      params,
+      path.join(tempDir, "host-result-sessions.json"),
+      "host-result-session",
+    );
+    const tool = createRuntimeDynamicTool("gateway_exec");
+    setCodexTestToolFactory(params, () => [tool]);
+    setCodexTestModelSupportsTools(params, true);
+    const { harness, run } = await startCheckpointAttempt(params);
+    try {
+      await harness.notify(
+        rawItemCompleted({
+          type: "function_call",
+          call_id: "host-call",
+          name: tool.name,
+          arguments: "{}",
+        }),
+      );
+      const response = await harness.handleServerRequest({
+        id: 0,
+        method: "item/tool/call",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "host-call",
+          namespace: null,
+          tool: tool.name,
+          arguments: {},
+        },
+      });
+      expect(response).toMatchObject({
+        success: true,
+        contentItems: [{ type: "inputText", text: "gateway_exec done" }],
+      });
+      const readToolResults = async () =>
+        (await readTranscriptMessagesByIdentity(params)).filter(
+          (message) => message.role === "toolResult",
+        );
+      // The callback and the later native response have separate owners. History
+      // records the native representation once, even if it differs from the callback.
+      expect(await readToolResults()).toEqual([]);
+      const output = "gateway_exec done\n";
+      await harness.notify(
+        rawItemCompleted({ type: "function_call_output", call_id: "host-call", output }),
+      );
+      expect(await readToolResults()).toEqual([
+        expect.objectContaining({
+          toolCallId: "host-call",
+          isError: false,
+          content: [{ type: "text", text: output }],
+        }),
+      ]);
+      expect(tool.execute).toHaveBeenCalledTimes(1);
+    } finally {
+      await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+      await run;
+    }
+  });
+
   it("persists completed commentary and final once when native item IDs change after streaming", async () => {
     const params = createParams(
       path.join(tempDir, "identity-drift.jsonl"),

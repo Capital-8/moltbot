@@ -211,6 +211,8 @@ export type AgentCommandOpts = {
   mainRestartRecoveryOwnerLease?: MainSessionRecoveryOwnerLease;
   /** Gateway already consumed this automatic recovery run's durable reservation. */
   mainRestartRecoveryAdmitted?: boolean;
+  /** Interrupted operational run identified by the in-process recovery dispatcher. */
+  interruptedRunId?: string;
   /** Exact durable recovery attempt allowed to bind post-admission execution identity. */
   mainRestartRecoveryAttempt?: number;
   /** Private recovery correlation; public ingress callers cannot author identity evidence. */
@@ -259,6 +261,7 @@ type AgentCommandGatewayOnlyKey =
   | "taskSuggestionDeliveryMode"
   | "runtimeContextFragments"
   | "mainRestartRecoveryOwnerLease"
+  | "interruptedRunId"
   | "mainRestartRecoveryAdmitted"
   | "mainRestartRecoveryAttempt"
   | "pinnedWidgetAuthoring"

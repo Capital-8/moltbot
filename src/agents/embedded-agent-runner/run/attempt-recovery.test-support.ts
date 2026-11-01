@@ -14,6 +14,8 @@ import { createEmbeddedRunFailoverRetryController } from "./failover-retry-contr
 import { resolveEmbeddedRunAttemptTerminalState } from "./terminal-outcome.js";
 
 export type TransportDropScenario = {
+  abortSignal?: AbortSignal;
+  codexAppServerFailure?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["codexAppServerFailure"];
   config?: OpenClawConfig;
   assistant?: AssistantMessage;
   providerOwner?: PreparedProviderFailoverOwner;
@@ -98,6 +100,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     erroredAssistant,
   ] as never;
   const attempt = makeEmbeddedRunnerAttempt({
+    codexAppServerFailure: scenario.codexAppServerFailure,
     assistantTexts: scenario.assistantTexts ?? [],
     messagesSnapshot,
     toolMetas: toolCalls.map((toolCallId) => ({
@@ -132,6 +135,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
   const terminalState = resolveEmbeddedRunAttemptTerminalState({
     attempt,
     assistant: erroredAssistant,
+    abortSignal: scenario.abortSignal,
   });
   const markOwnedTranscriptRetry = vi.fn();
   const continueFromCurrentTranscript = vi.fn();
@@ -164,6 +168,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     recoverEmbeddedRunAttempt({
       runInput: {
         runParams: {
+          abortSignal: scenario.abortSignal,
           config: scenario.config ?? {},
           agentId: "main",
           sessionId: "session:transport-drop",
@@ -174,7 +179,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
         fallbackConfigured: scenario.fallbackConfigured ?? false,
         suspendForFailure: vi.fn(),
         startedAtMs: Date.now(),
-        laneController: { throwIfAborted: vi.fn() },
+        laneController: { throwIfAborted: () => scenario.abortSignal?.throwIfAborted() },
       },
       preparedRuntime: {
         provider,

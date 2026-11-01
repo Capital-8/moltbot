@@ -26,6 +26,7 @@ import {
 import { createDeferredEmbeddedRunLifecycleManager } from "../embedded-agent-runner/run/deferred-lifecycle-owner.js";
 import { resolveFastModeState } from "../fast-mode.js";
 import { runAgentHarnessBeforeMessageWriteHook } from "../harness/hook-helpers.js";
+import { createToolHandoffSettlement } from "../harness/tool-handoff-settlement.js";
 import { prepareInternalSessionEffectsSession } from "../internal-session-effects.js";
 import { LiveSessionModelSwitchError } from "../live-model-switch.js";
 import {
@@ -132,6 +133,10 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
   const attemptSessionFile = internalSessionTarget?.sessionFile ?? sessionFile;
 
   const startedAt = Date.now();
+  const toolHandoffSettlement =
+    params.opts.deliver === true && sessionKey && storePath && !params.suppressVisibleSessionEffects
+      ? createToolHandoffSettlement()
+      : undefined;
   const attemptLifecycleState: AgentAttemptLifecycleState = {
     currentTurnUserMessagePersisted: false,
     lifecycleFinishing: false,
@@ -534,6 +539,7 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
                 params.onLifecycleGenerationChanged(nextLifecycleGeneration);
               },
               onAgentEvent: attemptLifecycleCallbacks.onAgentEvent,
+              registerToolHandoffSettlement: toolHandoffSettlement?.register,
               deferTerminalLifecycle: true,
               deferredLifecycle,
             });
@@ -661,6 +667,7 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
     suppressUserTurnPersistence,
     userTurnTranscriptRecorder,
     fallbackTrajectoryRecorder,
+    ...(toolHandoffSettlement ? { toolHandoffSettlement } : {}),
     deferredLifecycle,
     lifecycle,
     terminal,

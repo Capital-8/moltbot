@@ -47,6 +47,7 @@ class CodexAttemptState {
   clientClosedAbort = false;
   connectionRecovery?: Promise<void>;
   recoveredTurnId?: string;
+  liveRejoinAdmission?: ReturnType<typeof createDeferred<void>>;
   recoveredProjectionDrain?: Promise<void>;
   shouldDelayNativeHookRelayUnregister = false;
   lifecycleStarted = false;
@@ -77,6 +78,10 @@ export function createCodexAttemptTurnState(resources: CodexAttemptResources) {
   const { connection } = prompt.context.runtime;
   const { params, options, runAbortController } = connection;
   const state = new CodexAttemptState();
+  if (resourceState.thread.lifecycle.rejoinedTurn) {
+    state.liveRejoinAdmission = createDeferred<void>();
+    void state.liveRejoinAdmission.promise.catch(() => {});
+  }
   const { promise: completion, resolve: resolveCompletion } = createDeferred<void>();
   const settlementExpired = createDeferred<void>();
   const pendingOpenClawDynamicToolCompletionIds = new Set<string>();

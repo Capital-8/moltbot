@@ -230,7 +230,8 @@ async function resumeMainSessionWithinAdmission(
   );
   // Preserve the interrupted turn's identity so its completion observer can
   // join this successor. Run correlation does not create channel authority.
-  const sourceRunId = claimedSourceRunId ?? readInterruptedRunId(params.entry);
+  const interruptedRunId = readInterruptedRunId(params.entry);
+  const sourceRunId = claimedSourceRunId ?? interruptedRunId;
   if (
     requiresRestartRecoveryMessageActionAuthority(params.entry) &&
     !hasRestartRecoveryMessageActionAuthority(params.entry)
@@ -374,7 +375,7 @@ async function resumeMainSessionWithinAdmission(
           normalizeOptionalString(entry.restartRecoveryDeliveryRunId) !== claimedRunId ||
           normalizeOptionalString(entry.restartRecoveryDeliverySourceRunId) !==
             claimedSourceRunId ||
-          (!claimedSourceRunId && readInterruptedRunId(entry) !== sourceRunId)
+          readInterruptedRunId(entry) !== interruptedRunId
         ) {
           return { result: false };
         }
@@ -471,6 +472,16 @@ async function resumeMainSessionWithinAdmission(
     let stopTyping: (() => void) | undefined;
     const dispatchOutcome = await dispatchRestartRecoveryWithinCapacity({
       agentParams,
+      // Startup orphan marking clears the active writer. On the first attempt
+      // this reused delivery claim still identifies its original command run.
+      // Never infer a tool owner from the source message or conflicting fences.
+      interruptedRunId:
+        interruptedRunId ??
+        (reusingRecoveryRunId &&
+        params.recoveryAttempt === 1 &&
+        !params.entry.restartRecoveryRuns?.length
+          ? claimedRunId
+          : undefined),
       capacity: params.recoveryCapacity,
       beginDispatch: params.recoveryAdmission.beginDispatch,
       gatewayRuntime: params.gatewayRuntime,

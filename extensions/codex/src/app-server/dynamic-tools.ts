@@ -41,6 +41,7 @@ import {
   type AcceptedSessionSpawn,
   type AgentHarnessToolExecutionSnapshot,
 } from "openclaw/plugin-sdk/agent-harness-tool-runtime";
+import { isGatewayExecResultHandoffAuthorized } from "openclaw/plugin-sdk/codex-mcp-projection";
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { expectDefined } from "openclaw/plugin-sdk/expect-runtime";
 import type { RemoteWorkspaceFileReader } from "openclaw/plugin-sdk/file-access-runtime";
@@ -158,6 +159,8 @@ export type CodexDynamicToolBridge = {
   /** Final executable tools after schema projection and hook-wrapper quarantine. */
   availableTools: AnyAgentTool[];
   availableSpecs: CodexDynamicToolSpec[];
+  /** Pure current executor/declaration check; never reruns hooks or resource authorization. */
+  isToolCallAvailableForHandoff: (call: CodexDynamicToolCallParams) => boolean;
   specs: CodexDynamicToolSpec[];
   resultContentSourceForTool: (toolName: string) => AnyAgentTool["resultContentSource"];
   sideEffectOwnerKeyForTool: (toolName: string) => string | undefined;
@@ -168,6 +171,7 @@ export type CodexDynamicToolBridge = {
       onAgentToolResult?: EmbeddedRunAttemptParams["onAgentToolResult"];
       toolCallOrdinal?: number;
       retainExecutionSnapshot?: boolean;
+      shouldSettleForHandoff?: () => boolean;
     },
   ) => Promise<CodexDynamicToolRuntimeResponse>;
   /** Consume exact boundary evidence retained while post-execution processing is incomplete. */
@@ -338,10 +342,28 @@ export function createCodexDynamicToolBridge(params: {
       directToolNames,
       functionToolsOnly: params.functionToolsOnly,
     });
+  const isToolCallAvailableForHandoff = (call: CodexDynamicToolCallParams): boolean => {
+    const entry = toolMap.get(call.tool);
+    // Plugin/channel resource authorization belongs to dispatch and has no pure replay check.
+    if (!entry || getPluginToolMeta(entry.tool) || getChannelAgentToolMeta(entry.tool as never)) {
+      return false;
+    }
+    const declared = specs.some((spec) =>
+      spec.type === "namespace"
+        ? spec.name === call.namespace && spec.tools.some((tool) => tool.name === call.tool)
+        : call.namespace == null && spec.name === call.tool,
+    );
+    return (
+      declared &&
+      validateJsonSchemaValue({ schema: entry.inputSchema, value: call.arguments }).ok &&
+      isGatewayExecResultHandoffAuthorized(entry.tool, call.arguments)
+    );
+  };
   const resolveAutomationsToolsAllow = createCodexAutomationsToolsAllowResolver(specs);
   let readRemoteWorkspaceFile: RemoteWorkspaceFileReader | undefined;
   return {
     availableTools: availableTools.map((entry) => entry.tool),
+    isToolCallAvailableForHandoff,
     availableSpecs: inheritedSpecs
       ? inheritedSpecs.flatMap<CodexDynamicToolSpec>((spec) => {
           if (spec.type === "function") {
@@ -574,7 +596,7 @@ export function createCodexDynamicToolBridge(params: {
           }
           return result;
         },
-        onResult: ({
+        onResult: async ({
           boundary: executionBoundary,
           startedAt,
           executedArguments: executedArgs,
@@ -597,7 +619,7 @@ export function createCodexDynamicToolBridge(params: {
             observerResult,
             resultIsError,
           );
-          void runAgentHarnessAfterToolCallHook({
+          const afterToolHook = runAgentHarnessAfterToolCallHook({
             toolName,
             toolCallId: call.callId,
             ...toolResultHookContext,
@@ -690,6 +712,48 @@ export function createCodexDynamicToolBridge(params: {
           response.executionStarted = executionBoundary.executionStarted;
           response.replaySafe = replaySafe;
           response.sideEffectEvidence = !replaySafe || undefined;
+          // Capture original result facts after middleware and hook settlement. Text-only
+          // transport is insufficient when raw output created host delivery/child work.
+          const onlyText = (content: AgentToolResult<unknown>["content"]) =>
+            content.length === 1 && content[0]?.type === "text";
+          const hostObligations =
+            telemetry.didSendViaMessagingTool ||
+            telemetry.didDeliverSourceReplyViaMessageTool ||
+            telemetry.sourceReplyDelivered ||
+            telemetry.messagingToolSentTexts.length > 0 ||
+            telemetry.messagingToolSentMediaUrls.length > 0 ||
+            telemetry.messagingToolSentTargets.length > 0 ||
+            telemetry.messagingToolSourceReplyPayloads.length > 0 ||
+            telemetry.confirmedMediaDeliveries.length > 0 ||
+            telemetry.toolMediaUrls.length > 0 ||
+            telemetry.toolAutoDeliveryMediaUrls.length > 0 ||
+            telemetry.coreTtsToolResults.length > 0 ||
+            telemetry.toolAudioAsVoice ||
+            telemetry.acceptedSessionSpawns.length > 0 ||
+            Boolean(telemetry.successfulCronAdds) ||
+            Boolean(telemetry.heartbeatToolResponse);
+          if (options?.shouldSettleForHandoff?.()) {
+            response.handoffDisposition =
+              !signal.aborted &&
+              !response.asyncStarted &&
+              !response.terminate &&
+              onlyText(rawResult.content) &&
+              onlyText(result.content) &&
+              contentItems.length === 1 &&
+              contentItems[0]?.type === "inputText" &&
+              !hostObligations &&
+              isToolCallAvailableForHandoff(call)
+                ? "eligible"
+                : "unsupported";
+            if (response.handoffDisposition === "eligible") {
+              // The outer tool deadline still owns this wait. A timeout/abort response
+              // has no attestation, and a late hook cannot publish a completed receipt.
+              await afterToolHook;
+              if (signal.aborted) {
+                response.handoffDisposition = "unsupported";
+              }
+            }
+          }
           return response;
         },
         onError: ({

@@ -2,7 +2,6 @@ import {
   AgentHarnessPreflightError,
   embeddedAgentLog,
   formatErrorMessage,
-  type AgentHarnessRuntimeArtifactBinding,
   type CodexBundleMcpThreadConfig,
   type EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
   type resolveSandboxContext,
@@ -104,9 +103,7 @@ export async function startCodexAttemptThread(params: {
   startupAuthProfileId: string | null | undefined;
   startupAuthRequirement?: CodexAppServerClientOptions["authRequirement"];
   startupAuthBindingFingerprint: string | undefined;
-  runtimeArtifactRequest?: Readonly<{
-    expected?: AgentHarnessRuntimeArtifactBinding;
-  }>;
+  runtimeArtifactRequest?: Parameters<typeof verifyStartupArtifact>[0]["request"];
   startupPreparedAuth?: CodexAppServerClientOptions["preparedAuth"];
   startupAuthAccountCacheKey: string | undefined;
   startupEnvApiKeyCacheKey: string | undefined;
@@ -121,6 +118,8 @@ export async function startCodexAttemptThread(params: {
   effectiveWorkspace: string;
   effectiveCwd: string;
   dynamicTools: CodexDynamicToolSpec[];
+  availableDynamicTools?: readonly CodexDynamicToolSpec[];
+  isDynamicToolHandoffAuthorized?: () => boolean;
   persistentWebSearchAllowed?: boolean;
   webSearchAllowed: boolean;
   developerInstructions: string | undefined;
@@ -468,6 +467,8 @@ export async function startCodexAttemptThread(params: {
                 agentDir: params.agentDir,
                 cwd: startupExecutionCwd,
                 dynamicTools: params.dynamicTools,
+                availableDynamicTools: params.availableDynamicTools,
+                isDynamicToolHandoffAuthorized: params.isDynamicToolHandoffAuthorized,
                 persistentWebSearchAllowed: params.persistentWebSearchAllowed,
                 webSearchAllowed: params.webSearchAllowed,
                 appServer: pluginAppServer,

@@ -182,7 +182,11 @@ describe("Codex terminal dynamic-tool release", () => {
           },
         },
       },
-      state: { client: physical.client, thread: { threadId: "thread-1" }, turnRoute: route },
+      state: {
+        client: physical.client,
+        thread: { threadId: "thread-1", lifecycle: { action: "resumed" } },
+        turnRoute: route,
+      },
       projectorRef: {},
       startupTimeoutMs: 1_000,
     };

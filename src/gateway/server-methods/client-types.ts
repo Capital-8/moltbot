@@ -104,6 +104,8 @@ export type GatewayClient = {
     agentRunTracking?: GatewayAgentRunTaskOwner;
     /** Host-captured requester lineage for opt-in plugin subagent completion delivery. */
     pluginSubagentRequester?: PluginSubagentRequesterContext;
+    /** Original operational run captured by the restart-recovery dispatcher. */
+    interruptedRunId?: string;
     /** Host-owned exact media set for a scoped automatic recovery delivery. */
     internalDeliveryMediaUrls?: string[];
     runtimeContextFragments?: RuntimeContextFragment[];

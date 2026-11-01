@@ -35,6 +35,7 @@ export type RestartRecoveryDispatchStartOutcome =
 
 export async function dispatchRestartRecoveryUntilStarted(params: {
   agentParams: AgentRunRequest;
+  interruptedRunId?: string;
   gatewayRuntime: GatewayRecoveryRuntime;
   onSettled?: () => void;
 }): Promise<RestartRecoveryDispatchStartOutcome> {
@@ -107,6 +108,7 @@ export async function dispatchRestartRecoveryUntilStarted(params: {
       undefined,
       {
         expectFinal: true,
+        ...(params.interruptedRunId ? { interruptedRunId: params.interruptedRunId } : {}),
         onAccepted: () => {
           dispatchAccepted = true;
         },
