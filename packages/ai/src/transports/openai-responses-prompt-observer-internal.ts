@@ -11,9 +11,33 @@ type ResponsesPromptRequest = {
   input?: unknown;
   model?: unknown;
   reasoning?: { effort?: unknown };
-  tools?: Array<{ name?: unknown; strict?: unknown; parameters?: { required?: unknown } }>;
+  tools?: unknown;
 };
 type ResponsesPromptMetadata = Pick<ResponsesPromptObservation, "egress" | "payloadVariant">;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readSessionsSpawnSchema(
+  tools: unknown,
+): ResponsesPromptObservation["sessionsSpawn"] | undefined {
+  if (!Array.isArray(tools)) {
+    return undefined;
+  }
+  const tool = tools.find(
+    (candidate) => isRecord(candidate) && candidate.name === "sessions_spawn",
+  );
+  if (!isRecord(tool)) {
+    return undefined;
+  }
+  const parameters = isRecord(tool.parameters) ? tool.parameters : undefined;
+  return {
+    ...(typeof tool.strict === "boolean" ? { strict: tool.strict } : {}),
+    categoryRequired:
+      Array.isArray(parameters?.required) && parameters.required.includes("category"),
+  };
+}
 
 function readFinalResponsesPrompt(
   request: ResponsesPromptRequest,
@@ -55,7 +79,7 @@ export function createResponsesPromptEgressObserver(
   );
   return (request: ResponsesPromptRequest, metadata: ResponsesPromptMetadata) => {
     const [promptSource, observedPrompt] = readFinalResponsesPrompt(request);
-    const sessionsSpawn = request.tools?.find((tool) => tool.name === "sessions_spawn");
+    const sessionsSpawn = readSessionsSpawnSchema(request.tools);
     observer({
       ...metadata,
       promptSource,
@@ -66,18 +90,7 @@ export function createResponsesPromptEgressObserver(
       ...(typeof request.reasoning?.effort === "string"
         ? { reasoningEffort: request.reasoning.effort }
         : {}),
-      ...(sessionsSpawn
-        ? {
-            sessionsSpawn: {
-              ...(typeof sessionsSpawn.strict === "boolean"
-                ? { strict: sessionsSpawn.strict }
-                : {}),
-              categoryRequired:
-                Array.isArray(sessionsSpawn.parameters?.required) &&
-                sessionsSpawn.parameters.required.includes("category"),
-            },
-          }
-        : {}),
+      ...(sessionsSpawn ? { sessionsSpawn } : {}),
     });
   };
 }
