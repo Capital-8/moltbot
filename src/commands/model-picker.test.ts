@@ -546,3 +546,23 @@ it("labels the selection as fallbacks when no allowlist exists", async () => {
   });
   expect(multiselect.mock.calls[0]?.[0]?.message).toBe("Fallback models (multi-select)");
 });
+
+it.each([
+  { allow: ["openai/gpt-5.5", "nvidia/rec", "nvidia/kimi"], seeded: ["nvidia/rec", "nvidia/kimi"] },
+  { allow: ["openai/gpt-5.5", "nvidia/*"], seeded: ["nvidia/rec", "nvidia/kimi", "nvidia/other"] },
+])("seeds a configure re-run from the saved allowlist: $allow", async ({ allow, seeded }) => {
+  setScopedCatalog([
+    catalogModel("nvidia", "rec", "Recommended"),
+    catalogModel("nvidia", "kimi", "Kimi"),
+    catalogModel("nvidia", "other", "Other"),
+  ]);
+  const { multiselect } = await pickAllowlist({
+    config: {
+      meta: { migrations: { modelPolicyAllowlist: true } },
+      agents: { defaults: { model: { primary: "openai/gpt-5.5" }, modelPolicy: { allow } } },
+    },
+    preferredProvider: "nvidia",
+    providerScopedCatalog: true,
+  });
+  expect(multiselect.mock.calls[0]?.[0]?.initialValues).toEqual(seeded);
+});

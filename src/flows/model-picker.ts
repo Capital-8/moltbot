@@ -42,7 +42,7 @@ import { resolveOwningPluginIdsForProviderRef } from "../plugins/providers.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { t } from "../wizard/i18n/index.js";
 import type { WizardPrompter, WizardSelectOption } from "../wizard/prompts.js";
-import { normalizeModelKeys } from "./model-picker-allowlist.js";
+import { createScopedSeeds, normalizeModelKeys } from "./model-picker-allowlist.js";
 import {
   loadResolvedModelPickerRuntime,
   maybeHandleProviderPluginSelection,
@@ -780,6 +780,7 @@ export async function promptModelAllowlist(params: {
     ...fallbackKeys,
     ...(params.initialSelections ?? []),
   ]);
+  const scopedSeeds = createScopedSeeds({ ...params, initialSeeds });
   const hasRealSeed =
     existingKeys.length > 0 ||
     fallbackKeys.length > 0 ||
@@ -863,8 +864,7 @@ export async function promptModelAllowlist(params: {
       includeSetupRegistry: true,
     });
     const scopeKeys = allowedKeys.length > 0 ? allowedKeys : scopedFastKeys;
-    const scopeKeySet = new Set(scopeKeys);
-    const initialKeys = initialSeeds.filter((key) => scopeKeySet.has(key));
+    const initialKeys = scopedSeeds(scopeKeys);
     const options: WizardSelectOption[] = [];
     const seen = new Set<string>();
     for (const key of scopeKeys) {
@@ -970,10 +970,7 @@ export async function promptModelAllowlist(params: {
         ...scopedConfiguredKeys,
       ])
     : undefined;
-  const scopeKeySet = scopeKeys ? new Set(scopeKeys) : null;
-  const selectableInitialSeeds = scopeKeySet
-    ? initialSeeds.filter((key) => scopeKeySet.has(key))
-    : initialSeeds;
+  const selectableInitialSeeds = scopeKeys ? scopedSeeds(scopeKeys) : initialSeeds;
   const initialKeys = selectableInitialSeeds.filter(isVisibleModelRef);
 
   for (const entry of filteredCatalog) {
