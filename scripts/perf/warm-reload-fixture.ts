@@ -19,6 +19,7 @@ export type WarmReloadFixtureOptions = {
   sessions?: number;
   transcriptLatePaint?: boolean;
   dashboardEndAnchor?: boolean;
+  dashboardPaneChrome?: boolean;
   pluginActivation?: boolean;
   admission?: Pick<
     Awaited<ReturnType<typeof startWarmReloadAdmission>>,
@@ -33,6 +34,7 @@ function transcript(
   agentId: string,
   longMarkdown = false,
   endAnchor = false,
+  activityTail = false,
 ) {
   const events: unknown[] = [];
   let parentId: string | null = null;
@@ -69,6 +71,15 @@ function transcript(
       },
       `user-${row}`,
     );
+    if (activityTail && row === 0) {
+      events.push({
+        type: "message",
+        id: `warm-proof-${session}-alternative`,
+        parentId,
+        timestamp: new Date(now - 60_000).toISOString(),
+        message: { role: "assistant", content: "Synthetic alternative version." },
+      });
+    }
     if (row === lastRow) {
       append(
         {
@@ -193,6 +204,27 @@ function transcript(
           display: false,
         },
         `hidden-${index}`,
+      );
+    }
+  }
+  if (activityTail) {
+    for (let index = 0; index < 160; index++) {
+      const id = `warm-proof-activity-${index}`;
+      append(
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id, name: "read", arguments: { path: "fixture.md" } }],
+        },
+        `activity-call-${index}`,
+      );
+      append(
+        {
+          role: "toolResult",
+          toolCallId: id,
+          toolName: "read",
+          content: [{ type: "text", text: "Synthetic checkpoint verified." }],
+        },
+        `activity-result-${index}`,
       );
     }
   }
@@ -447,7 +479,7 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
               ...old.entry,
               label: target.label,
               displayName: target.label,
-              archivedAt: now - 1000,
+              archivedAt: options.dashboardPaneChrome && index === 1 ? undefined : now - 1000,
               pinnedAt: now - index,
               updatedAt: now - index,
               lastActivityAt: now - index,
@@ -485,6 +517,7 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
               agentId,
               options.transcriptLatePaint,
               options.dashboardEndAnchor,
+              options.dashboardPaneChrome && index === 1,
             ),
           );
           reactions.setSessionReactionInDatabase(owner, target.key, {
@@ -607,6 +640,7 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
       otherViewers: options.admission?.peerSessions.length ?? 0,
       targets,
       dashboardEndAnchor: options.dashboardEndAnchor ?? false,
+      dashboardPaneChrome: options.dashboardPaneChrome ?? false,
       pluginActivation: pluginFixture?.ids ?? [],
       viewerId,
       pinKeys,
@@ -622,14 +656,14 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
         collapsed: 5,
         emptyGroups: "always",
         preview: false,
-        archivedTargets: true,
+        archivedTargets: !options.dashboardPaneChrome,
         nonArchivedPins: 2,
         expandedRetainedParents: sidebarParents.length,
       },
       ...(options.transcriptLatePaint
         ? {
             transcriptLatePaint: {
-              archivedTargets: true,
+              archivedTargets: !options.dashboardPaneChrome,
               groups: sidebarGroups,
               sectionOrder: sidebarSectionOrder,
               collapsedSections: sidebarGroups.slice(0, 5).map((name) => `category:${name}`),
