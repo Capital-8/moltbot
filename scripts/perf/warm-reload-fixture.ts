@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { buildControlUiSessionPath } from "@openclaw/session-url-contract";
+import { SESSION_TOTAL_TOKENS_VERSION } from "../../src/config/sessions/types.js";
 import type { OpenClawConfig } from "../../src/config/types.openclaw.js";
 import { applyMockOpenAiModelConfig } from "../e2e/lib/fixtures/mock-openai-config.mjs";
 import { generateTeamShapeFixture, parseTeamShapeOptions } from "./team-shape-fixture.ts";
@@ -20,6 +21,7 @@ export type WarmReloadFixtureOptions = {
   transcriptLatePaint?: boolean;
   dashboardEndAnchor?: boolean;
   pluginActivation?: boolean;
+  activeTargets?: boolean;
   admission?: Pick<
     Awaited<ReturnType<typeof startWarmReloadAdmission>>,
     "origin" | "gatewayAuth" | "viewerEmail" | "peerSessions"
@@ -447,12 +449,17 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
               ...old.entry,
               label: target.label,
               displayName: target.label,
-              archivedAt: now - 1000,
+              archivedAt: options.activeTargets ? undefined : now - 1000,
               pinnedAt: now - index,
               updatedAt: now - index,
               lastActivityAt: now - index,
               boardFace: index === 1 ? "dashboard" : "chat",
               status: "done",
+              contextTokens: 96_000,
+              contextTokensSource: "runtime-configured",
+              totalTokens: 1800,
+              totalTokensFresh: true,
+              totalTokensVersion: SESSION_TOTAL_TOKENS_VERSION,
             },
             { canonicalPreviousEntry: old.entry, canonicalPreviousRow: old.row },
           );
@@ -622,14 +629,14 @@ export async function seedWarmReloadFixture(options: WarmReloadFixtureOptions) {
         collapsed: 5,
         emptyGroups: "always",
         preview: false,
-        archivedTargets: true,
+        archivedTargets: !options.activeTargets,
         nonArchivedPins: 2,
         expandedRetainedParents: sidebarParents.length,
       },
       ...(options.transcriptLatePaint
         ? {
             transcriptLatePaint: {
-              archivedTargets: true,
+              archivedTargets: !options.activeTargets,
               groups: sidebarGroups,
               sectionOrder: sidebarSectionOrder,
               collapsedSections: sidebarGroups.slice(0, 5).map((name) => `category:${name}`),
