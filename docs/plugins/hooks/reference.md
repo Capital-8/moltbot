@@ -263,6 +263,11 @@ For `sessions.create` calls with `parentSessionKey` and `emitCommandHooks: true`
 includes optional before/after artifacts with content and tree hashes, plus
 declared and source versions when available.
 
+`source` names the writer: `workshop`, `clawhub`, `source-install`, `upload`, or
+`plugin`. A `plugin` event comes from a plugin that changed its own skills root
+through [skill authoring](/plugins/sdk-entrypoints#skill-authoring); the host sets
+`pluginId` to that plugin's id.
+
 ### Channel pairing requests
 
 Use `channel_pairing_requested` when a plugin needs to notify an operator or
