@@ -29,24 +29,18 @@ export function SensitiveToggleButton(props: {
   onToggleSensitivePath?: (path: Array<string | number>) => void;
 }): JSX.Element {
   const label = createMemo(() =>
-    props.state.canReveal
-      ? props.state.isRevealed
-        ? t("configForm.hideValue")
-        : t("configForm.revealValue")
-      : props.state.sentinelRedacted
-        ? t("configForm.storedSecretNotRevealable")
-        : t("configForm.disableStreamToReveal"),
+    props.state.isRevealed ? t("configForm.hideValue") : t("configForm.revealValue"),
   );
   return (
     <>
-      {props.state.isSensitive && props.onToggleSensitivePath && (
+      {props.state.canReveal && props.onToggleSensitivePath && (
         <openclaw-tooltip prop:content={label()}>
           <button
             type="button"
             class="settings-secret__toggle"
             aria-label={label()}
             aria-pressed={props.state.isRevealed ? "true" : "false"}
-            disabled={props.disabled || !props.state.canReveal}
+            disabled={props.disabled}
             onClick={() => props.onToggleSensitivePath?.(props.path)}
           >
             <Icon name={props.state.isRevealed ? "eye" : "eyeOff"} />
@@ -357,14 +351,16 @@ export function JsonTextareaControl(props: {
           : envVar()
             ? t("configForm.environmentSecret", { name: envVar()! })
             : props.sensitiveState.isRedacted
-              ? t("configForm.redactedPlaceholder")
+              ? props.sensitiveState.canReveal && props.onToggleSensitivePath
+                ? t("configForm.redactedPlaceholder")
+                : "••••••••"
               : t("configForm.jsonValue")
       }
       rows={props.rows}
       disabled={props.disabled}
       readonly={lockedRedacted()}
       onClick={() => {
-        if (lockedRedacted()) {
+        if (lockedRedacted() && props.sensitiveState.canReveal) {
           props.onToggleSensitivePath?.(props.path);
         }
       }}

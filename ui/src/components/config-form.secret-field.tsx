@@ -3,6 +3,7 @@ import type { ConfigUiHints } from "../api/types.ts";
 import type { ConfigSecretFields } from "../lib/config/config-secret-fields.ts";
 import { t } from "../lib/reactive/i18n.ts";
 import { hintForPath } from "./config-form.shared.ts";
+import { Icon } from "./solid/icon.tsx";
 
 const SAVED_VISIBLE_MS = 2500;
 
@@ -49,6 +50,7 @@ export function createSecretFieldHold(read: () => SecretFieldSource) {
   const [revision, setRevision] = createSignal(0, { ownedWrite: true });
   const [saving, setSaving] = createSignal(false);
   const [saved, setSaved] = createSignal(false);
+  const [showsTyped, setShowsTyped] = createSignal(false);
   const text = createMemo(() => {
     revision();
     const source = read();
@@ -74,9 +76,15 @@ export function createSecretFieldHold(read: () => SecretFieldSource) {
     saved,
     /** The latest refusal; the field shows it and clears it on the next edit. */
     error: () => error,
+    /** Typed text can be shown; a new edit always starts hidden. */
+    revealed: () => text() !== undefined && showsTyped(),
+    toggleRevealed: () => setShowsTyped((value) => !value),
     edit(next: string, stored: string) {
       const source = read();
       error = "";
+      if (text() === undefined) {
+        setShowsTyped(false);
+      }
       clearSaved();
       if (next === stored) {
         source.secretFields?.release(source.path);
@@ -119,6 +127,8 @@ export type SecretFieldHold = ReturnType<typeof createSecretFieldHold>;
 /** Sits inside the field so holding an edit never moves the row or the caret. */
 export function SecretFieldActions(props: {
   hold: SecretFieldHold;
+  /** The field masks what was typed, so an eye can show it. */
+  hidesText?: boolean;
   label: string;
   disabled: boolean;
   onSave: () => void;
@@ -136,6 +146,25 @@ export function SecretFieldActions(props: {
       }
     >
       <span class="cfg-secret-actions">
+        <Show when={props.hidesText}>
+          <openclaw-tooltip
+            prop:content={t(
+              props.hold.revealed() ? "configForm.hideValue" : "configForm.revealValue",
+            )}
+          >
+            <button
+              type="button"
+              class="settings-secret__toggle"
+              aria-label={t(
+                props.hold.revealed() ? "configForm.hideValue" : "configForm.revealValue",
+              )}
+              aria-pressed={props.hold.revealed() ? "true" : "false"}
+              onClick={() => props.hold.toggleRevealed()}
+            >
+              <Icon name={props.hold.revealed() ? "eye" : "eyeOff"} />
+            </button>
+          </openclaw-tooltip>
+        </Show>
         <button
           type="button"
           class="btn btn--sm primary"

@@ -904,6 +904,19 @@ openclaw-appearance-background .settings-background-preview .session-background_
   padding-inline-end: 8.5rem;
 }
 
+.settings-secret:has(.cfg-secret-actions .settings-secret__toggle) > input {
+  padding-inline-end: 10.5rem;
+}
+
+.cfg-secret-actions .settings-secret__toggle {
+  position: static;
+}
+
+/* Without an eye there's nothing to clear, so the text keeps the field's own inset. */
+.settings-secret:not(:has(> openclaw-tooltip, > .settings-secret__toggle)) > :is(input, textarea) {
+  padding-right: var(--field-padding-inline);
+}
+
 .settings-secret:has(> textarea) > .cfg-secret-actions {
   inset-block: auto 6px;
   height: 28px;

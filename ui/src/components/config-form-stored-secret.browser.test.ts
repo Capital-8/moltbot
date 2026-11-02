@@ -163,6 +163,37 @@ describe("stored secrets", () => {
     expect(configEnvReference(undefined, path)).toBeNull();
   });
 
+  it("offers no eye on a stored secret, and keeps it for text in the draft", () => {
+    const stored = document.createElement("div");
+    renderTextInputFixture(stored, {
+      schema,
+      value: REDACTED,
+      path,
+      inputType: "text",
+      hints,
+      onToggleSensitivePath: vi.fn(),
+      onPatch: vi.fn(),
+    });
+    expect(stored.querySelector(".settings-secret__toggle")).toBeNull();
+    expect(stored.querySelector("input")?.placeholder).toBe("••••••••");
+
+    const typed = document.createElement("div");
+    renderTextInputFixture(typed, {
+      schema,
+      value: "just-typed",
+      path,
+      inputType: "text",
+      hints,
+      onToggleSensitivePath: vi.fn(),
+      onPatch: vi.fn(),
+    });
+    const eye = expectElement(
+      typed.querySelector<HTMLButtonElement>(".settings-secret__toggle"),
+      "draft reveal toggle",
+    );
+    expect(eye.disabled).toBe(false);
+  });
+
   it("shows an env placeholder instead of masking it", () => {
     const secretFields = fakeSecretFields();
     const { input } = render({ value: "${TELEGRAM_TOKEN}", secretFields });

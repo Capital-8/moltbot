@@ -178,9 +178,9 @@ function ScalarInput(props: {
             ? rawAvailable
               ? t("configForm.structuredSecretRaw")
               : t("configForm.structuredSecretFile")
-            : masked
-              ? "••••••••"
-              : t("configForm.redactedPlaceholder")
+            : !masked && sensitiveState?.canReveal && params.onToggleSensitivePath
+              ? t("configForm.redactedPlaceholder")
+              : "••••••••"
         : (hint?.placeholder ??
           (!masked && schema.default !== undefined
             ? t("configForm.defaultValue", { value: formatConfigValueText(schema.default) })
@@ -195,14 +195,15 @@ function ScalarInput(props: {
     const effectiveValue = value !== undefined ? value : schema.default;
     const initialBranch = scalarValueBranch(effectiveValue);
     const shownText = heldText ?? (typeof value === "string" ? value : "");
-    const effectiveInputType =
-      masked ||
-      replaceable ||
-      // An env placeholder names a variable; it is not a secret to hide.
-      (hold.active() &&
-        !params.revealSensitive &&
-        !sensitiveState?.isRevealed &&
-        !isEnvPlaceholder(shownText))
+    // An env placeholder names a variable; it is not a secret to hide.
+    const hidesText =
+      hold.active() &&
+      !params.revealSensitive &&
+      !sensitiveState?.isRevealed &&
+      !isEnvPlaceholder(shownText);
+    const effectiveInputType = hold.revealed()
+      ? "text"
+      : masked || replaceable || hidesText
         ? "password"
         : sensitiveState?.isSensitive && !effectiveRedacted
           ? "text"
@@ -254,6 +255,7 @@ function ScalarInput(props: {
       isStructuredSecretRef,
       masked,
       replaceable,
+      hidesText,
       effectiveRedacted,
       placeholder,
       effectiveValue,
@@ -440,6 +442,7 @@ function ScalarInput(props: {
       if (
         !state().masked &&
         !state().replaceable &&
+        state().sensitiveState?.canReveal &&
         state().sensitiveState?.isRedacted &&
         !state().isStructuredSecretRef
       ) {
@@ -551,6 +554,7 @@ function ScalarInput(props: {
           )}
           <SecretFieldActions
             hold={hold}
+            hidesText={state().hidesText}
             label={String(state().field.label)}
             disabled={props.params.disabled}
             onSave={() => void saveHeld()}

@@ -116,8 +116,18 @@ suite.define(() => {
       expect(await token.inputValue()).toBe("");
       expect(await token.getAttribute("readonly")).toBeNull();
       expect(await token.getAttribute("placeholder")).toBe("••••••••");
+      const reveal = page.getByRole("button", { name: "Reveal value", exact: true });
+      expect(await reveal.count()).toBe(0);
 
       await token.fill(PARTIAL);
+      expect(await token.getAttribute("type")).toBe("password");
+      await reveal.click();
+      expect(await token.getAttribute("type")).toBe("text");
+      expect(await token.inputValue()).toBe(PARTIAL);
+      await page.getByRole("button", { name: "Cancel: Api Token", exact: true }).click();
+      await expect.poll(() => reveal.count()).toBe(0);
+      await token.fill(PARTIAL);
+      expect(await token.getAttribute("type")).toBe("password");
       await page.getByRole("button", { name: "Cancel: Api Token", exact: true }).click();
       await expect.poll(() => save.count()).toBe(0);
       expect(await token.inputValue()).toBe("");
