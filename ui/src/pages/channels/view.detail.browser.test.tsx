@@ -43,7 +43,7 @@ it("keeps channel completion links inside the native modal at desktop and narrow
       ...panel.querySelectorAll<HTMLElement>(".channels-detail__footer :is(a,button)"),
     ];
     expect(panel.getBoundingClientRect().width).toBeLessThanOrEqual(bounds.width + 1);
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(1);
     for (const action of actions) {
       const rect = action.getBoundingClientRect();
       expect(rect.left).toBeGreaterThanOrEqual(bounds.left - 1);

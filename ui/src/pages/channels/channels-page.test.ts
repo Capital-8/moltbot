@@ -69,7 +69,7 @@ const findButton = (root: ParentNode, selector: string) =>
   root.querySelector<HTMLButtonElement>(selector)!;
 const text = (root: ParentNode, selector: string) => root.querySelector(selector)?.textContent;
 async function closeDetail(page: HTMLElement) {
-  findButton(page, ".channels-detail__close").click();
+  findButton(page, ".channels-detail .oc-dialog__close").click();
   await settle();
 }
 function expectUpdate(mount: PackagedChannel["mounts"][number], expected: object) {
@@ -184,7 +184,7 @@ describe("ChannelsPage lifecycle", () => {
       details.click();
       await settle();
       expect(page.querySelector(".channels-detail")).not.toBeNull();
-      const runSetup = profileButton(page, "Run setup");
+      const runSetup = profileButton(page, "Set up");
       expect(runSetup.disabled).toBe(true);
       runSetup.click();
       await settle();
@@ -644,7 +644,7 @@ it("retires a real host configuration slot and rejects mounting through its old 
   const container = document.createElement("div");
   f.mounts[0]!.input.parentElement!.append(container);
   const dispose = f.context.mountConfig(container);
-  await waitForSolid(() => expect(container.textContent).toContain("Reload"));
+  await waitForSolid(() => expect(container.children.length).toBeGreaterThan(0));
   f.gateway.emit({ client: createGateway().snapshot.client });
   expect(f.context.signal.aborted).toBe(true);
   expect(container.childNodes).toHaveLength(0);

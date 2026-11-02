@@ -128,7 +128,10 @@ suite.define(() => {
       await token.waitFor();
       expect(await token.inputValue()).toBe(PARTIAL);
       await detail.getByRole("button", { name: "Close", exact: true }).click();
-      await page.getByRole("button", { name: "Discard", exact: true }).click();
+      await page
+        .locator("dialog[open]", { hasText: "aren't saved yet" })
+        .getByRole("button", { name: "Discard", exact: true })
+        .click();
       await expect.poll(() => row.textContent()).not.toContain("Unsaved changes");
       expect(await gateway.getRequests("config.patch")).toHaveLength(0);
     });
@@ -151,12 +154,15 @@ suite.define(() => {
       expect(await gateway.getRequests("config.set")).toHaveLength(0);
 
       await detail.getByRole("button", { name: "Close", exact: true }).click();
-      await page.getByRole("button", { name: "Discard", exact: true }).click();
+      await page
+        .locator("dialog[open]", { hasText: "aren't saved yet" })
+        .getByRole("button", { name: "Discard", exact: true })
+        .click();
       await expect.poll(() => detail.count()).toBe(0);
       await page.locator(".channels-item").filter({ hasText: "Telegram" }).first().click();
       await token.waitFor();
       expect(await token.inputValue()).not.toBe(PARTIAL);
-      expect(await detail.getByRole("status").count()).toBe(0);
+      expect(await detail.getByRole("status").textContent()).toBe("");
     });
   });
 });

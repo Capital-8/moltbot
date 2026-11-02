@@ -76,18 +76,15 @@ suite.define(() => {
         await open();
         const detail = page.locator(".channels-detail");
         await expect(detail.getByRole("heading", { name: "Nostr", exact: true })).toBeVisible();
-        await expect(detail).toContainText("Decentralized DMs via Nostr relays (NIP-04).");
+        await detail.getByRole("button", { name: "Edit Profile", exact: true }).waitFor();
         expect(assets.some((asset) => asset.url.endsWith(".js"))).toBe(true);
         expect(assets.every((asset) => asset.status === 200)).toBe(true);
-        await expect(detail.locator(".settings-group").first()).toHaveCSS(
-          "border-top-style",
-          "solid",
-        );
+        await expect(detail.locator(".settings-row").first()).toHaveCSS("display", "flex");
         await detail.getByRole("button", { name: "Edit Profile", exact: true }).click();
         await detail.locator("#nostr-profile-name").fill("Alice Updated");
-        await detail.locator(".channels-detail__close").click();
+        await detail.locator(".oc-dialog__close").click();
         await open("Other");
-        await detail.locator(".channels-detail__close").click();
+        await detail.locator(".oc-dialog__close").click();
         await open();
         await expect(detail.locator("#nostr-profile-name")).toHaveValue("Alice Updated");
         await detail.getByRole("button", { name: "Save & Publish", exact: true }).click();
@@ -130,14 +127,10 @@ suite.define(() => {
         await gateway.setMethodResponse("config.get", snapshot(2));
         const beforeReload = (await gateway.getRequests("config.get")).length;
         await refreshAfter(async () => {
-          await detail.getByRole("button", { name: "Reload", exact: true }).click();
+          await detail.getByRole("button", { name: "Check connection", exact: true }).click();
           await gateway.waitForRequest("config.get", { after: beforeReload });
           await expect(enabled).toBeChecked();
         }, true);
-        await refreshAfter(
-          () => detail.getByRole("button", { name: "Refresh", exact: true }).click(),
-          false,
-        );
         expect(await gateway.getRequests("plugins.controlUi.report")).toHaveLength(0);
         expect(errors).toEqual([]);
       },

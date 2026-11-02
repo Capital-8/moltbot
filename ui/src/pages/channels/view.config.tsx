@@ -25,9 +25,9 @@ function resolveSchemaNode(schema: JsonSchema | null, path: string[]): JsonSchem
 
 const EXTRA_CHANNEL_FIELDS = ["groupPolicy", "streamMode", "dmPolicy"] as const;
 
-const channelConfigFormId = (channelId: string) => `channel-config-${channelId}`;
+export const channelConfigFormId = (channelId: string) => `channel-config-${channelId}`;
 
-function isSavingChannelConfig(channelId: string, props: ChannelsProps) {
+export function isSavingChannelConfig(channelId: string, props: ChannelsProps) {
   return (
     props.savingChannel === channelId || props.mutationBusy?.config || props.config.configSaving
   );
@@ -35,38 +35,13 @@ function isSavingChannelConfig(channelId: string, props: ChannelsProps) {
 
 /** Outside the form's scroll, so what happened to a save never depends on scrolling to it. */
 export function ChannelConfigFeedback(params: { channelId: string; props: ChannelsProps }) {
+  const failure = () => params.props.config.lastError ?? params.props.channels.channelsError;
   return (
-    <Show when={params.props.config.lastError || params.props.saveConflict === params.channelId}>
+    <Show when={failure() || params.props.saveConflict === params.channelId}>
       <div class="channels-detail__feedback" role="alert">
-        <div class={params.props.config.lastError ? "callout danger" : "callout warn"}>
-          {params.props.config.lastError ?? t("channels.config.conflictKept")}
+        <div class={failure() ? "callout danger" : "callout warn"}>
+          {failure() ?? t("channels.config.conflictKept")}
         </div>
-      </div>
-    </Show>
-  );
-}
-
-/** Lives in the dialog's footer: a long form can't hide that an edit is waiting on Save. */
-export function ChannelConfigSave(params: { channelId: string; props: ChannelsProps }) {
-  const edits = () => params.props.configEdits[params.channelId];
-  const saved = () => params.props.savedChannel === params.channelId;
-  const saving = () => isSavingChannelConfig(params.channelId, params.props);
-  return (
-    <Show when={edits() || saved()}>
-      <div class="channels-detail__save">
-        <Show when={edits()}>
-          <button
-            class="btn btn--sm primary"
-            type="submit"
-            form={channelConfigFormId(params.channelId)}
-            disabled={!params.props.channels.connected || saving()}
-          >
-            {saving() ? t("common.saving") : t("common.save")}
-          </button>
-        </Show>
-        <span role="status">
-          {t(edits() ? "channels.config.unsaved" : "configView.autoSaveSaved")}
-        </span>
       </div>
     </Show>
   );
@@ -85,7 +60,9 @@ export function ChannelConfig(params: { channelId: string; props: ChannelsProps 
       edits() ?? [],
     ),
   );
-  const extraFields = () => EXTRA_CHANNEL_FIELDS.filter((field) => field in value());
+  // A field the form already edits isn't worth repeating as text below it.
+  const extraFields = () =>
+    EXTRA_CHANNEL_FIELDS.filter((field) => field in value() && !node()?.properties?.[field]);
   const unsupported = createMemo(() => new Set(analysis().unsupportedPaths));
   const saving = () =>
     params.props.savingChannel === params.channelId ||
@@ -99,7 +76,7 @@ export function ChannelConfig(params: { channelId: string; props: ChannelsProps 
     >
       <form
         id={channelConfigFormId(params.channelId)}
-        class="settings-row settings-row--stacked"
+        class="channels-detail__form"
         novalidate
         onSubmit={(event) => {
           event.preventDefault();
@@ -162,16 +139,6 @@ export function ChannelConfig(params: { channelId: string; props: ChannelsProps 
             </>
           )}
         </Show>
-        <div class="settings-row__control">
-          <button
-            class="btn"
-            type="button"
-            disabled={!params.props.channels.connected || disabled()}
-            onClick={() => params.props.onConfigReload(params.channelId)}
-          >
-            {t("common.reload")}
-          </button>
-        </div>
       </form>
     </Show>
   );
