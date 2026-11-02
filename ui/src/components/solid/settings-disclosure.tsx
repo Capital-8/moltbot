@@ -2,24 +2,39 @@ import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 import { Icon } from "./icon.tsx";
 
-/** One disclosure for settings: a row that opens to more rows in the same group. */
+/**
+ * One disclosure for settings: a row that opens to more rows in the same group.
+ * `nested` puts that row inside a surrounding group, and `sections` opens whole
+ * settings sections below the row, since a group can't hold other groups.
+ */
 export function SettingsDisclosure(props: {
   id?: string;
   class?: string;
   title: JSX.Element;
   description?: JSX.Element;
   open?: boolean;
+  nested?: boolean;
+  sections?: boolean;
   onToggle?: JSX.EventHandler<HTMLDetailsElement, Event>;
   children?: JSX.Element;
 }) {
   return (
     <details
       id={props.id}
-      class={["settings-group settings-disclosure", props.class]}
+      class={[
+        "settings-disclosure",
+        { "settings-group": !props.nested && !props.sections },
+        props.class,
+      ]}
       open={props.open}
       onToggle={(event) => props.onToggle?.(event)}
     >
-      <summary class="settings-row settings-row--nav settings-disclosure__summary">
+      <summary
+        class={[
+          "settings-row settings-row--nav settings-disclosure__summary",
+          { "settings-group": props.sections },
+        ]}
+      >
         <div class="settings-row__text">
           <span class="settings-row__title">{props.title}</span>
           <Show when={props.description}>
@@ -32,7 +47,13 @@ export function SettingsDisclosure(props: {
           </span>
         </div>
       </summary>
-      {props.children}
+      {props.sections ? (
+        <div class="settings-stack settings-disclosure__sections">{props.children}</div>
+      ) : props.nested ? (
+        <div class="settings-subrows">{props.children}</div>
+      ) : (
+        props.children
+      )}
     </details>
   );
 }
