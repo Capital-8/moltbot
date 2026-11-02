@@ -6,7 +6,6 @@ import {
   StateDatabaseAdmissionPendingError,
   StateDatabaseOfflineMaintenanceError,
 } from "../infra/gateway-state-owner-record.js";
-import { readSqliteDatabaseCleanClose } from "../infra/sqlite-database-admission.js";
 import { createSqliteLifecycleAggregateError } from "../infra/sqlite-lifecycle-errors.js";
 import { captureSqlitePrivateSnapshotFamily } from "../infra/sqlite-private-snapshot-fork.js";
 import {
@@ -47,7 +46,6 @@ const log = createSubsystemLogger("state/db");
 export type StateReadSnapshotSource = {
   location: string;
   cleanupRoot?: string;
-  cleanClose?: boolean;
   postgresSnapshot?: string;
 };
 
@@ -60,7 +58,7 @@ export async function prepareOpenClawStateReadSnapshotSource({
   controller,
   callerSignal,
   admissionTimeoutMs,
-  reuseCleanClose,
+  live,
 }: {
   pathname: string;
   env: NodeJS.ProcessEnv;
@@ -69,7 +67,7 @@ export async function prepareOpenClawStateReadSnapshotSource({
   controller: AbortController;
   callerSignal?: AbortSignal;
   admissionTimeoutMs?: number;
-  reuseCleanClose?: boolean;
+  live: boolean;
 }) {
   const admissionSignal = callerSignal
     ? AbortSignal.any([callerSignal, controller.signal])
@@ -81,7 +79,6 @@ export async function prepareOpenClawStateReadSnapshotSource({
   let prepared: AsyncPreparedSqliteReadOnlyLocation | undefined;
   let source: StateReadSnapshotSource | undefined;
   let family: SqlitePrivateSnapshotFamily | undefined;
-  let cleanClose = false;
   let postgresSnapshot: string | undefined;
   let releaseSource: (() => void) | undefined;
   let preparation: RetainedSqliteSnapshotPreparation | undefined;
@@ -95,11 +92,10 @@ export async function prepareOpenClawStateReadSnapshotSource({
     source = {
       location: location.location,
       cleanupRoot: location.cleanupRoot,
-      cleanClose,
       postgresSnapshot,
     };
     releaseSource =
-      postgres || cleanClose
+      postgres || live
         ? undefined
         : retainSnapshotTempDirectory(location.cleanupRoot ?? path.dirname(location.location));
   };
@@ -165,7 +161,6 @@ export async function prepareOpenClawStateReadSnapshotSource({
       if (nextWaitLog > 0) {
         log.info(`Shared-state admission acquired: ${pathname}`);
       }
-      cleanClose = !postgres && reuseCleanClose === true && readSqliteDatabaseCleanClose(pathname);
       if (postgres) {
         const { openPostgresStateReadSnapshot } =
           await import("./openclaw-state-postgres-snapshot.js");
@@ -178,7 +173,7 @@ export async function prepareOpenClawStateReadSnapshotSource({
           location: pathname,
           cleanupAsync: () => retained.close().then(() => true),
         };
-      } else if (cleanClose) {
+      } else if (live) {
         prepared = { location: pathname, cleanupAsync: async () => true };
       } else if (
         artifactPreserving &&

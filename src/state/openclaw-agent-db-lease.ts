@@ -27,6 +27,7 @@ import {
   assertAgentDeletionPathFence,
   prepareAgentDeletionPathFence,
 } from "./agent-deletion-journal.js";
+import { isLiveStateRead } from "./artifact-preserving-state-reads.js";
 import { withExistingAgentLeaseWrite } from "./openclaw-agent-db-existing-write.js";
 import {
   createAgentDatabaseLeaseStaleReasonReader,
@@ -633,7 +634,9 @@ export function readActiveOpenClawAgentDatabaseLeasesReadOnly(
     return withOpenClawStateReadOnlyLocation(
       ({ db }) => readActiveLeases(db),
       pathname,
-      isStatePostgres() ? pathname : prepareSqliteReadOnlyLocationSync(pathname),
+      isStatePostgres() || isLiveStateRead()
+        ? pathname
+        : prepareSqliteReadOnlyLocationSync(pathname),
       openStateSchemaReadAdmission,
     );
   }

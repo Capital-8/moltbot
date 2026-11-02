@@ -14,7 +14,7 @@ import { runPluginSharedStateWork } from "../plugins/plugin-shared-state-admissi
 import { getAsyncWorkSignal } from "../shared/async-work-scope.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import {
-  artifactPreservingReads,
+  withLiveStateReads,
   isArtifactPreservingStateRead,
   withArtifactPreservingStateReads,
 } from "./artifact-preserving-state-reads.js";
@@ -106,10 +106,10 @@ function resolveStateReadCallerSignal(): AbortSignal | undefined {
   return snapshot && signal === snapshot.work.signal ? snapshot.callerSignal : signal;
 }
 
-/** Stable identity and private bytes for reads within the enclosing snapshot scope. */
+/** Selected live or private source within the enclosing read admission. */
 export function getActiveOpenClawStateDatabaseReadSnapshot(
   options: OpenClawStateDatabaseOptions = {},
-): Readonly<{ location: string; cleanClose?: boolean }> | undefined {
+): Readonly<{ location: string }> | undefined {
   const current = stateSnapshotReads.getStore();
   return current?.path === resolveOpenClawStateReadPath(options) ? current.readSource() : undefined;
 }
@@ -117,7 +117,7 @@ export function getActiveOpenClawStateDatabaseReadSnapshot(
 /** Prepare lazy snapshot bytes without blocking asynchronous discovery callers. */
 export async function getActiveOpenClawStateDatabaseReadSnapshotAsync(
   options: OpenClawStateDatabaseOptions = {},
-): Promise<Readonly<{ location: string; cleanClose?: boolean }> | undefined> {
+): Promise<Readonly<{ location: string }> | undefined> {
   const current = stateSnapshotReads.getStore();
   if (current?.path !== resolveOpenClawStateReadPath(options)) {
     return undefined;
@@ -146,17 +146,34 @@ export async function forkActiveOpenClawStateDatabaseReadSnapshot(
   return current.work.track(() => current.forkSource(signal));
 }
 
-/** Use a SQLite snapshot or the PostgreSQL read owner without redirecting live writers. */
-export async function withOpenClawStateDatabaseReadSnapshot<T>(
+type StateReadScopeOptions = OpenClawStateDatabaseOptions & {
+  admissionTimeoutMs?: number;
+  /** Selected reports acquire shared bytes only when a reader actually needs them. */
+  lazy?: boolean;
+  /** Command owners may cancel preparation before the callback acquires its read scope. */
+  signal?: AbortSignal;
+};
+
+/** Retain live read admission; each operation observes its own committed SQLite transaction. */
+export function withOpenClawStateDatabaseReadAdmission<T>(
   operation: () => Promise<T>,
-  options: OpenClawStateDatabaseOptions & {
-    admissionTimeoutMs?: number;
-    reuseCleanClose?: boolean;
-    /** Selected reports acquire shared bytes only when a reader actually needs them. */
-    lazy?: boolean;
-    /** Command owners may cancel preparation before the callback acquires its read scope. */
-    signal?: AbortSignal;
-  } = {},
+  options: Omit<StateReadScopeOptions, "lazy"> = {},
+): Promise<T> {
+  return withLiveStateReads(() => withStateReadScope(operation, options, true));
+}
+
+/** Use a SQLite snapshot or the PostgreSQL read owner without redirecting live writers. */
+export function withOpenClawStateDatabaseReadSnapshot<T>(
+  operation: () => Promise<T>,
+  options: StateReadScopeOptions = {},
+): Promise<T> {
+  return withStateReadScope(operation, options, false);
+}
+
+async function withStateReadScope<T>(
+  operation: () => Promise<T>,
+  options: StateReadScopeOptions,
+  live: boolean,
 ): Promise<T> {
   const inheritedSignal = resolveStateReadCallerSignal();
   const callerSignal =
@@ -189,7 +206,7 @@ export async function withOpenClawStateDatabaseReadSnapshot<T>(
       controller,
       callerSignal,
       admissionTimeoutMs: options.admissionTimeoutMs,
-      reuseCleanClose: options.reuseCleanClose,
+      live,
     });
     let readSucceeded = false;
     const snapshot = Object.assign(
@@ -493,7 +510,7 @@ export function executeExistingOpenClawStateRead<Command extends OpenClawStateRe
     // Active writer observations use the retained worker connection, not a new
     // artifact-preserving copy. Admission and canonical close still own it.
     const read = live
-      ? () => artifactPreservingReads.run(false, () => exitStateReadSnapshot(execute))
+      ? () => withLiveStateReads(() => exitStateReadSnapshot(execute))
       : current
         ? () => exitStateReadSnapshot(execute)
         : execute;
