@@ -451,6 +451,7 @@ const enSettings = {
     unsupportedType: "Unsupported type: {type}. Use Raw mode.",
     structuredSecretRaw: "Structured value (SecretRef) - use Raw mode to edit",
     structuredSecretFile: "Structured value (SecretRef) - edit the config file directly",
+    environmentSecret: "From environment · {name}",
     defaultValue: en.configForm.defaultValue,
     select: "Select...",
     required: "Required",

@@ -6,6 +6,7 @@ import {
 import type { ChannelConfigEdit } from "../../lib/channels/index.ts";
 import {
   pruneEmptyConfigForm,
+  REDACTED_SENTINEL,
   removePathValue,
   setPathValue,
   type JsonSchema,
@@ -29,6 +30,26 @@ export function applyChannelConfigEdits(
     }
   }
   return (root.channels as Record<string, Record<string, unknown>>)[channelId] ?? {};
+}
+
+/** Emptying a field typed over a stored secret keeps the secret; nothing here deletes it. */
+export function emptiesStoredSecret(
+  base: Record<string, unknown> | null,
+  channelId: string,
+  path: ReadonlyArray<string | number>,
+  value: unknown,
+): boolean {
+  if (value !== undefined && value !== "") {
+    return false;
+  }
+  let node: unknown = { channels: { [channelId]: base ?? {} } };
+  for (const segment of path) {
+    node =
+      isRecord(node) || Array.isArray(node)
+        ? (node as Record<string, unknown>)[segment]
+        : undefined;
+  }
+  return node === REDACTED_SENTINEL;
 }
 
 function sameValue(left: unknown, right: unknown): boolean {

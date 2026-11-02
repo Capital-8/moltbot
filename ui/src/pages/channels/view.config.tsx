@@ -5,6 +5,7 @@ import { ConfigTierGroups } from "../../components/config-form.render.tsx";
 import { schemaType, type JsonSchema } from "../../components/config-form.shared.ts";
 import { SettingsLoadingSkeleton } from "../../components/solid/settings-ui.tsx";
 import { formatChannelExtraValue, resolveChannelConfigValue } from "../../lib/channels/index.ts";
+import { configEnvReference } from "../../lib/config-form-utils.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { applyChannelConfigEdits } from "./channel-config-draft.ts";
 import type { ChannelsProps } from "./view.types.ts";
@@ -141,6 +142,10 @@ export function ChannelConfig(params: { channelId: string; props: ChannelsProps 
                         disabled: disabled(),
                         showLabel: false,
                         maskSensitive: true,
+                        replaceStoredSecrets: {
+                          envVar: (path) =>
+                            configEnvReference(params.props.config.configSnapshot?.parsed, path),
+                        },
                         onPatch: (path, next) =>
                           params.props.onConfigPatch(params.channelId, path, next),
                       }}

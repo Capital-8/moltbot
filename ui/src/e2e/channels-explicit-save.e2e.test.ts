@@ -40,7 +40,21 @@ const schema = configSchema(
   { "channels.telegram.botToken": { sensitive: true, advanced: false } },
 );
 
-async function openChannels(page: Page) {
+const storedConfig = {
+  channels: { telegram: { enabled: true, dmPolicy: "pairing", botToken: "__OPENCLAW_REDACTED__" } },
+};
+const storedSnapshot = {
+  ...snapshot,
+  config: storedConfig,
+  sourceConfig: storedConfig,
+  runtimeConfig: storedConfig,
+  raw: JSON.stringify(storedConfig),
+};
+
+async function openChannels(
+  page: Page,
+  current = snapshot as typeof snapshot | typeof storedSnapshot,
+) {
   const gateway = await installMockGateway(page, {
     featureMethods: [...defaultControlUiFeatureMethods, "config.patch"],
     methodResponses: {
@@ -55,7 +69,7 @@ async function openChannels(page: Page) {
         channelDefaultAccountId: {},
       },
       "channels.pairing.list": emptyPairingSnapshot(),
-      "config.get": snapshot,
+      "config.get": current,
       "config.schema": schema,
       "config.patch": { ok: true, config, hash: "channel-config" },
     },
@@ -131,6 +145,38 @@ suite.define(() => {
       await page.getByRole("button", { name: "Discard", exact: true }).click();
       await expect.poll(() => row.textContent()).not.toContain("Unsaved changes");
       expect(await gateway.getRequests("config.patch")).toHaveLength(0);
+    });
+  });
+
+  it("replaces a stored token only with what was typed", async () => {
+    await suite.withPage({ viewport: { width: 1280, height: 900 } }, async ({ page }) => {
+      const { gateway, detail, token } = await openChannels(page, storedSnapshot);
+      const status = detail.getByRole("status");
+      expect(await token.inputValue()).toBe("");
+      expect(await token.getAttribute("readonly")).toBeNull();
+      expect(await token.getAttribute("placeholder")).toBe("••••••••");
+
+      await token.fill(PARTIAL);
+      await expect.poll(() => status.textContent()).toBe("Unsaved changes");
+      await token.fill("");
+      await expect
+        .poll(() => detail.getByRole("status").filter({ hasText: "Unsaved changes" }).count())
+        .toBe(0);
+      expect(await gateway.getRequests("config.patch")).toHaveLength(0);
+
+      await token.fill(PARTIAL);
+      await gateway.deferNext("config.patch");
+      await detail.getByRole("button", { name: "Save", exact: true }).click();
+      const request = await gateway.waitForRequest("config.patch");
+      expect(JSON.parse((request.params as { raw: string }).raw)).toEqual({
+        channels: { telegram: { botToken: PARTIAL } },
+      });
+      await gateway.resolveDeferred("config.patch", {
+        ok: true,
+        config: storedConfig,
+        hash: "channel-config-2",
+      });
+      await expect.poll(() => status.textContent()).toBe("Saved");
     });
   });
 

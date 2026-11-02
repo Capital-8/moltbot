@@ -2,6 +2,7 @@ import { registerListener } from "../../../../src/shared/listeners.js";
 import type { ApplicationContext } from "../../app/context-types.ts";
 import { gatewayPresentationScope } from "../../app/gateway-presentation-scope.ts";
 import { t } from "../../i18n/index.ts";
+import { configEnvReference } from "../config-form-utils.ts";
 import { listen } from "../reactive/listener.ts";
 import { showToast } from "../toast.ts";
 import type { ConfigPatchAck } from "./config-draft-model.ts";
@@ -12,7 +13,12 @@ type ConfigPath = Array<string | number>;
 
 const fieldKey = (path: ConfigPath) => JSON.stringify(path);
 
-export type ConfigSecretFields = {
+/** Names the Gateway environment variable behind a stored secret, if there is one. */
+export type StoredSecretSources = {
+  envVar: (path: ConfigPath) => string | null;
+};
+
+export type ConfigSecretFields = StoredSecretSources & {
   read: (path: ConfigPath) => string | undefined;
   hold: (path: ConfigPath, text: string, label: string) => void;
   release: (path: ConfigPath) => void;
@@ -115,6 +121,7 @@ function createConfigSecretFields(context: SecretFieldsContext): ConfigSecretFie
       },
     );
   return {
+    envVar: (path) => configEnvReference(runtime.state.configSnapshot?.parsed, path),
     read(path) {
       syncScope();
       return entries.get(fieldKey(path))?.text;

@@ -3,6 +3,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { JSX } from "@solidjs/web";
 import { For, createMemo } from "solid-js";
 import { i18n } from "../i18n/index.ts";
+import { isEnvPlaceholder, REDACTED_SENTINEL } from "../lib/config-form-utils.ts";
 import { getLocale, t } from "../lib/reactive/i18n.ts";
 import { createNativeDraft } from "../lib/reactive/native-draft.ts";
 import {
@@ -139,6 +140,7 @@ function ScalarInput(props: {
     path: props.params.path,
     hints: props.params.hints,
     secretFields: props.stepped ? undefined : props.params.secretFields,
+    stored: props.params.value === REDACTED_SENTINEL,
     label: () => String(resolveConfigFieldPresentation(props.params).label),
   }));
   let input: HTMLInputElement | HTMLTextAreaElement | undefined;
@@ -157,21 +159,34 @@ function ScalarInput(props: {
       (sensitiveState?.isRedacted && !masked) ||
       sensitiveState?.sentinelRedacted ||
       isStructuredSecretRef;
-    const effectiveRedacted = storedRedacted && heldText === undefined;
-    const placeholder = effectiveRedacted
-      ? isStructuredSecretRef
-        ? rawAvailable
-          ? t("configForm.structuredSecretRaw")
-          : t("configForm.structuredSecretFile")
-        : masked
-          ? "••••••••"
-          : t("configForm.redactedPlaceholder")
-      : (hint?.placeholder ??
-        (!masked && schema.default !== undefined
-          ? t("configForm.defaultValue", { value: formatConfigValueText(schema.default) })
-          : props.stepped
-            ? undefined
-            : ""));
+    // An explicit Save writes whatever replaces it, and an empty field keeps it. References stay
+    // read-only: typing would swap a SecretRef or ${VAR} for a literal in the config file.
+    const envVar = sensitiveState?.sentinelRedacted
+      ? ((params.secretFields ?? params.replaceStoredSecrets)?.envVar(path) ?? null)
+      : null;
+    const replaceable =
+      Boolean(sensitiveState?.sentinelRedacted) &&
+      envVar === null &&
+      (hold.active() || params.replaceStoredSecrets !== undefined);
+    const effectiveRedacted = storedRedacted && heldText === undefined && !replaceable;
+    const placeholder = replaceable
+      ? "••••••••"
+      : effectiveRedacted
+        ? envVar
+          ? t("configForm.environmentSecret", { name: envVar })
+          : isStructuredSecretRef
+            ? rawAvailable
+              ? t("configForm.structuredSecretRaw")
+              : t("configForm.structuredSecretFile")
+            : masked
+              ? "••••••••"
+              : t("configForm.redactedPlaceholder")
+        : (hint?.placeholder ??
+          (!masked && schema.default !== undefined
+            ? t("configForm.defaultValue", { value: formatConfigValueText(schema.default) })
+            : props.stepped
+              ? undefined
+              : ""));
     const displayValue = storedRedacted
       ? ""
       : !props.stepped && isRecord(value)
@@ -179,8 +194,15 @@ function ScalarInput(props: {
         : (value ?? (params.compact ? schema.default : undefined) ?? "");
     const effectiveValue = value !== undefined ? value : schema.default;
     const initialBranch = scalarValueBranch(effectiveValue);
+    const shownText = heldText ?? (typeof value === "string" ? value : "");
     const effectiveInputType =
-      masked || (hold.active() && !params.revealSensitive && !sensitiveState?.isRevealed)
+      masked ||
+      replaceable ||
+      // An env placeholder names a variable; it is not a secret to hide.
+      (hold.active() &&
+        !params.revealSensitive &&
+        !sensitiveState?.isRevealed &&
+        !isEnvPlaceholder(shownText))
         ? "password"
         : sensitiveState?.isSensitive && !effectiveRedacted
           ? "text"
@@ -231,6 +253,7 @@ function ScalarInput(props: {
       sensitiveState,
       isStructuredSecretRef,
       masked,
+      replaceable,
       effectiveRedacted,
       placeholder,
       effectiveValue,
@@ -251,7 +274,7 @@ function ScalarInput(props: {
       revalidate(this: void, target: HTMLInputElement | HTMLTextAreaElement): void {
         draft.setValidity(
           target,
-          effectiveRedacted
+          effectiveRedacted || (replaceable && target.value === "")
             ? ""
             : inputType === "number" && target instanceof HTMLInputElement
               ? resolveNumericInputState(target, { schema, isRequired }, invalidNumber).message
@@ -406,8 +429,20 @@ function ScalarInput(props: {
     get readonly() {
       return state().effectiveRedacted;
     },
+    get autocomplete() {
+      return state().effectiveInputType === "password" ? "new-password" : undefined;
+    },
+    // A narrow field clips this copy, and the variable's name is what matters.
+    get title() {
+      return state().effectiveRedacted ? state().placeholder : undefined;
+    },
     onClick: () => {
-      if (!state().masked && state().sensitiveState?.isRedacted && !state().isStructuredSecretRef) {
+      if (
+        !state().masked &&
+        !state().replaceable &&
+        state().sensitiveState?.isRedacted &&
+        !state().isStructuredSecretRef
+      ) {
         props.params.onToggleSensitivePath?.(props.params.path);
       }
     },

@@ -32,6 +32,8 @@ type SecretFieldSource = {
   path: Array<string | number>;
   hints: ConfigUiHints;
   secretFields: ConfigSecretFields | undefined;
+  /** The Gateway redacted this value, so it is a secret whatever its marking says. */
+  stored: boolean;
   label: () => string;
 };
 
@@ -39,7 +41,10 @@ type SecretFieldSource = {
 export function createSecretFieldHold(read: () => SecretFieldSource) {
   const active = createMemo(() => {
     const source = read();
-    return source.secretFields !== undefined && isSecretConfigField(source.path, source.hints);
+    return (
+      source.secretFields !== undefined &&
+      (source.stored || isSecretConfigField(source.path, source.hints))
+    );
   });
   const [revision, setRevision] = createSignal(0, { ownedWrite: true });
   const [saving, setSaving] = createSignal(false);

@@ -22,7 +22,7 @@ import { projectMutableSource, projectSource } from "../../lib/reactive/projecti
 import { useVisiblePoll } from "../../lib/reactive/visible-poll.ts";
 import { resolveScrollBehavior } from "../../lib/scroll-behavior.ts";
 import { showToast } from "../../lib/toast.ts";
-import { buildChannelConfigPatch } from "./channel-config-draft.ts";
+import { buildChannelConfigPatch, emptiesStoredSecret } from "./channel-config-draft.ts";
 import { createChannelPluginPresentation } from "./plugin-presentation-loader.ts";
 import { ChannelsView, resolveChannelLabel, resolveChannelOrder } from "./view.tsx";
 import type { ChannelPairingPrompt, ChannelsProps } from "./view.types.ts";
@@ -552,7 +552,15 @@ export function ChannelsPage() {
       onShowAdvancedSettings: setShowAdvancedSettings,
       onConfigPatch: (channelId, path, value) => {
         setSavedChannel(null);
-        channelCapability.editConfig(channelId, { path, value });
+        const saved = resolveChannelConfigValue(
+          context.runtimeConfig.state.configForm ?? {},
+          channelId,
+        );
+        if (emptiesStoredSecret(saved, channelId, path, value)) {
+          channelCapability.restoreConfigField(channelId, path);
+        } else {
+          channelCapability.editConfig(channelId, { path, value });
+        }
       },
       onConfigSave: (channelId) => void runMutation("config", saveChannelConfig(channelId)),
       onConfigReload: (channelId) => void reloadChannelConfig(channelId),

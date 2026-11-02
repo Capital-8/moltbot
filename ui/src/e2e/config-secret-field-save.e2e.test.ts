@@ -39,11 +39,20 @@ const schema = configSchema(
   },
 );
 
-async function openForm(page: Page) {
+const storedConfig = { logging: { level: "info", apiToken: "__OPENCLAW_REDACTED__" } };
+const storedSnapshot = {
+  ...snapshot,
+  config: storedConfig,
+  sourceConfig: storedConfig,
+  runtimeConfig: storedConfig,
+  raw: JSON.stringify(storedConfig),
+};
+
+async function openForm(page: Page, current = snapshot as typeof snapshot | typeof storedSnapshot) {
   const gateway = await installMockGateway(page, {
     featureMethods: [...defaultControlUiFeatureMethods, "config.patch", "config.set"],
     methodResponses: {
-      "config.get": snapshot,
+      "config.get": current,
       "config.schema": schema,
       "config.set": { ok: true, config, hash: "base" },
       "config.patch": { ok: true, config, hash: "base" },
@@ -97,6 +106,43 @@ suite.define(() => {
       });
       await page.getByRole("status").filter({ hasText: "Saved" }).first().waitFor();
       expect(await save.count()).toBe(0);
+    });
+  });
+
+  it("replaces a stored secret on Save, and leaves it alone on Cancel", async () => {
+    await suite.withPage({ viewport: { width: 1280, height: 900 } }, async ({ page }) => {
+      const { gateway, token } = await openForm(page, storedSnapshot);
+      const save = page.getByRole("button", { name: "Save: Api Token", exact: true });
+      expect(await token.inputValue()).toBe("");
+      expect(await token.getAttribute("readonly")).toBeNull();
+      expect(await token.getAttribute("placeholder")).toBe("••••••••");
+
+      await token.fill(PARTIAL);
+      await page.getByRole("button", { name: "Cancel: Api Token", exact: true }).click();
+      await expect.poll(() => save.count()).toBe(0);
+      expect(await token.inputValue()).toBe("");
+      await token.fill(PARTIAL);
+      await token.fill("");
+      await expect.poll(() => save.count()).toBe(0);
+      await page.waitForTimeout(1200);
+      expect(await gateway.getRequests("config.patch")).toHaveLength(0);
+      expect(await gateway.getRequests("config.set")).toHaveLength(0);
+
+      await token.fill(PARTIAL);
+      await gateway.deferNext("config.patch");
+      await save.click();
+      const request = await gateway.waitForRequest("config.patch");
+      expect(JSON.parse((request.params as { raw: string }).raw)).toEqual({
+        logging: { apiToken: PARTIAL },
+      });
+      await gateway.resolveDeferred("config.patch", {
+        ok: true,
+        config: storedConfig,
+        hash: "next",
+      });
+      await page.getByRole("status").filter({ hasText: "Saved" }).first().waitFor();
+      expect(await token.inputValue()).toBe("");
+      expect(await token.getAttribute("readonly")).toBeNull();
     });
   });
 

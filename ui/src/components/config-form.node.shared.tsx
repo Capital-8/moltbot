@@ -282,8 +282,14 @@ export function JsonTextareaControl(props: {
     path: props.path,
     hints: props.hints ?? {},
     secretFields: props.secretFields,
+    stored: props.sensitiveState.sentinelRedacted,
     label: () => props.ariaLabel,
   }));
+  const envVar = () =>
+    props.sensitiveState.sentinelRedacted ? (props.secretFields?.envVar(props.path) ?? null) : null;
+  const replaceable = () =>
+    props.sensitiveState.sentinelRedacted && envVar() === null && hold.active();
+  const lockedRedacted = () => props.sensitiveState.isRedacted && !replaceable();
   let textarea: HTMLTextAreaElement | undefined;
   const storedFallback = createMemo(() => (props.sensitiveState.isRedacted ? "" : props.fallback));
   const renderedFallback = createMemo(() => hold.text() ?? storedFallback());
@@ -340,26 +346,30 @@ export function JsonTextareaControl(props: {
         textarea = element;
         draft.ref(element);
       }}
-      class={["settings-input", { "cfg-redacted": props.sensitiveState.isRedacted }]}
+      class={["settings-input", { "cfg-redacted": lockedRedacted() }]}
       aria-label={props.ariaLabel}
       aria-required={configFieldRequiresInput(props) ? "true" : undefined}
       aria-describedby={[props.descriptionId, errorId()].filter(Boolean).join(" ") || undefined}
       aria-invalid="false"
       placeholder={
-        props.sensitiveState.isRedacted
-          ? t("configForm.redactedPlaceholder")
-          : t("configForm.jsonValue")
+        replaceable()
+          ? "••••••••"
+          : envVar()
+            ? t("configForm.environmentSecret", { name: envVar()! })
+            : props.sensitiveState.isRedacted
+              ? t("configForm.redactedPlaceholder")
+              : t("configForm.jsonValue")
       }
       rows={props.rows}
       disabled={props.disabled}
-      readonly={props.sensitiveState.isRedacted}
+      readonly={lockedRedacted()}
       onClick={() => {
-        if (props.sensitiveState.isRedacted) {
+        if (lockedRedacted()) {
           props.onToggleSensitivePath?.(props.path);
         }
       }}
       onInput={(event) => {
-        if (!props.sensitiveState.isRedacted) {
+        if (!lockedRedacted()) {
           if (hold.active()) {
             hold.edit(event.currentTarget.value, storedFallback());
           }

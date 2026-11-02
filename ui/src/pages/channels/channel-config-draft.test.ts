@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyChannelConfigEdits, buildChannelConfigPatch } from "./channel-config-draft.ts";
+import {
+  applyChannelConfigEdits,
+  buildChannelConfigPatch,
+  emptiesStoredSecret,
+} from "./channel-config-draft.ts";
 
 const schema = {
   type: "object",
@@ -85,5 +89,23 @@ describe("channel config draft", () => {
         schema,
       }),
     ).toBeNull();
+  });
+});
+
+describe("emptiesStoredSecret", () => {
+  const base = { botToken: "__OPENCLAW_REDACTED__", proxy: "http://x" };
+  const tokenPath = ["channels", "telegram", "botToken"];
+
+  it("keeps a stored secret when its field is emptied", () => {
+    expect(emptiesStoredSecret(base, "telegram", tokenPath, "")).toBe(true);
+    expect(emptiesStoredSecret(base, "telegram", tokenPath, undefined)).toBe(true);
+  });
+
+  it("leaves typed values and other fields as edits", () => {
+    expect(emptiesStoredSecret(base, "telegram", tokenPath, "new")).toBe(false);
+    expect(emptiesStoredSecret(base, "telegram", ["channels", "telegram", "proxy"], "")).toBe(
+      false,
+    );
+    expect(emptiesStoredSecret(null, "telegram", tokenPath, "")).toBe(false);
   });
 });
