@@ -296,7 +296,7 @@ export function SessionStorageSettings(props: SettingsProps) {
           control={<SettingsValue value={storageSize(totals().embedded)} />}
         />
         {inventoryProps.status.agents.length > 1 ? (
-          <SettingsDisclosure nested title={t("configView.sessionStorage.byAgent")}>
+          <SettingsDisclosure quiet title={t("configView.sessionStorage.byAgent")}>
             <For each={inventoryProps.status.agents} keyed={(agent) => agent.agentId}>
               {(agent) => (
                 <SettingsRow

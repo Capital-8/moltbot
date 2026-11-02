@@ -4,8 +4,8 @@ import { Icon } from "./icon.tsx";
 
 /**
  * One disclosure for settings: a row that opens to more rows in the same group.
- * `nested` puts that row inside a surrounding group, and `sections` opens whole
- * settings sections below the row, since a group can't hold other groups.
+ * `quiet` is for details inside a surrounding group: a muted row with indented subrows.
+ * `sections` opens whole settings sections below the row, since a group can't hold other groups.
  */
 export function SettingsDisclosure(props: {
   id?: string;
@@ -13,7 +13,7 @@ export function SettingsDisclosure(props: {
   title: JSX.Element;
   description?: JSX.Element;
   open?: boolean;
-  nested?: boolean;
+  quiet?: boolean;
   sections?: boolean;
   onToggle?: JSX.EventHandler<HTMLDetailsElement, Event>;
   children?: JSX.Element;
@@ -23,7 +23,7 @@ export function SettingsDisclosure(props: {
       id={props.id}
       class={[
         "settings-disclosure",
-        { "settings-group": !props.nested && !props.sections },
+        { "settings-group": !props.quiet && !props.sections },
         props.class,
       ]}
       open={props.open}
@@ -36,7 +36,9 @@ export function SettingsDisclosure(props: {
         ]}
       >
         <div class="settings-row__text">
-          <span class="settings-row__title">{props.title}</span>
+          <span class={props.quiet ? "settings-row__desc" : "settings-row__title"}>
+            {props.title}
+          </span>
           <Show when={props.description}>
             <span class="settings-row__desc">{props.description}</span>
           </Show>
@@ -49,7 +51,7 @@ export function SettingsDisclosure(props: {
       </summary>
       {props.sections ? (
         <div class="settings-stack settings-disclosure__sections">{props.children}</div>
-      ) : props.nested ? (
+      ) : props.quiet ? (
         <div class="settings-subrows">{props.children}</div>
       ) : (
         props.children
