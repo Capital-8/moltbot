@@ -80,3 +80,18 @@
     --skill-reader-inset: var(--space-4);
   }
 }
+
+.skill-library-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.skill-library-details > .settings-disclosure__summary {
+  padding-inline: 0;
+}
+
+.skill-library-details dl {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--control-ui-text-sm);
+}
