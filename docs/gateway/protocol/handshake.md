@@ -197,6 +197,12 @@ needs a restart. `config.get.hash` is the opaque authored revision used by confi
 write conflict guards. It covers root-file bytes and the captured identities and
 content of included files.
 
+Clients with `operator.admin` also receive the running Gateway's `authMode`,
+`bindHost`, and `tailscaleMode`. These include startup flags such as `--bind`
+and `--tailscale`, which the config file can't show. Older Gateways omit
+`bindHost` and `tailscaleMode`, so clients must not infer exposure from their
+absence.
+
 The snapshot's optional `controlUiIdentityUrl` advertises the active Gateway's
 HTTPS dashboard URL when it uses trusted-proxy or Tailscale Serve identity.
 Operator clients can open this URL for personal browser sign-in instead of
