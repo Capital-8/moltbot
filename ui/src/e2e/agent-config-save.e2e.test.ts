@@ -119,8 +119,14 @@ suite.define(() => {
       );
       const writesBeforeRetry = (await gateway.getRequests("config.set")).length;
       expect(writesBeforeRetry).toBe(writesBeforeReconnect + 1);
+      await gateway.deferNext("config.set");
       await indicator.getByRole("button", { name: "Retry", exact: true }).click();
-      await saveParams(gateway, writesBeforeRetry);
+      const retried = await saveParams(gateway, writesBeforeRetry);
+      // The initial read-error fixture has no stateful config store; supply its acknowledgement.
+      await gateway.resolveDeferred("config.set", {
+        config: JSON.parse(String(retried.raw)),
+        hash: "retried-agent-config",
+      });
       await expect.poll(() => indicator.textContent()).not.toContain("Save failed");
 
       const writesBeforeFreshEdit = (await gateway.getRequests("config.set")).length;
@@ -132,7 +138,6 @@ suite.define(() => {
       };
       expect(JSON.parse(String(params.raw))).toEqual(savedConfig);
       expect(await gateway.getRequests("config.set")).toHaveLength(writesBeforeFreshEdit + 1);
-      // The initial read-error fixture has no stateful config store; supply its acknowledgement.
       await gateway.resolveDeferred("config.set", {
         config: savedConfig,
         hash: "saved-agent-config",
