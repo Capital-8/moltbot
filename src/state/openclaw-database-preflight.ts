@@ -59,7 +59,7 @@ import {
 } from "./openclaw-state-db-contract.js";
 import {
   executeExistingOpenClawStateRead,
-  getActiveOpenClawStateDatabaseReadSnapshot,
+  getActiveOpenClawStateDatabaseReadSnapshotAsync,
 } from "./openclaw-state-db-readonly.js";
 import * as schemaRead from "./openclaw-state-db-schema-migration-required.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
@@ -293,7 +293,7 @@ export async function preflightOpenClawDatabaseSchemas(
         deletionJournal = read.inspection.deletionJournal ?? deletionJournal;
       } else {
         // Reuse the admitted source: live at startup, private for offline inspection.
-        const activeSnapshot = getActiveOpenClawStateDatabaseReadSnapshot({
+        const activeSnapshot = await getActiveOpenClawStateDatabaseReadSnapshotAsync({
           env: options.env,
         });
         const assertStateSource = activeSnapshot ? undefined : assertPreparedStateSchema;

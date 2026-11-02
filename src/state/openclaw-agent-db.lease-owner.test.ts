@@ -23,7 +23,8 @@ import {
 import {
   assertNoOpenClawAgentDatabaseLeasesReadOnly,
   readActiveOpenClawAgentDatabaseLeasesReadOnly,
-} from "./openclaw-agent-db-lease.js";
+  readActiveOpenClawAgentDatabaseLeasesInDatabase,
+} from "./openclaw-agent-db-lease-inspection.js";
 import { recordOpenClawAgentDatabaseOpenFailure } from "./openclaw-agent-db-lifecycle.js";
 import { retainOpenClawAgentDatabaseReadOnly } from "./openclaw-agent-db-readonly.js";
 import { getOpenClawAgentDatabaseValidation } from "./openclaw-agent-db-validation-cache.js";
@@ -80,18 +81,18 @@ describe("agent database lease acquisition owner", () => {
     { cached: false, live: true },
   ])(
     "observes live leases before maintenance (cached: $cached, live: $live)",
-    ({ cached, live }) => {
+    async ({ cached, live }) => {
       const { env } = createOwner();
       const agent = openOpenClawAgentDatabase({ agentId: "main", env });
       if (!cached) {
         closeOpenClawStateDatabaseForTest();
       }
-      const snapshot = vi.spyOn(sqliteSnapshots, "prepareSqliteReadOnlyLocationSync");
-      const inspect = () => {
-        expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([
+      const snapshot = vi.spyOn(sqliteSnapshots, "prepareSqliteReadOnlyLocation");
+      const inspect = async () => {
+        expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([
           expect.objectContaining({ agent_id: "main", path: agent.path, owner_pid: process.pid }),
         ]);
-        expect(() => assertNoOpenClawAgentDatabaseLeasesReadOnly({ env })).toThrow(
+        await expect(assertNoOpenClawAgentDatabaseLeasesReadOnly({ env })).rejects.toThrow(
           "database is still open in process",
         );
 
@@ -99,14 +100,14 @@ describe("agent database lease acquisition owner", () => {
         if (!cached) {
           closeOpenClawStateDatabaseForTest();
         }
-        expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
-        expect(() => assertNoOpenClawAgentDatabaseLeasesReadOnly({ env })).not.toThrow();
+        expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
+        await expect(assertNoOpenClawAgentDatabaseLeasesReadOnly({ env })).resolves.toBeUndefined();
       };
       if (live) {
-        withLiveStateReads(inspect);
+        await withLiveStateReads(inspect);
         expect(snapshot).not.toHaveBeenCalled();
       } else {
-        inspect();
+        await inspect();
         if (!cached) {
           expect(snapshot).toHaveBeenCalled();
         }
@@ -425,7 +426,9 @@ describe("openclaw agent database handle cache", () => {
           return terminate(pid, signal);
         }
         expect(database.db.isOpen).toBe(true);
-        expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
+        expect(
+          readActiveOpenClawAgentDatabaseLeasesInDatabase(openOpenClawStateDatabase({ env }).db),
+        ).toHaveLength(1);
         expect(readSqliteDatabaseWriteRevision(database.db)).toBe(revision);
         return true;
       });
@@ -438,7 +441,7 @@ describe("openclaw agent database handle cache", () => {
       try {
         evict?.();
         expect(database.db.isOpen).toBe(true);
-        expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
+        expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
         expect(readSqliteDatabaseWriteRevision(database.db)).toBe(revision);
       } finally {
         if (!replaced) {
@@ -457,7 +460,7 @@ describe("openclaw agent database handle cache", () => {
         expect(Atomics.load(new Int32Array(validation.valid), 0)).toBe(1);
         expect(kill).not.toHaveBeenCalledWith(process.pid, "SIGKILL");
         expect(database.db.isOpen).toBe(false);
-        expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
+        expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
       }
     },
   );
@@ -514,33 +517,33 @@ describe("openclaw agent database handle cache", () => {
     expect(operation).not.toHaveBeenCalled();
   });
 
-  it("releases a CLI one-shot's idle lease for Doctor but keeps a borrowed one", () => {
+  it("releases a CLI one-shot's idle lease for Doctor but keeps a borrowed one", async () => {
     vi.spyOn(databaseProcessRole, "getDatabaseProcessRole").mockReturnValue("cli-oneshot");
-    const leasedAgents = () =>
-      readActiveOpenClawAgentDatabaseLeasesReadOnly({ env }).map((lease) => lease.agent_id);
+    const leasedAgents = async () =>
+      (await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).map((lease) => lease.agent_id);
     const idle = openOpenClawAgentDatabase({ agentId: "one-shot-idle", env });
     const borrowed = borrowOpenClawAgentDatabase({ agentId: "one-shot-busy", env });
     try {
       vi.advanceTimersByTime(30_000 - 1);
-      expect(leasedAgents().toSorted()).toEqual(["one-shot-busy", "one-shot-idle"]);
+      expect((await leasedAgents()).toSorted()).toEqual(["one-shot-busy", "one-shot-idle"]);
       vi.advanceTimersByTime(1);
       expect(idle.db.isOpen).toBe(false);
-      expect(leasedAgents()).toEqual(["one-shot-busy"]);
+      expect(await leasedAgents()).toEqual(["one-shot-busy"]);
     } finally {
       borrowed.release();
     }
     vi.advanceTimersByTime(30_000);
-    expect(leasedAgents()).toEqual([]);
+    expect(await leasedAgents()).toEqual([]);
   });
 
-  it("keeps a Gateway's idle lease for the shared retention window", () => {
+  it("keeps a Gateway's idle lease for the shared retention window", async () => {
     vi.spyOn(databaseProcessRole, "getDatabaseProcessRole").mockReturnValue("gateway");
     const database = openOpenClawAgentDatabase({ agentId: "gateway-idle", env });
     vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS - 1);
     expect(database.db.isOpen).toBe(true);
-    expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
+    expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
+    expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
   });
 
   it("keeps maintenance handles through CLI idle expiry and seals them at scope release", async () => {
@@ -569,7 +572,7 @@ describe("openclaw agent database handle cache", () => {
       expect(databases.map((database) => database.db.isOpen)).toEqual([true, true]);
       vi.useRealTimers();
       await lock!.release();
-      expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
+      expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
       for (const database of databases) {
         expect(database.db.isOpen).toBe(false);
         expect(readSqliteDatabaseCleanClose(database.path)).toBe(true);
@@ -584,7 +587,7 @@ describe("openclaw agent database handle cache", () => {
     }
   });
 
-  it("reinstalls idle eviction when a borrower reads a cached handle without a timer", () => {
+  it("reinstalls idle eviction when a borrower reads a cached handle without a timer", async () => {
     const options = { agentId: "borrower-idle-rearm", env };
     const database = openOpenClawAgentDatabase(options);
     agentDatabaseBorrowers.idleTimers.get(database.db)?.[Symbol.dispose]();
@@ -595,7 +598,7 @@ describe("openclaw agent database handle cache", () => {
     expect(database.db.isOpen).toBe(true);
     vi.advanceTimersByTime(1);
     expect(database.db.isOpen).toBe(false);
-    expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
+    expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
   });
 
   it("keeps an open transaction through expiry and evicts after it finishes", () => {
@@ -612,7 +615,7 @@ describe("openclaw agent database handle cache", () => {
     expect(database.db.isOpen).toBe(false);
   });
 
-  it("shares idle custody between read claims and the writable borrower", () => {
+  it("shares idle custody between read claims and the writable borrower", async () => {
     const options = { agentId: "completion", env };
     const database = openOpenClawAgentDatabase(options);
     const retained = retainOpenClawAgentDatabaseReadOnly(options);
@@ -636,14 +639,14 @@ describe("openclaw agent database handle cache", () => {
       second.claim.release();
       vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS);
       expect(database.db.isOpen).toBe(true);
-      expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
+      expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toHaveLength(1);
       writer.release();
       vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS - 1);
       expect(database.db.isOpen).toBe(true);
       vi.advanceTimersByTime(1);
       expect(database.db.isOpen).toBe(false);
       expect(retained.claim.isCurrent()).toBe(false);
-      expect(readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
+      expect(await readActiveOpenClawAgentDatabaseLeasesReadOnly({ env })).toEqual([]);
     } finally {
       retained.claim.release();
       second.claim.release();

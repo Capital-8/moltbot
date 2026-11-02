@@ -7,13 +7,11 @@ import {
   StateDatabaseOfflineMaintenanceError,
 } from "../infra/gateway-state-owner-record.js";
 import { createSqliteLifecycleAggregateError } from "../infra/sqlite-lifecycle-errors.js";
-import { captureSqlitePrivateSnapshotFamily } from "../infra/sqlite-private-snapshot-fork.js";
 import {
   deferSqliteSnapshotCleanupAfterRead,
   retainSnapshotTempDirectory,
   SqliteSnapshotCleanupError,
 } from "../infra/sqlite-readonly-location-cleanup.js";
-import { prepareSqliteReadOnlyLocationSyncInProcess } from "../infra/sqlite-readonly-location.js";
 import type {
   AsyncPreparedSqliteReadOnlyLocation,
   RetainedSqliteSnapshotPreparation,
@@ -35,10 +33,6 @@ import {
   openClawStateDatabaseCache,
 } from "./openclaw-state-db-cache.js";
 import { existingPathOrUndefined } from "./openclaw-state-db.paths.js";
-import {
-  getOpenClawDatabaseMaintenanceScope,
-  maintenanceOwnerMayCopySourcesInProcess,
-} from "./openclaw-state-maintenance-context.js";
 import { captureOpenClawStateReadWorkerContext } from "./openclaw-state-worker-context.js";
 
 const log = createSubsystemLogger("state/db");
@@ -175,18 +169,6 @@ export async function prepareOpenClawStateReadSnapshotSource({
         };
       } else if (live) {
         prepared = { location: pathname, cleanupAsync: async () => true };
-      } else if (
-        artifactPreserving &&
-        maintenanceOwnerMayCopySourcesInProcess(getOpenClawDatabaseMaintenanceScope(), pathname) &&
-        !openClawStateDatabaseCache.isOpenClawStateDatabaseOpen(pathname)
-      ) {
-        prepared = prepareSqliteReadOnlyLocationSyncInProcess(pathname);
-        if (prepared.cleanupRoot) {
-          prepared.privateFamily = captureSqlitePrivateSnapshotFamily(
-            prepared.location,
-            prepared.cleanupRoot,
-          );
-        }
       } else if (artifactPreserving) {
         // Share only the retained read producer, never a generic mutable snapshot lease.
         preparation = startSqliteReadOnlyLocationAsync(pathname, {
@@ -198,7 +180,7 @@ export async function prepareOpenClawStateReadSnapshotSource({
       } else {
         prepared = await prepareSqliteReadOnlyLocation(pathname, {
           preserveSourceArtifacts: artifactPreserving,
-          signal: controller.signal,
+          signal: admissionSignal,
         });
       }
       retainSource(prepared);
