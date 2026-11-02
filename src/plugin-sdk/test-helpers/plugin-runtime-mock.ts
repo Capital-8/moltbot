@@ -546,6 +546,7 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides = 
     subagent: {
       complete: vi.fn(),
       forkSession: vi.fn(),
+      runForkedTurn: vi.fn(),
       run: vi.fn(),
       waitForRun: vi.fn(),
       getSessionMessages: vi.fn(),
