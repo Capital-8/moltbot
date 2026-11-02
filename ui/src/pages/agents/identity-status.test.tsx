@@ -106,11 +106,10 @@ it("switches identity editors while the previous agent save is pending", async (
   );
   const mounted = mountSolid(() => {
     const props = createMemo(() => page.read());
-    return <Agents {...props()} identitySavePending={page.identitySavePending()} />;
+    return <Agents {...props()} />;
   });
   const input = () =>
     mounted.container.querySelector<HTMLInputElement>(".agent-identity-editor__fields input")!;
-  const saving = () => mounted.container.querySelector('.agent-identity-editor [role="status"]');
   const edit = (name: string) => {
     input().value = name;
     input().dispatchEvent(new Event("input", { bubbles: true }));
@@ -124,7 +123,6 @@ it("switches identity editors while the previous agent save is pending", async (
         name: "Main draft",
       }),
     );
-    await waitForSolid(() => expect(saving()?.textContent).toContain("Saving"));
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -135,13 +133,11 @@ it("switches identity editors while the previous agent save is pending", async (
     page.setRouteData(routeData);
     await waitForSolid(() => {
       expect(input().value).toBe("Main draft");
-      expect(saving()?.textContent).toContain("Saving");
     });
     selection.set("research");
     await waitForSolid(() => {
       expect(input().value).toBe("Research");
       expect(input().disabled).toBe(false);
-      expect(saving()).toBeNull();
     });
     pending.resolve();
     await pending.promise;
@@ -154,7 +150,6 @@ it("switches identity editors while the previous agent save is pending", async (
     selection.set("research");
     await waitForSolid(() => {
       expect(input().value).toBe("Research");
-      expect(saving()).toBeNull();
     });
     retiredBeforePresentation.resolve();
   } finally {

@@ -9,6 +9,7 @@ import {
   updateConfigFormValue,
   updateConfigRawValue,
 } from "./config-draft-model.ts";
+import { createConfigExternalSaveStatus } from "./config-external-save-status.ts";
 import { createConfigFieldDiscard } from "./config-field-discard.ts";
 import {
   executeConfigExternalMutation,
@@ -67,6 +68,7 @@ export function createConfigWriteCoordinator({
   let writesSuspended = false;
   let refreshWriteAdmission: (() => Promise<void>) | undefined;
   let writesResumed: Deferred | null = null;
+  const externalSaves = createConfigExternalSaveStatus(state, publish);
   const canDispatchConfigMutation = (method: ConfigMethod): boolean => {
     const allowed = canCallConfigMethod(method);
     if (!allowed && state.connected) {
@@ -389,6 +391,7 @@ export function createConfigWriteCoordinator({
       fieldDiscard.invalidate();
       reconciliation.retireConnection();
       patches.clear();
+      externalSaves.clear();
       const draftBelongsToPreviousConnection =
         state.configFormDirty || inFlight !== null || unacknowledged !== null;
       if (clientChanged || inFlight !== null || unacknowledged !== null) {
@@ -547,7 +550,7 @@ export function createConfigWriteCoordinator({
       hasInFlightWrite: () => inFlight !== null,
       holdAutoSave,
       drainPendingWrites,
-      clearPatches: patches.clear,
+      clearPatches: () => externalSaves.discard(patches.clear),
       run,
       mutate,
       clearDraftConnection: () => {
@@ -599,6 +602,7 @@ export function createConfigWriteCoordinator({
         () => canDispatchConfigMutation("config.set") && (options.canDispatch?.() ?? true),
       ),
     retry: () =>
+      externalSaves.retry() ??
       patches.retry(() =>
         reconciliation.latestSubmission?.operation === "apply" ? writes.apply() : writes.save(),
       ),
@@ -659,7 +663,7 @@ export function createConfigWriteCoordinator({
               state,
               mutationClient,
               mutationConnectionEpoch,
-              task,
+              externalSaves.track(task, options),
               options,
               () => run(() => refreshConfigAfterMutation(state, { draftWrites: writes }), "config"),
               onSubmitted,
@@ -675,6 +679,7 @@ export function createConfigWriteCoordinator({
           }),
           { flushScheduledDraft: true },
         );
+        externalSaves.settle(result, options, mutationClient, mutationConnectionEpoch);
         if (
           !(
             options.waitForWritesResumed &&

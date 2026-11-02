@@ -65,11 +65,11 @@ export type AgentsProps = Omit<
     | "configLoading"
     | "configSaving"
     | "configFormDirty"
+    | "configAutoSaveStatus"
     | "lastError"
   >;
   overview: Omit<AgentsPageView["overview"], "modelSelectionPolicy" | "modelCatalogRetired"> &
     Partial<Pick<AgentsPageView["overview"], "modelSelectionPolicy" | "modelCatalogRetired">>;
-  identitySavePending?: boolean;
   onOpenMemoryImport?: AgentsPageView["onOpenMemoryImport"];
   onOpenMemorySettings?: AgentsPageView["onOpenMemorySettings"];
 };
@@ -308,7 +308,13 @@ export function Agents(props: AgentsProps) {
                 role="tabpanel"
                 aria-labelledby={`agents-tab-${props.readData().agentsPanel}`}
               >
-                <Show when={!props.config.configSaving}>
+                {/* A failed write is reported by the save status, without moving this page. */}
+                <Show
+                  when={
+                    !props.config.configSaving &&
+                    !["error", "rejected", "conflict"].includes(props.config.configAutoSaveStatus)
+                  }
+                >
                   <ConfigError message={props.config.lastError}>
                     {(message) => (
                       <div class="callout danger" role="alert">
@@ -334,7 +340,6 @@ export function Agents(props: AgentsProps) {
                           {(agentId) => (
                             <AgentOverview
                               {...props.overview}
-                              identitySavePending={props.identitySavePending ?? false}
                               readData={props.readData}
                               {...configActions()}
                               agent={agent()}
