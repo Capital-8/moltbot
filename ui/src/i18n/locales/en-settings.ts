@@ -1973,7 +1973,6 @@ const enSettings = {
       title: "Connection",
       gateway: "Gateway",
       status: "Status",
-      assistant: "Assistant",
     },
     root: "<root>",
     itemCount: "[{count} item]",
