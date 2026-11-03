@@ -1,10 +1,13 @@
+import { NODE_MCP_TOOLS_CALL_COMMAND } from "../infra/node-commands.js";
 import { canInvokeNodeMcpLocally } from "./node-command-policy.js";
+import { NodeMcpElicitationRegistry } from "./node-mcp-elicitation.js";
 import type { NodeSession } from "./node-session.types.js";
 import { WEBSOCKET_OPEN_READY_STATE } from "./server-constants.js";
 import { closeGatewayTransportWithGrace } from "./server/connection-transport-close.js";
 
-/** Keep the command permission on the physical supervisor that received the grant. */
-export class NodeWorkerLocalMcpPolicy {
+/** Own MCP permissions and pending questions for this Gateway’s paired node sessions. */
+export class NodeMcpPolicy {
+  readonly elicitation = new NodeMcpElicitationRegistry();
   private readonly permissions = new WeakMap<NodeSession, boolean>();
 
   constructor(
@@ -24,6 +27,7 @@ export class NodeWorkerLocalMcpPolicy {
 
   retire(node: NodeSession | undefined): void {
     if (node) {
+      this.elicitation.retire(node);
       this.setAvailable(node, false);
     }
   }
@@ -53,7 +57,10 @@ export class NodeWorkerLocalMcpPolicy {
     }
   }
 
-  refresh(node: NodeSession): void {
+  refresh(node: NodeSession, questionsEnabled: boolean): void {
+    if (!questionsEnabled || !node.commands.includes(NODE_MCP_TOOLS_CALL_COMMAND)) {
+      this.elicitation.retire(node);
+    }
     if (this.permissions.has(node)) {
       this.setAvailable(node, true);
     }

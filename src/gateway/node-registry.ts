@@ -34,6 +34,7 @@ import { isSerializedEventPayload, type SerializedEventPayload } from "./node-ev
 import { sendNodeWebSocketEvent } from "./node-event-send.js";
 import { serializeNodeEvent } from "./node-invoke-request.js";
 import type { NodeInvokeParams, NodeInvokeResult } from "./node-invoke.types.js";
+import { NodeMcpPolicy } from "./node-mcp-policy.js";
 import {
   publishNodeSessionPluginTools,
   removeConnectedNodePluginTools,
@@ -80,7 +81,6 @@ import type {
   NodeSessionConnectParams,
 } from "./node-session.types.js";
 import { normalizeNodeSkillDescriptors } from "./node-skill-descriptors.js";
-import { NodeWorkerLocalMcpPolicy } from "./node-worker-local-mcp-policy.js";
 import { WEBSOCKET_OPEN_READY_STATE } from "./server-constants.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
@@ -210,10 +210,7 @@ export class NodeRegistry {
     this.nodesById.get(nodeId),
   );
   private pairingGenerationEventChains = new Map<string, Promise<void>>();
-  private readonly localMcpPolicy = new NodeWorkerLocalMcpPolicy(
-    this.nodesById,
-    this.sendEventToSession.bind(this),
-  );
+  readonly mcp = new NodeMcpPolicy(this.nodesById, this.sendEventToSession.bind(this));
   private committedConfig: OpenClawConfig | undefined;
   private hostStatsCheckpoints: NodeHostStatsCheckpoints;
 
@@ -249,7 +246,7 @@ export class NodeRegistry {
           ? this.sendEventToSession(current, event, payload)
           : false;
       },
-      setLocalMcpAvailable: this.localMcpPolicy.setAvailableForConnection,
+      setLocalMcpAvailable: this.mcp.setAvailableForConnection,
       rememberAuthorizedSystemRunEvent: (event) => this.systemRunEvents.remember(event),
       publishActiveNodeContext: () => this.publishActiveNodeContext(),
       closeHostStats: () => this.hostStatsCheckpoints.close(),
@@ -374,7 +371,7 @@ export class NodeRegistry {
       displayName: node.displayName,
       skills: node.nodeSkills,
     });
-    this.localMcpPolicy.refresh(node);
+    this.mcp.refresh(node, cfg?.mcp?.apps?.enabled === true);
   }
 
   private isCommandAllowed(nodeId: string, command: string, liveConfig?: OpenClawConfig): boolean {
@@ -498,7 +495,7 @@ export class NodeRegistry {
       skills: [],
       withheldCommands: connect.withheldCommands ?? [],
     });
-    this.localMcpPolicy.retire(previousSession);
+    this.mcp.retire(previousSession);
     const replacesPresence = previousSession?.lastActiveAtMs !== undefined;
     forgetNodeRunnerInventory(this, client.connId);
     this.nodesById.set(nodeId, session);
@@ -545,7 +542,7 @@ export class NodeRegistry {
     }
     const node = this.nodesById.get(nodeId);
     const unregistersCurrentNode = node?.connId === connId;
-    this.localMcpPolicy.retire(unregistersCurrentNode ? node : undefined);
+    this.mcp.retire(unregistersCurrentNode ? node : undefined);
     this.nodesByConn.delete(connId);
     this.eventTransportsByConn.delete(connId);
     forgetNodeRunnerInventory(this, connId);
@@ -648,7 +645,7 @@ export class NodeRegistry {
     if (this.nodesById.get(node.nodeId) !== node || node.client.invalidated === true) {
       return false;
     }
-    this.localMcpPolicy.retire(node);
+    this.mcp.retire(node);
     node.client.invalidated = true;
     this.hostStatsCheckpoints.forget(node);
     invalidateNodeCatalog(this);
@@ -997,7 +994,7 @@ export class NodeRegistry {
       this.hostStatsCheckpoints.forget(node);
       node.hostStats = undefined;
       node.pairingGeneration = generationTransition.nextPairingGeneration;
-      this.localMcpPolicy.retire(node);
+      this.mcp.retire(node);
     }
     this.refreshSessionPolicy(node);
 

@@ -51,8 +51,8 @@ import {
 } from "./worker-turn-payload.js";
 import { prepareWorkerTurnPrompt, WORKER_CONTEXT_ENGINE_HOST } from "./worker-turn-prompt.js";
 import {
-  collectWorkerMcpGrants,
   filterWorkerPlacementTools,
+  prepareWorkerLaunchTools,
   retainWorkerTurnTools,
   resolveLocalMcpNodeId,
 } from "./worker-turn-tool-surface.js";
@@ -257,13 +257,7 @@ export async function executeWorkerTurn(
       assertCurrent: assertSourceCurrent,
       computerAvailable: Boolean(computer),
     });
-    const {
-      admittedRunContext,
-      operationalRunInstance,
-      runtimeIdentity,
-      assertActive,
-      takeFinishingOutcome,
-    } = await prepareWorkerAgentRuntimeIdentity({
+    const turnOwner = await prepareWorkerAgentRuntimeIdentity({
       ...params,
       agentId: placement.agentId,
       runtimeInstanceId: placement.environmentId,
@@ -278,6 +272,13 @@ export async function executeWorkerTurn(
       },
       assertSourceCurrent,
     });
+    const {
+      admittedRunContext,
+      operationalRunInstance,
+      runtimeIdentity,
+      assertActive,
+      takeFinishingOutcome,
+    } = turnOwner;
     assertActive();
     const authority = runtimeIdentity.approvalAuthority;
     const authorityAbort = new AbortController();
@@ -462,18 +463,22 @@ export async function executeWorkerTurn(
         assertCurrent: assertActive,
       };
       const promptContext = await runPrepared(() => prepareWorkerTurnPrompt(promptPreparation));
-      const allowedToolNames = surface.tools.map((tool) => tool.definition.name);
-      await params.placements.authorizeWorkerTurnTools(
-        params.turnClaim,
-        allowedToolNames,
+      using mcpQuestions = new DisposableStack();
+      const { allowedToolNames, issueLaunchAuthority } = await prepareWorkerLaunchTools({
+        ...turnOwner,
+        surface,
+        localMcpNodeId,
+        exec,
+        connectionIdentity,
+        placements: params.placements,
+        questionsEnabled: turn.config.mcp?.apps?.enabled === true,
+        assertToolSurfaceCurrent,
+        isAuthorized,
         assertTurnInputCurrent,
-      );
-      if (allowedToolNames.includes("computer")) {
-        preparedComputer?.bind(operationalRunInstance, {
-          authority: runtimeIdentity.approvalAuthority,
-          assertCurrent: assertActive,
-        });
-      }
+        preparedComputer,
+        signal,
+        mcpQuestions,
+      });
       const media = await prepareWorkerTurnMedia({
         turn: { ...turn, prompt: promptContext.prompt },
         history: promptContext.history,
@@ -536,8 +541,8 @@ export async function executeWorkerTurn(
         );
         throw new WorkerTurnExecutionError(WORKER_PROVIDER_REPLAY_LOCAL_RETRY_MESSAGE);
       }
+      const toolAuthority = issueLaunchAuthority();
       // Project the wire handshake; the receipt also carries storage-only provenance.
-      const mcpTools = collectWorkerMcpGrants(surface);
       const { bundleHash, openclawVersion, protocolFeatures } = bootstrapReceipt;
       githubGrant = await bindWorkerGitHubTurn({
         session: placement,
@@ -597,13 +602,7 @@ export async function executeWorkerTurn(
                 ackedSeq: placement.lastLiveEventAckCursor ?? 0,
                 nextSeq: (placement.lastLiveEventAckCursor ?? 0) + 1,
               },
-              toolAuthority: {
-                exec,
-                ...(mcpTools.length && { mcpTools }),
-                allowedToolNames: surface.tools
-                  .filter((tool) => tool.execution === "placement")
-                  .map((tool) => tool.definition.name),
-              },
+              toolAuthority,
               ...(browser && allowedToolNames.includes("browser") ? { browser } : {}),
               ...(computer && allowedToolNames.includes("computer") ? { computer } : {}),
             },
@@ -668,6 +667,7 @@ export async function executeWorkerTurn(
           onDispatchReady,
         });
       } finally {
+        mcpQuestions.dispose();
         await handoffPending;
       }
       // Node launches return only after the exact launch journal receipt is terminal,
