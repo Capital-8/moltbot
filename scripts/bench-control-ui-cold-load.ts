@@ -943,11 +943,14 @@ if (values["active-transcript-two-round"] && !values["active-transcript"]) {
   throw new Error("active-transcript-two-round requires active-transcript");
 }
 const transcriptWitness = values["transcript-witness"]
-? createTranscriptReloadWitness(fixture, values["active-transcript"])
+  ? createTranscriptReloadWitness(fixture, values["active-transcript"])
   : undefined;
-if (transcriptWitness && fixture.liveHistory) {
-  fixture.liveHistory.messages = transcriptWitness.variants.live;
-}
+const liveHistory = fixture.liveHistory
+  ? {
+      ...fixture.liveHistory,
+      messages: transcriptWitness?.variants.live ?? fixture.liveHistory.messages,
+    }
+  : undefined;
 const streamingReply = values["streaming-reply"]
   ? createControlUiStreamingReply(streamingRate, streamingContent)
   : undefined;
@@ -1680,7 +1683,7 @@ try {
     ? `\n(${installRotatingBoardTickets.toString()})(${JSON.stringify(fixture.board)}, window.openclawControlUiE2eGateway);`
     : "";
   await page.addInitScript({
-    content: `;(() => { if (window !== window.top || location.protocol === "about:") return; const __name = (fn) => fn; (${installWidgetReadiness.toString()})(); ${createControlUiMockGatewayInitScript(gatewayScenario)}\n${witnessInit}\n${rigProbeScript}\nwindow.__teamScaleSidebarLists = { apply: (mutation) => window.__teamScaleMutate(mutation) }; window.openclawControlUiE2eGateway.setRequestHandler("sessions.list", async ({ params, respond }) => respond(await window.__teamScaleList(params))); window.openclawControlUiE2eGateway.setRequestHandler("cron.list", async ({ params, respond }) => respond(await window.__teamScaleCronList(params)));\n${boardTickets}\n${createColdLoadProbeInitScript({ latencyMs, downloadKbps: values["critical-path"] || values["long-session"] || latencyProfile === "live-capped" ? downloadKbps : undefined, methodLatencyMs, sidebarQueryLatencyMs, omitHelloSelfPresence: values["omit-hello-self-presence"], connectNotBeforeMs, frameGapMs, events: fixture.events, liveEvents: fixture.liveEvents, liveHistory: fixture.liveHistory, ownerProbes, sidebarCounters })}\n${streamingReply ? createStreamingReplyProbeInitScript() : ""}\n${extraInitScripts.join("\n")}\n${warmProbes}${presentationProbes} })();`,
+    content: `;(() => { if (window !== window.top || location.protocol === "about:") return; const __name = (fn) => fn; (${installWidgetReadiness.toString()})(); ${createControlUiMockGatewayInitScript(gatewayScenario)}\n${witnessInit}\n${rigProbeScript}\nwindow.__teamScaleSidebarLists = { apply: (mutation) => window.__teamScaleMutate(mutation) }; window.openclawControlUiE2eGateway.setRequestHandler("sessions.list", async ({ params, respond }) => respond(await window.__teamScaleList(params))); window.openclawControlUiE2eGateway.setRequestHandler("cron.list", async ({ params, respond }) => respond(await window.__teamScaleCronList(params)));\n${boardTickets}\n${createColdLoadProbeInitScript({ latencyMs, downloadKbps: values["critical-path"] || values["long-session"] || latencyProfile === "live-capped" ? downloadKbps : undefined, methodLatencyMs, sidebarQueryLatencyMs, omitHelloSelfPresence: values["omit-hello-self-presence"], connectNotBeforeMs, frameGapMs, events: fixture.events, liveEvents: fixture.liveEvents, liveHistory, ownerProbes, sidebarCounters })}\n${streamingReply ? createStreamingReplyProbeInitScript() : ""}\n${extraInitScripts.join("\n")}\n${warmProbes}${presentationProbes} })();`,
   });
   if (values["critical-path"]) {
     await page.addInitScript({
