@@ -127,7 +127,8 @@ import {
   GATEWAY_HEAP_SAMPLE_INTERVAL,
   readGatewayHeapProfile,
 } from "./lib/gateway-bench-profile.ts";
-import { installWarmReloadTranscriptProbe, summarizeDetailsGeometry } from "./perf/warm-reload-browser-probe.ts";
+import { summarizeDetailsGeometry } from "./perf/warm-reload-browser-probe.ts";
+import { installWarmReloadTranscriptProbe } from "./perf/warm-reload-transcript-probe.ts";
 
 function readRigProbeSnapshot() {
   const perf = Reflect.get(window, "__perf");
@@ -1623,8 +1624,7 @@ try {
     if (witnessLive) {
       const phases = [];
       Reflect.set(window, "__activeTranscriptRounds", phases);
-      const recordPhase = (phase, extra = {}) => phases.push({ phase, atMs: performance.now(), ...extra });
-      recordPhase("intermediate-history", { totalMessages, messages: witnessMessages.length, messageId: "active-reload-fresh-result" });
+      const recordPhase = (phase) => phases.push({ phase, atMs: performance.now() });
       const awaitFirstCommit = () => {
         const pane = document.querySelector(".chat-pane-cache__pane--active");
         const history = Reflect.get(window, "__warmReload")?.witnesses()?.history ?? [];
@@ -1633,11 +1633,7 @@ try {
           requestAnimationFrame(awaitFirstCommit);
           return;
         }
-        recordPhase("intermediate-commit", {
-          messageId: "active-reload-fresh-result",
-          markerAttached: Boolean(pane.querySelector('[data-position-marker-id="active-reload-fresh-result"]')),
-          rowAttached: Boolean(pane.querySelector('[data-virtual-row-key="group:assistant:msg:id:active-reload-fresh-result:0"]')),
-        });
+        recordPhase("intermediate-commit");
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const messages = ${JSON.stringify(transcriptWitness.variants.live)};
           const totalMessages = ${transcriptWitness.totalMessages.live};
@@ -1651,11 +1647,11 @@ try {
           for (const method of ["chat.history", "chat.startup"]) {
             window.openclawControlUiE2eGateway.setMethodResponse(method, response);
             window.openclawControlUiE2eGateway.setRequestHandler(method, ({ respond }) => {
-              recordPhase("completed-history-response", { method, totalMessages, messages: messages.length });
+              recordPhase("completed-history-response");
               respond(response);
             });
           }
-          recordPhase("tool-completion", { runId: "active-reload-run", messageId: "active-reload-tool-answer" });
+          recordPhase("tool-completion");
           window.openclawControlUiE2eGateway.emit("sessions.changed", {
             sessionKey: ${JSON.stringify(fixture.selectedSessionKey)}, agentId: "main", phase: "message",
           });
@@ -1665,7 +1661,7 @@ try {
               requestAnimationFrame(awaitCompletedCommit);
               return;
             }
-            recordPhase("completed-commit", { messageId: "active-reload-tool-answer" });
+            recordPhase("completed-commit");
           };
           requestAnimationFrame(awaitCompletedCommit);
         }));
@@ -2825,7 +2821,7 @@ try {
         : undefined;
     if (transcriptWitness) {
       const observed = warmReload?.transcriptWitnesses;
-      const finalWitness =
+      const finalWitnessVisible =
         values["active-transcript"] && !values["active-transcript-reader"]
           ? await page.evaluate(({ rowKey, text }) => {
               const thread = document.querySelector<HTMLElement>(
@@ -2838,22 +2834,17 @@ try {
               const rect = body?.getBoundingClientRect();
               const rowRect = row?.getBoundingClientRect();
               const viewport = thread?.getBoundingClientRect();
-              return {
-                attached: Boolean(body?.textContent?.includes(text)),
-                visible: Boolean(
-                  body?.textContent?.includes(text) &&
-                  body.checkVisibility({ checkOpacity: true, visibilityProperty: true }) &&
-                  rect &&
-                  rowRect &&
-                  viewport &&
-                  Math.min(rect.bottom, rowRect.bottom, viewport.bottom, innerHeight) >
-                    Math.max(rect.top, rowRect.top, viewport.top, 0) &&
-                  Math.min(rect.right, rowRect.right, viewport.right, innerWidth) >
-                    Math.max(rect.left, rowRect.left, viewport.left, 0),
-                ),
-                top: rect && viewport ? rect.top - viewport.top : null,
-                bottom: rect && viewport ? rect.bottom - viewport.top : null,
-              };
+              return Boolean(
+                body?.textContent?.includes(text) &&
+                body.checkVisibility({ checkOpacity: true, visibilityProperty: true }) &&
+                rect &&
+                rowRect &&
+                viewport &&
+                Math.min(rect.bottom, rowRect.bottom, viewport.bottom, innerHeight) >
+                  Math.max(rect.top, rowRect.top, viewport.top, 0) &&
+                Math.min(rect.right, rowRect.right, viewport.right, innerWidth) >
+                  Math.max(rect.left, rowRect.left, viewport.left, 0),
+              );
             }, transcriptWitness.witnesses.live)
           : null;
       const cache =
@@ -2883,7 +2874,7 @@ try {
         // Chrome's one-shot text timing entry can precede the tail's scroll into view.
         (values["active-transcript-reader"] ||
           (values["active-transcript"]
-            ? finalWitness?.visible &&
+            ? finalWitnessVisible &&
               warmReload?.transcriptStability?.frames.at(-1)?.distanceFromEnd <= 1
             : observed.live.paintMs !== null)) &&
         (!values["active-transcript-two-round"] ||
@@ -2901,9 +2892,7 @@ try {
             capturedAt: new Date().toISOString(),
             hold: witnessHold,
             observed,
-            phases: warmReload?.transcriptRounds,
-            stability: warmReload?.transcriptStability,
-            finalWitness,
+            finalWitnessVisible,
             valid: Boolean(valid),
             savedPaintObserved:
               observed?.saved.paintMs !== null && observed?.saved.paintMs !== undefined,
