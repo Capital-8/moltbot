@@ -565,6 +565,12 @@ lease, and cancellation detaches only that caller while the shared operation and
 remaining leases keep their original owner and cleanup authority.
 
 Shared-state reads capture their source and lifecycle authority before queuing.
+Read-only state inspections in one process share a retained private image while
+the source's main file and WAL are unchanged, instead of copying the database for
+each schema, lease, or single-row read. A commit, a replaced file, or a rollback
+journal retires it, and it leaves after one idle minute. A failed removal of a
+retired image logs a warning and stays with the exit retry and the Gateway sweep.
+
 An explicitly inherited snapshot keeps its original bytes. A fresh
 artifact-preserving copy checks the admitted physical file key at each main-file
 open and refuses changed identity rather than following a replacement. Requests
