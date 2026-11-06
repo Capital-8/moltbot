@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -18,7 +19,7 @@ import { resolveDatabaseFamilyEngines } from "./database-engine/registry.js";
 import { resolveStatePortRoots } from "./database-engine/state-port.js";
 import { resolveUserPath } from "./home-dir.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
-import { openNodeSqliteDatabase } from "./node-sqlite.js";
+import { openNodeSqliteDatabase, resolveImmutableSqliteFileUri } from "./node-sqlite.js";
 import { normalizeWindowsPathPreservingCase } from "./path-guards.js";
 import { resolvePrivateSqliteSnapshotStagingRoot } from "./sqlite-private-directory.js";
 import { tryInspectSqliteReadOnlyInProcess } from "./sqlite-readonly-inspection.js";
@@ -32,6 +33,7 @@ import {
   prepareSqliteReadOnlyLocationSyncInProcess,
 } from "./sqlite-readonly-location.js";
 import { createSqliteSnapshotStagingDirectory } from "./sqlite-snapshot-staging.js";
+import { readSqliteSourceFingerprint } from "./sqlite-source-fingerprint.js";
 import {
   StateDatabaseDiscoverySchema,
   UPDATE_CANDIDATE_PLUGIN_PLAN_FILENAME,
@@ -111,6 +113,27 @@ async function withStateDatabaseSnapshot<T>(
   preserveSourceArtifacts = false,
 ): Promise<T> {
   const progress = createUpdateStateSnapshotReporter(file, "shared database snapshot", onProgress);
+  if (preserveSourceArtifacts) {
+    // This isolated child opens the source without locks or sidecars when nothing can
+    // differ from the main file. A commit during the read falls through to a private copy.
+    const canonical = realpathSync.native(file);
+    const drained = readSqliteSourceFingerprint(canonical);
+    if (drained?.drained) {
+      const outcome = await Promise.resolve()
+        .then(() => read(resolveImmutableSqliteFileUri(canonical)))
+        .then(
+          (value) => ({ value }),
+          (cause: unknown) => ({ cause }),
+        );
+      if (readSqliteSourceFingerprint(canonical)?.fingerprint === drained.fingerprint) {
+        if ("cause" in outcome) {
+          throw outcome.cause;
+        }
+        progress.complete(Number(drained.main.size));
+        return outcome.value;
+      }
+    }
+  }
   const snapshot = preserveSourceArtifacts
     ? prepareSqliteReadOnlyLocationSyncInProcess(file, stagingRoot)
     : await prepareSqliteReadOnlyLocationInProcess(

@@ -14,6 +14,7 @@ import type {
   RetainedSqliteSnapshotPreparation,
   SqlitePrivateSnapshotFamily,
 } from "./sqlite-readonly-location.types.js";
+import { readSqliteSourceFingerprint } from "./sqlite-source-fingerprint.js";
 import { assertDatabaseFileIdentity, type DatabaseFileIdentity } from "./sqlite-worker-identity.js";
 
 // Timestamps must clear the coarsest filesystem clock (FAT's two seconds), so a
@@ -48,35 +49,6 @@ function completed<T>(value: T): RetainedOperation<T> {
   const retained = createRetainedOperation<T>(() => {});
   retained.resolve(value);
   return retained.operation;
-}
-
-/**
- * Stat only: closing even a raw descriptor here could release this process's SQLite
- * locks. Root SQLite fchowns the WAL on every open, so only the main file keeps ctime,
- * and an empty WAL holds no frames, so readers creating or removing one change no bytes.
- */
-function readSource(
-  canonicalPath: string,
-): (SqliteSnapshotSource & { newestMs: number }) | undefined {
-  try {
-    const main = fs.statSync(canonicalPath, { bigint: true, throwIfNoEntry: false });
-    if (!main?.isFile() || fs.statSync(`${canonicalPath}-journal`, { throwIfNoEntry: false })) {
-      return undefined;
-    }
-    const wal = fs.statSync(`${canonicalPath}-wal`, { bigint: true, throwIfNoEntry: false });
-    const frames = wal && wal.size > 0n ? wal : undefined;
-    return {
-      fingerprint: [
-        `${main.dev}:${main.ino}:${main.size}:${main.mtimeNs}:${main.ctimeNs}`,
-        frames ? `${frames.dev}:${frames.ino}:${frames.size}:${frames.mtimeNs}` : "none",
-      ].join("|"),
-      main,
-      newestMs: Math.max(Number(main.mtimeMs), Number(frames?.mtimeMs ?? 0)),
-    };
-  } catch {
-    // Reuse is only an optimization; the snapshot producer reports the real failure.
-    return undefined;
-  }
 }
 
 /** Sidecars live beside the real file, so an alias must not hide its WAL commits. */
@@ -157,7 +129,10 @@ export function leaseReusableSqliteSnapshot(
   if (!key || !image) {
     return undefined;
   }
-  if (readSource(key)?.fingerprint !== image.fingerprint || !fs.existsSync(image.location)) {
+  if (
+    readSqliteSourceFingerprint(key)?.fingerprint !== image.fingerprint ||
+    !fs.existsSync(image.location)
+  ) {
     retire(key, image);
     return undefined;
   }
@@ -178,7 +153,7 @@ export function leaseReusableSqliteSnapshot(
 /** Observe before copying; a source written within the timestamp quantum is never retained. */
 export function captureReusableSqliteSource(pathname: string): SqliteSnapshotSource | undefined {
   const key = canonicalKey(pathname);
-  const source = key ? readSource(key) : undefined;
+  const source = key ? readSqliteSourceFingerprint(key) : undefined;
   return source && Date.now() - source.newestMs >= SOURCE_QUIESCENT_MS ? source : undefined;
 }
 
