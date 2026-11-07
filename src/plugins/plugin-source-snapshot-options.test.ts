@@ -30,3 +30,17 @@ it("binds snapshots to symlink resolution without keying the host main entry", (
   process.execArgv = ["--preserve-symlinks"];
   expect(pluginSourceSnapshotOptionsDigest({})).not.toBe(ordinary);
 });
+
+it("binds snapshots to the runtime's effective require-module condition", () => {
+  process.execArgv = [];
+  const ordinary = pluginSourceSnapshotOptionsDigest({});
+  process.execArgv = ["--no-experimental-require-module"];
+  const disabled = pluginSourceSnapshotOptionsDigest({});
+  if (process.versions.bun) {
+    expect(disabled).toBe(ordinary);
+  } else {
+    expect(disabled).not.toBe(ordinary);
+  }
+  process.execArgv.push("--experimental-require-module");
+  expect(pluginSourceSnapshotOptionsDigest({})).toBe(ordinary);
+});
