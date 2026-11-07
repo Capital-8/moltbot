@@ -36,3 +36,20 @@ export function pluginSourceSnapshotOptionsDigest(env: NodeJS.ProcessEnv = proce
     options: Object.fromEntries(keys.map((key) => [key, env[key] ?? null])),
   });
 }
+
+/** Match Jiti's environment parsing without consulting mutable filesystem configuration. */
+export function resolvePluginSnapshotTsconfigPaths(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean | string {
+  const raw = env.JITI_TSCONFIG_PATHS;
+  if (!raw) {
+    return false;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    value = raw;
+  }
+  return typeof value === "string" ? value : Boolean(value);
+}
