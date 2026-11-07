@@ -17,6 +17,7 @@ import {
 import { createControlUiE2eArtifactDir } from "../../ui/src/test-helpers/control-ui-e2e-artifacts.ts";
 import { evaluateControlUiContext } from "../../ui/src/test-helpers/control-ui-e2e-context.ts";
 import { waitForControlUiGatewayReady } from "../../ui/src/test-helpers/control-ui-e2e-readiness.ts";
+import { qualifyDetailsSubagentsWarmState } from "../lib/control-ui-bench-warm-state.ts";
 import { installPaneChromeProbe } from "../lib/control-ui-pane-chrome-probe.ts";
 import { stopChild } from "../lib/gateway-bench-child.ts";
 import { freeProofPort, startWarmReloadAdmission } from "./warm-reload-admission.ts";
@@ -44,6 +45,8 @@ const { values } = parseArgs({
     "dashboard-pane-chrome": { type: "boolean", default: false },
     "plugin-activation": { type: "boolean", default: false },
     "details-session-facts": { type: "boolean", default: false },
+    "details-subagent-activity": { type: "boolean", default: false },
+    "details-child-count": { type: "string", default: "3" },
     "active-targets": { type: "boolean", default: false },
     "composer-controls": { type: "boolean", default: false },
     "reload-after-navigation": { type: "boolean", default: false },
@@ -61,6 +64,7 @@ if (values.help) {
   --admission signed-in|token --base <dist|ref> --candidate <dist|ref>
   --reloads 11 --sessions 3000 --rtt-ms 80 --capture-ms 8000 --route both|chat|dashboard
   --transcript-late-paint --plugin-activation --active-targets --reload-after-navigation --cpu-profile
+  --details-subagent-activity --details-child-count 3..8 (active chat ordinary children; default 3)
   --init-script <browser-script.js> (repeatable)
 Creates fresh isolated state and Chromium, records cold + warm reloads, then stops both.
 Offline paint audit: --audit-report <report.json> --paint-audit <paint-audit.json>
@@ -96,6 +100,9 @@ const reloads = integer(values.reloads, "--reloads", 0, 100);
 const sessions = integer(values.sessions, "--sessions", 2000, 20000);
 const rttMs = integer(values["rtt-ms"], "--rtt-ms", 0, 1000);
 const captureMs = integer(values["capture-ms"], "--capture-ms", 1000, 60000);
+const detailsChildren = values["details-subagent-activity"]
+  ? integer(values["details-child-count"], "--details-child-count", 3, 8)
+  : 0;
 const extraInitScripts = await Promise.all(
   values["init-script"].map((file) => readFile(file, "utf8")),
 );
@@ -736,6 +743,7 @@ const results: Array<{
   route: "chat" | "dashboard";
   coldReset: unknown;
   warmCache: Awaited<ReturnType<typeof inspectWarmCache>> | null;
+  detailsSubagentsWarmState: Awaited<ReturnType<typeof qualifyDetailsSubagentsWarmState>>;
   runs: Array<Awaited<ReturnType<typeof captureReload>>>;
 }> = [];
 try {
@@ -779,6 +787,7 @@ try {
     dashboardPaneChrome: values["dashboard-pane-chrome"],
     pluginActivation: values["plugin-activation"],
     detailsSessionFacts: values["details-session-facts"],
+    detailsSubagentActivity: detailsChildren,
     activeTargets: values["active-targets"],
     composerControls: values["composer-controls"],
     ...(admission
@@ -1073,6 +1082,7 @@ try {
             route,
             coldReset,
             warmCache: null as Awaited<ReturnType<typeof inspectWarmCache>> | null,
+            detailsSubagentsWarmState: null,
             runs: [
               await captureReload(
                 page,
@@ -1150,11 +1160,23 @@ try {
               .waitFor({ state: "visible" });
           }
           const target = fixture.fixtureSummary.targets[route === "chat" ? 0 : 1]!;
+          if (route === "chat" && detailsChildren) {
+            const qualified = await page.waitForFunction(qualifyDetailsSubagentsWarmState, {
+              sessionKey: target.key,
+              rows: fixture.fixtureSummary.ordinaryChildren,
+            });
+            results.at(-1)!.detailsSubagentsWarmState = await qualified.jsonValue();
+            await qualified.dispose();
+          }
           const cache = await inspectWarmCache(page, target.key);
           results.at(-1)!.warmCache = cache;
           await writeFile(
             path.join(arm.directory, route, "warm-cache.json"),
-            JSON.stringify(cache, null, 2),
+            JSON.stringify(
+              { ...cache, detailsSubagentsWarmState: results.at(-1)!.detailsSubagentsWarmState },
+              null,
+              2,
+            ),
           );
           if (reloads > 0 && cache.targetSnapshots === 0) {
             throw new Error(
