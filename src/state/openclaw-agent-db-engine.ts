@@ -20,6 +20,11 @@ import { admitSqliteSchema, getAdmittedSqliteSchemaFacts } from "../infra/sqlite
 import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.js";
 import { VERSION } from "../version.js";
 import {
+  AGENT_ACTIVE_EVENT_FACTS_SCHEMA_VERSION,
+  agentActiveEventFactsPostgresMigration,
+  withoutAgentPostgresActiveEventFacts,
+} from "./openclaw-agent-active-event-facts-schema.js";
+import {
   agentColdArchiveChunksPostgresMigration,
   withoutAgentPostgresColdArchiveChunks,
 } from "./openclaw-agent-cold-archive-chunks-schema.js";
@@ -111,7 +116,8 @@ export function admitAgentEngineSearchExtensions(
 
 const agentPostgresSql = `${agentPostgresRuntime.sql}\n${agentSearchPostgresRuntime.sql}`;
 function createAgentPostgresMigrations(): StoreSchema["postgresMigrations"] {
-  const agentPostgresV39Sql = withoutAgentPostgresCreationOperations(agentPostgresSql);
+  const agentPostgresV40Sql = withoutAgentPostgresActiveEventFacts(agentPostgresSql);
+  const agentPostgresV39Sql = withoutAgentPostgresCreationOperations(agentPostgresV40Sql);
   const agentPostgresV38Sql = withoutAgentPostgresColdNavigation(agentPostgresV39Sql);
   const agentPostgresV36Sql = withoutAgentPostgresColdArchiveChunks(agentPostgresV38Sql);
   const agentPostgresV35Sql = withLegacyAgentPostgresMemoryPaths(agentPostgresV36Sql);
@@ -322,14 +328,35 @@ function createAgentPostgresMigrations(): StoreSchema["postgresMigrations"] {
         postgresTextSearchVersion: 2,
       },
       schema: {
+        postgres: agentPostgresV40Sql,
+        postgresVectorDecoderVersion: 2,
+        postgresVectorSearchVersion: 2,
+        postgresTextSearchVersion: 2,
+      },
+      sql: `${agentCreationOperationsPostgresMigration(agentPostgresV40Sql)}
+        UPDATE schema_meta
+        SET schema_version = ${AGENT_CREATION_OPERATIONS_SCHEMA_VERSION},
+          app_version = '${VERSION.replaceAll("'", "''")}',
+          updated_at = CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000 AS bigint)
+        WHERE meta_key = 'primary';`,
+    },
+    {
+      version: AGENT_ACTIVE_EVENT_FACTS_SCHEMA_VERSION,
+      fromSchema: {
+        postgres: agentPostgresV40Sql,
+        postgresVectorDecoderVersion: 2,
+        postgresVectorSearchVersion: 2,
+        postgresTextSearchVersion: 2,
+      },
+      schema: {
         postgres: agentPostgresSql,
         postgresVectorDecoderVersion: 2,
         postgresVectorSearchVersion: 2,
         postgresTextSearchVersion: 2,
       },
-      sql: `${agentCreationOperationsPostgresMigration(agentPostgresSql)}
+      sql: `${agentActiveEventFactsPostgresMigration(agentPostgresSql)}
         UPDATE schema_meta
-        SET schema_version = ${AGENT_CREATION_OPERATIONS_SCHEMA_VERSION},
+        SET schema_version = ${AGENT_ACTIVE_EVENT_FACTS_SCHEMA_VERSION},
           app_version = '${VERSION.replaceAll("'", "''")}',
           updated_at = CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000 AS bigint)
         WHERE meta_key = 'primary';`,
