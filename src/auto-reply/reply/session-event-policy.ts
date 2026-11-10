@@ -158,6 +158,9 @@ export function captureScheduledSessionEventConfigPolicy(
         channels: channelConfig,
         logging: _logging,
         meta: _meta,
+        // Plugin reloads own their admitted turns: they hand over at a step boundary or
+        // stay pinned to the admitted generation (src/agents/plugin-turn-handover.ts).
+        plugins: _plugins,
         ...global
       }: OpenClawConfig,
       profiles: ReadonlySet<string>,
@@ -212,6 +215,7 @@ export function captureScheduledSessionEventConfigPolicy(
       const tokens = parseConcreteConfigPathTokens(path);
       if (
         tokens?.[0] === "logging" ||
+        tokens?.[0] === "plugins" ||
         (runtimeOwnsMcpServers && tokens?.[0] === "mcp" && tokens[1] === "servers")
       ) {
         return false;
