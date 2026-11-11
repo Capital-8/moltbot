@@ -539,6 +539,8 @@ export async function runEmbeddedAttemptPromptPhase(
             !isRawModelRun &&
             (inHistorySystemUpdates ||
               sessionPromptState.pendingToolSurface ||
+              sessionPromptState.usageRanking?.snapshot !==
+                sessionPromptState.persistedUsageRanking ||
               toolResultPromptProjectionState.frozen.size > 0)
           ) {
             await withTranscriptWrite(async () => {
@@ -549,7 +551,7 @@ export async function runEmbeddedAttemptPromptPhase(
               );
               const appendEntry = (customType: string, data: unknown) =>
                 sessionManager.appendCustomEntryAsync(customType, data);
-              await (sessionRuntime.prepareSystemPromptUpdate
+              await (inHistorySystemUpdates
                 ? persistSessionSystemPrompt(sessionPromptState, appendEntry)
                 : persistSessionToolSurface(sessionPromptState, appendEntry));
             });

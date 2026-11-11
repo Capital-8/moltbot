@@ -50,6 +50,11 @@ export const LAB_FEATURES = (
     },
     {
       ...BOOLEAN_GATE,
+      id: "usageRankedToolIndex",
+      configPath: ["agents", "defaults", "experimental", "usageRankedToolIndex"],
+    },
+    {
+      ...BOOLEAN_GATE,
       id: "advisor",
       configPath: ["plugins", "entries", "advisor", "enabled"],
       settingsPluginId: "advisor",
