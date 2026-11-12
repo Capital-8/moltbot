@@ -49,7 +49,11 @@ struct OnboardingOpenClawIDView: View {
                 Text(error).foregroundStyle(.orange).font(.callout)
             }
             Button("Close") {
-                if let onClose = self.onClose { onClose() } else { self.dismiss() }
+                if let onClose = self.onClose {
+                    onClose()
+                } else {
+                    self.dismiss()
+                }
             }.keyboardShortcut(.cancelAction)
         }
         .padding(28)
