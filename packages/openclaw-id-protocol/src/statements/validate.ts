@@ -20,6 +20,7 @@ import {
   REVOCATION_KINDS,
   ROOT_EPOCH,
   STATEMENT_TYPES,
+  type NodeDescription,
   type SignedStatement,
   type StatementType,
 } from "./types.js";
@@ -193,6 +194,18 @@ const nodeDescription = object({
   commands: list(nodeText(MAX_NODE_SURFACE_NAME), 0, MAX_NODE_SURFACE_ITEMS),
   caps: list(nodeText(MAX_NODE_SURFACE_NAME), 0, MAX_NODE_SURFACE_ITEMS),
 });
+/** Whether an untrusted value is a bounded node description (as signed in NodeRedemption). */
+export function isNodeDescription(value: unknown): value is NodeDescription {
+  try {
+    nodeDescription(value, "$");
+    return true;
+  } catch (error) {
+    if (error instanceof SchemaError) {
+      return false;
+    }
+    throw error;
+  }
+}
 const role = oneOf(MEMBER_ROLES);
 const ownerDeviceCertBody = object({
   device_pub: ed25519Key,
