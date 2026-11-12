@@ -408,6 +408,13 @@ export function AgentOverview(
           </For>
         }
       >
+        <Show when={params.readData().modelImpact}>
+          {(notice) => (
+            <div class="callout" role="status" style={{ "white-space": "pre-line" }}>
+              {notice()}
+            </div>
+          )}
+        </Show>
         <SettingsRow
           title={primaryModelLabel()}
           control={
@@ -417,7 +424,7 @@ export function AgentOverview(
               value={selectedPrimary() ?? ""}
               options={primaryModelOptions()}
               disabled={disabled()}
-              onChange={(value) => params.onModelChange(params.agent.id, value || null)}
+              onChange={(value) => void params.onModelChange(params.agent.id, value || null)}
               onOpen={params.onModelCatalogOpen}
             />
           }
