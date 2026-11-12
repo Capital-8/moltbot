@@ -33,6 +33,7 @@ struct OnboardingReachabilityContent: View {
 
 struct OnboardingOpenClawIDView: View {
     @Bindable var model: OnboardingOpenClawIDModel
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -47,7 +48,9 @@ struct OnboardingOpenClawIDView: View {
             if let error = self.model.error {
                 Text(error).foregroundStyle(.orange).font(.callout)
             }
-            Button("Close") { self.dismiss() }.keyboardShortcut(.cancelAction)
+            Button("Close") {
+                if let onClose = self.onClose { onClose() } else { self.dismiss() }
+            }.keyboardShortcut(.cancelAction)
         }
         .padding(28)
         .frame(width: 574)
