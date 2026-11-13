@@ -13,7 +13,7 @@ import {
   buildBackupArchivePath,
 } from "../infra/backup-archive-path-policy.js";
 import { readEngineAnchor } from "../infra/database-engine/open.js";
-import { readEngineAnchorIdentity } from "../infra/database-engine/physical-store.js";
+import { readEngineAnchorIdentity } from "../infra/database-engine/physical-store-inspection.js";
 import { loadSqliteVecExtension } from "../infra/database-engine/sqlite-vec.js";
 import { sha256File } from "../infra/directory-durability.js";
 import { formatErrorMessage, hasErrnoCode } from "../infra/errors.js";
