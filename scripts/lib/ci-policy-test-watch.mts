@@ -32,7 +32,7 @@ const policyTestWatches: readonly PolicyTestWatch[] = [
   })),
   {
     // Scenario coverage and taxonomy are filesystem inventories, not imports.
-    testFile: "extensions/qa-lab/src/coverage-report.test.ts",
+    testFile: "extensions/qa-lab/src/cli-coverage.runtime.test.ts",
     watchGlobs: ["qa/scenarios/**", "taxonomy.yaml"],
   },
   {
