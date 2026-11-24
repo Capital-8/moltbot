@@ -67,7 +67,18 @@ describe("chat session suggestions", () => {
     expect(container.querySelector("button")).toBeNull();
     expect(container.textContent).toContain("Awaiting approval");
     expect(container.querySelector(".session-suggestion__author")?.textContent).toBe("Alice");
-    expect(container.querySelector("[data-initials]")?.getAttribute("data-initials")).toBe("A");
+  });
+
+  it("leads every row with the author's avatar instead of a queue glyph", () => {
+    for (const role of ["owner", "viewer"] as const) {
+      const view = mount(role);
+      const row = view.container.querySelector(".session-suggestion");
+      expect(row?.firstElementChild?.classList.contains("chat-author-avatar")).toBe(true);
+      expect(row?.firstElementChild?.getAttribute("aria-label")).toBe("Alice");
+      expect(row?.querySelector(".chat-author-avatar__initials")?.textContent).toBe("A");
+      expect(row?.querySelector(".chat-queue__leading")).toBeNull();
+      view.container.remove();
+    }
   });
 
   it("hides owner actions when the resolve method is unavailable", () => {

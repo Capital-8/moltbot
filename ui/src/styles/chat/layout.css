@@ -276,13 +276,12 @@ openclaw-pending-session-create {
 /* Composer neighbors share one quiet card frame. Status color belongs to the
    item, never to the surface: only the icon, heading and a low-opacity edge
    carry tone while the card keeps the composer's own surface and geometry. */
-:is(.chat-composer-neighbor-card, .session-suggestion, .chat-pr.chat-pr) {
+:is(.chat-composer-neighbor-card, .chat-pr.chat-pr) {
   border-radius: calc(16px * var(--openclaw-corner-radius-scale));
   corner-shape: superellipse(1.5);
 }
 
-.chat-composer-neighbor-card,
-.session-suggestion {
+.chat-composer-neighbor-card {
   display: grid;
   align-items: center;
   gap: 10px;
@@ -1613,67 +1612,20 @@ openclaw-chat-video-player {
   box-shadow: 0 8px 18px color-mix(in srgb, var(--bg) 32%, transparent);
 }
 
-.session-suggestions {
-  display: grid;
-  gap: 6px;
+/* Suggestions share the pending-send queue's tray and row geometry. The
+   author's avatar takes the leading slot: a suggestion awaits a decision, so
+   it carries no queue glyph. */
+.chat-queue__item.session-suggestion {
+  --chat-queue-leading-columns: var(--chat-queue-avatar-size, 20px);
+
+  > .chat-author-avatar {
+    grid-column: 1;
+  }
 }
 
-.session-suggestion {
-  grid-template-columns: fit-content(30%) minmax(0, 1fr) auto;
-  min-height: 38px;
-  border: 1px solid var(--border);
-  font-size: 13px;
-
-  > b,
-  > small {
-    font-size: 11px;
-    white-space: nowrap;
-  }
-  > b {
-    border-radius: 999px;
-    padding: 3px 8px;
-    font-weight: 600;
-    color: var(--chat-text-link, var(--link));
-    background: var(--person-reference-bg);
-  }
-  > small {
-    color: var(--muted);
-  }
-  > div {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-  &.preview > :is(b, span) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  &:not(.preview) {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    background: color-mix(in srgb, var(--panel-strong) 74%, transparent);
-    > b {
-      background: var(--panel-hover);
-      color: var(--text-strong);
-    }
-    > small {
-      padding: 3px 8px;
-      font-weight: 600;
-    }
-    > span {
-      max-height: 12rem;
-      overflow: auto;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-    }
-    @media (max-width: 640px) {
-      grid-template-columns: auto minmax(0, 1fr);
-      > :is(div, small) {
-        grid-column: 1 / -1;
-        justify-self: end;
-      }
-    }
-  }
+.session-suggestion__author {
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 .task-suggestion__header-action svg,
