@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
+import "../../../styles/chat/composer-queue-content.css";
 import type {
   SessionSharingRole,
   SessionSuggestion,
@@ -51,7 +52,7 @@ export function ChatSessionSuggestions(props: {
 
   return (
     <Show when={visible().length > 0}>
-      <div class="session-suggestions" aria-live="polite">
+      <div class="chat-queue session-suggestions" aria-live="polite">
         <For
           each={expanded() ? visible() : visible().slice(0, 3)}
           keyed={(suggestion) => suggestion.id}
