@@ -336,7 +336,7 @@ suite.define(() => {
     await expect(page.locator(".session-suggestion__text")).toHaveText("Try the focused change");
   });
 
-  it("clamps a long guest suggestion to two lines beside its approval state", async () => {
+  it("keeps a long guest suggestion, its avatar and approval state on one line", async () => {
     const prompt =
       "Compare the two approaches in the release notes and explain which one keeps the migration simple for teams that already have a working setup.";
     const { page } = await openSuggestions("viewer", {
@@ -365,51 +365,14 @@ suite.define(() => {
     }
     await expect(state).toHaveText("Awaiting approval");
     await expect(row.locator(".chat-author-avatar")).toHaveAttribute("aria-label", "Alice");
-    const clamp = row.locator(".chat-queue__text");
-    await page.setViewportSize({ width: 1180, height: 760 });
-    expect(await clamp.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
-    const lineHeight = Number.parseFloat(
-      await clamp.evaluate((el) => getComputedStyle(el).lineHeight),
-    );
-    expect((await bounds(clamp)).height).toBeLessThanOrEqual(lineHeight * 2 + 1);
-    const [promptBox, stateBox] = await Promise.all([bounds(clamp), bounds(state)]);
-    expect(promptBox.y + promptBox.height / 2).toBeGreaterThan(stateBox.y);
-    expect(promptBox.y + promptBox.height / 2).toBeLessThan(stateBox.y + stateBox.height);
-  });
-
-  it("clamps a long multi-line owner suggestion to two lines", async () => {
-    const prompt = [
-      "read our earlier discussion and resend that table with it in mind:",
-      "",
-      "lot of inconsistency in how we show lack of access.",
-      "Image",
-      "Image",
-      "Image",
-    ].join("\n");
-    const { page } = await openSuggestions("owner", {
-      methodResponses: {
-        "session.suggestions.list": {
-          suggestions: [pendingSuggestion("long", prompt, 1)],
-          role: "owner",
-        },
-      },
-    });
-    const row = page.locator(".session-suggestion");
-    const clamp = row.locator(".chat-queue__text");
-    await expect(row.locator(".session-suggestion__text")).toHaveText(prompt);
-    await expect(row.locator(".chat-author-avatar")).toHaveAttribute("aria-label", "Alice");
-    await expect(row.getByRole("button", { name: "Send Alice's suggestion now" })).toBeVisible();
-    const lineHeight = Number.parseFloat(
-      await clamp.evaluate((el) => getComputedStyle(el).lineHeight),
-    );
-    expect((await bounds(clamp)).height).toBeLessThanOrEqual(lineHeight * 2 + 1);
-    expect(await clamp.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
-    if (process.env.OPENCLAW_CAPTURE_UI_PROOF === "1") {
-      const frame = await takeControlUiScreenshotFrame(page, row, [clamp], {
-        animations: "disabled",
-        elements: [row],
-      });
-      await writeFile(path.join(suite.artifactDir, "owner.png"), frame.png);
+    const preview = row.locator(".session-suggestion__preview");
+    for (const width of [1180, 400]) {
+      await page.setViewportSize({ width, height: 760 });
+      await expect(preview).toHaveCSS("text-overflow", "ellipsis");
+      expect(await preview.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      const [promptBox, stateBox] = await Promise.all([bounds(preview), bounds(state)]);
+      expect(promptBox.y + promptBox.height / 2).toBeGreaterThan(stateBox.y);
+      expect(promptBox.y + promptBox.height / 2).toBeLessThan(stateBox.y + stateBox.height);
     }
   });
 

@@ -1,8 +1,10 @@
 /* @vitest-environment jsdom */
 
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionSuggestion } from "../../../../../packages/gateway-protocol/src/index.js";
 import { mountSolid } from "../../../test-helpers/mount-solid.ts";
+import { waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import { ChatSessionSuggestions } from "./chat-session-suggestions.solid.tsx";
 
 const suggestion: SessionSuggestion = {
@@ -69,18 +71,6 @@ describe("chat session suggestions", () => {
     expect(container.querySelector(".session-suggestion__author")?.textContent).toBe("Alice");
   });
 
-  it("leads every row with the author's avatar instead of a queue glyph", () => {
-    for (const role of ["owner", "viewer"] as const) {
-      const view = mount(role);
-      const row = view.container.querySelector(".session-suggestion");
-      expect(row?.firstElementChild?.classList.contains("chat-author-avatar")).toBe(true);
-      expect(row?.firstElementChild?.getAttribute("aria-label")).toBe("Alice");
-      expect(row?.querySelector(".chat-author-avatar__initials")?.textContent).toBe("A");
-      expect(row?.querySelector(".chat-queue__leading")).toBeNull();
-      view.container.remove();
-    }
-  });
-
   it("hides owner actions when the resolve method is unavailable", () => {
     const view = mount("owner", suggestion, false);
     expect(view.container.querySelector("button")).toBeNull();
@@ -96,4 +86,60 @@ describe("chat session suggestions", () => {
     buttons[0]?.click();
     expect(view.onResolve).toHaveBeenCalledWith(suggestion, "dismiss");
   });
+});
+
+it("lets the author close a dismissed outcome without a resolution request", () => {
+  const onClose = vi.fn();
+  const onResolve = vi.fn();
+  container = document.body.appendChild(document.createElement("div"));
+  mountSolid(
+    () => (
+      <ChatSessionSuggestions
+        suggestions={[{ ...suggestion, state: "dismissed" }]}
+        role="viewer"
+        busyIds={new Set()}
+        archived={false}
+        canResolve={false}
+        onResolve={onResolve}
+        onClose={onClose}
+        liveResolutions={new Map([[suggestion.id, true]])}
+      />
+    ),
+    { container },
+  );
+  const close = container.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+  expect(close).not.toBeNull();
+  close?.click();
+  expect(onClose).toHaveBeenCalledWith(suggestion.id);
+  expect(onResolve).not.toHaveBeenCalled();
+});
+
+it("bounds the tray, retains keyed disclosures on refresh, and keeps busy resolutions disabled", async () => {
+  const [suggestions, setSuggestions] = createSignal(
+    Array.from({ length: 5 }, (_, index) => ({ ...suggestion, id: `suggestion-${index}` })),
+  );
+  const view = mountSolid(() => (
+    <ChatSessionSuggestions
+      suggestions={suggestions()}
+      role="owner"
+      busyIds={new Set(["suggestion-0"])}
+      archived={false}
+      canResolve
+    />
+  ));
+  const rows = () => view.container.querySelectorAll(".session-suggestion");
+  expect(rows()).toHaveLength(3);
+  const first = rows()[0]!;
+  const disclosure = first.querySelector("details")!;
+  disclosure.open = true;
+  expect([...first.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+  view.getByRole("button", { name: "+2 more" }).click();
+  await waitForSolid(() => expect(rows()).toHaveLength(5));
+  setSuggestions((items) => items.map((item) => ({ ...item, text: "Updated proposal" })));
+  await waitForSolid(() => expect(first.textContent).toContain("Updated proposal"));
+  expect(rows()[0]).toBe(first);
+  expect(disclosure.open).toBe(true);
+  view.getByRole("button", { name: "Show less" }).click();
+  await waitForSolid(() => expect(rows()).toHaveLength(3));
+  expect(disclosure.open).toBe(true);
 });
