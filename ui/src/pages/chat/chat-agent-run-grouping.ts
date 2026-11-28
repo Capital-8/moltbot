@@ -71,9 +71,10 @@ export function chatItemGroups(
   return [];
 }
 
-/** What woke the work a part resumes, which opens it with a Resumed rule. */
-function partContinuation(item: AgentRunFrameInput | ChatItem) {
-  return readProjectedContinuation(chatItemGroups(item)[0]?.messages[0]?.message);
+/** A background command can resume adjacent tool activity without a separate row. */
+function partStartsSeparateContinuation(item: AgentRunFramePart): boolean {
+  const source = readProjectedContinuation(chatItemGroups(item)[0]?.messages[0]?.message);
+  return source !== undefined && source !== "exec";
 }
 
 function itemRunId(item: AgentRunFramePart): string | undefined {
@@ -198,12 +199,14 @@ export function coalesceAgentRunFrames(
   // row; `resuming` lets exactly the next run in.
   let opened: { runId: string; boundaryId: string | undefined } | undefined;
   let resuming = false;
-  // Without a Resumed rule marking the handoff, operations on either side of it are one log.
+  // Keep neighboring tool activity together across invisible handoffs.
   let afterHandoff = false;
   const addPart = (item: AgentRunFramePart) => {
     const last = parts.at(-1);
     const joined =
-      afterHandoff && last && !partContinuation(item) ? joinActivityRuns(last, item) : undefined;
+      afterHandoff && last && !partStartsSeparateContinuation(item)
+        ? joinActivityRuns(last, item)
+        : undefined;
     afterHandoff = false;
     if (joined) {
       parts[parts.length - 1] = joined;

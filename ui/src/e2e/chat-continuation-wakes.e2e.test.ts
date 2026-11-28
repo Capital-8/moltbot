@@ -201,8 +201,8 @@ suite.define(() => {
         await writeFile(file, frame.png);
         console.log(`Screenshot: ${file}`);
       }
-      // One assistant block per prompt; the earlier answer stays in place above
-      // a Resumed rule for each wake that continued the work.
+      // Adjacent command groups share a log across an automatic wake. A reply,
+      // spoken wait, or subagent wake still separates activity.
       expect(await thread.locator(".chat-group.assistant").count()).toBe(2);
       expect(
         (await thread.locator(".chat-handoff-resume__rule").allTextContents()).map((text) =>
@@ -210,10 +210,23 @@ suite.define(() => {
         ),
       ).toEqual([
         "Resumed · 3m 40s later · Background command finished",
-        "Resumed · 4m 30s later · Background command finished",
         "Resumed · 4m 40s later · Agent finished",
         "Resumed · 1m 40s later · Background command finished",
       ]);
+
+      for (const disclosure of await thread
+        .getByRole("button", { name: "Ran commands", exact: true })
+        .all()) {
+        if ((await disclosure.getAttribute("aria-expanded")) === "false") {
+          await disclosure.click();
+        }
+      }
+      const commands = thread.locator(".chat-activity-group__body").filter({
+        has: page.getByText("pnpm docs:check", { exact: true }),
+      });
+      expect(await commands.getByText("curl -s preview/health", { exact: true }).count()).toBe(1);
+      const log = (await commands.textContent()) ?? "";
+      expect(log.indexOf("pnpm docs:check")).toBeLessThan(log.indexOf("curl -s preview/health"));
       await thread.getByText(ANSWER, { exact: true }).waitFor();
     });
   });
